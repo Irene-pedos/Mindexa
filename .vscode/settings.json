@@ -1,0 +1,115 @@
+{
+  // ────────────────────────────────────────────────────────────────
+  // Global Editor Behavior
+  // ────────────────────────────────────────────────────────────────
+  "editor.formatOnSave": true,
+  "editor.formatOnPaste": false, // prevents chaos when pasting from web
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true,
+  "files.eol": "\n",
+
+  // ────────────────────────────────────────────────────────────────
+  // Python / FastAPI / Ruff Settings (Backend – The Brain)
+  // ────────────────────────────────────────────────────────────────
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": "explicit",
+      "source.fixAll.ruff": "explicit"
+    },
+    "editor.formatOnSaveMode": "file"
+  },
+
+  // Use Ruff as the primary tool (lint + format). Let it take over most responsibilities.
+  "python.linting.enabled": false, // Ruff handles linting
+  "python.formatting.provider": "none", // Ruff handles formatting
+  "ruff.lint.enable": true,
+  "ruff.format.enable": true,
+  "ruff.nativeServer": "on", // Use Ruff's fast native server (recommended 2025+)
+  "ruff.interpreter": [
+    "${workspaceFolder}/backend/.venv/bin/python" // adjust if your venv is elsewhere
+  ],
+  // Optional: strict mode vibes (can move to ruff.toml later)
+  "ruff.lint.select": [
+    "E",
+    "F",
+    "W",
+    "I",
+    "UP",
+    "YTT",
+    "ASYNC",
+    "TRIO",
+    "PT",
+    "Q",
+    "ANN",
+    "ARG",
+    "ERA",
+    "PGH",
+    "PL",
+    "TRY",
+    "FLY",
+    "NPY",
+    "RUF"
+  ],
+
+  // ────────────────────────────────────────────────────────────────
+  // TypeScript / Next.js / Tailwind Settings (Frontend – The Body)
+  // ────────────────────────────────────────────────────────────────
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+
+  // Tailwind CSS IntelliSense – make class sorting & suggestions shine
+  "tailwindCSS.includeLanguages": {
+    "plaintext": "html",
+    "typescript": "javascript",
+    "typescriptreact": "javascript"
+  },
+  "tailwindCSS.emmetCompletions": true,
+  "tailwindCSS.experimental.classRegex": [
+    ["clsx\\(([^)]*)\\)", "[\"'`]([^'\"`]*)[\"'`]"],
+    ["cn\\(([^)]*)\\)", "[\"'`]([^'\"`]*)[\"'`]"]
+  ], // support clsx / cn helpers if we use them later
+
+  "files.associations": {
+    "*.css": "tailwindcss"
+  },
+
+  // ESLint + Prettier harmony
+  "eslint.validate": [
+    "javascript",
+    "typescript",
+    "javascriptreact",
+    "typescriptreact"
+  ],
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+
+  // ────────────────────────────────────────────────────────────────
+  // General Productivity & Security
+  // ────────────────────────────────────────────────────────────────
+  "security.workspace.trust.untrustedFiles": "prompt",
+  "explorer.sortOrder": "filesFirst", // nice for app/ routes in Next.js
+  "editor.inlineSuggest.enabled": true,
+  "github.copilot.enable": {
+    "*": true,
+    "plaintext": true,
+    "markdown": true,
+    "scminput": true
+  },
+
+  // ────────────────────────────────────────────────────────────────
+  // Optional: Debugging FastAPI more easily later
+  // ────────────────────────────────────────────────────────────────
+  "python.experiments.optInto": [],
+  "python.analysis.typeCheckingMode": "basic" // can go to "strict" later
+}
