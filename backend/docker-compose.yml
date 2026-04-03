@@ -1,0 +1,160 @@
+version: "3.9"
+
+# Local development infrastructure.
+# Paths use Docker's cross-platform relative syntax — safe on Windows with Docker Desktop.
+#
+# Usage (PowerShell from D:\Projects\mindexa\backend):
+#   docker compose up -d postgres redis     # infrastructure only (recommended)
+#   docker compose up -d                    # everything
+#   docker compose logs -f api
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: mindexa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mindexa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mindexa_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-mindexa_db}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-mindexa} -d ${POSTGRES_DB:-mindexa_db}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mindexa_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: mindexa_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save 60 1000
+      --loglevel warning
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mindexa_net
+
+  # API container — for running the full stack in Docker.
+  # For local Windows dev, run uvicorn directly on your host instead.
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mindexa_api
+    restart: unless-stopped
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-config /dev/null
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mindexa_net
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mindexa_worker
+    restart: unless-stopped
+    # Uses prefork inside the Linux container — correct for production
+    command: >
+      celery -A app.workers.celery_app worker
+      --loglevel=info
+      --queues=default,grading,documents,integrity,high_priority
+      --concurrency=4
+      --pool=prefork
+    volumes:
+      - .:/app
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - mindexa_net
+
+  beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mindexa_beat
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.celery_app beat
+      --loglevel=info
+      --scheduler=celery.beat:PersistentScheduler
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - mindexa_net
+
+  flower:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: development
+    container_name: mindexa_flower
+    restart: unless-stopped
+    command: >
+      celery -A app.workers.celery_app flower
+      --port=5555
+      --basic_auth=admin:mindexa_flower
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    depends_on:
+      - redis
+    networks:
+      - mindexa_net
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  mindexa_net:
+    driver: bridge
