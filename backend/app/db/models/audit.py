@@ -50,12 +50,13 @@ from __future__ import annotations
 import uuid
 from typing import Optional
 
-from app.db.base import AppendOnlyModel
-from app.db.enums import SecurityEventSeverity, SecurityEventType
-from app.db.mixins import composite_index
 from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field
+
+from app.db.base import AppendOnlyModel
+from app.db.enums import SecurityEventSeverity, SecurityEventType
+from app.db.mixins import composite_index
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AUDIT LOG

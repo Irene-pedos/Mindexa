@@ -10,11 +10,12 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any
 
-from app.core.config import settings
-from app.core.logging import get_logger
 from sqlalchemy.ext.asyncio import (AsyncEngine, AsyncSession,
                                     async_sessionmaker, create_async_engine)
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+
+from app.core.config import settings
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

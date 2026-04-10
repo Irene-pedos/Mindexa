@@ -1,5 +1,5 @@
 // frontend/components/hero-section.tsx
-'use client';
+"use client";
 
 import React from "react";
 import Link from "next/link";
@@ -25,7 +25,6 @@ const transitionVariants: Variants = {
   },
 };
 
-
 export default function HeroSection() {
   return (
     <>
@@ -37,10 +36,12 @@ export default function HeroSection() {
           <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] [background-size:60px_60px]" />
         </div>
 
-        <section id="home" className="relative min-h-screen flex items-center pt-20 pb-16">
+        <section
+          id="home"
+          className="relative min-h-screen flex items-center pt-20 pb-16"
+        >
           <div className="mx-auto max-w-7xl px-6 w-full">
             <div className="grid lg:grid-cols-12 gap-12 items-center">
-
               {/* Center Content */}
               <div className="lg:col-span-7">
                 <AnimatedGroup variants={transitionVariants}>
@@ -48,7 +49,9 @@ export default function HeroSection() {
                     href="#"
                     className="mx-auto flex w-fit items-center gap-3 rounded-full border bg-white px-5 py-2 text-sm shadow-sm hover:shadow transition-all duration-300"
                   >
-                    <span className="text-slate-600">Introducing Explainable AI Grading</span>
+                    <span className="text-slate-600">
+                      Introducing Explainable AI Grading
+                    </span>
                     <div className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
                       New
                     </div>
@@ -64,7 +67,8 @@ export default function HeroSection() {
                       speed={8}
                       shineColor="oklch(0.488 0.243 264.376)"
                       color="oklch(0.148 0.004 228.8)"
-                    /> of Academic Integrity.
+                    />{" "}
+                    of Academic Integrity.
                   </TypographyH2>
                 </div>
 
@@ -77,13 +81,21 @@ export default function HeroSection() {
                   as="p"
                   className="mx-auto mt-8 max-w-3xl  text-lg md:text-xl text-slate-700"
                 >
-                  Conduct cheating-free assessments with real time AI monitoring and autonomous grading.
+                  Conduct cheating-free assessments with real time AI monitoring
+                  and autonomous grading.
                 </TextEffect>
 
                 {/* CTAs */}
                 <AnimatedGroup
                   variants={{
-                    container: { visible: { transition: { staggerChildren: 0.05, delayChildren: 0.75 } } },
+                    container: {
+                      visible: {
+                        transition: {
+                          staggerChildren: 0.05,
+                          delayChildren: 0.75,
+                        },
+                      },
+                    },
                     ...transitionVariants,
                   }}
                   className="mt-10 flex flex-col sm:flex-row gap-4"
@@ -112,13 +124,13 @@ export default function HeroSection() {
               {/* Right Side - Image Card with Skeleton fallback */}
               <div className="lg:col-span-5 flex justify-center lg:justify-end">
                 <InView>
-                    <div className="relative h-[500px] w-full rounded-3xl overflow-hidden shadow-l border border-border">
-                      <img
-                        src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
-                        alt="Students focused during digital exam"
-                        className="object-cover h-full w-full"
-                      />
-                    </div>
+                  <div className="relative h-[500px] w-full rounded-3xl overflow-hidden shadow-l border border-border">
+                    <img
+                      src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
+                      alt="Students focused during digital exam"
+                      className="object-cover h-full w-full"
+                    />
+                  </div>
                 </InView>
               </div>
             </div>

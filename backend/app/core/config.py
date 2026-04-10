@@ -2,10 +2,18 @@
 app/core/config.py
 
 Application configuration loaded from environment variables via Pydantic Settings.
-All settings are validated at startup — missing or wrongly-typed variables cause
-an immediate startup failure with a clear error message.
+All settings are validated at startup — if a required variable is missing or
+has the wrong type, the application will refuse to start with a clear error.
 
-Usage anywhere in the codebase:
+PHASE 3 ADDITIONS:
+    - EMAIL_VERIFICATION_EXPIRE_MINUTES
+    - PASSWORD_RESET_EXPIRE_MINUTES
+    - MAX_FAILED_LOGIN_ATTEMPTS
+    - ACCOUNT_LOCKOUT_MINUTES
+    - REFRESH_TOKEN_COOKIE_NAME
+    - ACCESS_TOKEN_COOKIE_SECURE (for HttpOnly cookie mode)
+
+Usage:
     from app.core.config import settings
     settings.DATABASE_URL
 """
@@ -14,13 +22,18 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from urllib.parse import quote_plus
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """
+    Central settings object. Every field maps 1-to-1 with an environment
+    variable (or a default). Pydantic validates types and constraints on import.
+    """
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -28,7 +41,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Application ──────────────────────────────────────────────────────────
+    # ── Application ───────────────────────────────────────────────────────────
     ENVIRONMENT: str = Field(
         default="development",
         pattern="^(development|staging|production|test)$",
@@ -40,23 +53,21 @@ class Settings(BaseSettings):
     ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
 
     # ── PostgreSQL ────────────────────────────────────────────────────────────
-    POSTGRES_HOST: str = "localhost"
-    POSTGRES_PORT: int = Field(default=5432, ge=1, le=65535)
-    POSTGRES_USER: str = "mindexa"
+    POSTGRES_HOST: str = "127.0.0.1"
+    # Updated default to 5433 to match your new installation
+    POSTGRES_PORT: int = Field(default=5433, ge=1, le=65535)
+    POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str
     POSTGRES_DB: str = "mindexa_db"
-
-    # Assembled automatically by model_validator — do not set manually in .env
     DATABASE_URL: str = ""
     DATABASE_URL_SYNC: str = ""
 
     # ── Redis ─────────────────────────────────────────────────────────────────
-    REDIS_HOST: str = "localhost"
+    REDIS_HOST: str = "127.0.0.1"
     REDIS_PORT: int = Field(default=6379, ge=1, le=65535)
     REDIS_PASSWORD: str = ""
     REDIS_DB: int = Field(default=0, ge=0, le=15)
     REDIS_DB_CELERY: int = Field(default=1, ge=0, le=15)
-
     REDIS_URL: str = ""
     CELERY_BROKER_URL: str = ""
     CELERY_RESULT_BACKEND: str = ""
@@ -65,6 +76,30 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=5, le=1440)
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=30)
+
+    # ── Auth / Account Security (Phase 3) ─────────────────────────────────────
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = Field(
+        default=1440,  # 24 hours
+        ge=60,
+        le=10080,      # max 7 days
+    )
+    PASSWORD_RESET_EXPIRE_MINUTES: int = Field(
+        default=60,    # 1 hour
+        ge=15,
+        le=1440,
+    )
+    MAX_FAILED_LOGIN_ATTEMPTS: int = Field(
+        default=5,
+        ge=3,
+        le=20,
+    )
+    ACCOUNT_LOCKOUT_MINUTES: int = Field(
+        default=15,
+        ge=5,
+        le=1440,
+    )
+    REFRESH_TOKEN_COOKIE_NAME: str = "mindexa_refresh"
+    ACCESS_TOKEN_COOKIE_SECURE: bool = False
 
     # ── Password Policy ───────────────────────────────────────────────────────
     PASSWORD_MIN_LENGTH: int = Field(default=8, ge=6, le=128)
@@ -76,11 +111,10 @@ class Settings(BaseSettings):
     RATE_LIMIT_AI: str = "20/minute"
 
     # ── File Upload ───────────────────────────────────────────────────────────
-    # Relative path — pathlib.Path handles Windows backslashes automatically
     UPLOAD_DIR: Path = Path("./uploads")
     MAX_UPLOAD_SIZE_MB: int = Field(default=25, ge=1, le=100)
     ALLOWED_UPLOAD_EXTENSIONS: list[str] = [
-        "pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg",
+        "pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"
     ]
 
     # ── AI / OpenAI ───────────────────────────────────────────────────────────
@@ -105,23 +139,29 @@ class Settings(BaseSettings):
     # ── Sentry ────────────────────────────────────────────────────────────────
     SENTRY_DSN: str = ""
 
-    # ── URL Assembly ─────────────────────────────────────────────────────────
+    # ── Computed / Derived ────────────────────────────────────────────────────
 
     @model_validator(mode="after")
     def assemble_urls(self) -> "Settings":
-        """Build all connection strings from their component parts."""
+        # Encode password to handle special characters (@, :, %, etc.)
+        encoded_pass = quote_plus(self.POSTGRES_PASSWORD)
+
         if not self.DATABASE_URL:
             self.DATABASE_URL = (
-                f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"postgresql+asyncpg://{self.POSTGRES_USER}:{encoded_pass}"
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
         if not self.DATABASE_URL_SYNC:
             self.DATABASE_URL_SYNC = (
-                f"postgresql+psycopg2://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"postgresql+psycopg2://{self.POSTGRES_USER}:{encoded_pass}"
                 f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
             )
 
-        redis_auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        redis_auth = f":{quote_plus(self.REDIS_PASSWORD)}@" if self.REDIS_PASSWORD else ""
+        if not self.REDIS_URL:
+            self.REDIS_URL = (
+                f"redis://{redis_auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
+            )
         if not self.REDIS_URL:
             self.REDIS_URL = (
                 f"redis://{redis_auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
@@ -132,10 +172,9 @@ class Settings(BaseSettings):
             )
         if not self.CELERY_RESULT_BACKEND:
             self.CELERY_RESULT_BACKEND = self.CELERY_BROKER_URL
-
         return self
 
-    # ── Convenience Properties ────────────────────────────────────────────────
+    # ── Convenience properties ────────────────────────────────────────────────
 
     @property
     def is_production(self) -> bool:
@@ -161,16 +200,17 @@ class Settings(BaseSettings):
     def refresh_token_expire_seconds(self) -> int:
         return self.JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60
 
+    @property
+    def email_verification_expire_seconds(self) -> int:
+        return self.EMAIL_VERIFICATION_EXPIRE_MINUTES * 60
+
+    @property
+    def password_reset_expire_seconds(self) -> int:
+        return self.PASSWORD_RESET_EXPIRE_MINUTES * 60
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """
-    Cached singleton. Call get_settings.cache_clear() in tests to reload.
-    """
-    # Pydantic Settings will attempt to read these from the environment or .env file.
-    # We pass empty strings as defaults here only to satisfy static analysis if needed,
-    # but the Field(...) in the class definition ensures they must be provided
-    # at runtime via environment variables or the .env file.
     return Settings()  # type: ignore
 
 

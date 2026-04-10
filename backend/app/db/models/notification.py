@@ -78,7 +78,8 @@ from app.db.base import BaseModel, utcnow
 from app.db.enums import (NotificationChannel, NotificationType,
                           ScheduledEventType)
 from app.db.mixins import composite_index
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -182,10 +183,12 @@ class Notification(BaseModel, table=True):
     # ── Recipient ─────────────────────────────────────────────────────────────
 
     recipient_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Content ───────────────────────────────────────────────────────────────
@@ -273,12 +276,12 @@ class ScheduledEvent(BaseModel, table=True):
         - Fan-out is handled by bulk insert in a Celery task.
 
     event_type (ScheduledEventType enum):
-        ASSESSMENT_WINDOW    → The open window for taking an assessment.
-        HOMEWORK_DEADLINE    → Due date for homework/group work submission.
+        ASSESSMENT_WINDOW     → The open window for taking an assessment.
+        HOMEWORK_DEADLINE     → Due date for homework/group work submission.
         RESULT_RELEASE       → Scheduled result release date.
         REASSESSMENT_WINDOW  → The window for a reassessment attempt.
         REVIEW_WINDOW        → The window within which appeals can be raised.
-        SUPERVISION_SHIFT    → A lecturer's assigned supervision slot.
+        SUPERVISION_SHIFT     → A lecturer's assigned supervision slot.
 
     event_source_id / event_source_type:
         The academic object this event derives from. Same polymorphic
@@ -327,10 +330,12 @@ class ScheduledEvent(BaseModel, table=True):
     # ── Owner ─────────────────────────────────────────────────────────────────
 
     user_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Event identity ────────────────────────────────────────────────────────
@@ -480,10 +485,12 @@ class Reminder(BaseModel, table=True):
     # ── Recipient ─────────────────────────────────────────────────────────────
 
     recipient_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Content template ──────────────────────────────────────────────────────
@@ -523,10 +530,12 @@ class Reminder(BaseModel, table=True):
     # Assessment FK — used for bulk cancellation when an assessment changes
     assessment_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        )
         # CASCADE: if an assessment is deleted, its pending reminders are removed.
         # This is the only CASCADE-to-assessment in this module.
     )
@@ -551,4 +560,3 @@ class Reminder(BaseModel, table=True):
         nullable=True,
         max_length=500,
     )
-

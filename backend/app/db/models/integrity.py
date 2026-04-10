@@ -82,6 +82,8 @@ from app.db.enums import (IntegrityEventType, IntegrityFlagRaisedBy,
                           IntegrityFlagStatus, IntegrityRiskLevel,
                           WarningLevel)
 from app.db.mixins import composite_index, unique_composite_index
+from sqlalchemy import Column, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
 if TYPE_CHECKING:
@@ -136,11 +138,11 @@ class IntegrityEvent(AppendOnlyModel, table=True):
 
     severity (IntegrityRiskLevel enum):
         LOW    → Informational; single occurrence is not suspicious.
-                 Examples: window_blur (phone call), page_hidden (brief)
+                  Examples: window_blur (phone call), page_hidden (brief)
         MEDIUM → Noteworthy; repeated occurrences increase risk score.
-                 Examples: tab_switch, reconnect
+                  Examples: tab_switch, reconnect
         HIGH   → Significant; directly raises risk score.
-                 Examples: fullscreen_exit, copy_attempt, devtools_open
+                  Examples: fullscreen_exit, copy_attempt, devtools_open
 
     risk_score_delta:
         The integer points added to the attempt's integrity_risk_score
@@ -189,17 +191,21 @@ class IntegrityEvent(AppendOnlyModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Denormalised — avoids joining through attempt for supervisor queries
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — student who owns this attempt; validated at service layer
     student_id: uuid.UUID = Field(nullable=False, index=True)
@@ -315,17 +321,21 @@ class IntegrityWarning(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Denormalised for supervisor dashboard queries
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — validated at service layer
     student_id: uuid.UUID = Field(nullable=False, index=True)
@@ -349,10 +359,12 @@ class IntegrityWarning(BaseModel, table=True):
 
     triggered_by_event_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="integrity_event.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("integrity_event.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     # Plain UUID — NULL for SYSTEM-issued; set for LECTURER-issued
     issued_by_lecturer_id: Optional[uuid.UUID] = Field(
@@ -408,11 +420,11 @@ class IntegrityFlag(BaseModel, table=True):
         - This is enforced by the result release service, not DB constraints.
 
     flag_status (IntegrityFlagStatus enum):
-        OPEN        → Raised; awaiting lecturer review.
+        OPEN         → Raised; awaiting lecturer review.
         UNDER_REVIEW → A lecturer has opened the flag and is reviewing it.
-        RESOLVED    → Lecturer made a decision (see resolution_decision).
-        DISMISSED   → Lecturer determined no violation occurred (false positive).
-        ESCALATED   → Referred to admin or institution level for further action.
+        RESOLVED     → Lecturer made a decision (see resolution_decision).
+        DISMISSED    → Lecturer determined no violation occurred (false positive).
+        ESCALATED    → Referred to admin or institution level for further action.
 
     resolution_decision:
         Free text. Required when transitioning to RESOLVED, DISMISSED,
@@ -430,7 +442,7 @@ class IntegrityFlag(BaseModel, table=True):
 
     raised_by (IntegrityFlagRaisedBy enum):
         SYSTEM   → Created automatically by escalating warning logic or
-                   AI pattern detection.
+                    AI pattern detection.
         LECTURER → Manually raised by a supervisor in the live panel.
     """
 
@@ -459,19 +471,23 @@ class IntegrityFlag(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
         # RESTRICT: a flagged attempt cannot be deleted.
         # The flag must be resolved or dismissed first.
     )
     # Denormalised for lecturer queue queries without joining through attempt
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — student who owns the flagged attempt
     student_id: uuid.UUID = Field(nullable=False, index=True)
@@ -617,10 +633,12 @@ class SupervisionSession(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — lecturer opening this session; validated at service layer
     lecturer_id: uuid.UUID = Field(nullable=False, index=True)

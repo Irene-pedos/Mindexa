@@ -111,5 +111,18 @@
   // Optional: Debugging FastAPI more easily later
   // ────────────────────────────────────────────────────────────────
   "python.experiments.optInto": [],
-  "python.analysis.typeCheckingMode": "basic" // can go to "strict" later
+  "python.analysis.typeCheckingMode": "basic",
+  "sqltools.connections": [
+    {
+      "ssh": "Disabled",
+      "previewLimit": 50,
+      "server": "localhost",
+      "port": 5433,
+      "askForPassword": true,
+      "driver": "PostgreSQL",
+      "name": "New",
+      "database": "mindexa_db",
+      "username": "postgres"
+    }
+  ] // can go to "strict" later
 }

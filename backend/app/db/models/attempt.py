@@ -61,16 +61,17 @@ from app.db.enums import (AIGradeDecision, AppealStatus, AttemptStatus,
                           GradingMode, QuestionType, SubmissionGradingMode,
                           SubmissionStatus)
 from app.db.mixins import composite_index, unique_composite_index
-from sqlalchemy import UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Column, Field, Relationship
+from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship
 
 if TYPE_CHECKING:
-    from app.db.models.assessment import Assessment, AssessmentSection
+    from app.db.models.assessment import (Assessment, AssessmentSection,
+                                          RubricCriterion,
+                                          RubricCriterionLevel)
     from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
                                          IntegrityWarning, SupervisionSession)
-    from app.db.models.question import (AssessmentQuestion, Question,
-                                        RubricCriterion, RubricCriterionLevel)
+    from app.db.models.question import AssessmentQuestion, Question
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -89,17 +90,17 @@ class AssessmentAttempt(BaseModel, table=True):
 
     Lifecycle states (AttemptStatus enum):
         PENDING          → Row created; student on the intro/password screen.
-                          Not yet counted against max_attempts until ACTIVE.
+                           Not yet counted against max_attempts until ACTIVE.
         ACTIVE           → Student is answering questions; timer is running.
         SUBMITTED        → Student clicked Submit; responses are locked.
         AUTO_SUBMITTED   → Timer expired; backend forced submission.
         TIMED_OUT        → Student lost connection and never reconnected within
-                          the reconnect grace window. Treated as submitted with
-                          whatever answers were autosaved.
+                           the reconnect grace window. Treated as submitted with
+                           whatever answers were autosaved.
         ABANDONED        → Student navigated away during PENDING state.
-                          Not counted against max_attempts.
+                           Not counted against max_attempts.
         FLAGGED          → Attempt has active integrity flags under review.
-                          Grading is paused until flags are resolved.
+                           Grading is paused until flags are resolved.
 
     score_percentage:
         Populated after grading. NULL while the attempt is ungraded.
@@ -143,10 +144,12 @@ class AssessmentAttempt(BaseModel, table=True):
             "assessment_attempt",
             "student_id", "assessment_id", "status",
         ),
-        # Grading queue queries
-        composite_index(
-            "assessment_attempt",
-            "assessment_id", "grading_mode", "submission_status",
+        # Grading queue queries - Manual name used to stay under 63 char limit
+        Index(
+            "ix_asmt_att_asmt_id_grading_status",  # Manual short name
+            "assessment_id",
+            "grading_mode",
+            "submission_status"
         ),
         # Risk score queries for live supervision
         composite_index(
@@ -164,23 +167,29 @@ class AssessmentAttempt(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     group_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="student_group.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_group.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Attempt identity ──────────────────────────────────────────────────────
@@ -296,18 +305,18 @@ class AssessmentAttempt(BaseModel, table=True):
         sa_relationship_kwargs={"uselist": False},
     )
 
-    # Add these relationships (after importing IntegrityEvent etc. via TYPE_CHECKING)
-integrity_events: List["IntegrityEvent"] = Relationship(
-    back_populates="attempt",
-    sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-)
-integrity_warnings: List["IntegrityWarning"] = Relationship(
-    back_populates="attempt",
-    sa_relationship_kwargs={"cascade": "all, delete-orphan"},
-)
-integrity_flags: List["IntegrityFlag"] = Relationship(
-    back_populates="attempt",
-)
+  # ── Integrity relationships (back-populated from integrity.py) ─────────────
+    integrity_events: List["IntegrityEvent"] = Relationship(
+        back_populates="attempt",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    integrity_warnings: List["IntegrityWarning"] = Relationship(
+        back_populates="attempt",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    integrity_flags: List["IntegrityFlag"] = Relationship(
+        back_populates="attempt",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -343,10 +352,12 @@ class StudentGroup(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     name: str = Field(nullable=False, max_length=100)
     max_members: Optional[int] = Field(default=None, nullable=True)
@@ -398,16 +409,20 @@ class StudentGroupMember(BaseModel, table=True):
     )
 
     group_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="student_group.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_group.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     group_role: Optional[str] = Field(
         default=None,
@@ -490,11 +505,11 @@ class StudentResponse(BaseModel, table=True):
             Per-criterion breakdown for rubric-based AI grading:
             [{"criterion_id": "<uuid>", "suggested_marks": 6, "rationale": "..."}]
         ai_grade_decision:
-            PENDING       → AI has not processed this response yet.
-            SUGGESTED     → AI has produced a suggestion; awaiting lecturer review.
-            ACCEPTED      → Lecturer accepted the AI suggestion.
-            MODIFIED      → Lecturer modified the AI suggestion before accepting.
-            REJECTED      → Lecturer rejected the AI suggestion and graded manually.
+            PENDING        → AI has not processed this response yet.
+            SUGGESTED      → AI has produced a suggestion; awaiting lecturer review.
+            ACCEPTED       → Lecturer accepted the AI suggestion.
+            MODIFIED       → Lecturer modified the AI suggestion before accepting.
+            REJECTED       → Lecturer rejected the AI suggestion and graded manually.
             NOT_APPLICABLE → Auto-graded question type; AI not involved.
     """
 
@@ -525,23 +540,29 @@ class StudentResponse(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_question_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment_question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_question.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
         # Denormalised for direct access to per-assessment question config
         # (marks_override, order_index) without an extra JOIN.
     )
@@ -627,10 +648,10 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         Queries for current grades always filter: WHERE is_current = TRUE.
 
     grading_mode (SubmissionGradingMode):
-        AUTO              → All questions were auto-graded by the system.
-        AI_ASSISTED       → AI suggested grades; lecturer confirmed.
-        MANUAL            → Lecturer graded without AI assistance.
-        HYBRID            → Mix of auto-graded and manually graded questions.
+        AUTO               → All questions were auto-graded by the system.
+        AI_ASSISTED        → AI suggested grades; lecturer confirmed.
+        MANUAL             → Lecturer graded without AI assistance.
+        HYBRID             → Mix of auto-graded and manually graded questions.
 
     submission_status (SubmissionStatus):
         PENDING_GRADING   → Submitted but no grading has started.
@@ -701,23 +722,29 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Denormalised for fast query access without joining through attempt
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Grade state ───────────────────────────────────────────────────────────
@@ -843,35 +870,43 @@ class RubricGrade(BaseModel, table=True):
     )
 
     submission_grade_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="submission_grade.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("submission_grade.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     student_response_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="student_response.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_response.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
         # Links this rubric grade to the specific question response being graded.
         # NULL for assessment-level rubric grading (entire submission graded as one).
     )
     criterion_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="rubric_criterion.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric_criterion.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Selected level ────────────────────────────────────────────────────────
 
     selected_level_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="rubric_criterion_level.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric_criterion_level.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     marks_awarded: float = Field(nullable=False)
     feedback: Optional[str] = Field(default=None, nullable=True)
@@ -880,9 +915,11 @@ class RubricGrade(BaseModel, table=True):
 
     ai_suggested_level_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="rubric_criterion_level.id",
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric_criterion_level.id", ondelete="SET NULL"),
+            nullable=True,
+        )
     )
     ai_suggested_marks: Optional[float] = Field(default=None, nullable=True)
     ai_suggestion_rationale: Optional[str] = Field(default=None, nullable=True)
@@ -961,23 +998,29 @@ class ResultAppeal(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     submission_grade_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="submission_grade.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("submission_grade.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Denormalised for fast access in the lecturer review queue
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── Appeal content ────────────────────────────────────────────────────────
@@ -1007,10 +1050,12 @@ class ResultAppeal(BaseModel, table=True):
 
     reviewer_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     review_started_at: Optional[datetime] = Field(default=None, nullable=True)
     review_completed_at: Optional[datetime] = Field(default=None, nullable=True)

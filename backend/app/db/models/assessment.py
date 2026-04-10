@@ -10,7 +10,7 @@ Tables defined here:
     assessment_section           — Blueprint sections within an assessment
     assessment_blueprint_rule    — Structured rules for question distribution
     assessment_draft_progress    — Wizard step completion tracking (1:1 per assessment)
-    assessment_autosave          — Serialised form-state snapshots for crash recovery
+    assessment_autosave           — Serialised form-state snapshots for crash recovery
     assessment_publish_validation — Results of the publish readiness check
     rubric                       — Grading rubric definition
     rubric_criterion             — Individual criterion within a rubric
@@ -37,7 +37,7 @@ Cascade rules:
     assessment_draft_progress     → CASCADE from assessment
     assessment_autosave           → CASCADE from assessment
     assessment_publish_validation → CASCADE from assessment
-    rubric_criterion              → CASCADE from rubric
+    rubric_criterion               → CASCADE from rubric
     rubric_criterion_level        → CASCADE from rubric_criterion
 """
 
@@ -53,8 +53,9 @@ from app.db.enums import (AssessmentStatus, AssessmentType, BlueprintRuleType,
                           ResultReleaseMode, SupervisorRole)
 from app.db.mixins import (bool_field, composite_index, optional_fk_uuid,
                            positive_int, unique_composite_index)
-from sqlalchemy import UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
+from app.db.models.integrity import SupervisionSession
+from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
 # Constants from mixins (not enums — they are integers)
@@ -126,26 +127,32 @@ class Assessment(AuditedBaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     course_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="course.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     subject_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="subject.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("subject.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # Self-referential: NULL for normal, set for reassessments
     reassessment_of_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Identity ──────────────────────────────────────────────────────────────
@@ -298,16 +305,20 @@ class AssessmentTargetSection(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     class_section_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="class_section.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("class_section.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — validated at service layer
     added_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
@@ -351,16 +362,20 @@ class AssessmentSupervisor(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     supervisor_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     supervisor_role: SupervisorRole = Field(
         default=SupervisorRole.ASSISTANT,
@@ -421,10 +436,12 @@ class AssessmentSection(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     title: str = Field(nullable=False, max_length=255)
     instructions: Optional[str] = Field(default=None, nullable=True)
@@ -433,17 +450,15 @@ class AssessmentSection(BaseModel, table=True):
 
     # Blueprint distribution fields
     question_count_target: Optional[int] = Field(default=None, nullable=True)
-    # JSONB stored as JSON string in SQLModel; parsed at service layer
-    allowed_question_types: Optional[str] = Field(
-        default=None,
-        nullable=True,
-        sa_column_kwargs={"type_": JSONB()},
-    )
-    difficulty_distribution: Optional[str] = Field(
-        default=None,
-        nullable=True,
-        sa_column_kwargs={"type_": JSONB()},
-    )
+    # Stored as native JSONB
+    allowed_question_types: Optional[dict] = Field(
+    default=None,
+    sa_column=Column(JSONB, nullable=True),
+)
+    difficulty_distribution: Optional[dict] = Field(
+    default=None,
+    sa_column=Column(JSONB, nullable=True),
+)
     ai_generation_prompt_hint: Optional[str] = Field(default=None, nullable=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────
@@ -467,7 +482,7 @@ class AssessmentBlueprintRule(BaseModel, table=True):
     Rules serve two purposes:
         1. Publish validation — is_enforced=True rules block publish if violated.
         2. AI generation guidance — all rules are included in the AI prompt
-           context when generating questions.
+            context when generating questions.
 
     rule_type / numeric_value examples:
         EXACT_QUESTIONS    → numeric_value=20  "This section must have exactly 20 questions"
@@ -498,17 +513,21 @@ class AssessmentBlueprintRule(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_section_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment_section.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        )
     )
     rule_type: BlueprintRuleType = Field(nullable=False, index=True)
     question_type: Optional[QuestionType] = Field(default=None, nullable=True)
@@ -562,10 +581,12 @@ class AssessmentDraftProgress(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # Step completion flags
@@ -635,19 +656,20 @@ class AssessmentAutosave(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — validated at service layer
     lecturer_id: uuid.UUID = Field(nullable=False, index=True)
 
     step_number: int = Field(nullable=False)
-    snapshot: str = Field(
-        nullable=False,
-        sa_column_kwargs={"type_": JSONB()},
-    )
+    snapshot: dict = Field(
+    sa_column=Column(JSONB, nullable=False),
+)
     client_version: int = Field(default=1, nullable=False)
     saved_at: datetime = Field(default_factory=utcnow, nullable=False)
     expires_at: datetime = Field(nullable=False, index=True)
@@ -699,19 +721,20 @@ class AssessmentPublishValidation(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — validated at service layer
     checked_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
     checked_at: datetime = Field(default_factory=utcnow, nullable=False, index=True)
     overall_passed: bool = Field(default=False, nullable=False, index=True)
-    validation_results: str = Field(
-        nullable=False,
-        sa_column_kwargs={"type_": JSONB()},
-    )
+    validation_results: list = Field(
+    sa_column=Column(JSONB, nullable=False),
+)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     assessment: Optional["Assessment"] = Relationship(
@@ -783,10 +806,12 @@ class RubricCriterion(BaseModel, table=True):
     )
 
     rubric_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="rubric.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None, nullable=True)
@@ -834,10 +859,12 @@ class RubricCriterionLevel(BaseModel, table=True):
     )
 
     criterion_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="rubric_criterion.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric_criterion.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     label: str = Field(nullable=False, max_length=100)
     description: Optional[str] = Field(default=None, nullable=True)

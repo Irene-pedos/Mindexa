@@ -17,8 +17,9 @@ import sys
 from typing import Any
 
 import structlog
-from app.core.config import settings
 from structlog.types import EventDict, WrappedLogger
+
+from app.core.config import settings
 
 
 def _add_app_context(

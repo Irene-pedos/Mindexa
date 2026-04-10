@@ -10,13 +10,14 @@ from __future__ import annotations
 import time
 import uuid
 
-from app.core.config import settings
-from app.core.logging import (bind_request_context, clear_request_context,
-                              get_logger)
 from starlette.middleware.base import (BaseHTTPMiddleware,
                                        RequestResponseEndpoint)
 from starlette.requests import Request
 from starlette.responses import Response
+
+from app.core.config import settings
+from app.core.logging import (bind_request_context, clear_request_context,
+                              get_logger)
 
 logger = get_logger(__name__)
 

@@ -1,225 +1,434 @@
 """
 app/core/exceptions.py
 
-Custom exception hierarchy for Mindexa.
+Custom exception hierarchy for Mindexa Platform.
 
-Every exception carries:
-  - error_code   — machine-readable string for frontend handling
-  - http_status  — set at class level, not at raise site
-  - message      — safe human-readable message (no internal details)
+STRUCTURE:
+    MindexaError (base)
+    ├── AuthenticationError      → 401 Unauthorized
+    │   ├── InvalidCredentialsError → 401 (wrong email/password — enumeration-safe)
+    │   ├── TokenExpiredError    → 401 (token past expiry)
+    │   └── InvalidTokenError    → 401 (malformed / bad signature / wrong type)
+    ├── AuthorizationError       → 403 Forbidden
+    │   ├── PermissionDeniedError → 403 (authenticated but not allowed)
+    │   └── RoleRequiredError    → 403 (wrong role for this endpoint)
+    ├── AccountError             → 403 (account state blocks access)
+    │   ├── AccountSuspendedError
+    │   ├── AccountInactiveError
+    │   ├── AccountLockedError
+    │   └── EmailNotVerifiedError
+    ├── NotFoundError            → 404 Not Found
+    ├── AlreadyExistsError       → 409 Conflict (duplicate resource)
+    │   └── EmailAlreadyRegisteredError
+    ├── ConflictError            → 409 Conflict (state conflict)
+    ├── ValidationError          → 422 Unprocessable Entity
+    ├── RateLimitError           → 429 Too Many Requests
+    ├── FileTooLargeError        → 413 Payload Too Large
+    ├── FileTypeNotAllowedError  → 415 Unsupported Media Type
+    └── InternalError            → 500 Internal Server Error
+
+All exceptions carry:
+    - detail:  human-readable message (shown to client)
+    - code:    machine-readable string (used by frontend to branch logic)
+    - context: arbitrary kwargs for logging/debugging
+
+NAMING ALIASES:
+    Several exception names exist in two forms for backward compatibility
+    and clarity at call sites. Both point to the same class.
+
+        TokenInvalidError   ← same as → InvalidTokenError
+        ConflictError       ← same as → AlreadyExistsError (for generic conflicts)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+# ─────────────────────────────────────────────────────────────────────────────
+# BASE
+# ─────────────────────────────────────────────────────────────────────────────
 
-class MindexaException(Exception):
-    http_status: int = 500
-    error_code: str = "INTERNAL_ERROR"
+
+class MindexaError(Exception):
+    """
+    Base exception for all Mindexa application errors.
+
+    Every exception subclass must define:
+        status_code    — the HTTP status code for this error category
+        default_message — what the user sees if no detail is provided
+        default_code   — machine-readable string for frontend routing
+
+    Usage:
+        raise NotFoundError(resource="Assessment", resource_id=str(assessment_id))
+        raise AuthenticationError(detail="Token has been revoked.")
+    """
+
+    status_code: int = 500
     default_message: str = "An unexpected error occurred."
+    default_code: str = "internal_error"
 
     def __init__(
         self,
-        message: str | None = None,
-        *,
-        detail: Any = None,
-        headers: dict[str, str] | None = None,
+        detail: str | None = None,
+        code: str | None = None,
+        **context: Any,
     ) -> None:
-        self.message = message or self.default_message
-        self.detail = detail
-        self.headers = headers
-        super().__init__(self.message)
+        self.detail = detail or self.default_message
+        self.code = code or self.default_code
+        self.context = context
+        super().__init__(self.detail)
 
 
-# ── Auth & Permission ─────────────────────────────────────────────────────────
-
-class AuthenticationError(MindexaException):
-    http_status = 401
-    error_code = "AUTHENTICATION_FAILED"
-    default_message = "Authentication credentials are missing or invalid."
-
-    def __init__(self, message: str | None = None, **kwargs: Any) -> None:
-        super().__init__(message, **kwargs)
-        self.headers = self.headers or {"WWW-Authenticate": "Bearer"}
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTHENTICATION  (401)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class InvalidTokenError(AuthenticationError):
-    error_code = "INVALID_TOKEN"
-    default_message = "The provided token is invalid or has expired."
+class AuthenticationError(MindexaError):
+    """
+    Raised when authentication credentials are missing, expired, or invalid.
+    Maps to HTTP 401.
+    """
+
+    status_code = 401
+    default_message = "Authentication required."
+    default_code = "authentication_required"
+
+
+class InvalidCredentialsError(AuthenticationError):
+    """
+    Raised when an email/password combination is incorrect.
+
+    SECURITY: The message is intentionally vague — we never reveal whether
+    the email exists or the password is wrong. Both cases return the same
+    user-facing text to prevent user enumeration attacks.
+    """
+
+    default_message = "Invalid email or password."
+    default_code = "invalid_credentials"
 
 
 class TokenExpiredError(AuthenticationError):
-    error_code = "TOKEN_EXPIRED"
+    """Raised when a JWT token has passed its expiry time (exp claim)."""
+
     default_message = "Your session has expired. Please log in again."
+    default_code = "token_expired"
 
 
-class PermissionDeniedError(MindexaException):
-    http_status = 403
-    error_code = "PERMISSION_DENIED"
+class InvalidTokenError(AuthenticationError):
+    """
+    Raised when a JWT token fails cryptographic validation.
+
+    Covers:
+        - Malformed token (cannot be decoded at all)
+        - Bad signature (tampered payload)
+        - Wrong token type (refresh used as access, or vice versa)
+        - Missing required claims (sub, jti, etc.)
+        - Token has been revoked (blocklisted JTI)
+    """
+
+    default_message = "Invalid authentication token."
+    default_code = "token_invalid"
+
+
+# Backward-compatible alias — some modules import TokenInvalidError
+TokenInvalidError = InvalidTokenError
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AUTHORIZATION  (403)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AuthorizationError(MindexaError):
+    """
+    Raised when a user is authenticated but lacks permission for an action.
+    Maps to HTTP 403.
+    """
+
+    status_code = 403
     default_message = "You do not have permission to perform this action."
+    default_code = "forbidden"
 
 
-class RoleRequiredError(PermissionDeniedError):
-    error_code = "ROLE_REQUIRED"
-    default_message = "This action requires a specific role."
+class PermissionDeniedError(AuthorizationError):
+    """
+    Raised when a user's role or resource ownership check fails.
 
-    def __init__(self, required_role: str, **kwargs: Any) -> None:
-        super().__init__(f"This action requires the '{required_role}' role.", **kwargs)
-        self.required_role = required_role
+    Use this when the user is fully authenticated but is attempting to access
+    a resource or perform an action they are not authorised for — e.g. a
+    student trying to access lecturer-only grading endpoints, or a lecturer
+    trying to modify another lecturer's assessment.
+    """
+
+    default_message = "You do not have permission to access this resource."
+    default_code = "permission_denied"
 
 
-# ── Resource ──────────────────────────────────────────────────────────────────
+class RoleRequiredError(AuthorizationError):
+    """
+    Raised when the user's role is insufficient for the requested endpoint.
 
-class NotFoundError(MindexaException):
-    http_status = 404
-    error_code = "NOT_FOUND"
-    default_message = "The requested resource was not found."
+    Includes the required role(s) in the context dict so the error handler
+    can optionally surface them in the response for debugging.
+
+    Example:
+        raise RoleRequiredError(required_roles=["lecturer", "admin"])
+    """
+
+    default_message = "Your role does not have access to this resource."
+    default_code = "insufficient_role"
 
     def __init__(
         self,
-        resource: str = "Resource",
-        resource_id: Any = None,
+        required_roles: list[str] | None = None,
         **kwargs: Any,
     ) -> None:
-        id_str = f" with id '{resource_id}'" if resource_id is not None else ""
-        super().__init__(f"{resource}{id_str} was not found.", **kwargs)
+        super().__init__(**kwargs)
+        self.required_roles = required_roles or []
+
+
+# Alias for call sites that use the more generic name
+InsufficientRoleError = RoleRequiredError
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ACCOUNT STATE  (403)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class AccountError(AuthorizationError):
+    """
+    Base for errors caused by the account's current state blocking access.
+    Inherits from AuthorizationError → HTTP 403.
+    """
+
+    default_code = "account_error"
+
+
+class AccountSuspendedError(AccountError):
+    """Raised when an admin has suspended the user's account."""
+
+    default_message = (
+        "Your account has been suspended. "
+        "Please contact your institution administrator."
+    )
+    default_code = "account_suspended"
+
+
+class AccountInactiveError(AccountError):
+    """Raised when the user's account has been deactivated."""
+
+    default_message = (
+        "Your account is inactive. "
+        "Please contact your institution administrator."
+    )
+    default_code = "account_inactive"
+
+
+class AccountLockedError(AccountError):
+    """
+    Raised when the account is temporarily locked due to too many
+    consecutive failed login attempts.
+
+    The locked_until attribute contains the datetime when the lock expires,
+    so the response handler can surface it to the client for countdown display.
+    """
+
+    default_message = (
+        "Your account is temporarily locked due to too many failed login attempts. "
+        "Please try again later."
+    )
+    default_code = "account_locked"
+
+    def __init__(self, locked_until: Any = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.locked_until = locked_until
+
+
+class EmailNotVerifiedError(AccountError):
+    """
+    Raised when a protected endpoint requires email verification and
+    the user's email_verified flag is False.
+    """
+
+    default_message = (
+        "Please verify your email address before accessing this resource. "
+        "Check your inbox or request a new verification email."
+    )
+    default_code = "email_not_verified"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# RESOURCE  (404)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class NotFoundError(MindexaError):
+    """
+    Raised when a requested resource does not exist (or has been soft-deleted).
+    Maps to HTTP 404.
+
+    Usage:
+        raise NotFoundError(resource="Assessment", resource_id=str(pk))
+    """
+
+    status_code = 404
+    default_message = "The requested resource was not found."
+    default_code = "not_found"
+
+    def __init__(
+        self,
+        resource: str | None = None,
+        resource_id: str | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
         self.resource = resource
         self.resource_id = resource_id
+        if resource:
+            self.detail = f"{resource} not found."
+            if resource_id:
+                self.detail = f"{resource} with id '{resource_id}' not found."
 
 
-class ConflictError(MindexaException):
-    http_status = 409
-    error_code = "CONFLICT"
-    default_message = "A conflict occurred with the current state of the resource."
+# ─────────────────────────────────────────────────────────────────────────────
+# CONFLICT / DUPLICATE  (409)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class AlreadyExistsError(ConflictError):
-    error_code = "ALREADY_EXISTS"
+class AlreadyExistsError(MindexaError):
+    """
+    Raised when a create operation would violate a uniqueness constraint.
+    Maps to HTTP 409.
+
+    Use this for all duplicate-resource scenarios (duplicate email, duplicate
+    course code, duplicate enrollment, etc.).
+    """
+
+    status_code = 409
     default_message = "A resource with these details already exists."
-
-    def __init__(self, resource: str = "Resource", **kwargs: Any) -> None:
-        super().__init__(f"{resource} already exists.", **kwargs)
+    default_code = "already_exists"
 
 
-# ── Validation ────────────────────────────────────────────────────────────────
+class EmailAlreadyRegisteredError(AlreadyExistsError):
+    """
+    Raised during registration when the submitted email is already in use.
 
-class ValidationError(MindexaException):
-    http_status = 422
-    error_code = "VALIDATION_ERROR"
-    default_message = "The provided data is invalid."
+    NOTE: Only raise this during registration — never during login.
+    Login always returns InvalidCredentialsError regardless of whether
+    the email exists, to prevent enumeration.
+    """
 
-
-class BadRequestError(MindexaException):
-    http_status = 400
-    error_code = "BAD_REQUEST"
-    default_message = "The request is malformed or contains invalid parameters."
-
-
-# ── Assessment & Academic ─────────────────────────────────────────────────────
-
-class AssessmentNotAvailableError(MindexaException):
-    http_status = 403
-    error_code = "ASSESSMENT_NOT_AVAILABLE"
-    default_message = "This assessment is not currently available."
+    default_message = "An account with this email address already exists."
+    default_code = "email_already_registered"
 
 
-class AssessmentWindowClosedError(MindexaException):
-    http_status = 403
-    error_code = "ASSESSMENT_WINDOW_CLOSED"
-    default_message = "The submission window for this assessment has closed."
+class ConflictError(MindexaError):
+    """
+    Raised when an operation conflicts with the current state of a resource,
+    not because of a uniqueness violation but because of a state machine rule.
+
+    Examples:
+        - Trying to publish an assessment that is already published
+        - Trying to submit an attempt that is already submitted
+        - Trying to release grades that have not been graded yet
+
+    Maps to HTTP 409.
+    """
+
+    status_code = 409
+    default_message = "This operation conflicts with the current resource state."
+    default_code = "conflict"
 
 
-class AttemptAlreadyActiveError(MindexaException):
-    http_status = 409
-    error_code = "ATTEMPT_ALREADY_ACTIVE"
-    default_message = "You already have an active attempt for this assessment."
+# ─────────────────────────────────────────────────────────────────────────────
+# VALIDATION  (422)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class AttemptNotActiveError(MindexaException):
-    http_status = 400
-    error_code = "ATTEMPT_NOT_ACTIVE"
-    default_message = "There is no active attempt to perform this action on."
+class ValidationError(MindexaError):
+    """
+    Raised for business-rule validation failures that are not caught by
+    Pydantic schema validation.
+
+    Pydantic schema errors produce FastAPI's built-in 422 responses.
+    This exception is for service-layer rules that require DB context to check
+    (e.g. "assessment window has already closed", "max attempts exceeded").
+
+    Maps to HTTP 422.
+    """
+
+    status_code = 422
+    default_message = "The provided data failed validation."
+    default_code = "validation_error"
 
 
-class MaxAttemptsReachedError(MindexaException):
-    http_status = 403
-    error_code = "MAX_ATTEMPTS_REACHED"
-    default_message = "You have reached the maximum number of attempts."
+# ─────────────────────────────────────────────────────────────────────────────
+# RATE LIMIT  (429)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class NotEnrolledError(MindexaException):
-    http_status = 403
-    error_code = "NOT_ENROLLED"
-    default_message = "You are not enrolled in the course for this assessment."
+class RateLimitError(MindexaError):
+    """
+    Raised when a client exceeds the configured rate limit for an endpoint.
+    Maps to HTTP 429.
+    """
 
-
-class WrongPasswordError(MindexaException):
-    http_status = 401
-    error_code = "WRONG_ASSESSMENT_PASSWORD"
-    default_message = "The assessment password is incorrect."
-
-
-class AIBlockedError(MindexaException):
-    http_status = 403
-    error_code = "AI_BLOCKED"
-    default_message = (
-        "AI assistance is not permitted during this assessment. "
-        "Study support AI is disabled for protected assessments."
-    )
-
-
-# ── AI & Agent ────────────────────────────────────────────────────────────────
-
-class AIServiceError(MindexaException):
-    http_status = 502
-    error_code = "AI_SERVICE_ERROR"
-    default_message = "The AI service is temporarily unavailable. Please try again."
-
-
-class AIRateLimitError(MindexaException):
-    http_status = 429
-    error_code = "AI_RATE_LIMIT"
-    default_message = "AI rate limit reached. Please wait before retrying."
-
-
-# ── File ──────────────────────────────────────────────────────────────────────
-
-class FileTooLargeError(MindexaException):
-    http_status = 413
-    error_code = "FILE_TOO_LARGE"
-    default_message = "The uploaded file exceeds the maximum allowed size."
-
-    def __init__(self, max_mb: int, **kwargs: Any) -> None:
-        super().__init__(f"File exceeds the maximum size of {max_mb}MB.", **kwargs)
-
-
-class FileTypeNotAllowedError(MindexaException):
-    http_status = 415
-    error_code = "FILE_TYPE_NOT_ALLOWED"
-    default_message = "This file type is not permitted."
-
-    def __init__(self, extension: str, **kwargs: Any) -> None:
-        super().__init__(f"File type '.{extension}' is not allowed.", **kwargs)
-
-
-# ── Rate Limiting ─────────────────────────────────────────────────────────────
-
-class RateLimitExceededError(MindexaException):
-    http_status = 429
-    error_code = "RATE_LIMIT_EXCEEDED"
+    status_code = 429
     default_message = "Too many requests. Please slow down."
+    default_code = "rate_limit_exceeded"
 
 
-# ── Infrastructure ────────────────────────────────────────────────────────────
-
-class DatabaseError(MindexaException):
-    http_status = 500
-    error_code = "DATABASE_ERROR"
-    default_message = "A database error occurred. Please try again."
+# ─────────────────────────────────────────────────────────────────────────────
+# FILE ERRORS  (413 / 415)
+# ─────────────────────────────────────────────────────────────────────────────
 
 
-class ServiceUnavailableError(MindexaException):
-    http_status = 503
-    error_code = "SERVICE_UNAVAILABLE"
-    default_message = "The service is temporarily unavailable."
+class FileTooLargeError(MindexaError):
+    """
+    Raised when an uploaded file exceeds the configured size limit.
+    Maps to HTTP 413.
+    """
+
+    status_code = 413
+    default_message = "The uploaded file exceeds the maximum allowed size."
+    default_code = "file_too_large"
+
+    def __init__(self, max_mb: int | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if max_mb:
+            self.detail = f"File exceeds the maximum allowed size of {max_mb}MB."
+
+
+class FileTypeNotAllowedError(MindexaError):
+    """
+    Raised when an uploaded file has a disallowed extension or MIME type.
+    Maps to HTTP 415.
+    """
+
+    status_code = 415
+    default_message = "This file type is not allowed."
+    default_code = "file_type_not_allowed"
+
+    def __init__(self, extension: str | None = None, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        if extension:
+            self.detail = f"File type '.{extension}' is not allowed."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERNAL  (500)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class InternalError(MindexaError):
+    """
+    Raised for unexpected server-side errors.
+    The detail is intentionally generic — never expose stack traces to clients.
+    Maps to HTTP 500.
+    """
+
+    status_code = 500
+    default_message = "An internal server error occurred. Please try again."
+    default_code = "internal_error"

@@ -26,7 +26,8 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
 from sqlmodel import SQLModel
 
 # Force test environment before any app module imports
@@ -39,7 +40,6 @@ os.environ.setdefault("POSTGRES_PASSWORD", "mindexa_dev_password")
 from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
-
 
 # ── Event Loop ────────────────────────────────────────────────────────────────
 

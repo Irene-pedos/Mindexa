@@ -23,8 +23,8 @@ Import order safety:
                          bool_field, positive_int
 
     This file does NOT import from:
-        app.db.models.auth        → User referenced via TYPE_CHECKING only
-        app.db.models.assessment  → Not needed here; assessment imports academic
+        app.db.models.auth         → User referenced via TYPE_CHECKING only
+        app.db.models.assessment   → Not needed here; assessment imports academic
 
 Cascade rules:
     ondelete="RESTRICT" is the default on all FKs (via fk_uuid).
@@ -47,11 +47,12 @@ from app.db.enums import (AcademicPeriodType, EnrollmentStatus,
 from app.db.mixins import (bool_field, composite_index, fk_uuid, long_text,
                            optional_fk_uuid, positive_int, short_text,
                            unique_composite_index)
-from sqlalchemy import UniqueConstraint
-from sqlmodel import Field, Relationship
+from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
+from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
-    from app.db.models.assessment import Assessment
+    from app.db.models.assessment import Assessment, AssessmentTargetSection
     from app.db.models.auth import User
 
 
@@ -117,10 +118,12 @@ class Department(BaseModel, table=True):
     )
 
     institution_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="institution.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
@@ -165,10 +168,12 @@ class AcademicPeriod(BaseModel, table=True):
     )
 
     institution_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="institution.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     name: str = Field(nullable=False, max_length=255)
     period_type: AcademicPeriodType = Field(nullable=False)
@@ -215,17 +220,21 @@ class Subject(BaseModel, table=True):
     )
 
     institution_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="institution.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     department_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="department.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("department.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     code: str = Field(nullable=False, max_length=20)
     title: str = Field(nullable=False, max_length=255, index=True)
@@ -273,23 +282,29 @@ class Course(BaseModel, table=True):
     )
 
     institution_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="institution.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     department_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="department.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("department.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     academic_period_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="academic_period.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_period.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     code: str = Field(nullable=False, max_length=20)
     title: str = Field(nullable=False, max_length=255)
@@ -342,16 +357,20 @@ class CourseSubject(BaseModel, table=True):
     )
 
     course_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="course.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     subject_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="subject.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("subject.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     is_primary: bool = Field(default=False, nullable=False)
 
@@ -393,10 +412,12 @@ class ClassSection(BaseModel, table=True):
     )
 
     course_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="course.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     name: str = Field(nullable=False, max_length=100)
     capacity: Optional[int] = Field(default=None, nullable=True)
@@ -458,16 +479,20 @@ class LecturerCourseAssignment(AuditedBaseModel, table=True):
     )
 
     lecturer_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     course_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="course.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     assignment_role: LecturerAssignmentRole = Field(nullable=False)
     assigned_at: datetime = Field(default_factory=utcnow, nullable=False)
@@ -519,16 +544,20 @@ class StudentEnrollment(AuditedBaseModel, table=True):
     )
 
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     class_section_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="class_section.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("class_section.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     enrollment_status: EnrollmentStatus = Field(
         default=EnrollmentStatus.ACTIVE,

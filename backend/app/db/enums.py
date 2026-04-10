@@ -187,6 +187,7 @@ class AttemptStatus(str, Enum):
     SUBMITTED = "submitted"
     AUTO_SUBMITTED = "auto_submitted"
     ABANDONED = "abandoned"
+    PENDING ="pending"
 
 
 class SubmissionGradingMode(str, Enum):
@@ -210,6 +211,8 @@ class SubmissionStatus(str, Enum):
     REVIEWER_APPROVED = "reviewer_approved"
     FINAL_RELEASED = "final_released"
     UNDER_APPEAL = "under_appeal"
+    PENDING_GRADING = "pending_grading"
+    GRADING_FAILED = "grading_failed"
 
 
 class AppealStatus(str, Enum):
@@ -217,6 +220,9 @@ class AppealStatus(str, Enum):
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     REVISED = "revised"
+    SUBMITTED = "submitted"
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,6 +316,7 @@ class ResourceCategory(str, Enum):
     PAST_PAPER = "past_paper"
     PERSONAL_NOTES = "personal_notes"
     OTHER = "other"
+    GENERAL = "general"
 
 
 class ResourceProcessingStatus(str, Enum):
@@ -338,12 +345,17 @@ class AIActionStatus(str, Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
+    INITIATED = "initiated"
 
 
 class AIGradeDecision(str, Enum):
+    NOT_APPLICABLE = "not_applicable"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
     MODIFIED = "modified"
+    PENDING = "pending"
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────

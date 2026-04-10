@@ -18,11 +18,12 @@ from __future__ import annotations
 import uuid
 from typing import Any, Generic, TypeVar
 
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import NotFoundError
 from app.db.base import BaseModel
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 ModelType = TypeVar("ModelType", bound=BaseModel)
 

@@ -11,12 +11,13 @@ from __future__ import annotations
 import traceback
 import uuid
 
-from app.core.exceptions import MindexaException
-from app.core.logging import get_logger
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from app.core.exceptions import MindexaException
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

@@ -10,10 +10,11 @@ In production Linux containers, use --pool=prefork for true multiprocessing.
 
 from __future__ import annotations
 
-from app.core.config import settings
 from celery import Celery
 from celery.signals import worker_ready, worker_shutdown
 from kombu import Exchange, Queue
+
+from app.core.config import settings
 
 celery_app = Celery(
     "mindexa",

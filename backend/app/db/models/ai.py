@@ -34,7 +34,7 @@ Import order safety:
     ai_action_log_id as a plain UUID field.
 
 Cascade rules:
-    ai_action_log  → AppendOnlyModel. NEVER deleted. NEVER updated.
+    ai_action_log   → AppendOnlyModel. NEVER deleted. NEVER updated.
     ai_grade_review → RESTRICT on submission_grade and assessment_attempt.
                       A grade review record cannot be orphaned.
 """
@@ -48,9 +48,9 @@ from typing import Optional
 from app.db.base import AppendOnlyModel, BaseModel, utcnow
 from app.db.enums import AIActionStatus, AIActionType, AIGradeDecision
 from app.db.mixins import composite_index
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Column, Field
+from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AI ACTION LOG
@@ -74,7 +74,7 @@ class AIActionLog(AppendOnlyModel, table=True):
         1. Write the row with status=INITIATED and prompt context
         2. Make the AI call
         3. Write a SECOND row with status=COMPLETED (or FAILED)
-           referencing the first row via parent_log_id
+            referencing the first row via parent_log_id
 
     This two-row pattern preserves the append-only guarantee while
     maintaining the full lifecycle trace. The service layer always
@@ -327,17 +327,21 @@ class AIGradeReview(BaseModel, table=True):
     # ── Core references ───────────────────────────────────────────────────────
 
     attempt_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment_attempt.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Denormalised for fast assessment-level grading queue queries
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — student who owns this attempt
     student_id: uuid.UUID = Field(nullable=False, index=True)

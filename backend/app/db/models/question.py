@@ -7,10 +7,10 @@ Tables defined here:
     question                     — A reusable question owned by a lecturer
     question_option              — Answer options for closed question types
     question_blank               — Blank definitions for fill-in-the-blank questions
-    assessment_question          — Junction: question ↔ assessment (with per-assessment overrides)
+    assessment_question           — Junction: question ↔ assessment (with per-assessment overrides)
     ai_question_generation_batch — A single AI generation request session
     ai_question_review           — Lecturer decision on each AI-generated candidate
-    question_bank_entry          — The lecturer's question bank view
+    question_bank_entry           — The lecturer's question bank view
 
 Import order safety:
     This file imports from:
@@ -21,7 +21,7 @@ Import order safety:
                          unique_composite_index, bool_field
 
     This file references via TYPE_CHECKING only:
-        app.db.models.assessment → Assessment, AssessmentSection
+        app.db.models.assessment → Assessment, AssessmentSection, Rubric
         app.db.models.auth       → User (lecturer)
 
     This file does NOT import from:
@@ -37,7 +37,7 @@ Cascade rules:
                           links are removed — the question itself survives in the bank)
     ai_question_review → CASCADE from ai_question_generation_batch
     question_bank_entry → RESTRICT on question (entry references question; question
-                           cannot be deleted while it has a bank entry)
+                            cannot be deleted while it has a bank entry)
 
 JSONB fields:
     All JSONB fields use SQLAlchemy's JSONB type directly.
@@ -75,13 +75,13 @@ from app.db.base import BaseModel, utcnow
 from app.db.enums import (AIBatchStatus, AIQuestionDecision, DifficultyLevel,
                           QuestionAddedVia, QuestionSourceType, QuestionType)
 from app.db.mixins import bool_field, composite_index, unique_composite_index
-from sqlalchemy import UniqueConstraint, text
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Column, Field, Relationship, SQLModel
+from sqlalchemy import Column, ForeignKey, UniqueConstraint, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from app.db.models.ai import AIActionLog
-    from app.db.models.assessment import Assessment, AssessmentSection
+    from app.db.models.assessment import Assessment, AssessmentSection, Rubric
     from app.db.models.attempt import StudentResponse
 
 
@@ -158,6 +158,7 @@ class Question(BaseModel, table=True):
         composite_index("question", "parent_question_id"),
     )
 
+
     # ── Ownership ─────────────────────────────────────────────────────────────
 
     # Plain UUID — validated at service layer (must be a user with role=lecturer)
@@ -170,10 +171,12 @@ class Question(BaseModel, table=True):
 
     subject_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="subject.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("subject.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Content ───────────────────────────────────────────────────────────────
@@ -199,6 +202,16 @@ class Question(BaseModel, table=True):
         # classification. topic_tag is an optional secondary label.
     )
 
+    rubric_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+
     # ── Source traceability ───────────────────────────────────────────────────
 
     source_type: QuestionSourceType = Field(
@@ -208,10 +221,12 @@ class Question(BaseModel, table=True):
     )
     source_assessment_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     source_ai_batch_id: Optional[uuid.UUID] = Field(
         default=None,
@@ -254,13 +269,17 @@ class Question(BaseModel, table=True):
     version: int = Field(default=1, nullable=False)
     parent_question_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
+
+    rubric: Optional["Rubric"] = Relationship()
 
     options: List["QuestionOption"] = Relationship(
         back_populates="question",
@@ -307,10 +326,10 @@ class QuestionOption(BaseModel, table=True):
 
     is_correct:
         MCQ        → True on the correct option(s). Supports multi-select MCQ
-                     if multiple options have is_correct=True.
+                      if multiple options have is_correct=True.
         TRUE_FALSE → True on the correct answer only.
         MATCHING   → Not used (None). Match correctness is derived from
-                     comparing match_key → match_value pairs.
+                      comparing match_key → match_value pairs.
         ORDERING   → Not used (None). Correct order is defined by order_index.
 
     match_key / match_value:
@@ -335,10 +354,12 @@ class QuestionOption(BaseModel, table=True):
     )
 
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     content: str = Field(nullable=False)
     is_correct: Optional[bool] = Field(default=None, nullable=True)
@@ -399,10 +420,12 @@ class QuestionBlank(BaseModel, table=True):
     )
 
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     blank_index: int = Field(nullable=False)
     accepted_answers: List[str] = Field(
@@ -478,23 +501,29 @@ class AssessmentQuestion(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_section_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment_section.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     order_index: int = Field(nullable=False)
     marks_override: Optional[int] = Field(default=None, nullable=True)
@@ -509,17 +538,21 @@ class AssessmentQuestion(BaseModel, table=True):
     )
     ai_review_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="ai_question_review.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("ai_question_review.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     bank_entry_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="question_bank_entry.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question_bank_entry.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
@@ -594,17 +627,21 @@ class AIQuestionGenerationBatch(BaseModel, table=True):
     )
 
     assessment_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_section_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment_section.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     # Plain UUID — lecturer who clicked Generate; validated at service layer
     initiated_by_id: uuid.UUID = Field(nullable=False, index=True)
@@ -667,15 +704,15 @@ class AIQuestionReview(BaseModel, table=True):
 
     Lifecycle:
         1. AI generates candidate → question row created with is_approved=False,
-           source_type=AI_GENERATED
+            source_type=AI_GENERATED
         2. AIQuestionReview row created with lecturer_decision=PENDING
         3. Lecturer reviews:
-           ACCEPTED  → question.is_approved=True, added_to_assessment and/or
-                       added_to_bank set to True
-           MODIFIED  → a new question row is created (child of original via
-                       parent_question_id), new question.is_approved=True,
-                       modification_summary records what changed
-           REJECTED  → question remains is_approved=False, not added anywhere
+            ACCEPTED  → question.is_approved=True, added_to_assessment and/or
+                        added_to_bank set to True
+            MODIFIED  → a new question row is created (child of original via
+                        parent_question_id), new question.is_approved=True,
+                        modification_summary records what changed
+            REJECTED  → question remains is_approved=False, not added anywhere
         4. When all reviews in the batch have a non-PENDING decision,
            batch.review_completed is set to True
 
@@ -714,16 +751,20 @@ class AIQuestionReview(BaseModel, table=True):
     )
 
     batch_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="ai_question_generation_batch.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("ai_question_generation_batch.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     ai_action_log_id: Optional[uuid.UUID] = Field(
         default=None,
@@ -838,10 +879,12 @@ class QuestionBankEntry(BaseModel, table=True):
     )
 
     question_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="question.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     # Plain UUID — the lecturer who owns this bank entry
     added_by_id: uuid.UUID = Field(nullable=False, index=True)
@@ -850,10 +893,12 @@ class QuestionBankEntry(BaseModel, table=True):
 
     subject_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="subject.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("subject.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     difficulty: Optional[DifficultyLevel] = Field(
         default=None,
@@ -867,10 +912,12 @@ class QuestionBankEntry(BaseModel, table=True):
     )
     source_assessment_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── Usage tracking ────────────────────────────────────────────────────────

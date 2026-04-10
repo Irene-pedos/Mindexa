@@ -10,10 +10,11 @@ import json
 from typing import Any
 
 import redis.asyncio as aioredis
-from app.core.config import settings
-from app.core.logging import get_logger
 from redis.asyncio import Redis
 from redis.exceptions import RedisError
+
+from app.core.config import settings
+from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 

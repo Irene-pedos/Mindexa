@@ -14,9 +14,9 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
-from sqlalchemy import Index, text
+from sqlalchemy import Column, ForeignKey, Index, text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REUSABLE FIELD FACTORIES
@@ -47,16 +47,20 @@ def fk_uuid(
     if nullable:
         return Field(
             default=None,
-            nullable=True,
-            foreign_key=foreign_table,
-            index=index,
-            sa_column_kwargs={"ondelete": ondelete},
+            sa_column=Column(
+                UUID(as_uuid=True),
+                ForeignKey(foreign_table, ondelete=ondelete),
+                nullable=True,
+                index=index,
+            ),
         )
     return Field(
-        nullable=False,
-        foreign_key=foreign_table,
-        index=index,
-        sa_column_kwargs={"ondelete": ondelete},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey(foreign_table, ondelete=ondelete),
+            nullable=False,
+            index=index,
+        ),
     )
 
 

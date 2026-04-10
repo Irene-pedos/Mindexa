@@ -84,9 +84,9 @@ from typing import TYPE_CHECKING, List, Optional
 from app.db.base import BaseModel, utcnow
 from app.db.enums import ResourceCategory, ResourceProcessingStatus
 from app.db.mixins import composite_index
-from sqlalchemy import UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Column, Field, Relationship
+from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship
 
 if TYPE_CHECKING:
     from app.db.models.academic import Course
@@ -162,10 +162,12 @@ class StudentResource(BaseModel, table=True):
     # ── Ownership ─────────────────────────────────────────────────────────────
 
     student_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
 
     # ── File metadata ─────────────────────────────────────────────────────────
@@ -302,10 +304,12 @@ class ResourceChunk(BaseModel, table=True):
     )
 
     student_resource_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="student_resource.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "CASCADE"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_resource.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     chunk_index: int = Field(nullable=False)
     content: str = Field(nullable=False)
@@ -402,24 +406,30 @@ class LecturerMaterial(BaseModel, table=True):
     # ── Ownership & scope ─────────────────────────────────────────────────────
 
     lecturer_id: uuid.UUID = Field(
-        nullable=False,
-        foreign_key="user.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "RESTRICT"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     course_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="course.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
     assessment_id: Optional[uuid.UUID] = Field(
         default=None,
-        nullable=True,
-        foreign_key="assessment.id",
-        index=True,
-        sa_column_kwargs={"ondelete": "SET NULL"},
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
     )
 
     # ── File metadata ─────────────────────────────────────────────────────────
