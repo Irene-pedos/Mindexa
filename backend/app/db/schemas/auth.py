@@ -153,6 +153,9 @@ class ForgotPasswordRequest(MindexaSchema):
     email: EmailStr = Field(description="Email address of the account to reset.")
 
 
+PasswordResetRequestBody = ForgotPasswordRequest
+
+
 class ResetPasswordRequest(MindexaSchema):
     """
     Confirm a password reset.
@@ -181,6 +184,9 @@ class ResetPasswordRequest(MindexaSchema):
         if self.new_password != self.confirm_password:
             raise ValueError("new_password and confirm_password do not match.")
         return self
+
+
+PasswordResetConfirmRequest = ResetPasswordRequest
 
 
 class ResendVerificationRequest(MindexaSchema):
@@ -217,6 +223,9 @@ class ChangePasswordRequest(MindexaSchema):
         if self.new_password != self.confirm_password:
             raise ValueError("new_password and confirm_password do not match.")
         return self
+
+
+PasswordChangeRequest = ChangePasswordRequest
 
 
 class UserProfileUpdate(MindexaSchema):

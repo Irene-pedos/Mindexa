@@ -413,8 +413,8 @@ async def refresh_tokens(
 async def logout(
     request: Request,
     response: Response,
+    current_user: ActiveUser,
     db: AsyncSession = Depends(get_db),
-    current_user: ActiveUser = Depends(require_active_user),
     body: LogoutRequest | None = None,
     refresh_cookie: Optional[str] = Cookie(
         default=None,
@@ -466,8 +466,8 @@ async def logout(
 async def logout_all_sessions(
     request: Request,
     response: Response,
+    current_user: ActiveUser,
     db: AsyncSession = Depends(get_db),
-    current_user: ActiveUser = Depends(require_active_user),
 ) -> AuthMessageResponse:
     """
     Logout from all devices.
@@ -779,8 +779,8 @@ async def get_me(
 )
 async def update_me(
     body: UserProfileUpdate,
+    current_user: VerifiedUser,
     db: AsyncSession = Depends(get_db),
-    current_user: VerifiedUser = Depends(),
 ) -> UserResponse:
     """
     Update profile fields for the authenticated user.
@@ -822,8 +822,8 @@ async def change_password(
     body: ChangePasswordRequest,
     request: Request,
     response: Response,
+    current_user: VerifiedUser,
     db: AsyncSession = Depends(get_db),
-    current_user: VerifiedUser = Depends(),
 ) -> AuthMessageResponse:
     """
     Authenticated password change.

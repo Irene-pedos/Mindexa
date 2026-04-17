@@ -77,6 +77,8 @@ from app.db.models.attempt import (AssessmentAttempt, ResultAppeal,
                                    RubricGrade, StudentGroup,
                                    StudentGroupMember, StudentResponse,
                                    SubmissionGrade)
+# ── 11. Assessment Results (depends on attempt, assessment) ───────────────────
+from app.db.models.result import AssessmentResult, ResultBreakdown
 # ── 1. Audit (no FK deps — always first) ──────────────────────────────────────
 from app.db.models.audit import AuditLog, SecurityEvent
 # ── 2. Auth (defines `user` table) ────────────────────────────────────────────

@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 
 def _build_engine() -> AsyncEngine:
     return create_async_engine(
-        settings.DATABASE_URL,
+        settings.DATABASE_ASYNC_URL,
         echo=settings.DEBUG and settings.is_development,
         future=True,
         pool_pre_ping=True,
@@ -100,3 +100,7 @@ async def check_db_health() -> bool:
 async def dispose_engine() -> None:
     await engine.dispose()
     logger.info("database_engine_disposed")
+
+
+async def close_db_engine() -> None:
+    await dispose_engine()

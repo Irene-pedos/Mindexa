@@ -1,160 +1,229 @@
-version: "3.9"
-
-# Local development infrastructure.
-# Paths use Docker's cross-platform relative syntax — safe on Windows with Docker Desktop.
+# =============================================================================
+# Mindexa Platform — docker-compose.yml
+# =============================================================================
 #
-# Usage (PowerShell from D:\Projects\mindexa\backend):
-#   docker compose up -d postgres redis     # infrastructure only (recommended)
-#   docker compose up -d                    # everything
-#   docker compose logs -f api
+# SERVICES:
+#   postgres        — PostgreSQL 16 database
+#   redis           — Redis 7 (broker + cache)
+#   backend         — FastAPI app (Gunicorn + UvicornWorker)
+#   celery-worker   — Background task processor
+#   celery-beat     — Periodic task scheduler
+#
+# USAGE:
+#   # Start all services:
+#   docker compose up -d
+#
+#   # Development (hot-reload, no gunicorn):
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+#
+#   # View logs:
+#   docker compose logs -f backend
+#   docker compose logs -f celery-worker
+#
+#   # Run migrations:
+#   docker compose exec backend alembic upgrade head
+#
+#   # Seed development data:
+#   docker compose exec backend python -m app.scripts.seed_db
+#
+#   # Stop and remove everything (including volumes):
+#   docker compose down -v
+#
+# ENVIRONMENT:
+#   Copy .env.example to .env and fill in all required values.
+#   Never commit .env to version control.
+# =============================================================================
 
 services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
   postgres:
-    image: pgvector/pgvector:pg16
-    container_name: mindexa_postgres
+    image: postgres:16-alpine
+    container_name: mindexa-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-postgres}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-mindexa_dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-mindexa_db}
-      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=en_US.UTF-8 --lc-ctype=en_US.UTF-8"
-    ports:
-      - "5433:5433"
+      POSTGRES_DB: ${POSTGRES_DB:-mindexa}
+      POSTGRES_USER: ${POSTGRES_USER:-mindexa}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      # Performance tuning for a 2GB RAM server
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./scripts/db/init.sql:/docker-entrypoint-initdb.d/01_init.sql:ro
+      # Optional: custom postgres config
+      # - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-mindexa} -d ${POSTGRES_DB:-mindexa_db}",
+          "pg_isready -U ${POSTGRES_USER:-mindexa} -d ${POSTGRES_DB:-mindexa}",
         ]
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     networks:
-      - mindexa_net
+      - mindexa-net
 
+  # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
-    container_name: mindexa_redis
+    container_name: mindexa-redis
     restart: unless-stopped
     command: >
       redis-server
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
       --save 60 1000
-      --loglevel warning
-    ports:
-      - "6379:6379"
+      --appendonly yes
+      --appendfsync everysec
     volumes:
       - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
-      timeout: 5s
+      timeout: 3s
       retries: 5
+      start_period: 5s
     networks:
-      - mindexa_net
+      - mindexa-net
 
-  # API container — for running the full stack in Docker.
-  # For local Windows dev, run uvicorn directly on your host instead.
-  api:
+  # ── Backend (FastAPI) ────────────────────────────────────────────────────────
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
-    container_name: mindexa_api
+      target: runtime
+    image: mindexa-backend:latest
+    container_name: mindexa-backend
     restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --log-config /dev/null
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-      - ./uploads:/app/uploads
     env_file:
       - .env
+    environment:
+      # Override DB/Redis URLs to use Docker service names
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    ports:
+      - "${APP_PORT:-8000}:8000"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    volumes:
+      # Persist uploaded files (local storage mode only)
+      - uploads_data:/app/uploads
     networks:
-      - mindexa_net
+      - mindexa-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
-  worker:
+  # ── Celery Worker ────────────────────────────────────────────────────────────
+  celery-worker:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
-    container_name: mindexa_worker
+      target: runtime
+    image: mindexa-backend:latest
+    container_name: mindexa-celery-worker
     restart: unless-stopped
-    # Uses prefork inside the Linux container — correct for production
+    # Override the default CMD to run a Celery worker
     command: >
-      celery -A app.workers.celery_app worker
-      --loglevel=info
-      --queues=default,grading,documents,integrity,high_priority
+      celery -A app.core.celery_app.celery worker
+      --queues=default,grading,email,cleanup
       --concurrency=4
-      --pool=prefork
-    volumes:
-      - .:/app
-      - ./uploads:/app/uploads
+      --loglevel=${LOG_LEVEL:-info}
+      --without-heartbeat
+      --without-gossip
+      --without-mingle
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    networks:
-      - mindexa_net
-
-  beat:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: development
-    container_name: mindexa_beat
-    restart: unless-stopped
-    command: >
-      celery -A app.workers.celery_app beat
-      --loglevel=info
-      --scheduler=celery.beat:PersistentScheduler
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "celery -A app.core.celery_app.celery inspect ping --destination celery@$$HOSTNAME || exit 1",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     volumes:
-      - .:/app
-    env_file:
-      - .env
-    depends_on:
-      - redis
+      - uploads_data:/app/uploads
     networks:
-      - mindexa_net
+      - mindexa-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "25m"
+        max-file: "3"
 
-  flower:
+  # ── Celery Beat (Scheduler) ──────────────────────────────────────────────────
+  celery-beat:
     build:
       context: .
       dockerfile: Dockerfile
-      target: development
-    container_name: mindexa_flower
+      target: runtime
+    image: mindexa-backend:latest
+    container_name: mindexa-celery-beat
     restart: unless-stopped
     command: >
-      celery -A app.workers.celery_app flower
-      --port=5555
-      --basic_auth=admin:mindexa_flower
-    ports:
-      - "5555:5555"
+      celery -A app.core.celery_app.celery beat
+      --loglevel=${LOG_LEVEL:-info}
+      --scheduler celery.beat:PersistentScheduler
+      --schedule /tmp/celerybeat-schedule
     env_file:
       - .env
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
-      - mindexa_net
+      - mindexa-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+# ── VOLUMES ────────────────────────────────────────────────────────────────────
 volumes:
   postgres_data:
-    driver: local
+    name: mindexa-postgres-data
   redis_data:
-    driver: local
+    name: mindexa-redis-data
+  uploads_data:
+    name: mindexa-uploads
 
+# ── NETWORKS ───────────────────────────────────────────────────────────────────
 networks:
-  mindexa_net:
+  mindexa-net:
+    name: mindexa-network
     driver: bridge

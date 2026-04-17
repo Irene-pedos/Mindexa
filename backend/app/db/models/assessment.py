@@ -67,7 +67,7 @@ if TYPE_CHECKING:
     from app.db.models.auth import User
     from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
                                          IntegrityWarning, SupervisionSession)
-    from app.db.models.question import (AIQuestionGenerationBatch,
+    from app.db.models.question import (AIGenerationBatch,
                                         AssessmentQuestion)
 
 
@@ -265,7 +265,7 @@ class Assessment(AuditedBaseModel, table=True):
     attempts: List["AssessmentAttempt"] = Relationship(
         back_populates="assessment"
     )
-    ai_generation_batches: List["AIQuestionGenerationBatch"] = Relationship(
+    ai_generation_batches: List["AIGenerationBatch"] = Relationship(
         back_populates="assessment"
     )
 
@@ -533,6 +533,10 @@ class AssessmentBlueprintRule(BaseModel, table=True):
     question_type: Optional[QuestionType] = Field(default=None, nullable=True)
     difficulty: Optional[DifficultyLevel] = Field(default=None, nullable=True)
     numeric_value: Optional[float] = Field(default=None, nullable=True)
+    value_json: Optional[str] = Field(default=None, nullable=True)
+    priority: int = Field(default=100, nullable=False)
+    is_blocking: bool = Field(default=True, nullable=False)
+    description: Optional[str] = Field(default=None, nullable=True)
     is_enforced: bool = Field(default=True, nullable=False, index=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────

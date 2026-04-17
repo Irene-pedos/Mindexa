@@ -12,10 +12,12 @@ Import what you need into each model file.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from sqlalchemy import Column, ForeignKey, Index, text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, func, text
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column
 from sqlmodel import Field
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,3 +216,61 @@ AUTOSAVE_EXPIRY_DAYS: int = 7
 
 # Vector embedding dimension matching OpenAI text-embedding-3-small
 EMBEDDING_DIMENSIONS: int = 1536
+
+class TimestampMixin:
+    """
+    Adds created_at and updated_at columns to a model.
+
+    created_at: Set once at insert time. Never changes.
+    updated_at: Updated automatically on every UPDATE operation.
+
+    Both are timezone-aware UTC datetimes.
+    """
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="UTC timestamp when this record was created",
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+        comment="UTC timestamp when this record was last updated",
+    )
+
+
+class SoftDeleteMixin:
+    """
+    Adds soft-delete support to a model.
+
+    is_deleted: When True, this record is considered deleted.
+    deleted_at: Timestamp when soft-delete was applied.
+
+    IMPORTANT:
+        Soft-deleted records are NOT automatically excluded from queries.
+        Repositories must explicitly filter is_deleted=False in all user-facing queries.
+        Use the BaseRepository.get_active() helpers which apply this filter.
+
+    RATIONALE:
+        Academic data must be retained for audit and appeal purposes.
+        Hard deletion of user data, submissions, or grades is disallowed
+        unless explicitly authorized by the compliance policy.
+    """
+
+    is_deleted: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        comment="Soft delete flag — True means this record is logically deleted",
+    )
+
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="UTC timestamp when this record was soft-deleted",
+    )

@@ -196,6 +196,10 @@ class AssessmentAttempt(BaseModel, table=True):
 
     attempt_number: int = Field(default=1, nullable=False)
     is_practice: bool = Field(default=False, nullable=False, index=True)
+    access_token: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), nullable=True, index=True),
+    )
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -243,10 +247,20 @@ class AssessmentAttempt(BaseModel, table=True):
         # Absolute UTC deadline computed as: started_at + assessment.duration_minutes.
         # The backend auto-submit Celery task queries this field.
     )
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+        index=True,
+    )
+    last_activity_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+    )
 
     # ── Grading results ───────────────────────────────────────────────────────
 
     raw_score: Optional[float] = Field(default=None, nullable=True)
+    total_score: Optional[float] = Field(default=None, nullable=True)
     score_percentage: Optional[float] = Field(
         default=None,
         nullable=True,
@@ -268,6 +282,7 @@ class AssessmentAttempt(BaseModel, table=True):
     tab_switch_count: int = Field(default=0, nullable=False)
     copy_attempt_count: int = Field(default=0, nullable=False)
     warning_count: int = Field(default=0, nullable=False)
+    total_integrity_warnings: int = Field(default=0, nullable=False)
     reconnect_count: int = Field(default=0, nullable=False)
     is_flagged: bool = Field(default=False, nullable=False, index=True)
 
@@ -300,7 +315,10 @@ class AssessmentAttempt(BaseModel, table=True):
             "order_by": "StudentResponse.created_at",
         },
     )
-    submission_grade: Optional["SubmissionGrade"] = Relationship(
+    submission_grades: List["SubmissionGrade"] = Relationship(
+        back_populates="attempt",
+    )
+    result: Optional["AssessmentResult"] = Relationship(
         back_populates="attempt",
         sa_relationship_kwargs={"uselist": False},
     )
@@ -579,6 +597,31 @@ class StudentResponse(BaseModel, table=True):
     )
     is_submitted: bool = Field(default=False, nullable=False, index=True)
 
+    # ── Repo-expected fields ──────────────────────────────────────────────────
+
+    answer_type: Optional[str] = Field(default=None, nullable=True)
+    answer_text: Optional[str] = Field(default=None, nullable=True)
+    selected_option_ids: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    ordered_option_ids: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    match_pairs_json: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    fill_blank_answers: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    file_url: Optional[str] = Field(default=None, nullable=True)
+    is_skipped: bool = Field(default=False, nullable=False)
+    saved_at: Optional[datetime] = Field(default=None, nullable=True)
+    is_final: bool = Field(default=False, nullable=False, index=True)
+
     # ── Timing analytics ──────────────────────────────────────────────────────
 
     time_spent_seconds: Optional[int] = Field(default=None, nullable=True)
@@ -618,10 +661,63 @@ class StudentResponse(BaseModel, table=True):
     question: Optional["Question"] = Relationship(
         back_populates="responses"
     )
+    grade: Optional["SubmissionGrade"] = Relationship(
+        back_populates="student_response",
+        sa_relationship_kwargs={"uselist": False},
+    )
     rubric_grades: List["RubricGrade"] = Relationship(
         back_populates="student_response",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STUDENT RESPONSE LOG
+# ─────────────────────────────────────────────────────────────────────────────
+
+class StudentResponseLog(BaseModel, table=True):
+    """
+    Immutable audit log for student responses.
+
+    Tracks every change made to a response during an attempt.
+    """
+
+    __tablename__ = "student_response_log"
+
+    response_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_response.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    attempt_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    question_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
+    )
+    change_type: str = Field(nullable=False)
+    previous_value: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    new_value: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -721,11 +817,29 @@ class SubmissionGrade(AuditedBaseModel, table=True):
 
     # ── Core references ───────────────────────────────────────────────────────
 
+    response_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_response.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        )
+    )
     attempt_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="RESTRICT"),
             nullable=False,
+            index=True,
+        )
+    )
+    question_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=True,
             index=True,
         )
     )
@@ -754,13 +868,15 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         nullable=False,
         index=True,
     )
-    grading_mode: SubmissionGradingMode = Field(
+    grading_mode: str = Field(
         nullable=False,
         index=True,
     )
 
     # ── Score ─────────────────────────────────────────────────────────────────
 
+    max_score: float = Field(default=0.0, nullable=False)
+    score: Optional[float] = Field(default=None, nullable=True)
     raw_score: Optional[float] = Field(default=None, nullable=True)
     final_marks: Optional[float] = Field(default=None, nullable=True)
     percentage: Optional[float] = Field(default=None, nullable=True)
@@ -774,6 +890,20 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
+
+    # ── AI Grading (per response) ─────────────────────────────────────────────
+
+    ai_suggested_score: Optional[float] = Field(default=None, nullable=True)
+    ai_rationale: Optional[str] = Field(default=None, nullable=True)
+    ai_confidence: Optional[float] = Field(default=None, nullable=True)
+    internal_notes: Optional[str] = Field(default=None, nullable=True)
+    rubric_scores: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    is_final: bool = Field(default=False, nullable=False, index=True)
+    graded_at: Optional[datetime] = Field(default=None, nullable=True)
+    lecturer_override: bool = Field(default=False, nullable=False)
 
     # ── Feedback ──────────────────────────────────────────────────────────────
 
@@ -811,7 +941,10 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="submission_grade"
+        back_populates="submission_grades"
+    )
+    student_response: Optional["StudentResponse"] = Relationship(
+        back_populates="grade"
     )
     rubric_grades: List["RubricGrade"] = Relationship(
         back_populates="submission_grade",
@@ -939,6 +1072,75 @@ class RubricGrade(BaseModel, table=True):
     student_response: Optional["StudentResponse"] = Relationship(
         back_populates="rubric_grades"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GRADING QUEUE ITEM
+# ─────────────────────────────────────────────────────────────────────────────
+
+class GradingQueueItem(BaseModel, table=True):
+    """
+    Represents an item in the manual/AI grading queue.
+    """
+
+    __tablename__ = "grading_queue_item"
+
+    response_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_response.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    attempt_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    assessment_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    question_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    student_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    grading_mode: str = Field(nullable=False)
+    status: str = Field(default="pending", nullable=False, index=True)
+    priority: str = Field(default="normal", nullable=False)
+    ai_pre_graded: bool = Field(default=False, nullable=False)
+    assigned_to_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    assigned_at: Optional[datetime] = Field(default=None, nullable=True)
+    completed_at: Optional[datetime] = Field(default=None, nullable=True)
+    created_at: datetime = Field(default_factory=utcnow, nullable=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

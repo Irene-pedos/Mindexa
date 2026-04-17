@@ -1,37 +1,31 @@
 """
 app/core/config.py
 
-Application configuration loaded from environment variables via Pydantic Settings.
-All settings are validated at startup — if a required variable is missing or
-has the wrong type, the application will refuse to start with a clear error.
+Central settings module for Mindexa Platform.
 
-PHASE 3 ADDITIONS:
-    - EMAIL_VERIFICATION_EXPIRE_MINUTES
-    - PASSWORD_RESET_EXPIRE_MINUTES
-    - MAX_FAILED_LOGIN_ATTEMPTS
-    - ACCOUNT_LOCKOUT_MINUTES
-    - REFRESH_TOKEN_COOKIE_NAME
-    - ACCESS_TOKEN_COOKIE_SECURE (for HttpOnly cookie mode)
+All configuration is driven by environment variables.
+Never hardcode secrets. Use .env for local development.
 
-Usage:
+USAGE:
     from app.core.config import settings
-    settings.DATABASE_URL
+
+    jwt_secret = settings.SECRET_KEY
+    max_attempts = settings.MAX_FAILED_LOGIN_ATTEMPTS
 """
 
-from __future__ import annotations
-
 from functools import lru_cache
-from pathlib import Path
-from urllib.parse import quote_plus
+from typing import List, Literal
 
-from pydantic import Field, model_validator
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """
-    Central settings object. Every field maps 1-to-1 with an environment
-    variable (or a default). Pydantic validates types and constraints on import.
+    Application settings resolved from environment variables.
+
+    All fields with defaults are safe to use without explicit env config.
+    Fields without defaults MUST be set in the environment or .env file.
     """
 
     model_config = SettingsConfigDict(
@@ -41,156 +35,162 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # ── Application ───────────────────────────────────────────────────────────
-    ENVIRONMENT: str = Field(
-        default="development",
-        pattern="^(development|staging|production|test)$",
-    )
+    # ─── Application ──────────────────────────────────────────────────────────
     APP_NAME: str = "Mindexa Platform"
     APP_VERSION: str = "0.1.0"
+    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = False
-    SECRET_KEY: str = Field(..., min_length=32)
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:3000"]
 
-    # ── PostgreSQL ────────────────────────────────────────────────────────────
-    POSTGRES_HOST: str = "127.0.0.1"
-    # Updated default to 5433 to match your new installation
-    POSTGRES_PORT: int = Field(default=5433, ge=1, le=65535)
-    POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str
-    POSTGRES_DB: str = "mindexa_db"
-    DATABASE_URL: str = ""
-    DATABASE_URL_SYNC: str = ""
+    # ─── Server ───────────────────────────────────────────────────────────────
+    HOST: str = "0.0.0.0"
+    PORT: int = 8000
+    WORKERS: int = 1
 
-    # ── Redis ─────────────────────────────────────────────────────────────────
-    REDIS_HOST: str = "127.0.0.1"
-    REDIS_PORT: int = Field(default=6379, ge=1, le=65535)
-    REDIS_PASSWORD: str = ""
-    REDIS_DB: int = Field(default=0, ge=0, le=15)
-    REDIS_DB_CELERY: int = Field(default=1, ge=0, le=15)
-    REDIS_URL: str = ""
-    CELERY_BROKER_URL: str = ""
-    CELERY_RESULT_BACKEND: str = ""
+    # ─── Security / Secrets ───────────────────────────────────────────────────
+    SECRET_KEY: str  # REQUIRED — no default, must be set in env
+    # For future RS256 support, add PUBLIC_KEY / PRIVATE_KEY here.
 
-    # ── JWT ───────────────────────────────────────────────────────────────────
+    # ─── JWT Configuration ────────────────────────────────────────────────────
     JWT_ALGORITHM: str = "HS256"
-    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(default=30, ge=5, le=1440)
-    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = Field(default=7, ge=1, le=30)
+    JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
-    # ── Auth / Account Security (Phase 3) ─────────────────────────────────────
-    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = Field(
-        default=1440,  # 24 hours
-        ge=60,
-        le=10080,      # max 7 days
-    )
-    PASSWORD_RESET_EXPIRE_MINUTES: int = Field(
-        default=60,    # 1 hour
-        ge=15,
-        le=1440,
-    )
-    MAX_FAILED_LOGIN_ATTEMPTS: int = Field(
-        default=5,
-        ge=3,
-        le=20,
-    )
-    ACCOUNT_LOCKOUT_MINUTES: int = Field(
-        default=15,
-        ge=5,
-        le=1440,
-    )
+    # ─── Auth / Account Security ──────────────────────────────────────────────
+    EMAIL_VERIFICATION_EXPIRE_MINUTES: int = 1440  # 24 hours
+    PASSWORD_RESET_EXPIRE_MINUTES: int = 60
+    MAX_FAILED_LOGIN_ATTEMPTS: int = 5
+    ACCOUNT_LOCKOUT_MINUTES: int = 15
+
+    # ─── Password Policy ──────────────────────────────────────────────────────
+    BCRYPT_ROUNDS: int = 12
+    PASSWORD_MIN_LENGTH: int = 8
+    PASSWORD_MAX_LENGTH: int = 128
+
+    # ─── Refresh Token Cookie ─────────────────────────────────────────────────
     REFRESH_TOKEN_COOKIE_NAME: str = "mindexa_refresh"
+    # MUST be True in production (requires HTTPS)
     ACCESS_TOKEN_COOKIE_SECURE: bool = False
 
-    # ── Password Policy ───────────────────────────────────────────────────────
-    PASSWORD_MIN_LENGTH: int = Field(default=8, ge=6, le=128)
-    BCRYPT_ROUNDS: int = Field(default=12, ge=10, le=16)
-
-    # ── Rate Limiting ─────────────────────────────────────────────────────────
-    RATE_LIMIT_DEFAULT: str = "100/minute"
-    RATE_LIMIT_AUTH: str = "10/minute"
-    RATE_LIMIT_AI: str = "20/minute"
-
-    # ── File Upload ───────────────────────────────────────────────────────────
-    UPLOAD_DIR: Path = Path("./uploads")
-    MAX_UPLOAD_SIZE_MB: int = Field(default=25, ge=1, le=100)
-    ALLOWED_UPLOAD_EXTENSIONS: list[str] = [
-        "pdf", "docx", "pptx", "txt", "png", "jpg", "jpeg"
+    # ─── CORS ─────────────────────────────────────────────────────────────────
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
     ]
+    CORS_ALLOW_CREDENTIALS: bool = True
 
-    # ── AI / OpenAI ───────────────────────────────────────────────────────────
-    OPENAI_API_KEY: str = ""
-    OPENAI_MODEL_CHAT: str = "gpt-4o"
-    OPENAI_MODEL_EMBEDDING: str = "text-embedding-3-small"
-    OPENAI_EMBEDDING_DIMENSIONS: int = 1536
+    # ─── Database ─────────────────────────────────────────────────────────────
+    DATABASE_URL: str  # REQUIRED
+    # Async URL derived automatically if not provided explicitly
+    DATABASE_ASYNC_URL: str = ""
+    DATABASE_POOL_SIZE: int = 10
+    DATABASE_MAX_OVERFLOW: int = 20
+    DATABASE_POOL_PRE_PING: bool = True
+    DATABASE_ECHO: bool = False  # Set True for SQL query logging in dev
 
-    # ── Email ─────────────────────────────────────────────────────────────────
-    MAIL_USERNAME: str = ""
-    MAIL_PASSWORD: str = ""
-    MAIL_FROM: str = "noreply@mindexa.ac"
-    MAIL_PORT: int = 587
-    MAIL_SERVER: str = "smtp.example.com"
-    MAIL_FROM_NAME: str = "Mindexa Platform"
-    MAIL_STARTTLS: bool = True
-    MAIL_SSL_TLS: bool = False
+    # ─── Redis ────────────────────────────────────────────────────────────────
+    REDIS_URL: str = "redis://localhost:6379/0"
+    REDIS_MAX_CONNECTIONS: int = 20
+    # TTL for revoked JTI cache entries (seconds); should match refresh token lifetime
+    REDIS_REVOKED_JTI_TTL: int = 60 * 60 * 24 * 7  # 7 days
 
-    # ── Celery ────────────────────────────────────────────────────────────────
+    # ─── Celery ───────────────────────────────────────────────────────────────
+    CELERY_BROKER_URL: str = "redis://localhost:6379/1"
+    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
     CELERY_TASK_ALWAYS_EAGER: bool = False
 
-    # ── Sentry ────────────────────────────────────────────────────────────────
-    SENTRY_DSN: str = ""
+    # ─── Email ────────────────────────────────────────────────────────────────
+    # Used when email delivery is wired up (Phase N)
+    SMTP_HOST: str = "localhost"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_TLS: bool = True
+    EMAILS_FROM_EMAIL: str = "noreply@mindexa.ac"
+    EMAILS_FROM_NAME: str = "Mindexa Platform"
+    # In development, log emails instead of sending
+    EMAIL_DEV_MODE: bool = True
 
-    # ── Computed / Derived ────────────────────────────────────────────────────
+    # ─── File Upload ──────────────────────────────────────────────────────────
+    MAX_UPLOAD_SIZE_MB: int = 25
+    ALLOWED_UPLOAD_EXTENSIONS: List[str] = [
+        ".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg",
+    ]
+    UPLOAD_DIR: str = "uploads"
+
+    # ─── AI / LLM ─────────────────────────────────────────────────────────────
+    OPENAI_API_KEY: str = ""
+    ANTHROPIC_API_KEY: str = ""
+    DEFAULT_LLM_PROVIDER: Literal["openai", "anthropic"] = "openai"
+    DEFAULT_EMBEDDING_MODEL: str = "text-embedding-3-small"
+    DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
+
+    # ─── Vector Store ─────────────────────────────────────────────────────────
+    VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"
+    PGVECTOR_DIMENSION: int = 1536  # text-embedding-3-small
+
+    # ─── Pagination ───────────────────────────────────────────────────────────
+    DEFAULT_PAGE_SIZE: int = 20
+    MAX_PAGE_SIZE: int = 100
+
+    # ─── Validators ───────────────────────────────────────────────────────────
+
+    @field_validator("SECRET_KEY")
+    @classmethod
+    def validate_secret_key(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError(
+                "SECRET_KEY must be at least 32 characters long. "
+                "Generate one with: openssl rand -hex 32"
+            )
+        return v
 
     @model_validator(mode="after")
-    def assemble_urls(self) -> "Settings":
-        # Encode password to handle special characters (@, :, %, etc.)
-        encoded_pass = quote_plus(self.POSTGRES_PASSWORD)
+    def build_async_database_url(self) -> "Settings":
+        """
+        Auto-derive async database URL from sync URL if not explicitly set.
 
-        if not self.DATABASE_URL:
-            self.DATABASE_URL = (
-                f"postgresql+asyncpg://{self.POSTGRES_USER}:{encoded_pass}"
-                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-            )
-        if not self.DATABASE_URL_SYNC:
-            self.DATABASE_URL_SYNC = (
-                f"postgresql+psycopg2://{self.POSTGRES_USER}:{encoded_pass}"
-                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
-            )
-
-        redis_auth = f":{quote_plus(self.REDIS_PASSWORD)}@" if self.REDIS_PASSWORD else ""
-        if not self.REDIS_URL:
-            self.REDIS_URL = (
-                f"redis://{redis_auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-            )
-        if not self.REDIS_URL:
-            self.REDIS_URL = (
-                f"redis://{redis_auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
-            )
-        if not self.CELERY_BROKER_URL:
-            self.CELERY_BROKER_URL = (
-                f"redis://{redis_auth}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB_CELERY}"
-            )
-        if not self.CELERY_RESULT_BACKEND:
-            self.CELERY_RESULT_BACKEND = self.CELERY_BROKER_URL
+        Converts:
+            postgresql://user:pass@host/db
+        to:
+            postgresql+asyncpg://user:pass@host/db
+        """
+        if not self.DATABASE_ASYNC_URL:
+            sync_url = self.DATABASE_URL
+            if sync_url.startswith("postgresql://"):
+                self.DATABASE_ASYNC_URL = sync_url.replace(
+                    "postgresql://", "postgresql+asyncpg://", 1
+                )
+            elif sync_url.startswith("postgres://"):
+                # Heroku-style
+                self.DATABASE_ASYNC_URL = sync_url.replace(
+                    "postgres://", "postgresql+asyncpg://", 1
+                )
+            else:
+                self.DATABASE_ASYNC_URL = sync_url
         return self
 
-    # ── Convenience properties ────────────────────────────────────────────────
+    @model_validator(mode="after")
+    def warn_production_insecure(self) -> "Settings":
+        """Warn about insecure settings in production."""
+        if self.ENVIRONMENT == "production":
+            if not self.ACCESS_TOKEN_COOKIE_SECURE:
+                import warnings
+                warnings.warn(
+                    "ACCESS_TOKEN_COOKIE_SECURE=False in production! "
+                    "Refresh tokens will be sent over HTTP.",
+                    stacklevel=2,
+                )
+        return self
 
-    @property
-    def is_production(self) -> bool:
-        return self.ENVIRONMENT == "production"
+    # ─── Computed Properties ──────────────────────────────────────────────────
 
     @property
     def is_development(self) -> bool:
         return self.ENVIRONMENT == "development"
 
     @property
-    def is_test(self) -> bool:
-        return self.ENVIRONMENT == "test"
-
-    @property
-    def max_upload_size_bytes(self) -> int:
-        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+    def is_production(self) -> bool:
+        return self.ENVIRONMENT == "production"
 
     @property
     def access_token_expire_seconds(self) -> int:
@@ -208,10 +208,21 @@ class Settings(BaseSettings):
     def password_reset_expire_seconds(self) -> int:
         return self.PASSWORD_RESET_EXPIRE_MINUTES * 60
 
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    return Settings()  # type: ignore
+    """
+    Return the cached Settings singleton.
+
+    Using lru_cache ensures the .env file is only parsed once per process.
+    In tests, call get_settings.cache_clear() before patching env vars.
+    """
+    return Settings()
 
 
+# Module-level singleton — use this everywhere
 settings: Settings = get_settings()

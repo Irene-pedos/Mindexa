@@ -1,138 +1,158 @@
 """
 alembic/env.py
 
-Alembic migration environment — Mindexa Platform.
-Updated for PostgreSQL 16 (Port 5433) stability.
+Alembic migration environment — async-compatible.
+
+Reads the database URL from app.core.config.settings so that
+alembic.ini never contains credentials.
+
+USAGE:
+    alembic upgrade head
+    alembic downgrade -1
+    alembic revision --autogenerate -m "description"
 """
 
 from __future__ import annotations
 
+import asyncio
 from logging.config import fileConfig
 from typing import Any
 
 from alembic import context
-from app.core.config import settings
-from app.db.models import (AcademicPeriod, AIActionLog,  # noqa: F401
-                           AIGradeReview, AIQuestionGenerationBatch,
-                           AIQuestionReview, Assessment, AssessmentAttempt,
-                           AssessmentAutosave, AssessmentBlueprintRule,
-                           AssessmentDraftProgress,
-                           AssessmentPublishValidation, AssessmentQuestion,
-                           AssessmentSection, AssessmentSupervisor,
-                           AssessmentTargetSection, AuditLog, ClassSection,
-                           Course, CourseSubject, Department, Institution,
-                           IntegrityEvent, IntegrityFlag, IntegrityWarning,
-                           LecturerCourseAssignment, LecturerMaterial,
-                           Notification, PasswordResetToken, Question,
-                           QuestionBankEntry, QuestionBlank, QuestionOption,
-                           RefreshToken, Reminder, ResourceChunk, ResultAppeal,
-                           Rubric, RubricCriterion, RubricCriterionLevel,
-                           RubricGrade, ScheduledEvent, SecurityEvent,
-                           StudentEnrollment, StudentGroup, StudentGroupMember,
-                           StudentResource, StudentResponse, Subject,
-                           SubmissionGrade, SupervisionSession, User,
-                           UserProfile)
-from sqlalchemy import engine_from_config, pool, text
+# Import Base FIRST (SQLAlchemy declarative base)
+from app.db.base import Base  # noqa: F401
+# Phase 4 — Assessment + Questions
+from app.db.models.assessment import Assessment  # noqa: F401
+from app.db.models.assessment import (AssessmentAutosave,
+                                      AssessmentBlueprintRule,
+                                      AssessmentDraftProgress,
+                                      AssessmentPublishValidation,
+                                      AssessmentSection, AssessmentSupervisor,
+                                      AssessmentTargetSection)
+# Phase 5 — Attempts, Submissions, Grading, Results, Integrity
+from app.db.models.attempt import AssessmentAttempt  # noqa: F401
+from app.db.models.attempt import GradingQueueItem  # noqa: F401
+from app.db.models.attempt import (StudentResponse, StudentResponseLog,
+                                   SubmissionGrade)
+# Phase 3 — Auth models
+from app.db.models.auth import (PasswordResetToken, RefreshToken,  # noqa: F401
+                                SecurityEvent, User, UserProfile)
+from app.db.models.integrity import IntegrityEvent  # noqa: F401
+from app.db.models.integrity import (IntegrityFlag, IntegrityWarning,
+                                     SupervisionSession)
+from app.db.models.question import (AssessmentQuestion, Question,  # noqa: F401
+                                    QuestionBankEntry, QuestionBlank,
+                                    QuestionOption)
+from app.db.models.result import AssessmentResult  # noqa: F401
+from app.db.models.result import ResultBreakdown
+from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlmodel import SQLModel
+from sqlalchemy.ext.asyncio import create_async_engine
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Alembic config
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Import ALL models so Alembic can detect schema changes via autogenerate.
+# Every model module must be imported here.
+# ---------------------------------------------------------------------------
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Alembic Config
+# ---------------------------------------------------------------------------
+
 config = context.config
 
+# Interpret the config file for Python logging.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-naming_convention: dict[str, str] = {
-    "ix":  "ix_%(table_name)s_%(column_0_N_name)s",
-    "uq":  "uq_%(table_name)s_%(column_0_N_name)s",
-    "ck":  "ck_%(table_name)s_%(constraint_name)s",
-    "fk":  "fk_%(table_name)s_%(column_0_name)s_%(referred_table_name)s",
-    "pk":  "pk_%(table_name)s",
-}
+# Autogenerate target — all SQLModel/SQLAlchemy metadata
+target_metadata = Base.metadata
 
-SQLModel.metadata.naming_convention = naming_convention  # type: ignore[assignment]
-target_metadata = SQLModel.metadata
+# ---------------------------------------------------------------------------
+# Database URL — pulled from app settings (never from alembic.ini)
+# ---------------------------------------------------------------------------
 
-# ─────────────────────────────────────────────────────────────────────────────
-# DB URL Override
-# ─────────────────────────────────────────────────────────────────────────────
-# We keep the %% escape to ensure any future special characters in passwords
-# don't break the Alembic ConfigParser.
-url = settings.DATABASE_URL_SYNC.replace("%", "%%")
-config.set_main_option("sqlalchemy.url", url)
+def get_url() -> str:
+    from app.core.config import settings
 
-_EXCLUDE_TABLES: frozenset[str] = frozenset({})
+    # Use the sync URL for Alembic (asyncpg not supported by Alembic directly)
+    url = settings.DATABASE_URL
+    # Normalize postgres:// → postgresql://
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql://", 1)
+    return url
 
-def include_object(
-    obj: Any,
-    name: str | None,
-    type_: str,
-    reflected: bool,
-    compare_to: Any,
-) -> bool:
-    if type_ == "table" and name in _EXCLUDE_TABLES:
-        return False
-    return True
 
-# ─────────────────────────────────────────────────────────────────────────────
-# OFFLINE MODE
-# ─────────────────────────────────────────────────────────────────────────────
+# ---------------------------------------------------------------------------
+# Offline migrations (no live DB connection needed)
+# ---------------------------------------------------------------------------
+
 def run_migrations_offline() -> None:
-    url = config.get_main_option("sqlalchemy.url")
+    """
+    Run migrations without a live DB connection.
+    Used for generating SQL scripts (e.g., for DBA review).
+    """
+    url = get_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        include_object=include_object,
         compare_type=True,
         compare_server_default=True,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# ONLINE MODE
-# ─────────────────────────────────────────────────────────────────────────────
-def _do_run_migrations(connection: Connection) -> None:
+
+# ---------------------------------------------------------------------------
+# Online migrations (live DB connection via asyncpg)
+# ---------------------------------------------------------------------------
+
+def do_run_migrations(connection: Connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=target_metadata,
-        include_object=include_object,
         compare_type=True,
         compare_server_default=True,
-        transaction_per_migration=True,
+        # Render column-level defaults in autogenerate
+        render_as_batch=False,
+        # Include schemas
         include_schemas=False,
     )
-
     with context.begin_transaction():
         context.run_migrations()
 
-def run_migrations_online() -> None:
-    # Build the engine using the configuration with the updated 5433 port
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
+
+async def run_async_migrations() -> None:
+    """Create an async engine and run migrations through a sync adapter."""
+    from app.core.config import settings
+
+    # Use async URL for the engine
+    connectable = create_async_engine(
+        settings.DATABASE_ASYNC_URL,
         poolclass=pool.NullPool,
+        echo=False,
     )
 
-    with connectable.connect() as connection:
-        # CRITICAL: Set search path and explicitly commit before migrations
-        # This solves the "tables not found in public" issue on some Postgres installs
-        connection.execute(text("SET search_path TO public"))
-        connection.execute(text("COMMIT"))
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
 
-        connection.dialect.default_schema_name = "public"  # type: ignore[attr-defined]
-        _do_run_migrations(connection)
+    await connectable.dispose()
 
-    connectable.dispose()
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────────────
+def run_migrations_online() -> None:
+    """Entry point for online migrations."""
+    asyncio.run(run_async_migrations())
+
+
+# ---------------------------------------------------------------------------
+# Entry point selection
+# ---------------------------------------------------------------------------
+
 if context.is_offline_mode():
     run_migrations_offline()
 else:

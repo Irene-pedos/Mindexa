@@ -16,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.core.exceptions import MindexaException
+from app.core.exceptions import MindexaError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -40,21 +40,21 @@ def _error_response(
 
 def register_exception_handlers(app: FastAPI) -> None:
 
-    @app.exception_handler(MindexaException)
-    async def handle_mindexa_exception(request: Request, exc: MindexaException) -> JSONResponse:
+    @app.exception_handler(MindexaError)
+    async def handle_mindexa_exception(request: Request, exc: MindexaError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
         logger.warning(
             "mindexa_exception",
-            error_code=exc.error_code,
-            message=exc.message,
-            status_code=exc.http_status,
+            error_code=exc.code,
+            message=exc.detail,
+            status_code=exc.status_code,
             path=str(request.url),
             request_id=request_id,
         )
         response = _error_response(
-            status_code=exc.http_status,
-            error_code=exc.error_code,
-            message=exc.message,
+            status_code=exc.status_code,
+            error_code=exc.code,
+            message=exc.detail,
             request_id=request_id,
         )
         if exc.headers:

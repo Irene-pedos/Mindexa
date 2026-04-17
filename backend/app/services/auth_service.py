@@ -33,28 +33,28 @@ IMPORT ALIGNMENT:
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
 from app.core.config import settings
-from app.core.constants import TokenType, UserRole, UserStatus
+from app.core.constants import (SecurityEventSeverity, SecurityEventType,
+                                 TokenType, UserRole, UserStatus)
 from app.core.exceptions import (AccountLockedError, AlreadyExistsError,
                                  AuthenticationError, InvalidTokenError,
                                  NotFoundError, PermissionDeniedError)
 from app.core.logging import get_logger
-from app.core.security import (TokenPayload, create_access_token,
-                               create_refresh_token, decode_token,
-                               generate_secure_token, hash_password,
-                               hash_token, verify_password, verify_token_hash)
+from app.core.redis import cache_revoked_jti, is_jti_revoked_in_cache
+from app.core.security import (TOKEN_TYPE_REFRESH, TokenPayload,
+                               create_access_token, create_refresh_token,
+                               decode_token, generate_secure_token,
+                               hash_password, hash_token, verify_password)
 from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
                                 UserProfile)
 from app.db.repositories.auth import (PasswordResetTokenRepository,
                                       RefreshTokenRepository, UserRepository)
 from sqlalchemy.ext.asyncio import AsyncSession
+
 
 logger = get_logger(__name__)
 
@@ -245,9 +245,11 @@ class AuthService:
                 ip_address=ip_address,
             )
             raise AccountLockedError(
-                "Account is temporarily locked due to too many failed attempts. "
-                "Please try again later.",
                 locked_until=user.locked_until,
+                detail=(
+                    "Account is temporarily locked due to too many failed attempts. "
+                    "Please try again later."
+                ),
             )
 
         # Password verification — timing-safe via bcrypt.checkpw
@@ -359,7 +361,7 @@ class AuthService:
         user_id_str: str = payload.sub
 
         # Step 2: Redis fast-path revocation check
-        from app.core.redis import is_token_blocklisted
+
         if await is_token_blocklisted(jti):
             logger.warning(
                 "refresh_token_replayed_or_stolen",
@@ -403,7 +405,7 @@ class AuthService:
         now = datetime.now(timezone.utc)
         remaining_ttl = max(0, int((db_token.expires_at - now).total_seconds()))
         if remaining_ttl > 0:
-            from app.core.redis import blocklist_token
+
             await blocklist_token(jti, remaining_ttl)
 
         # Step 6: Issue fresh token pair
@@ -473,7 +475,7 @@ class AuthService:
 
         if revoked:
             # Push to Redis blocklist to immediately block in-flight requests
-            from app.core.redis import blocklist_token
+
             await blocklist_token(jti, settings.refresh_token_expire_seconds)
 
         await self._record_security_event(

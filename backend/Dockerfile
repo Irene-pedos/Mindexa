@@ -1,85 +1,127 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# Mindexa Platform – Multi-stage Dockerfile
+# =============================================================================
+# Mindexa Platform — Multi-stage Dockerfile
+# =============================================================================
 #
-# Stages:
-#   base        — Python + system dependencies
-#   development — Used by docker-compose for containerised local dev
-#   production  — Minimal, non-root, no dev tools
+# STAGES:
+#   base      — Python + system deps (shared)
+#   deps      — Install Python packages into a venv
+#   runtime   — Minimal production image (no build tools)
 #
-# All Linux paths inside the container (/app, /opt/venv, etc.) are correct
-# and intentional — they refer to the container filesystem, not your Windows host.
-# ─────────────────────────────────────────────────────────────────────────────
+# BUILD:
+#   docker build -t mindexa-backend:latest .
+#   docker build --target runtime -t mindexa-backend:prod .
+#
+# RUN:
+#   docker run --env-file .env -p 8000:8000 mindexa-backend:latest
+#
+# SECURITY:
+#   - Runs as non-root user (app:app, UID 1001)
+#   - No build tools in the final image
+#   - No .env file is baked into the image (always pass at runtime)
+#   - Python bytecode is compiled at build time for faster startup
+# =============================================================================
 
-FROM python:3.11-slim-bookworm AS base
+# ── Stage 1: base ─────────────────────────────────────────────────────────────
+FROM python:3.12-slim AS base
 
+# Prevent Python from writing .pyc files during build (we compile explicitly)
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1 \
+    # pip behaviour
     PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=100 \
+    # venv location
+    VENV_PATH=/opt/venv
 
-WORKDIR /app
-
+# Install OS-level dependencies required by:
+#   - asyncpg  → libpq
+#   - bcrypt   → libffi
+#   - Pillow   → libjpeg, zlib (if needed for image processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq-dev \
-    libmupdf-dev \
-    libxml2-dev \
-    libxslt1-dev \
-    libjpeg-dev \
-    libpng-dev \
-    gcc \
-    g++ \
-    curl \
+        libpq5 \
+        libffi8 \
+        curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN python -m venv /opt/venv
-ENV PATH="/opt/venv/bin:$PATH"
-
-COPY pyproject.toml ./
-
-RUN pip install --upgrade pip setuptools wheel \
-    && pip install -e ".[dev]"
+# Create app user (non-root)
+RUN groupadd --gid 1001 app && \
+    useradd --uid 1001 --gid app --shell /bin/bash --create-home app
 
 
-# ── Development ───────────────────────────────────────────────────────────────
-FROM base AS development
+# ── Stage 2: deps ─────────────────────────────────────────────────────────────
+FROM base AS deps
 
-ENV ENVIRONMENT=development \
-    DEBUG=true
+# Build-time tools needed to compile C extensions
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpq-dev \
+        libffi-dev \
+        gcc \
+        build-essential \
+    && rm -rf /var/lib/apt/lists/*
 
+# Create virtualenv
+RUN python -m venv $VENV_PATH
+ENV PATH="$VENV_PATH/bin:$PATH"
+
+# Install dependencies in layers for better cache utilisation
+# Layer 1: core framework (changes rarely)
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --upgrade pip && \
+    pip install -r /tmp/requirements.txt
+
+# Pre-compile all .py files for faster container startup
+RUN python -m compileall -q $VENV_PATH/lib
+
+
+# ── Stage 3: runtime ──────────────────────────────────────────────────────────
+FROM base AS runtime
+
+LABEL org.opencontainers.image.title="Mindexa Platform Backend" \
+      org.opencontainers.image.description="Academic assessment platform API" \
+      org.opencontainers.image.version="1.0.0"
+
+ENV VENV_PATH=/opt/venv
+ENV PATH="$VENV_PATH/bin:$PATH"
+
+# Copy the virtualenv from deps stage (no compiler toolchain in final image)
+COPY --from=deps $VENV_PATH $VENV_PATH
+
+# Create application directory
+WORKDIR /app
+
+# Copy application source
+COPY --chown=app:app app/ ./app/
+COPY --chown=app:app alembic/ ./alembic/ 2>/dev/null || true
+COPY --chown=app:app alembic.ini ./alembic.ini 2>/dev/null || true
+
+# Pre-compile application code
+RUN python -m compileall -q app/
+
+# Drop to non-root
+USER app
+
+# Expose port
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", \
-     "--reload", "--log-config", "/dev/null"]
-
-
-# ── Production ────────────────────────────────────────────────────────────────
-FROM base AS production
-
-ENV ENVIRONMENT=production \
-    DEBUG=false
-
-RUN groupadd --gid 1001 mindexa \
-    && useradd --uid 1001 --gid mindexa --shell /bin/bash --create-home mindexa
-
-COPY --chown=mindexa:mindexa app/ ./app/
-COPY --chown=mindexa:mindexa alembic/ ./alembic/
-COPY --chown=mindexa:mindexa alembic.ini ./
-
-RUN mkdir -p /app/uploads && chown mindexa:mindexa /app/uploads
-
-USER mindexa
-
-EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+# Health check (Docker engine polls this)
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
     CMD curl -f http://localhost:8000/health/live || exit 1
 
-CMD ["uvicorn", "app.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "4", \
-     "--log-config", "/dev/null", \
-     "--no-access-log", \
-     "--proxy-headers", \
-     "--forwarded-allow-ips", "*"]
+# ── Entrypoint ────────────────────────────────────────────────────────────────
+#
+# Production: gunicorn with uvicorn workers
+# The WORKERS env var can override the default (4)
+#
+CMD ["sh", "-c", \
+     "gunicorn app.main:app \
+      --worker-class uvicorn.workers.UvicornWorker \
+      --workers ${WORKERS:-4} \
+      --bind 0.0.0.0:${PORT:-8000} \
+      --timeout 120 \
+      --graceful-timeout 30 \
+      --keep-alive 5 \
+      --access-logfile - \
+      --error-logfile - \
+      --log-level ${LOG_LEVEL:-info}"]

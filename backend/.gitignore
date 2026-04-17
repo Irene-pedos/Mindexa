@@ -1,8 +1,15 @@
-# ── Environment ───────────────────────────────────────────────────────────────
+# =============================================================================
+# Mindexa Platform — .gitignore
+# =============================================================================
+
+# ── Environment & Secrets ─────────────────────────────────────────────────────
 .env
 .env.local
 .env.*.local
-!.env.example
+*.key
+*.pem
+*.p12
+secrets/
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
@@ -11,17 +18,31 @@ __pycache__/
 *.so
 .Python
 build/
+develop-eggs/
 dist/
-*.egg-info/
+downloads/
+eggs/
 .eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
 *.egg
 MANIFEST
 
 # ── Virtual Environments ──────────────────────────────────────────────────────
 .venv/
 venv/
-ENV/
 env/
+ENV/
+.env/
+pyvenv.cfg
 
 # ── Testing ───────────────────────────────────────────────────────────────────
 .pytest_cache/
@@ -29,12 +50,10 @@ env/
 coverage.xml
 htmlcov/
 .tox/
+.nox/
+nosetests.xml
 *.cover
-
-# ── Linting / Type Checking ───────────────────────────────────────────────────
-.ruff_cache/
-.mypy_cache/
-.dmypy.json
+*.py,cover
 
 # ── IDEs ──────────────────────────────────────────────────────────────────────
 .idea/
@@ -42,29 +61,30 @@ htmlcov/
 *.swp
 *.swo
 *~
-
-# ── OS ────────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# ── Docker ────────────────────────────────────────────────────────────────────
-docker-compose.override.yml
-docker-compose.local.yml
-
-# ── Application ───────────────────────────────────────────────────────────────
+# ── Uploads ───────────────────────────────────────────────────────────────────
 uploads/
-*.log
-logs/
+!uploads/.gitkeep
+
+# ── Alembic ───────────────────────────────────────────────────────────────────
+# Keep the versions directory but not the runtime schedule file
+/tmp/celerybeat-schedule
 celerybeat-schedule
 celerybeat.pid
 
-# ── Alembic ───────────────────────────────────────────────────────────────────
-alembic/versions/__pycache__/
+# ── Docker ────────────────────────────────────────────────────────────────────
+.dockerignore
 
-# ── Secrets ───────────────────────────────────────────────────────────────────
-*.pem
-*.key
-*.cert
-*.p12
-secrets/
+# ── Logs ──────────────────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── mypy ──────────────────────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# ── Ruff / Linting ────────────────────────────────────────────────────────────
+.ruff_cache/

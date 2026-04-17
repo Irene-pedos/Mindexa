@@ -1,395 +1,591 @@
 """
 app/db/models/auth.py
 
-Authentication and Identity models for Mindexa.
+Authentication and user database models for Mindexa Platform.
 
-Tables defined here:
-    user                  — Central identity record for every person on the platform
-    user_profile          — Extended personal information (1:1 with user)
-    refresh_token         — Active JWT refresh tokens (hard-deleted on revoke/logout)
-    password_reset_token  — Short-lived single-use tokens for password reset & email verification
+Models:
+    User                  — Core account record
+    UserProfile           — Extended personal information
+    RefreshToken          — Tracked refresh token sessions (JTI-based)
+    PasswordResetToken    — Email verification + password reset tokens
+    SecurityEvent         — Auth and security audit log entries
 
-Design decisions:
-
-    ENUM SOURCE:
-        All enum types (UserRole, UserStatus) come from app.core.constants —
-        that is the single source of truth for enums across the entire backend.
-        Never import from app.db.enums (that file should not exist).
-
-    SOFT DELETE:
-        User and UserProfile use soft-delete (is_deleted, deleted_at from BaseModel).
-        RefreshToken and PasswordResetToken do NOT use soft-delete — they are
-        hard-deleted when consumed or revoked.
-
-    REFRESH TOKENS:
-        Revoked tokens are tracked in Redis for fast O(1) blocklist checks.
-        Once revoked, the row is hard-deleted to keep the table lean.
-        The table only contains ACTIVE tokens.
-
-    PASSWORD RESET / EMAIL VERIFICATION TOKENS:
-        Dual-purpose table controlled by token_type field.
-        The raw token is NEVER stored — only its SHA-256 hash.
-        This means even with full DB read access, an attacker cannot
-        use tokens extracted from this table.
-
-    CIRCULAR IMPORT PREVENTION:
-        User is the only model that all other domain tables reference.
-        Other model modules should use plain uuid.UUID FK columns
-        rather than importing User directly, to avoid circular imports.
-        Relationships to other domain models are added via TYPE_CHECKING.
-
-    SQLMODEL FIELD STYLE:
-        We use Field(...) consistently without sa_column= for simple columns.
-        sa_column=Column(...) is only used when we need ForeignKey, specific
-        PostgreSQL types (UUID as_uuid), or index options not supported by
-        Field's shorthand.
+DESIGN:
+    - All models extend UUIDBase (from app/db/base.py) for UUID PKs + timestamps
+    - Soft-delete is supported via is_deleted + deleted_at (from TimestampMixin)
+    - No raw passwords stored — only bcrypt hashes
+    - No raw reset/verification tokens — only SHA-256 hashes
+    - Relationships use selectinload-friendly lazy loading
+    - All columns have explicit names, nullable settings, and index hints
 """
-
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import List, Optional
 
-from app.core.constants import UserRole, UserStatus
-from app.db.base import BaseModel
-from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlmodel import Field, Relationship
+from app.core.constants import (SecurityEventSeverity, SecurityEventType,
+                                UserRole, UserStatus)
+from app.db.base import Base
+from app.db.mixins import SoftDeleteMixin, TimestampMixin
+from sqlalchemy import (Boolean, DateTime, ForeignKey, Index, Integer, String,
+                        Text)
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-if TYPE_CHECKING:
-    pass  # Forward references added as domain grows
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# USER
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── User ─────────────────────────────────────────────────────────────────────
 
 
-class User(BaseModel, table=True):
+class User(Base, TimestampMixin, SoftDeleteMixin):
     """
-    Central identity record for every person on the platform.
+    Core user account record.
 
-    Security notes:
-        hashed_password:
-            Stores a bcrypt hash — NEVER a plain-text password.
-            Use security.hash_password() to generate, security.verify_password() to check.
+    Stores credentials, role, account state, and security fields.
+    Personal information lives in UserProfile (1:1 relationship).
 
-        failed_login_attempts:
-            Increments on each failed login attempt.
-            Reset to 0 on successful login.
-            Checked by auth_service before allowing login.
-
-        locked_until:
-            Set to NOW() + lockout_duration when failed_login_attempts reaches
-            the configured threshold (settings.MAX_FAILED_LOGIN_ATTEMPTS).
-            Auth service checks this before processing credentials.
-
-        email_verified:
-            Must be True before a user can access any protected resource.
-            Set to True (and email_verified_at recorded) by the email verification flow.
-
-        last_login_at:
-            Updated on every successful token issuance.
-            Useful for security audits and inactive account detection.
-
-    Soft delete:
-        Soft-deleting a user sets is_deleted=True. Academic records
-        (attempts, grades, submissions) are NEVER cascaded — they are
-        permanent by design for academic integrity and audit compliance.
+    SECURITY FIELDS:
+        failed_login_attempts  — incremented on each failed login
+        locked_until           — account login blocked until this datetime
+        email_verified         — must be True for full platform access
+        email_verified_at      — timestamp when email was verified
+        last_login_at          — last successful login timestamp
     """
 
-    __tablename__ = "user"
+    __tablename__ = "users"
 
-    __table_args__ = (
-        # Composite index: fast role-filtered queries ("all active lecturers")
-        Index("ix_user_role_status", "role", "status"),
-        # Composite index: auth flow — email lookup combined with status check
-        Index("ix_user_email_status", "email", "status"),
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
 
-    # ── Authentication ────────────────────────────────────────────────────────
-
-    email: str = Field(
-        nullable=False,
+    email: Mapped[str] = mapped_column(
+        String(255),
         unique=True,
-        index=True,
-        max_length=255,
-    )
-    hashed_password: str = Field(
-        nullable=False,
-        max_length=255,
-    )
-
-    # ── Role & Status ─────────────────────────────────────────────────────────
-
-    role: UserRole = Field(
         nullable=False,
         index=True,
+        comment="Normalized (lowercase) email address",
     )
-    status: UserStatus = Field(
-        default=UserStatus.PENDING_VERIFICATION,
+
+    hashed_password: Mapped[str] = mapped_column(
+        String(255),
         nullable=False,
+        comment="bcrypt hash of the user password",
+    )
+
+    role: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=UserRole.STUDENT.value,
         index=True,
+        comment="User role: student | lecturer | admin",
     )
 
-    # ── Email verification ────────────────────────────────────────────────────
+    status: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default=UserStatus.PENDING_VERIFICATION.value,
+        index=True,
+        comment="Account status: pending_verification | active | suspended | inactive",
+    )
 
-    email_verified: bool = Field(default=False, nullable=False)
-    email_verified_at: Optional[datetime] = Field(default=None, nullable=True)
+    # Email verification
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        comment="True after email address has been verified",
+    )
+    email_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when email was verified",
+    )
 
-    # ── Session tracking ──────────────────────────────────────────────────────
+    # Login tracking
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp of last successful login",
+    )
 
-    last_login_at: Optional[datetime] = Field(default=None, nullable=True)
+    # Brute-force protection
+    failed_login_attempts: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+        comment="Number of consecutive failed login attempts",
+    )
+    locked_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Account login is blocked until this UTC datetime",
+    )
 
-    # ── Brute-force protection ────────────────────────────────────────────────
+    # ─── Relationships ────────────────────────────────────────────────────────
 
-    failed_login_attempts: int = Field(default=0, nullable=False)
-    locked_until: Optional[datetime] = Field(default=None, nullable=True)
-
-    # ── Relationships ─────────────────────────────────────────────────────────
-
-    profile: Optional["UserProfile"] = Relationship(
+    profile: Mapped[Optional["UserProfile"]] = relationship(
+        "UserProfile",
         back_populates="user",
-        sa_relationship_kwargs={
-            "lazy": "select",
-            "cascade": "all, delete-orphan",
-            "uselist": False,
-        },
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="selectin",
     )
 
-    refresh_tokens: List["RefreshToken"] = Relationship(
+    refresh_tokens: Mapped[List["RefreshToken"]] = relationship(
+        "RefreshToken",
         back_populates="user",
-        sa_relationship_kwargs={
-            "lazy": "select",
-            "cascade": "all, delete-orphan",
-        },
+        cascade="all, delete-orphan",
+        lazy="dynamic",
     )
 
-    password_reset_tokens: List["PasswordResetToken"] = Relationship(
+    password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
+        "PasswordResetToken",
         back_populates="user",
-        sa_relationship_kwargs={
-            "lazy": "select",
-            "cascade": "all, delete-orphan",
-        },
+        cascade="all, delete-orphan",
+        lazy="dynamic",
     )
 
+    security_events: Mapped[List["SecurityEvent"]] = relationship(
+        "SecurityEvent",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="dynamic",
+    )
 
-# ─────────────────────────────────────────────────────────────────────────────
-# USER PROFILE
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class UserProfile(BaseModel, table=True):
-    """
-    Extended personal information, separated from auth concerns.
-
-    Relationship:
-        Strictly 1:1 with User.
-        - The UniqueConstraint on user_id enforces this at the DB level.
-        - SQLAlchemy's uselist=False enforces it at the ORM level.
-        - Created during user onboarding (after registration).
-
-    avatar_url:
-        Stores a relative path or object-storage key, NOT a full URL.
-        The API layer resolves it to a full URL at response time.
-        This allows storage backends to change without a DB migration.
-    """
-
-    __tablename__ = "user_profile"
+    # ─── Composite Indexes ────────────────────────────────────────────────────
 
     __table_args__ = (
-        UniqueConstraint("user_id", name="uq_user_profile_user_id"),
+        Index("ix_users_email_status", "email", "status"),
+        Index("ix_users_role_status", "role", "status"),
     )
 
-    # ── Foreign key ───────────────────────────────────────────────────────────
+    def __repr__(self) -> str:
+        return f"<User id={self.id} email={self.email} role={self.role}>"
 
-    user_id: uuid.UUID = Field(
-        sa_column=Column(
-            PG_UUID(as_uuid=True),
-            ForeignKey("user.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        )
-    )
+    @property
+    def is_active(self) -> bool:
+        return self.status == UserStatus.ACTIVE.value
 
-    # ── Personal information ──────────────────────────────────────────────────
+    @property
+    def is_suspended(self) -> bool:
+        return self.status == UserStatus.SUSPENDED.value
 
-    first_name: str = Field(nullable=False, max_length=100)
-    last_name: str = Field(nullable=False, max_length=100)
-    phone_number: Optional[str] = Field(default=None, nullable=True, max_length=30)
-    avatar_url: Optional[str] = Field(default=None, nullable=True, max_length=500)
-    date_of_birth: Optional[datetime] = Field(default=None, nullable=True)
-    bio: Optional[str] = Field(default=None, nullable=True)
+    @property
+    def is_pending_verification(self) -> bool:
+        return self.status == UserStatus.PENDING_VERIFICATION.value
 
-    # ── Localisation ─────────────────────────────────────────────────────────
+    @property
+    def role_enum(self) -> UserRole:
+        return UserRole(self.role)
 
-    timezone: str = Field(default="UTC", nullable=False, max_length=64)
-    preferred_language: str = Field(default="en", nullable=False, max_length=10)
-
-    # ── Relationship ──────────────────────────────────────────────────────────
-
-    user: Optional["User"] = Relationship(back_populates="profile")
+    @property
+    def status_enum(self) -> UserStatus:
+        return UserStatus(self.status)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# REFRESH TOKEN
-# ─────────────────────────────────────────────────────────────────────────────
+# ─── UserProfile ──────────────────────────────────────────────────────────────
 
 
-class RefreshToken(BaseModel, table=True):
+class UserProfile(Base, TimestampMixin):
     """
-    Stores active refresh tokens for JWT rotation.
+    Extended user profile information.
 
-    Lifecycle:
-        1. Created on successful login.
-        2. Consumed (old row deleted, new one created) on /auth/refresh.
-        3. Hard-deleted on logout or explicit revocation.
+    Separated from User to keep the auth model lean.
+    Always created alongside User in the registration flow.
 
-    Hard-delete rationale:
-        Revoked tokens are tracked in Redis (fast blocklist check on every
-        refresh request). Once revoked, the DB row is deleted.
-        The table only contains ACTIVE tokens — "is this JTI valid?"
-        is answered by Redis, not a full table scan.
-
-    Replay attack protection:
-        If a refresh token JTI that has been revoked is presented again,
-        the auth service detects the replay and revokes ALL of that user's
-        sessions (all RefreshToken rows deleted, all JTIs pushed to Redis).
-
-    device_hint:
-        Non-sensitive client-provided string (e.g. "Chrome on Windows").
-        Used only for the "manage active sessions" UI. Never used for
-        security decisions.
-
-    ip_address:
-        IP at token issuance time. Stored for security audit logs.
-        If a user sees an unrecognised IP, they can revoke that session.
+    Has a strict 1:1 relationship with User.
     """
 
-    __tablename__ = "refresh_token"
+    __tablename__ = "user_profiles"
 
-    __table_args__ = (
-        # Fast lookup for "list all active sessions for this user"
-        Index("ix_refresh_token_user_id_revoked", "user_id", "revoked"),
-    )
-
-    # ── Foreign key ───────────────────────────────────────────────────────────
-
-    user_id: uuid.UUID = Field(
-        sa_column=Column(
-            PG_UUID(as_uuid=True),
-            ForeignKey("user.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
-        )
-    )
-
-    # ── Token identity ────────────────────────────────────────────────────────
-
-    jti: str = Field(
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
         nullable=False,
-        max_length=36,    # UUID4 string length: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
         unique=True,
         index=True,
     )
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
-
-    expires_at: datetime = Field(nullable=False)
-    revoked: bool = Field(default=False, nullable=False, index=True)
-    revoked_at: Optional[datetime] = Field(default=None, nullable=True)
-
-    # ── Context metadata ──────────────────────────────────────────────────────
-
-    device_hint: Optional[str] = Field(default=None, nullable=True, max_length=255)
-    ip_address: Optional[str] = Field(default=None, nullable=True, max_length=45)
-
-    # ── Relationship ──────────────────────────────────────────────────────────
-
-    user: Optional["User"] = Relationship(back_populates="refresh_tokens")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# PASSWORD RESET TOKEN  (also used for email verification)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-class PasswordResetToken(BaseModel, table=True):
-    """
-    Short-lived single-use tokens for password reset and email verification flows.
-
-    Dual-purpose table:
-        token_type = "password_reset"  → password reset flow
-        token_type = "email_verification" → email verification flow
-
-    Lifecycle:
-        1. Created when a user requests a password reset or email verification.
-        2. A hashed version of the raw token is stored here.
-        3. The raw token is emailed to the user (embedded in a link).
-        4. When the user clicks the link, the backend:
-               a. Looks up the record by token_hash (SHA-256 of submitted raw token)
-               b. Verifies it is not expired (expires_at > NOW())
-               c. Verifies it has not been used (used = False)
-               d. Sets used = True, used_at = NOW()
-        5. Hard-deleted after use (Celery cleanup job or on next request).
-
-    Security guarantees:
-        - Raw token is NEVER stored — only its SHA-256 hash.
-        - Even with full DB read access, tokens cannot be replayed.
-        - Timing-safe comparison (hmac.compare_digest) used at verification.
-        - expires_at enforces short validity window (15 min for password reset,
-          24 hours for email verification — configurable in settings).
-        - used = True prevents replay even within the validity window.
-
-    One active token per user per type:
-        The service layer deletes any existing unused token of the same
-        token_type before issuing a new one. This is a service-layer rule,
-        not a DB constraint, to avoid partial-index complexity.
-    """
-
-    __tablename__ = "password_reset_token"
-
-    __table_args__ = (
-        # Fast lookup: find unused tokens for a user (for invalidation before re-issue)
-        Index("ix_password_reset_token_user_id_used", "user_id", "used"),
+    first_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
     )
 
-    # ── Foreign key ───────────────────────────────────────────────────────────
+    last_name: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True,
+    )
 
-    user_id: uuid.UUID = Field(
-        sa_column=Column(
-            PG_UUID(as_uuid=True),
-            ForeignKey("user.id", ondelete="CASCADE"),
-            nullable=False,
-            index=True,
+    display_name: Mapped[Optional[str]] = mapped_column(
+        String(150),
+        nullable=True,
+        comment="Preferred display name (overrides first + last)",
+    )
+
+    phone_number: Mapped[Optional[str]] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    bio: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+    )
+
+    avatar_url: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    # For students: student ID number (institution-assigned)
+    student_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Institution-assigned student ID (students only)",
+    )
+
+    # For lecturers: staff/employee ID
+    staff_id: Mapped[Optional[str]] = mapped_column(
+        String(50),
+        nullable=True,
+        index=True,
+        comment="Institution-assigned staff ID (lecturers/admins)",
+    )
+
+    # Academic context
+    department: Mapped[Optional[str]] = mapped_column(
+        String(150),
+        nullable=True,
+    )
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="profile",
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<UserProfile user_id={self.user_id} "
+            f"name={self.first_name} {self.last_name}>"
         )
+
+    @property
+    def full_name(self) -> str:
+        if self.display_name:
+            return self.display_name
+        parts = [self.first_name, self.last_name]
+        return " ".join(p for p in parts if p) or "Unknown"
+
+
+# ─── RefreshToken ─────────────────────────────────────────────────────────────
+
+
+class RefreshToken(Base, TimestampMixin):
+    """
+    Tracked refresh token session.
+
+    Stores the JTI (JWT ID) of each issued refresh token.
+    Revocation is done by setting revoked=True and revoked_at.
+
+    ROTATION:
+        Each refresh call creates a new row and revokes the old one.
+        This enables detecting token theft (a revoked token being used again
+        triggers all-session revocation).
+
+    CLEANUP:
+        Expired + revoked tokens should be periodically purged by a Celery task.
+        The is_valid property reflects current usability.
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
     )
 
-    # ── Token type ────────────────────────────────────────────────────────────
-
-    token_type: str = Field(
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        max_length=50,
-        # Valid values: "password_reset" | "email_verification"
-        # Enforced at the service layer, not as a DB CHECK constraint
-        # (Alembic does not autogenerate CHECK constraints).
-    )
-
-    # ── Token ─────────────────────────────────────────────────────────────────
-
-    token_hash: str = Field(
-        nullable=False,
-        max_length=255,   # SHA-256 hex digest = 64 chars; padded for safety
         index=True,
     )
 
-    # ── Lifecycle ─────────────────────────────────────────────────────────────
+    jti: Mapped[str] = mapped_column(
+        String(36),  # UUID format
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="JWT ID claim — unique identifier for this token",
+    )
 
-    expires_at: datetime = Field(nullable=False)
-    used: bool = Field(default=False, nullable=False, index=True)
-    used_at: Optional[datetime] = Field(default=None, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        comment="Token expiry — after this the token is invalid regardless of revocation",
+    )
 
-    # ── Relationship ──────────────────────────────────────────────────────────
+    revoked: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+        comment="True if this token has been explicitly revoked",
+    )
 
-    user: Optional["User"] = Relationship(back_populates="password_reset_tokens")
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Timestamp when this token was revoked",
+    )
+
+    # Optional session context (helps with security event context)
+    device_hint: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+        comment="User-Agent or device identifier (for display purposes only)",
+    )
+
+    ip_address: Mapped[Optional[str]] = mapped_column(
+        String(45),  # Max IPv6 length
+        nullable=True,
+        comment="Client IP at token issuance",
+    )
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="refresh_tokens",
+    )
+
+    # ─── Composite Indexes ────────────────────────────────────────────────────
+
+    __table_args__ = (
+        Index("ix_refresh_tokens_user_revoked", "user_id", "revoked"),
+        Index("ix_refresh_tokens_jti_revoked", "jti", "revoked"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<RefreshToken jti={self.jti} user_id={self.user_id} "
+            f"revoked={self.revoked}>"
+        )
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if this token is currently usable (not revoked, not expired)."""
+        from datetime import timezone
+        now = datetime.now(tz=timezone.utc)
+        return not self.revoked and self.expires_at > now
+
+
+# ─── PasswordResetToken ───────────────────────────────────────────────────────
+
+
+class PasswordResetToken(Base, TimestampMixin):
+    """
+    Single-use token for password reset AND email verification.
+
+    The same table serves both use cases, differentiated by the
+    `token_purpose` field.
+
+    SECURITY:
+        - Only the SHA-256 hash of the token is stored
+        - Raw tokens are sent to the user by email and never persisted
+        - Tokens are single-use (used=True after consumption)
+        - Tokens expire after a configurable period
+        - Old unused tokens are invalidated when a new one is issued
+
+    CLEANUP:
+        Expired tokens should be purged by a periodic Celery task.
+    """
+
+    __tablename__ = "password_reset_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+
+    token_hash: Mapped[str] = mapped_column(
+        String(64),  # SHA-256 hex = 64 chars
+        nullable=False,
+        unique=True,
+        index=True,
+        comment="SHA-256 hash of the raw token sent to the user",
+    )
+
+    token_purpose: Mapped[str] = mapped_column(
+        String(30),
+        nullable=False,
+        default="password_reset",
+        comment="password_reset | email_verification",
+    )
+
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    used: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        index=True,
+    )
+
+    used_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+
+    user: Mapped["User"] = relationship(
+        "User",
+        back_populates="password_reset_tokens",
+    )
+
+    # ─── Composite Indexes ────────────────────────────────────────────────────
+
+    __table_args__ = (
+        Index(
+            "ix_password_reset_tokens_user_purpose_used",
+            "user_id",
+            "token_purpose",
+            "used",
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<PasswordResetToken user_id={self.user_id} "
+            f"purpose={self.token_purpose} used={self.used}>"
+        )
+
+    @property
+    def is_valid(self) -> bool:
+        """Check if this token is currently usable."""
+        from datetime import timezone
+        now = datetime.now(tz=timezone.utc)
+        return not self.used and self.expires_at > now
+
+
+# ─── SecurityEvent ────────────────────────────────────────────────────────────
+
+
+class SecurityEvent(Base, TimestampMixin):
+    """
+    Security audit log for auth and account events.
+
+    Every significant auth action creates a security event.
+    This provides a full audit trail for:
+        - Login history
+        - Failed logins / lockouts
+        - Password changes
+        - Token operations
+        - Suspicious activity
+
+    DESIGN:
+        - Append-only: events are never updated or deleted in normal operation
+        - Best-effort: security event writes should NOT block the auth flow
+        - Queryable by user, event type, severity, and time range
+
+    FUTURE:
+        - Admin security dashboard will query this table
+        - Alerts can be triggered on CRITICAL events
+        - SIEM integration export can use this as the audit source
+    """
+
+    __tablename__ = "security_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        nullable=False,
+    )
+
+    # Who triggered the event (nullable for system events)
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    event_type: Mapped[str] = mapped_column(
+        String(60),
+        nullable=False,
+        index=True,
+        comment="SecurityEventType value",
+    )
+
+    severity: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        default=SecurityEventSeverity.INFO.value,
+        index=True,
+        comment="info | low | medium | high | critical",
+    )
+
+    # Network context
+    ip_address: Mapped[Optional[str]] = mapped_column(
+        String(45),
+        nullable=True,
+    )
+
+    user_agent: Mapped[Optional[str]] = mapped_column(
+        String(500),
+        nullable=True,
+    )
+
+    # Free-form context data (JSON-serializable dict)
+    details: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="JSON-encoded additional context for this event",
+    )
+
+    # ─── Relationships ────────────────────────────────────────────────────────
+
+    user: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="security_events",
+    )
+
+    # ─── Composite Indexes ────────────────────────────────────────────────────
+
+    __table_args__ = (
+        Index("ix_security_events_user_type", "user_id", "event_type"),
+        Index("ix_security_events_severity_created", "severity", "created_at"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<SecurityEvent type={self.event_type} "
+            f"severity={self.severity} user_id={self.user_id}>"
+        )
