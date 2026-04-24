@@ -228,7 +228,7 @@ async def require_student(
     role-flexible endpoint with require_roles([STUDENT, LECTURER]).
     """
     if current_user.role != UserRole.STUDENT:
-        raise RoleRequiredError("student")
+        raise RoleRequiredError(["student"])
     return current_user
 
 
@@ -237,7 +237,7 @@ async def require_lecturer(
 ) -> User:
     """Allow only users with role=LECTURER."""
     if current_user.role != UserRole.LECTURER:
-        raise RoleRequiredError("lecturer")
+        raise RoleRequiredError(["lecturer"])
     return current_user
 
 
@@ -246,7 +246,7 @@ async def require_admin(
 ) -> User:
     """Allow only users with role=ADMIN."""
     if current_user.role != UserRole.ADMIN:
-        raise RoleRequiredError("admin")
+        raise RoleRequiredError(["admin"])
     return current_user
 
 
@@ -255,7 +255,7 @@ async def require_lecturer_or_admin(
 ) -> User:
     """Allow users with role=LECTURER or role=ADMIN."""
     if current_user.role not in (UserRole.LECTURER, UserRole.ADMIN):
-        raise RoleRequiredError("lecturer")
+        raise RoleRequiredError(["lecturer", "admin"])
     return current_user
 
 
@@ -276,7 +276,7 @@ def require_roles(allowed_roles: list[UserRole]):
         current_user: Annotated[User, Depends(require_verified_email)],
     ) -> User:
         if current_user.role not in allowed_roles:
-            role_names = " or ".join(r.value for r in allowed_roles)
+            role_names = [r.value for r in allowed_roles]
             raise RoleRequiredError(role_names)
         return current_user
 

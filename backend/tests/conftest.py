@@ -34,8 +34,11 @@ from sqlmodel import SQLModel
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 # Provide a fallback SECRET_KEY so tests don't fail on missing env var
-os.environ.setdefault("SECRET_KEY", "test-secret-key-minimum-32-characters-long-for-tests")
-os.environ.setdefault("POSTGRES_PASSWORD", "mindexa_dev_password")
+os.environ.setdefault("SECRET_KEY", "986104b16962f8f3e1b6d4631148c71ffac35cf7e32b70d5504d3ab1ad37a664")
+os.environ.setdefault("POSTGRES_PASSWORD", "Postgre123")
+# Build DATABASE_URL dynamically from POSTGRES_PASSWORD to avoid duplication
+postgres_password = os.environ["POSTGRES_PASSWORD"]
+os.environ.setdefault("DATABASE_URL", f"postgresql+asyncpg://postgres:{postgres_password}@localhost:5433/mindexa_db")
 
 from app.core.config import settings
 from app.db.session import get_db
@@ -68,11 +71,15 @@ TestSessionFactory = async_sessionmaker(
 )
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
+@pytest_asyncio.fixture(scope="session")
 async def setup_test_database():
     """Create all tables once before tests, drop all after."""
-    async with test_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+    try:
+        async with test_engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.create_all)
+    except Exception as exc:
+        pytest.skip(f"Test database unavailable: {exc}")
+
     yield
     async with test_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.drop_all)
@@ -80,7 +87,7 @@ async def setup_test_database():
 
 
 @pytest_asyncio.fixture
-async def db() -> AsyncGenerator[AsyncSession, None]:
+async def db(setup_test_database) -> AsyncGenerator[AsyncSession, None]:
     """
     Per-test database session wrapped in a savepoint.
     All changes roll back after each test — no cleanup needed.

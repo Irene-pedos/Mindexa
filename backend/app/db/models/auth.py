@@ -50,7 +50,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
         last_login_at          — last successful login timestamp
     """
 
-    __tablename__ = "users"
+    __tablename__ = "user"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -187,7 +187,7 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
 # ─── UserProfile ──────────────────────────────────────────────────────────────
 
 
-class UserProfile(Base, TimestampMixin):
+class UserProfile(Base, TimestampMixin, SoftDeleteMixin):
     """
     Extended user profile information.
 
@@ -197,7 +197,7 @@ class UserProfile(Base, TimestampMixin):
     Has a strict 1:1 relationship with User.
     """
 
-    __tablename__ = "user_profiles"
+    __tablename__ = "user_profile"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -208,7 +208,7 @@ class UserProfile(Base, TimestampMixin):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("user.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
         index=True,
@@ -308,7 +308,7 @@ class RefreshToken(Base, TimestampMixin):
         The is_valid property reflects current usability.
     """
 
-    __tablename__ = "refresh_tokens"
+    __tablename__ = "refresh_token"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -319,7 +319,7 @@ class RefreshToken(Base, TimestampMixin):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("user.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -414,7 +414,7 @@ class PasswordResetToken(Base, TimestampMixin):
         Expired tokens should be purged by a periodic Celery task.
     """
 
-    __tablename__ = "password_reset_tokens"
+    __tablename__ = "password_reset_token"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -425,7 +425,7 @@ class PasswordResetToken(Base, TimestampMixin):
 
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("user.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -520,7 +520,7 @@ class SecurityEvent(Base, TimestampMixin):
         - SIEM integration export can use this as the audit source
     """
 
-    __tablename__ = "security_events"
+    __tablename__ = "security_event"
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -532,7 +532,7 @@ class SecurityEvent(Base, TimestampMixin):
     # Who triggered the event (nullable for system events)
     user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="SET NULL"),
+        ForeignKey("user.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

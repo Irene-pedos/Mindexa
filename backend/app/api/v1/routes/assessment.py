@@ -74,7 +74,6 @@ async def create_assessment(
 ) -> AssessmentDetailResponse:
     svc = _service(db)
     assessment = await svc.create_assessment(body, current_user)
-    await db.commit()
     return AssessmentDetailResponse.model_validate(assessment)
 
 
@@ -134,14 +133,13 @@ async def update_assessment(
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentDetailResponse:
     svc = _service(db)
-    step = body.wizard_step or 1
+    step = body.draft_step or 1
     assessment = await svc.update_wizard_step(
         assessment_id=assessment_id,
         current_user=current_user,
         step=step,
         data=body,
     )
-    await db.commit()
     return AssessmentDetailResponse.model_validate(assessment)
 
 
@@ -165,7 +163,6 @@ async def update_security_settings(
         current_user=current_user,
         data=body,
     )
-    await db.commit()
     return AssessmentDetailResponse.model_validate(assessment)
 
 
@@ -185,7 +182,6 @@ async def delete_assessment(
 ) -> None:
     svc = _service(db)
     await svc.soft_delete_assessment(assessment_id, current_user)
-    await db.commit()
 
 
 @router.post(
@@ -203,7 +199,6 @@ async def finalize_assessment(
 ) -> FinalizeAssessmentResponse:
     svc = _service(db)
     result = await svc.finalize_assessment(assessment_id, current_user)
-    await db.commit()
     return result
 
 
@@ -238,7 +233,6 @@ async def save_wizard_step(
         step=step,
         data=body,
     )
-    await db.commit()
     return AssessmentDetailResponse.model_validate(assessment)
 
 
@@ -260,7 +254,6 @@ async def create_section(
 ) -> AssessmentSectionResponse:
     svc = _service(db)
     section = await svc.create_section(assessment_id, current_user, body)
-    await db.commit()
     return AssessmentSectionResponse.model_validate(section)
 
 
@@ -277,7 +270,6 @@ async def update_section(
 ) -> AssessmentSectionResponse:
     svc = _service(db)
     section = await svc.update_section(assessment_id, section_id, current_user, body)
-    await db.commit()
     return AssessmentSectionResponse.model_validate(section)
 
 
@@ -294,7 +286,6 @@ async def delete_section(
 ) -> None:
     svc = _service(db)
     await svc.delete_section(assessment_id, section_id, current_user)
-    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +310,6 @@ async def add_question(
 ) -> dict:
     svc = _service(db)
     aq = await svc.add_question_to_assessment(assessment_id, current_user, body)
-    await db.commit()
     return {
         "id": str(aq.id),
         "assessment_id": str(aq.assessment_id),
@@ -343,7 +333,6 @@ async def remove_question(
 ) -> None:
     svc = _service(db)
     await svc.remove_question_from_assessment(assessment_id, question_id, current_user)
-    await db.commit()
 
 
 @router.put(
@@ -362,5 +351,4 @@ async def reorder_questions(
 ) -> dict:
     svc = _service(db)
     await svc.reorder_questions(assessment_id, current_user, body)
-    await db.commit()
     return {"message": "Questions reordered successfully."}

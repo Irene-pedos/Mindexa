@@ -45,7 +45,7 @@ import secrets
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal, overload
 
 import bcrypt
 from app.core.config import settings
@@ -93,6 +93,21 @@ class TokenPayload:
     role: str = ""   # present on access tokens; empty string on refresh tokens
     email: str = ""  # present on access tokens; empty string on refresh tokens
 
+    @property
+    def user_id(self) -> str:
+        """Backward-compatible alias for `sub`."""
+        return self.sub
+
+    @property
+    def user_role(self) -> str:
+        """Backward-compatible alias for `role`."""
+        return self.role
+
+    @property
+    def type(self) -> str:
+        """Backward-compatible alias for `token_type`."""
+        return self.token_type
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # EMAIL NORMALISATION
@@ -117,6 +132,26 @@ def normalize_email(email: str) -> str:
     Call it before ANY email storage or comparison operation.
     """
     return email.strip().lower()
+
+
+def mask_email(email: str) -> str:
+    """
+    Mask an email address for display in logs or UI.
+
+    Examples:
+        alex.rivera@mindexa.ac -> a***@mindexa.ac
+        a@mindexa.ac           -> ***@mindexa.ac
+
+    Returns the masked string.
+    """
+    if "@" not in email:
+        return "***"
+
+    local, domain = email.split("@", 1)
+    if len(local) <= 1:
+        return f"***@{domain}"
+
+    return f"{local[0]}***@{domain}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -245,13 +280,36 @@ def verify_token_hash(raw_token: str, stored_hash: str) -> bool:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@overload
 def create_access_token(
     user_id: str | uuid.UUID,
     role: str,
     email: str,
     *,
     expires_delta: timedelta | None = None,
-) -> tuple[str, datetime]:
+    return_expires: Literal[False] = False,
+) -> tuple[str, str]: ...
+
+
+@overload
+def create_access_token(
+    user_id: str | uuid.UUID,
+    role: str,
+    email: str,
+    *,
+    expires_delta: timedelta | None = None,
+    return_expires: Literal[True],
+) -> tuple[str, str, datetime]: ...
+
+
+def create_access_token(
+    user_id: str | uuid.UUID,
+    role: str,
+    email: str,
+    *,
+    expires_delta: timedelta | None = None,
+    return_expires: bool = False,
+) -> tuple[str, str] | tuple[str, str, datetime]:
     """
     Create a signed JWT access token.
 
@@ -271,20 +329,23 @@ def create_access_token(
         re-loads the user's role from the database via get_current_user().
 
     Returns:
-        (encoded_token_string, expiry_datetime_utc)
+        Default: (encoded_token_string, jti_string)
+        If return_expires=True: (encoded_token_string, jti_string, expiry_datetime_utc)
     """
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
     now = datetime.now(timezone.utc)
     expires_at = now + expires_delta
+    role_value = role.value if hasattr(role, "value") else str(role)
+    jti = str(uuid.uuid4())
 
     payload: dict[str, Any] = {
         "sub": str(user_id),
-        "role": str(role),
+        "role": role_value,
         "email": str(email),
         "type": TOKEN_TYPE_ACCESS,
-        "jti": str(uuid.uuid4()),
+        "jti": jti,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
     }
@@ -294,14 +355,35 @@ def create_access_token(
         settings.SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
-    return encoded, expires_at
+    if return_expires:
+        return encoded, jti, expires_at
+    return encoded, jti
+
+
+@overload
+def create_refresh_token(
+    user_id: str | uuid.UUID,
+    *,
+    expires_delta: timedelta | None = None,
+    return_expires: Literal[False] = False,
+) -> tuple[str, str]: ...
+
+
+@overload
+def create_refresh_token(
+    user_id: str | uuid.UUID,
+    *,
+    expires_delta: timedelta | None = None,
+    return_expires: Literal[True],
+) -> tuple[str, str, datetime]: ...
 
 
 def create_refresh_token(
     user_id: str | uuid.UUID,
     *,
     expires_delta: timedelta | None = None,
-) -> tuple[str, str, datetime]:
+    return_expires: bool = False,
+) -> tuple[str, str] | tuple[str, str, datetime]:
     """
     Create a signed JWT refresh token.
 
@@ -317,7 +399,8 @@ def create_refresh_token(
         exp  → expiry
 
     Returns:
-        (encoded_token_string, jti_string, expiry_datetime_utc)
+        Default: (encoded_token_string, jti_string)
+        If return_expires=True: (encoded_token_string, jti_string, expiry_datetime_utc)
     """
     if expires_delta is None:
         expires_delta = timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
@@ -339,10 +422,12 @@ def create_refresh_token(
         settings.SECRET_KEY,
         algorithm=settings.JWT_ALGORITHM,
     )
-    return encoded, jti, expires_at
+    if return_expires:
+        return encoded, jti, expires_at
+    return encoded, jti
 
 
-def decode_token(token: str, expected_type: str) -> TokenPayload:
+def decode_token(token: str, expected_type: str | Any) -> TokenPayload:
     """
     Decode and validate a JWT token (access or refresh).
 
@@ -380,9 +465,12 @@ def decode_token(token: str, expected_type: str) -> TokenPayload:
         raise InvalidTokenError() from exc
 
     # Enforce token type — prevents refresh tokens being used as access tokens
-    if raw.get("type") != expected_type:
+    expected_type_value = (
+        expected_type.value if hasattr(expected_type, "value") else str(expected_type)
+    )
+    if raw.get("type") != expected_type_value:
         raise InvalidTokenError(
-            detail=f"Invalid token type. '{expected_type}' token required."
+            detail=f"Invalid token type. '{expected_type_value}' token required."
         )
 
     return TokenPayload(
@@ -426,7 +514,9 @@ def create_refresh_token_payload(
     Alias for create_refresh_token().
     Kept for backward compatibility with any code using the older name.
     """
-    return create_refresh_token(user_id, expires_delta=expires_delta)
+    return create_refresh_token(
+        user_id, expires_delta=expires_delta, return_expires=True
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

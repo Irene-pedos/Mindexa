@@ -20,6 +20,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
+from app.core.constants import GradingMode
 from app.db.base import BaseModel, utcnow
 from app.db.enums import (AIBatchStatus, AIQuestionDecision, DifficultyLevel,
                           QuestionAddedVia, QuestionSourceType, QuestionType)
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from app.db.models.ai import AIActionLog
     from app.db.models.assessment import Assessment, AssessmentSection, Rubric
     from app.db.models.attempt import StudentResponse
+    from app.db.models.auth import User
+    from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
+                                         IntegrityWarning, SupervisionSession)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,6 +76,7 @@ class Question(BaseModel, table=True):
 
     marks: int = Field(default=1, nullable=False)
     difficulty: DifficultyLevel = Field(default=DifficultyLevel.MEDIUM, nullable=False, index=True)
+    grading_mode: str = Field(default=GradingMode.AUTO.value, nullable=False, index=True)
     topic_tag: Optional[str] = Field(default=None, nullable=True, max_length=100, index=True)
 
     rubric_id: Optional[uuid.UUID] = Field(
@@ -91,6 +96,7 @@ class Question(BaseModel, table=True):
     approved_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
     approved_at: Optional[datetime] = Field(default=None, nullable=True)
     is_shared: bool = Field(default=False, nullable=False, index=True)
+    is_active: bool = Field(default=True, nullable=False, index=True)
 
     is_in_question_bank: bool = Field(default=False, nullable=False, index=True)
     bank_added_at: Optional[datetime] = Field(default=None, nullable=True)
@@ -240,7 +246,7 @@ class AIGenerationBatch(BaseModel, table=True):
     bloom_level: Optional[str] = Field(default=None, nullable=True)
     full_prompt: Optional[str] = Field(default=None, nullable=True)
     additional_context: Optional[str] = Field(default=None, nullable=True)
-    
+
     status: AIBatchStatus = Field(default=AIBatchStatus.PENDING, nullable=False, index=True)
     total_generated: int = Field(default=0, nullable=False)
     total_failed: int = Field(default=0, nullable=False)

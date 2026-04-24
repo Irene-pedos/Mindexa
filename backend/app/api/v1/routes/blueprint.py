@@ -56,7 +56,6 @@ async def set_blueprint(
 ) -> BlueprintSummaryResponse:
     svc = _service(db)
     result = await svc.set_blueprint(assessment_id, body)
-    await db.commit()
     return result
 
 

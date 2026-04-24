@@ -71,7 +71,6 @@ async def grade_attempt(
         assessment_id=attempt.assessment_id,
         student_id=attempt.student_id,
     )
-    await db.commit()
     return {
         "attempt_id": str(attempt_id),
         "auto_graded": counts["auto"],
@@ -113,7 +112,6 @@ async def manual_grade(
         rubric_scores=body.rubric_scores,
         accept_ai_suggestion=False,
     )
-    await db.commit()
     return SubmissionGradeResponse.model_validate(grade)
 
 
@@ -147,7 +145,6 @@ async def confirm_ai_grade(
         rubric_scores=body.rubric_scores,
         accept_ai_suggestion=body.accept_ai_suggestion,
     )
-    await db.commit()
     return SubmissionGradeResponse.model_validate(grade)
 
 
@@ -269,5 +266,4 @@ async def assign_queue_item(
         assigned_to_id=body.assigned_to_id,
         priority=body.priority,
     )
-    await db.commit()
     return {"message": "Queue item assigned successfully", "item_id": str(item_id)}

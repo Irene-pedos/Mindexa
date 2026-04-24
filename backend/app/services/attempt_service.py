@@ -129,12 +129,15 @@ class AttemptService:
 
         # Compute expires_at
         expires_at = self._compute_expires_at(assessment, now)
+        access_token = uuid.uuid4()
 
         attempt = await self.attempt_repo.create(
             assessment_id=assessment_id,
             student_id=student_id,
             attempt_number=used + 1,
+            grading_mode=assessment.grading_mode,
             expires_at=expires_at,
+            access_token=access_token,
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -179,7 +182,7 @@ class AttemptService:
 
         # Check window still open
         now = _utcnow()
-        if attempt.expires_at <= now:
+        if attempt.expires_at and attempt.expires_at <= now:
             # Auto-submit instead
             await self._auto_submit(attempt)
             return attempt
@@ -312,7 +315,7 @@ class AttemptService:
             )
 
         now = _utcnow()
-        if attempt.expires_at <= now:
+        if attempt.expires_at and attempt.expires_at <= now:
             await self._auto_submit(attempt)
             raise ConflictError(
                 "Your attempt has expired and was automatically submitted",
@@ -343,7 +346,7 @@ class AttemptService:
 
     async def _append_submit_logs(self, attempt_id: uuid.UUID, change_type: str) -> None:
         """Append a log entry for every finalised response (audit trail)."""
-        responses = await self.submission_repo.list_final_responses(attempt_id)
+        responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
         for response in responses:
             await self.submission_repo.append_log(
                 response_id=response.id,

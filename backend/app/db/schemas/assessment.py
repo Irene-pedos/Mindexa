@@ -10,13 +10,12 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from pydantic import Field, field_validator, model_validator
-
 from app.db.enums import (AssessmentStatus, AssessmentType, BlueprintRuleType,
                           DifficultyLevel, GradingMode, QuestionType,
                           ResultReleaseMode, SupervisorRole)
 from app.db.schemas.base import (BaseAuditedResponse, BaseResponse,
                                  MindexaSchema)
+from pydantic import Field, field_validator, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSESSMENT — STEP 1 (BASIC INFO)
@@ -82,8 +81,8 @@ class AssessmentStep2Request(MindexaSchema):
     is_open_book: Optional[bool] = None
     fullscreen_required: Optional[bool] = None
     integrity_monitoring_enabled: Optional[bool] = None
-    randomise_questions: Optional[bool] = None
-    randomise_options: Optional[bool] = None
+    randomize_questions: Optional[bool] = Field(default=None, alias="randomise_questions")
+    randomize_options: Optional[bool] = Field(default=None, alias="randomise_options")
     is_group_assessment: Optional[bool] = None
     late_submission_allowed: Optional[bool] = None
     late_penalty_percent: Optional[float] = Field(
@@ -246,8 +245,8 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     is_open_book: bool
     fullscreen_required: bool
     integrity_monitoring_enabled: bool
-    randomise_questions: bool
-    randomise_options: bool
+    randomize_questions: bool = Field(serialization_alias="randomise_questions")
+    randomize_options: bool = Field(serialization_alias="randomise_options")
     is_group_assessment: bool
     late_submission_allowed: bool
     late_penalty_percent: Optional[float]

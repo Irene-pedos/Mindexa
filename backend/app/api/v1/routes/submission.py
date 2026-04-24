@@ -75,7 +75,6 @@ async def save_answer(
         time_spent_seconds=body.time_spent_seconds,
         is_skipped=body.is_skipped,
     )
-    await db.commit()
     return SubmissionResponse.model_validate(response)
 
 

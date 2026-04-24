@@ -1,54 +1,32 @@
 """
 app/services/question_service.py
 
-Question Bank service — business logic for the Question domain.
-
-Responsibilities:
-    - create_question()       — Create with options and tags
-    - version_question()      — Archive old + create new version
-    - search_questions()      — Filtered + paginated search
-    - get_question()          — Load full question with options/tags
-    - attach_tags()           — Add tags to a question
-    - detach_tags()           — Remove tags from a question
-    - soft_delete_question()  — Soft-delete (preserve audit trail)
-    - infer_grading_mode()    — Determine grading mode from question type
-
-VERSIONING RULE:
-    When update is called with create_new_version=True (default):
-        1. Archive the existing question (is_active=False)
-        2. Create a new Question with parent_question_id = old question's id
-        3. Increment version_number
-    When create_new_version=False:
-        - Update the existing row in place (no version history)
-        - Use carefully — only for minor corrections (typos, etc.)
+Question Bank service - business logic for the Question domain.
 """
 
-import uuid
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
-from app.core.constants import GradingMode, QuestionType
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError)
+import uuid
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.constants import GradingMode, QuestionType, UserRole
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.db.models.auth import User
 from app.db.models.question import Question
 from app.db.repositories.question_repo import QuestionRepository
-from app.schemas.question import (QuestionCreateRequest,
-                                  QuestionDetailResponse, QuestionListResponse,
-                                  QuestionOptionResponse, QuestionSearchParams,
-                                  QuestionSummaryResponse, QuestionTagResponse,
-                                  QuestionUpdateRequest)
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.schemas.question import (
+    QuestionCreateRequest,
+    QuestionListResponse,
+    QuestionSearchParams,
+    QuestionSummaryResponse,
+    QuestionUpdateRequest,
+)
 
-# ─── Grading Mode Inference ───────────────────────────────────────────────────
 
-
-def infer_grading_mode(question_type: str, override: Optional[str] = None) -> str:
-    """
-    Determine the appropriate grading mode for a question type.
-
-    If the lecturer provides an explicit override, validate and use it.
-    Otherwise, infer from the question type.
-    """
+def infer_grading_mode(question_type: str, override: str | None = None) -> str:
+    """Determine grading mode from question type unless explicitly overridden."""
     if override:
         return override
 
@@ -71,34 +49,14 @@ class QuestionService:
         self.db = db
         self._repo = QuestionRepository(db)
 
-    # ─── Create ───────────────────────────────────────────────────────────────
+    @staticmethod
+    def _role_value(role: Any) -> str:
+        return role.value if hasattr(role, "value") else str(role)
 
-    async def create_question(
-        self,
-        data: QuestionCreateRequest,
-        created_by: User,
-    ) -> Question:
-        """
-        Create a new question in the question bank.
-
-        FLOW:
-            1. Infer grading mode from question type
-            2. Validate MCQ has at least one correct option
-            3. Create Question row
-            4. Create QuestionOption rows (if provided)
-            5. Create/attach tags
-            6. Return full question with options and tags
-
-        Raises:
-            ConflictError: If MCQ has no correct option.
-        """
+    async def create_question(self, data: QuestionCreateRequest, created_by: User) -> Question:
         grading_mode = infer_grading_mode(data.question_type, data.grading_mode)
 
-        # Validate options for auto-gradable types
-        if data.question_type in {
-            QuestionType.MCQ.value,
-            QuestionType.TRUE_FALSE.value,
-        }:
+        if data.question_type in {QuestionType.MCQ.value, QuestionType.TRUE_FALSE.value}:
             if not data.options:
                 raise ConflictError(
                     f"{data.question_type.upper()} questions must have at least 2 options.",
@@ -120,38 +78,25 @@ class QuestionService:
             content=data.content,
             question_type=data.question_type,
             difficulty=data.difficulty,
-            grading_mode=grading_mode,
+            marks=data.suggested_marks or 1,
             created_by_id=created_by.id,
             source_type="manual",
             explanation=data.explanation,
-            hint=data.hint,
-            subject=data.subject,
-            topic=data.topic,
-            bloom_level=data.bloom_level,
-            suggested_marks=data.suggested_marks,
-            estimated_time_minutes=data.estimated_time_minutes,
-            fill_blank_template=data.fill_blank_template,
-            correct_order_json=data.correct_order_json,
+            topic_tag=data.topic,
         )
+        await self._repo.update_fields(question.id, grading_mode=grading_mode)
 
-        # Create options
-        for opt in data.options:
+        for opt in (data.options or []):
             await self._repo.add_option(
                 question_id=question.id,
-                option_text=opt.option_text,
+                content=opt.option_text,
                 is_correct=opt.is_correct,
                 order_index=opt.order_index,
-                option_text_right=opt.option_text_right,
-                explanation=opt.explanation,
+                match_key=getattr(opt, "match_key", None),
+                match_value=getattr(opt, "match_value", None),
             )
 
-        # Attach tags
-        if data.tag_names:
-            await self._attach_tag_names(question.id, data.tag_names)
-
         return question
-
-    # ─── Version ──────────────────────────────────────────────────────────────
 
     async def version_question(
         self,
@@ -159,185 +104,120 @@ class QuestionService:
         data: QuestionUpdateRequest,
         updated_by: User,
     ) -> Question:
-        """
-        Update a question by creating a new version (default) or in-place.
-
-        VERSIONING FLOW (create_new_version=True):
-            1. Load existing question (must be owned by caller or caller is admin)
-            2. Archive existing question (is_active=False, status=archived)
-            3. Create new Question row with:
-                - parent_question_id = old question's id
-                - version_number = old.version_number + 1
-                - All updated fields applied
-            4. Recreate options on new question (if options provided)
-            5. Copy/update tags on new question
-
-        IN-PLACE FLOW (create_new_version=False):
-            - Update the existing row directly
-            - Options are replaced if provided
-
-        Raises:
-            NotFoundError: If question not found.
-            AuthorizationError: If caller doesn't own the question (and is not admin).
-        """
-        from app.core.constants import UserRole
-
         existing = await self._repo.get_by_id(question_id)
         if not existing or not existing.is_active:
             raise NotFoundError("Question not found or no longer active.")
 
-        # Ownership check
-        if (
-            str(existing.created_by_id) != str(updated_by.id)
-            and updated_by.role != UserRole.ADMIN.value
-        ):
-            raise AuthorizationError(
-                "You can only edit questions you created."
-            )
+        user_role = self._role_value(updated_by.role)
+        is_owner = str(existing.created_by_id) == str(updated_by.id)
+        if not is_owner and user_role != UserRole.ADMIN.value:
+            raise AuthorizationError("You can only edit questions you created.")
 
         if data.create_new_version:
-            # Archive old version
             await self._repo.archive(existing.id)
 
-            # Determine fields for new version
             new_content = data.content if data.content is not None else existing.content
-            new_grading_mode = infer_grading_mode(
-                existing.question_type, data.grading_mode
+            existing_qtype = (
+                existing.question_type.value
+                if hasattr(existing.question_type, "value")
+                else str(existing.question_type)
             )
+            new_grading_mode = infer_grading_mode(existing_qtype, data.grading_mode)
 
             new_question = await self._repo.create(
                 content=new_content,
-                question_type=existing.question_type,
-                difficulty=data.difficulty or existing.difficulty,
-                grading_mode=new_grading_mode,
-                created_by_id=updated_by.id,
-                source_type=existing.source_type,
-                explanation=data.explanation if data.explanation is not None else existing.explanation,
-                hint=data.hint if data.hint is not None else existing.hint,
-                subject=data.subject if data.subject is not None else existing.subject,
-                topic=data.topic if data.topic is not None else existing.topic,
-                bloom_level=data.bloom_level if data.bloom_level is not None else existing.bloom_level,
-                suggested_marks=data.suggested_marks if data.suggested_marks is not None else existing.suggested_marks,
-                estimated_time_minutes=data.estimated_time_minutes if data.estimated_time_minutes is not None else existing.estimated_time_minutes,
-                fill_blank_template=data.fill_blank_template if data.fill_blank_template is not None else existing.fill_blank_template,
-                correct_order_json=data.correct_order_json if data.correct_order_json is not None else existing.correct_order_json,
+                question_type=existing_qtype,
+                difficulty=data.difficulty or str(existing.difficulty),
+                marks=data.suggested_marks or existing.marks,
+                created_by_id=existing.created_by_id,
+                source_type=(
+                    existing.source_type.value
+                    if hasattr(existing.source_type, "value")
+                    else str(existing.source_type)
+                ),
+                explanation=(
+                    data.explanation if data.explanation is not None else existing.explanation
+                ),
+                subject_id=existing.subject_id,
+                topic_tag=data.topic if data.topic is not None else existing.topic_tag,
                 parent_question_id=existing.id,
-                version_number=existing.version_number + 1,
+                version=existing.version + 1,
             )
+            await self._repo.update_fields(new_question.id, grading_mode=new_grading_mode)
 
-            # Options
-            options_to_use = data.options if data.options is not None else []
             if data.options is None and existing.options:
-                # Copy existing options
                 for opt in existing.options:
                     await self._repo.add_option(
                         question_id=new_question.id,
-                        option_text=opt.option_text,
+                        content=opt.content,
                         is_correct=opt.is_correct,
                         order_index=opt.order_index,
-                        option_text_right=opt.option_text_right,
-                        explanation=opt.explanation,
+                        match_key=opt.match_key,
+                        match_value=opt.match_value,
                     )
             else:
-                for opt in options_to_use:
+                for new_opt in (data.options or []):
                     await self._repo.add_option(
                         question_id=new_question.id,
-                        option_text=opt.option_text,
-                        is_correct=opt.is_correct,
-                        order_index=opt.order_index,
-                        option_text_right=opt.option_text_right,
-                        explanation=opt.explanation,
+                        content=new_opt.option_text,
+                        is_correct=new_opt.is_correct,
+                        order_index=new_opt.order_index,
+                        match_key=getattr(new_opt, "match_key", None),
+                        match_value=getattr(new_opt, "match_value", None),
                     )
-
-            # Tags
-            if data.tag_names is not None:
-                await self._attach_tag_names(new_question.id, data.tag_names)
-            elif existing.tag_links:
-                for link in existing.tag_links:
-                    await self._repo.attach_tag(new_question.id, link.tag_id)
 
             return new_question
 
-        else:
-            # In-place update (no new version)
-            update_fields = {}
-            if data.content is not None:
-                update_fields["content"] = data.content
-            if data.explanation is not None:
-                update_fields["explanation"] = data.explanation
-            if data.hint is not None:
-                update_fields["hint"] = data.hint
-            if data.difficulty is not None:
-                update_fields["difficulty"] = data.difficulty
-            if data.grading_mode is not None:
-                update_fields["grading_mode"] = data.grading_mode
-            if data.subject is not None:
-                update_fields["subject"] = data.subject
-            if data.topic is not None:
-                update_fields["topic"] = data.topic
-            if data.bloom_level is not None:
-                update_fields["bloom_level"] = data.bloom_level
-            if data.suggested_marks is not None:
-                update_fields["suggested_marks"] = data.suggested_marks
-            if data.estimated_time_minutes is not None:
-                update_fields["estimated_time_minutes"] = data.estimated_time_minutes
+        update_fields: dict[str, Any] = {}
+        if data.content is not None:
+            update_fields["content"] = data.content
+        if data.explanation is not None:
+            update_fields["explanation"] = data.explanation
+        if data.difficulty is not None:
+            update_fields["difficulty"] = data.difficulty
+        if data.grading_mode is not None:
+            update_fields["grading_mode"] = data.grading_mode
+        if data.suggested_marks is not None:
+            update_fields["marks"] = data.suggested_marks
+        if data.topic is not None:
+            update_fields["topic_tag"] = data.topic
 
-            if update_fields:
-                from app.db.models.question import Question as Q
-                from sqlalchemy import update
-                await self.db.execute(
-                    update(Q).where(Q.id == existing.id).values(**update_fields)
+        if update_fields:
+            await self._repo.update_fields(existing.id, **update_fields)
+
+        if data.options is not None:
+            await self._repo.delete_all_options(existing.id)
+            for update_opt in data.options:
+                await self._repo.add_option(
+                    question_id=existing.id,
+                    content=update_opt.option_text,
+                    is_correct=update_opt.is_correct,
+                    order_index=update_opt.order_index,
+                    match_key=getattr(update_opt, "match_key", None),
+                    match_value=getattr(update_opt, "match_value", None),
                 )
 
-            if data.options is not None:
-                await self._repo.delete_options_for_question(existing.id)
-                for opt in data.options:
-                    await self._repo.add_option(
-                        question_id=existing.id,
-                        option_text=opt.option_text,
-                        is_correct=opt.is_correct,
-                        order_index=opt.order_index,
-                        option_text_right=opt.option_text_right,
-                        explanation=opt.explanation,
-                    )
-
-            if data.tag_names is not None:
-                await self._repo.detach_all_tags(existing.id)
-                await self._attach_tag_names(existing.id, data.tag_names)
-
-            return await self._repo.get_by_id(existing.id)  # type: ignore
-
-    # ─── Search ───────────────────────────────────────────────────────────────
+        updated = await self._repo.get_by_id(existing.id)
+        if not updated:
+            raise NotFoundError("Question not found after update.")
+        return updated
 
     async def search_questions(
         self,
         params: QuestionSearchParams,
         current_user: User,
     ) -> QuestionListResponse:
-        """
-        Paginated, filtered question search.
-
-        Students cannot search the question bank.
-        Lecturers see their own + active questions from other lecturers.
-        Admins see all.
-        """
-        from app.core.constants import UserRole
-
-        created_by_id = None
-        if current_user.role == UserRole.STUDENT.value:
+        user_role = self._role_value(current_user.role)
+        if user_role == UserRole.STUDENT.value:
             raise AuthorizationError("Students cannot access the question bank.")
 
         items, total = await self._repo.search(
             q=params.q,
             question_type=params.question_type,
             difficulty=params.difficulty,
-            subject=params.subject,
-            topic=params.topic,
-            bloom_level=params.bloom_level,
+            topic_tag=params.topic,
             source_type=params.source_type,
-            tag_names=params.tag_names,
-            is_active=params.is_active,
-            created_by_id=created_by_id,
+            created_by_id=None,
             page=params.page,
             page_size=params.page_size,
         )
@@ -350,54 +230,41 @@ class QuestionService:
             has_next=(params.page * params.page_size) < total,
         )
 
-    # ─── Get ──────────────────────────────────────────────────────────────────
-
     async def get_question(self, question_id: uuid.UUID) -> Question:
         question = await self._repo.get_by_id(question_id)
         if not question:
             raise NotFoundError("Question not found.")
         return question
 
-    # ─── Tags ─────────────────────────────────────────────────────────────────
-
-    async def attach_tags(
-        self, question_id: uuid.UUID, tag_names: List[str]
-    ) -> None:
-        question = await self._repo.get_by_id_simple(question_id)
-        if not question:
-            raise NotFoundError("Question not found.")
-        await self._attach_tag_names(question_id, tag_names)
-
-    async def detach_tags(
-        self, question_id: uuid.UUID, tag_names: List[str]
-    ) -> None:
-        for name in tag_names:
-            tag = await self._repo.get_tag_by_name(name)
-            if tag:
-                await self._repo.detach_tag(question_id, tag.id)
-
-    async def _attach_tag_names(
-        self, question_id: uuid.UUID, tag_names: List[str]
-    ) -> None:
-        for name in tag_names:
-            tag = await self._repo.get_or_create_tag(name)
-            await self._repo.attach_tag(question_id, tag.id)
-
-    # ─── Delete ───────────────────────────────────────────────────────────────
-
-    async def soft_delete_question(
-        self, question_id: uuid.UUID, current_user: User
-    ) -> None:
-        from app.core.constants import UserRole
-
+    async def attach_tags(self, question_id: uuid.UUID, tag_names: list[str]) -> None:
         question = await self._repo.get_by_id_simple(question_id)
         if not question:
             raise NotFoundError("Question not found.")
 
-        if (
-            str(question.created_by_id) != str(current_user.id)
-            and current_user.role != UserRole.ADMIN.value
-        ):
+        normalized_tags = [t.strip().lower() for t in tag_names if t and t.strip()]
+        if not normalized_tags:
+            return
+        await self._repo.update_fields(question_id, topic_tag=normalized_tags[0])
+
+    async def detach_tags(self, question_id: uuid.UUID, tag_names: list[str]) -> None:
+        question = await self._repo.get_by_id_simple(question_id)
+        if not question:
+            raise NotFoundError("Question not found.")
+        if not question.topic_tag:
+            return
+
+        normalized_tags = {t.strip().lower() for t in tag_names if t and t.strip()}
+        if question.topic_tag.lower() in normalized_tags:
+            await self._repo.update_fields(question_id, topic_tag=None)
+
+    async def soft_delete_question(self, question_id: uuid.UUID, current_user: User) -> None:
+        question = await self._repo.get_by_id_simple(question_id)
+        if not question:
+            raise NotFoundError("Question not found.")
+
+        user_role = self._role_value(current_user.role)
+        is_owner = str(question.created_by_id) == str(current_user.id)
+        if not is_owner and user_role != UserRole.ADMIN.value:
             raise AuthorizationError("You can only delete questions you created.")
 
         await self._repo.soft_delete(question_id)

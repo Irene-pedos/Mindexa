@@ -63,13 +63,14 @@ from typing import List, Optional, Tuple
 
 from app.db.enums import (AIBatchStatus, AIQuestionDecision, DifficultyLevel,
                           QuestionSourceType, QuestionType)
-from app.db.models.question import (AIQuestionGenerationBatch,
-                                    AIQuestionReview, AssessmentQuestion,
-                                    Question, QuestionBankEntry, QuestionBlank,
+from app.db.models.question import (AIGenerationBatch, AIQuestionReview,
+                                    AssessmentQuestion, Question,
+                                    QuestionBankEntry, QuestionBlank,
                                     QuestionOption)
 from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlmodel import col, select
 
 # ---------------------------------------------------------------------------
 # INTERNAL HELPERS
@@ -137,11 +138,11 @@ class QuestionRepository:
         """
         question = Question(
             created_by_id=created_by_id,
-            question_type=question_type,
+            question_type=QuestionType(question_type),
             content=content,
-            difficulty=difficulty,
+            difficulty=DifficultyLevel(difficulty),
             marks=marks,
-            source_type=source_type,
+            source_type=QuestionSourceType(source_type),
             is_approved=is_approved,
             explanation=explanation,
             subject_id=subject_id,
@@ -169,21 +170,16 @@ class QuestionRepository:
 
     async def get_by_id(self, question_id: uuid.UUID) -> Optional[Question]:
         """
-        Load a Question with options and blanks selectin-loaded.
+        Load a Question.
 
         Excludes soft-deleted questions. Does NOT filter by is_approved
         (service layer applies that check).
         """
         result = await self.db.execute(
             select(Question)
-            .options(
-                selectinload(Question.options),
-                selectinload(Question.blanks),
-                selectinload(Question.bank_entry),
-            )
             .where(
-                Question.id == question_id,
-                Question.is_deleted == False,  # noqa: E712
+                col(Question.id) == question_id,
+                col(Question.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
@@ -197,8 +193,8 @@ class QuestionRepository:
         """
         result = await self.db.execute(
             select(Question).where(
-                Question.id == question_id,
-                Question.is_deleted == False,  # noqa: E712
+                col(Question.id) == question_id,
+                col(Question.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
@@ -241,47 +237,47 @@ class QuestionRepository:
         filters = []
 
         if not include_deleted:
-            filters.append(Question.is_deleted == False)  # noqa: E712
+            filters.append(col(Question.is_deleted) == False)  # noqa: E712
 
         if is_approved is not None:
-            filters.append(Question.is_approved == is_approved)
+            filters.append(col(Question.is_approved) == is_approved)
 
         if question_type is not None:
-            filters.append(Question.question_type == question_type)
+            filters.append(col(Question.question_type) == question_type)
 
         if difficulty is not None:
-            filters.append(Question.difficulty == difficulty)
+            filters.append(col(Question.difficulty) == difficulty)
 
         if subject_id is not None:
-            filters.append(Question.subject_id == subject_id)
+            filters.append(col(Question.subject_id) == subject_id)
 
         if topic_tag is not None:
-            filters.append(Question.topic_tag.ilike(f"%{topic_tag}%"))
+            filters.append(col(Question.topic_tag).ilike(f"%{topic_tag}%"))
 
         if source_type is not None:
-            filters.append(Question.source_type == source_type)
+            filters.append(col(Question.source_type) == source_type)
 
         if created_by_id is not None:
-            filters.append(Question.created_by_id == created_by_id)
+            filters.append(col(Question.created_by_id) == created_by_id)
 
         if is_in_question_bank is not None:
-            filters.append(Question.is_in_question_bank == is_in_question_bank)
+            filters.append(col(Question.is_in_question_bank) == is_in_question_bank)
 
         if is_shared is not None:
-            filters.append(Question.is_shared == is_shared)
+            filters.append(col(Question.is_shared) == is_shared)
 
         if q is not None:
-            filters.append(Question.content.ilike(f"%{q}%"))
+            filters.append(col(Question.content).ilike(f"%{q}%"))
 
         count_result = await self.db.execute(
-            select(func.count(Question.id)).where(*filters)
+            select(func.count(col(Question.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
         result = await self.db.execute(
             select(Question)
             .where(*filters)
-            .order_by(Question.created_at.desc())
+            .order_by(col(Question.created_at).desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -296,10 +292,10 @@ class QuestionRepository:
         result = await self.db.execute(
             select(Question)
             .where(
-                Question.parent_question_id == parent_question_id,
-                Question.is_deleted == False,  # noqa: E712
+                col(Question.parent_question_id) == parent_question_id,
+                col(Question.is_deleted) == False,  # noqa: E712
             )
-            .order_by(Question.version.asc())
+            .order_by(col(Question.version).asc())
         )
         return list(result.scalars().all())
 
@@ -313,7 +309,7 @@ class QuestionRepository:
         """Update arbitrary scalar fields on a Question row."""
         await self.db.execute(
             update(Question)
-            .where(Question.id == question_id)
+            .where(col(Question.id) == question_id)
             .values(**fields)
         )
 
@@ -330,7 +326,7 @@ class QuestionRepository:
         now = _utcnow()
         await self.db.execute(
             update(Question)
-            .where(Question.id == question_id)
+            .where(col(Question.id) == question_id)
             .values(
                 is_approved=True,
                 approved_by_id=approved_by_id,
@@ -352,7 +348,7 @@ class QuestionRepository:
         now = _utcnow()
         await self.db.execute(
             update(Question)
-            .where(Question.id == question_id)
+            .where(col(Question.id) == question_id)
             .values(
                 is_in_question_bank=True,
                 bank_added_at=now,
@@ -371,9 +367,31 @@ class QuestionRepository:
         now = _utcnow()
         await self.db.execute(
             update(Question)
-            .where(Question.id == question_id)
+            .where(col(Question.id) == question_id)
             .values(is_deleted=True, deleted_at=now, is_approved=False)
         )
+
+    async def archive(self, question_id: uuid.UUID) -> None:
+        """
+        Archive a question (set is_active=False).
+        Used when creating a new version.
+        """
+        await self.db.execute(
+            update(Question)
+            .where(col(Question.id) == question_id)
+            .values(is_active=False)
+        )
+
+    async def list_tags(self) -> List[str]:
+        """
+        List all unique topic_tags currently in use.
+        """
+        result = await self.db.execute(
+            select(col(Question.topic_tag))
+            .where(col(Question.topic_tag).isnot(None), col(Question.is_deleted) == False)
+            .distinct()
+        )
+        return [row[0] for row in result.fetchall()]
 
     # -----------------------------------------------------------------------
     # QuestionOption — CRUD
@@ -416,8 +434,8 @@ class QuestionRepository:
         """Return all options for a question ordered by order_index."""
         result = await self.db.execute(
             select(QuestionOption)
-            .where(QuestionOption.question_id == question_id)
-            .order_by(QuestionOption.order_index)
+            .where(col(QuestionOption.question_id) == question_id)
+            .order_by(col(QuestionOption.order_index))
         )
         return list(result.scalars().all())
 
@@ -425,14 +443,14 @@ class QuestionRepository:
         """Hard-delete all options for a question (used when replacing options)."""
         await self.db.execute(
             delete(QuestionOption).where(
-                QuestionOption.question_id == question_id
+                col(QuestionOption.question_id) == question_id
             )
         )
 
     async def update_option(self, option_id: uuid.UUID, **fields) -> None:
         await self.db.execute(
             update(QuestionOption)
-            .where(QuestionOption.id == option_id)
+            .where(col(QuestionOption.id) == option_id)
             .values(**fields)
         )
 
@@ -468,8 +486,8 @@ class QuestionRepository:
         """Return all blanks for a question ordered by blank_index."""
         result = await self.db.execute(
             select(QuestionBlank)
-            .where(QuestionBlank.question_id == question_id)
-            .order_by(QuestionBlank.blank_index)
+            .where(col(QuestionBlank.question_id) == question_id)
+            .order_by(col(QuestionBlank.blank_index))
         )
         return list(result.scalars().all())
 
@@ -477,53 +495,57 @@ class QuestionRepository:
         """Hard-delete all blanks for a question (used when replacing blanks)."""
         await self.db.execute(
             delete(QuestionBlank).where(
-                QuestionBlank.question_id == question_id
+                col(QuestionBlank.question_id) == question_id
             )
         )
 
     async def update_blank(self, blank_id: uuid.UUID, **fields) -> None:
         await self.db.execute(
             update(QuestionBlank)
-            .where(QuestionBlank.id == blank_id)
+            .where(col(QuestionBlank.id) == blank_id)
             .values(**fields)
         )
 
     # -----------------------------------------------------------------------
-    # AIQuestionGenerationBatch — CRUD
+    # AIGenerationBatch — CRUD
     # -----------------------------------------------------------------------
 
     async def create_batch(
         self,
         *,
-        assessment_id: uuid.UUID,
-        initiated_by_id: uuid.UUID,
-        prompt_used: str,
-        count_requested: int,
-        assessment_section_id: Optional[uuid.UUID] = None,
-        question_type_requested: Optional[str] = None,
-        difficulty_requested: Optional[str] = None,
-        ai_action_log_id: Optional[uuid.UUID] = None,
-    ) -> AIQuestionGenerationBatch:
+        created_by_id: uuid.UUID,
+        question_type: str,
+        difficulty: str,
+        total_requested: int,
+        assessment_id: Optional[uuid.UUID] = None,
+        subject: Optional[str] = None,
+        topic: Optional[str] = None,
+        bloom_level: Optional[str] = None,
+        full_prompt: Optional[str] = None,
+        additional_context: Optional[str] = None,
+    ) -> AIGenerationBatch:
         """
         Create a new AI question generation batch.
 
         Initial state:
             status           -> PENDING
-            count_generated  -> 0
-            review_completed -> False
+            total_generated  -> 0
+            total_failed     -> 0
         """
-        batch = AIQuestionGenerationBatch(
+        batch = AIGenerationBatch(
+            created_by_id=created_by_id,
+            question_type=question_type,
+            difficulty=difficulty,
+            total_requested=total_requested,
             assessment_id=assessment_id,
-            assessment_section_id=assessment_section_id,
-            initiated_by_id=initiated_by_id,
-            ai_action_log_id=ai_action_log_id,
-            prompt_used=prompt_used,
-            question_type_requested=question_type_requested,
-            difficulty_requested=difficulty_requested,
-            count_requested=count_requested,
-            count_generated=0,
+            subject=subject,
+            topic=topic,
+            bloom_level=bloom_level,
+            full_prompt=full_prompt,
+            additional_context=additional_context,
             status=AIBatchStatus.PENDING,
-            review_completed=False,
+            total_generated=0,
+            total_failed=0,
         )
         self.db.add(batch)
         await self.db.flush()
@@ -531,65 +553,60 @@ class QuestionRepository:
 
     async def get_batch(
         self, batch_id: uuid.UUID
-    ) -> Optional[AIQuestionGenerationBatch]:
-        """Load a batch with its reviews selectin-loaded."""
+    ) -> Optional[AIGenerationBatch]:
+        """Load a batch."""
         result = await self.db.execute(
-            select(AIQuestionGenerationBatch)
-            .options(
-                selectinload(AIQuestionGenerationBatch.reviews).selectinload(
-                    AIQuestionReview.question
-                )
-            )
+            select(AIGenerationBatch)
             .where(
-                AIQuestionGenerationBatch.id == batch_id,
-                AIQuestionGenerationBatch.is_deleted == False,  # noqa: E712
+                col(AIGenerationBatch.id) == batch_id,
+                col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
 
     async def get_batch_simple(
         self, batch_id: uuid.UUID
-    ) -> Optional[AIQuestionGenerationBatch]:
+    ) -> Optional[AIGenerationBatch]:
         result = await self.db.execute(
-            select(AIQuestionGenerationBatch).where(
-                AIQuestionGenerationBatch.id == batch_id,
-                AIQuestionGenerationBatch.is_deleted == False,  # noqa: E712
+            select(AIGenerationBatch).where(
+                col(AIGenerationBatch.id) == batch_id,
+                col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
 
     async def list_batches_for_assessment(
         self, assessment_id: uuid.UUID
-    ) -> List[AIQuestionGenerationBatch]:
+    ) -> List[AIGenerationBatch]:
         result = await self.db.execute(
-            select(AIQuestionGenerationBatch)
+            select(AIGenerationBatch)
             .where(
-                AIQuestionGenerationBatch.assessment_id == assessment_id,
-                AIQuestionGenerationBatch.is_deleted == False,  # noqa: E712
+                col(AIGenerationBatch.assessment_id) == assessment_id,
+                col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
             )
-            .order_by(AIQuestionGenerationBatch.created_at.desc())
+            .order_by(col(AIGenerationBatch.created_at).desc())
         )
         return list(result.scalars().all())
 
-    async def list_batches_by_initiator(
+    async def list_batches_by_creator(
         self,
-        initiated_by_id: uuid.UUID,
+        created_by_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[AIQuestionGenerationBatch], int]:
+    ) -> Tuple[List[AIGenerationBatch], int]:
         filters = [
-            AIQuestionGenerationBatch.initiated_by_id == initiated_by_id,
-            AIQuestionGenerationBatch.is_deleted == False,  # noqa: E712
+            col(AIGenerationBatch.created_by_id) == created_by_id,
+            col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
         ]
         count_result = await self.db.execute(
-            select(func.count(AIQuestionGenerationBatch.id)).where(*filters)
+            select(func.count(col(AIGenerationBatch.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
         result = await self.db.execute(
-            select(AIQuestionGenerationBatch)
+            select(AIGenerationBatch)
             .where(*filters)
-            .order_by(AIQuestionGenerationBatch.created_at.desc())
+            .order_by(col(AIGenerationBatch.created_at).desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -598,40 +615,38 @@ class QuestionRepository:
     async def update_batch(
         self, batch_id: uuid.UUID, **fields
     ) -> None:
-        """Update scalar fields on a batch row (status, count_generated, etc.)."""
+        """Update scalar fields on a batch row (status, total_generated, etc.)."""
         await self.db.execute(
-            update(AIQuestionGenerationBatch)
-            .where(AIQuestionGenerationBatch.id == batch_id)
+            update(AIGenerationBatch)
+            .where(col(AIGenerationBatch.id) == batch_id)
             .values(**fields)
         )
 
-    async def mark_batch_review_complete(
+    async def mark_batch_completed(
         self, batch_id: uuid.UUID
     ) -> None:
         """
-        Set review_completed=True and review_completed_at=now.
-
-        Called when all candidates in the batch have a non-PENDING decision.
+        Set completed_at=now when batch is finished.
         """
         now = _utcnow()
         await self.db.execute(
-            update(AIQuestionGenerationBatch)
-            .where(AIQuestionGenerationBatch.id == batch_id)
-            .values(review_completed=True, review_completed_at=now)
+            update(AIGenerationBatch)
+            .where(col(AIGenerationBatch.id) == batch_id)
+            .values(completed_at=now)
         )
 
-    async def count_pending_reviews_in_batch(
+    async def count_pending_reviews_for_batch(
         self, batch_id: uuid.UUID
     ) -> int:
         """
-        Count AIQuestionReview rows still in PENDING state for a batch.
-        Used to determine when review_completed should be set to True.
+        Count AIGeneratedQuestion rows still pending review for a batch.
         """
+        from app.db.models.question import AIGeneratedQuestion
         result = await self.db.execute(
-            select(func.count(AIQuestionReview.id)).where(
-                AIQuestionReview.batch_id == batch_id,
-                AIQuestionReview.lecturer_decision == AIQuestionDecision.PENDING,
-                AIQuestionReview.is_deleted == False,  # noqa: E712
+            select(func.count(col(AIGeneratedQuestion.id))).where(
+                col(AIGeneratedQuestion.batch_id) == batch_id,
+                col(AIGeneratedQuestion.review_status) == AIQuestionDecision.PENDING,
+                col(AIGeneratedQuestion.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one()
@@ -643,29 +658,30 @@ class QuestionRepository:
     async def create_review(
         self,
         *,
-        batch_id: uuid.UUID,
-        question_id: uuid.UUID,
-        candidate_order: int,
-        ai_raw_output: dict,
-        ai_action_log_id: Optional[uuid.UUID] = None,
+        ai_question_id: uuid.UUID,
+        reviewer_id: uuid.UUID,
+        decision: str = AIQuestionDecision.PENDING,
+        modified_question_text: Optional[str] = None,
+        modified_options_json: Optional[str] = None,
+        modified_explanation: Optional[str] = None,
+        reviewer_notes: Optional[str] = None,
     ) -> AIQuestionReview:
         """
-        Create an AIQuestionReview row for a generated candidate.
+        Create an AIQuestionReview row for a generated question.
 
         Initial state:
-            lecturer_decision -> PENDING
-            added_to_assessment -> False
-            added_to_bank -> False
+            decision -> PENDING (or provided decision)
+            reviewed_at -> current time
         """
         review = AIQuestionReview(
-            batch_id=batch_id,
-            question_id=question_id,
-            candidate_order=candidate_order,
-            ai_raw_output=ai_raw_output,
-            ai_action_log_id=ai_action_log_id,
-            lecturer_decision=AIQuestionDecision.PENDING,
-            added_to_assessment=False,
-            added_to_bank=False,
+            ai_question_id=ai_question_id,
+            reviewer_id=reviewer_id,
+            decision=decision,
+            modified_question_text=modified_question_text,
+            modified_options_json=modified_options_json,
+            modified_explanation=modified_explanation,
+            reviewer_notes=reviewer_notes,
+            reviewed_at=_utcnow(),
         )
         self.db.add(review)
         await self.db.flush()
@@ -676,26 +692,23 @@ class QuestionRepository:
     ) -> Optional[AIQuestionReview]:
         result = await self.db.execute(
             select(AIQuestionReview)
-            .options(selectinload(AIQuestionReview.question))
             .where(
-                AIQuestionReview.id == review_id,
-                AIQuestionReview.is_deleted == False,  # noqa: E712
+                col(AIQuestionReview.id) == review_id,
+                col(AIQuestionReview.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
 
-    async def get_review_for_question(
-        self, batch_id: uuid.UUID, question_id: uuid.UUID
+    async def get_review_by_ai_question(
+        self, ai_question_id: uuid.UUID
     ) -> Optional[AIQuestionReview]:
         """
-        Fetch the unique review row for a (batch, question) pair.
-        Enforced unique by DB constraint uq_ai_question_review_batch_question.
+        Fetch the review row for an AI-generated question.
         """
         result = await self.db.execute(
             select(AIQuestionReview).where(
-                AIQuestionReview.batch_id == batch_id,
-                AIQuestionReview.question_id == question_id,
-                AIQuestionReview.is_deleted == False,  # noqa: E712
+                col(AIQuestionReview.ai_question_id) == ai_question_id,
+                col(AIQuestionReview.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
@@ -706,22 +719,22 @@ class QuestionRepository:
         decision_filter: Optional[str] = None,
     ) -> List[AIQuestionReview]:
         """
-        Return all reviews for a batch, ordered by candidate_order.
+        Return all reviews for a batch.
 
         decision_filter: if provided, only return reviews with that decision.
         """
+        from app.db.models.question import AIGeneratedQuestion
         filters = [
-            AIQuestionReview.batch_id == batch_id,
-            AIQuestionReview.is_deleted == False,  # noqa: E712
+            col(AIGeneratedQuestion.batch_id) == batch_id,
+            col(AIGeneratedQuestion.is_deleted) == False,  # noqa: E712
         ]
         if decision_filter:
-            filters.append(AIQuestionReview.lecturer_decision == decision_filter)
+            filters.append(col(AIGeneratedQuestion.review_status) == decision_filter)
 
         result = await self.db.execute(
             select(AIQuestionReview)
-            .options(selectinload(AIQuestionReview.question))
+            .join(AIGeneratedQuestion)
             .where(*filters)
-            .order_by(AIQuestionReview.candidate_order)
         )
         return list(result.scalars().all())
 
@@ -731,43 +744,43 @@ class QuestionRepository:
         """
         Update fields on an AIQuestionReview row.
 
-        Used to record the lecturer's decision:
-            lecturer_decision, lecturer_id, decided_at,
-            modification_summary, added_to_assessment, added_to_bank
+        Used to record reviewer's modifications and decisions:
+            decision, modified_question_text, modified_options_json,
+            modified_explanation, reviewer_notes
         """
         await self.db.execute(
             update(AIQuestionReview)
-            .where(AIQuestionReview.id == review_id)
+            .where(col(AIQuestionReview.id) == review_id)
             .values(**fields)
         )
 
     async def record_decision(
         self,
         review_id: uuid.UUID,
-        lecturer_id: uuid.UUID,
         decision: str,
-        modification_summary: Optional[str] = None,
-        added_to_assessment: bool = False,
-        added_to_bank: bool = False,
+        modified_question_text: Optional[str] = None,
+        modified_options_json: Optional[str] = None,
+        modified_explanation: Optional[str] = None,
+        reviewer_notes: Optional[str] = None,
     ) -> None:
         """
-        Convenience method to stamp a lecturer decision on a review.
+        Convenience method to stamp a reviewer's decision on a review.
 
         Sets:
-            lecturer_decision, lecturer_id, decided_at,
-            modification_summary, added_to_assessment, added_to_bank
+            decision, modified_question_text, modified_options_json,
+            modified_explanation, reviewer_notes, reviewed_at (now)
         """
         now = _utcnow()
         await self.db.execute(
             update(AIQuestionReview)
-            .where(AIQuestionReview.id == review_id)
+            .where(col(AIQuestionReview.id) == review_id)
             .values(
-                lecturer_decision=decision,
-                lecturer_id=lecturer_id,
-                decided_at=now,
-                modification_summary=modification_summary,
-                added_to_assessment=added_to_assessment,
-                added_to_bank=added_to_bank,
+                decision=decision,
+                modified_question_text=modified_question_text,
+                modified_options_json=modified_options_json,
+                modified_explanation=modified_explanation,
+                reviewer_notes=reviewer_notes,
+                reviewed_at=now,
             )
         )
 
@@ -795,8 +808,8 @@ class QuestionRepository:
             question_id=question_id,
             added_by_id=added_by_id,
             subject_id=subject_id,
-            difficulty=difficulty,
-            source_type=source_type,
+            difficulty=DifficultyLevel(difficulty) if difficulty else None,
+            source_type=QuestionSourceType(source_type),
             source_assessment_id=source_assessment_id,
             times_used=0,
             is_active=True,
@@ -814,9 +827,9 @@ class QuestionRepository:
         """
         result = await self.db.execute(
             select(QuestionBankEntry).where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
-                QuestionBankEntry.is_deleted == False,  # noqa: E712
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
+                col(QuestionBankEntry.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
@@ -826,8 +839,8 @@ class QuestionRepository:
     ) -> Optional[QuestionBankEntry]:
         result = await self.db.execute(
             select(QuestionBankEntry).where(
-                QuestionBankEntry.id == entry_id,
-                QuestionBankEntry.is_deleted == False,  # noqa: E712
+                col(QuestionBankEntry.id) == entry_id,
+                col(QuestionBankEntry.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none()
@@ -851,28 +864,27 @@ class QuestionRepository:
         required for the common bank browsing case.
         """
         filters = [
-            QuestionBankEntry.added_by_id == added_by_id,
-            QuestionBankEntry.is_deleted == False,  # noqa: E712
+            col(QuestionBankEntry.added_by_id) == added_by_id,
+            col(QuestionBankEntry.is_deleted) == False,  # noqa: E712
         ]
         if is_active is not None:
-            filters.append(QuestionBankEntry.is_active == is_active)
+            filters.append(col(QuestionBankEntry.is_active) == is_active)
         if subject_id is not None:
-            filters.append(QuestionBankEntry.subject_id == subject_id)
+            filters.append(col(QuestionBankEntry.subject_id) == subject_id)
         if difficulty is not None:
-            filters.append(QuestionBankEntry.difficulty == difficulty)
+            filters.append(col(QuestionBankEntry.difficulty) == difficulty)
         if source_type is not None:
-            filters.append(QuestionBankEntry.source_type == source_type)
+            filters.append(col(QuestionBankEntry.source_type) == source_type)
 
         count_result = await self.db.execute(
-            select(func.count(QuestionBankEntry.id)).where(*filters)
+            select(func.count(col(QuestionBankEntry.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
         result = await self.db.execute(
             select(QuestionBankEntry)
-            .options(selectinload(QuestionBankEntry.question))
             .where(*filters)
-            .order_by(QuestionBankEntry.created_at.desc())
+            .order_by(col(QuestionBankEntry.created_at).desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -884,9 +896,9 @@ class QuestionRepository:
         """Return True if the question is already in this lecturer's bank."""
         result = await self.db.execute(
             select(QuestionBankEntry.id).where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
-                QuestionBankEntry.is_deleted == False,  # noqa: E712
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
+                col(QuestionBankEntry.is_deleted) == False,  # noqa: E712
             )
         )
         return result.scalar_one_or_none() is not None
@@ -903,8 +915,8 @@ class QuestionRepository:
         await self.db.execute(
             update(QuestionBankEntry)
             .where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
             )
             .values(
                 times_used=QuestionBankEntry.times_used + 1,
@@ -924,8 +936,8 @@ class QuestionRepository:
         await self.db.execute(
             update(QuestionBankEntry)
             .where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
             )
             .values(is_active=False)
         )
@@ -937,8 +949,8 @@ class QuestionRepository:
         await self.db.execute(
             update(QuestionBankEntry)
             .where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
             )
             .values(is_deleted=True, deleted_at=now, is_active=False)
         )
@@ -968,8 +980,8 @@ class QuestionRepository:
         await self.db.execute(
             update(QuestionBankEntry)
             .where(
-                QuestionBankEntry.question_id == question_id,
-                QuestionBankEntry.added_by_id == added_by_id,
+                col(QuestionBankEntry.question_id) == question_id,
+                col(QuestionBankEntry.added_by_id) == added_by_id,
             )
             .values(**fields)
         )

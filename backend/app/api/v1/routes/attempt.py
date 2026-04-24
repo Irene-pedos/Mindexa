@@ -19,10 +19,11 @@ Security:
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from app.core.exceptions import AuthorizationError, NotFoundError
-from app.db.enums import AttemptStatus
+from app.db.enums import AttemptStatus, UserRole
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.session import get_db
 from app.dependencies.auth import (require_active_user,
@@ -72,20 +73,20 @@ async def start_attempt(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
-    await db.commit()
 
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
+    seconds_remaining = 0
+    if attempt.expires_at:
+        seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
 
     return AttemptStartResponse(
         id=attempt.id,
         assessment_id=attempt.assessment_id,
         attempt_number=attempt.attempt_number,
         status=attempt.status,
-        started_at=attempt.started_at,
-        expires_at=attempt.expires_at,
-        access_token=attempt.access_token,
+        started_at=attempt.started_at or now,
+        expires_at=attempt.expires_at or now,
+        access_token=attempt.access_token or uuid.uuid4(),
         seconds_remaining=seconds_remaining,
     )
 
@@ -118,20 +119,20 @@ async def resume_attempt(
         student_id=current_user.id,
         access_token=uuid.UUID(str(access_token)),
     )
-    await db.commit()
 
-    from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
-    seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
+    seconds_remaining = 0
+    if attempt.expires_at:
+        seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
 
     return AttemptStartResponse(
         id=attempt.id,
         assessment_id=attempt.assessment_id,
         attempt_number=attempt.attempt_number,
         status=attempt.status,
-        started_at=attempt.started_at,
-        expires_at=attempt.expires_at,
-        access_token=attempt.access_token,
+        started_at=attempt.started_at or now,
+        expires_at=attempt.expires_at or now,
+        access_token=attempt.access_token or uuid.uuid4(),
         seconds_remaining=seconds_remaining,
     )
 
@@ -160,7 +161,6 @@ async def submit_attempt(
         student_id=current_user.id,
         access_token=body.access_token,
     )
-    await db.commit()
     return AttemptResponse.model_validate(attempt)
 
 
@@ -188,8 +188,7 @@ async def get_attempt(
     if not attempt:
         raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
 
-    from app.db.enums import UserRole
-    if current_user.role == UserRole.STUDENT and attempt.student_id != current_user.id:
+    if current_user.role == UserRole.STUDENT.value and attempt.student_id != current_user.id:
         raise AuthorizationError("You do not own this attempt", code="ATTEMPT_OWNERSHIP_VIOLATION")
 
     return AttemptResponse.model_validate(attempt)

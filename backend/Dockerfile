@@ -93,11 +93,11 @@ WORKDIR /app
 
 # Copy application source
 COPY --chown=app:app app/ ./app/
-COPY --chown=app:app alembic/ ./alembic/ 2>/dev/null || true
-COPY --chown=app:app alembic.ini ./alembic.ini 2>/dev/null || true
+COPY --chown=app:app alembic/ ./alembic/
+COPY --chown=app:app alembic.ini ./
 
 # Pre-compile application code
-RUN python -m compileall -q app/
+RUN python -m compileall -q app/ alembic/
 
 # Drop to non-root
 USER app

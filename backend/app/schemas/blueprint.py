@@ -27,9 +27,9 @@ class BlueprintRuleCreate(BaseModel):
     @field_validator("rule_type")
     @classmethod
     def validate_rule_type(cls, v: str) -> str:
-        if v not in BlueprintRuleType.ALL_TYPES:
+        if v not in BlueprintRuleType.all_types():
             raise ValueError(
-                f"rule_type must be one of: {', '.join(sorted(BlueprintRuleType.ALL_TYPES))}"
+                f"rule_type must be one of: {', '.join(sorted(BlueprintRuleType.all_types()))}"
             )
         return v
 
@@ -45,13 +45,24 @@ class BlueprintRuleResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     rule_type: str
-    value_json: str  # Raw JSON string from DB
+    value_json: Any  # Can be dict (parsed) or string (raw)
     priority: int
     is_blocking: bool
     description: Optional[str]
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @field_validator("value_json", mode="before")
+    @classmethod
+    def parse_value_json(cls, v: Any) -> Any:
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                return v
+        return v
 
 
 class SetBlueprintRequest(BaseModel):

@@ -38,6 +38,7 @@ class AttemptRepository:
         attempt_number: int,
         grading_mode: GradingMode,
         expires_at: datetime,
+        access_token: uuid.UUID,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
     ) -> AssessmentAttempt:
@@ -50,6 +51,7 @@ class AttemptRepository:
             started_at=_utcnow(),
             expires_at=expires_at,
             last_activity_at=_utcnow(),
+            access_token=access_token,
             ip_address=ip_address,
             user_agent=user_agent,
         )

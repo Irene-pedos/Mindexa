@@ -77,8 +77,6 @@ from app.db.models.attempt import (AssessmentAttempt, ResultAppeal,
                                    RubricGrade, StudentGroup,
                                    StudentGroupMember, StudentResponse,
                                    SubmissionGrade)
-# ── 11. Assessment Results (depends on attempt, assessment) ───────────────────
-from app.db.models.result import AssessmentResult, ResultBreakdown
 # ── 1. Audit (no FK deps — always first) ──────────────────────────────────────
 from app.db.models.audit import AuditLog, SecurityEvent
 # ── 2. Auth (defines `user` table) ────────────────────────────────────────────
@@ -90,13 +88,15 @@ from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
 # ── 9. Notifications (depends on user, assessment) ────────────────────────────
 from app.db.models.notification import Notification, Reminder, ScheduledEvent
 # ── 5. Question bank (depends on assessment, academic) ────────────────────────
-from app.db.models.question import (AIQuestionGenerationBatch,
+from app.db.models.question import (AIGeneratedQuestion, AIGenerationBatch,
                                     AIQuestionReview, AssessmentQuestion,
                                     Question, QuestionBankEntry, QuestionBlank,
                                     QuestionOption)
 # ── 10. Resources (depends on user, academic, assessment; pgvector last) ──────
 from app.db.models.resource import (LecturerMaterial, ResourceChunk,
                                     StudentResource)
+# ── 11. Assessment Results (depends on attempt, assessment) ───────────────────
+from app.db.models.result import AssessmentResult, ResultBreakdown
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Public API — explicit __all__ for IDE completion and wildcard imports
@@ -138,7 +138,8 @@ __all__: list[str] = [
     "QuestionOption",
     "QuestionBlank",
     "AssessmentQuestion",
-    "AIQuestionGenerationBatch",
+    "AIGenerationBatch",
+    "AIGeneratedQuestion",
     "AIQuestionReview",
     "QuestionBankEntry",
     # ── Attempt & submission ───────────────────────────────────────────────────

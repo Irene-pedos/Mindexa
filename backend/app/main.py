@@ -22,7 +22,7 @@ LIFESPAN:
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import Any, AsyncGenerator
 
 from app.core.config import settings
 from app.core.exceptions import MindexaError
@@ -132,22 +132,24 @@ def create_application() -> FastAPI:
     async def mindexa_error_handler(request: Request, exc: MindexaError) -> JSONResponse:
         logger.warning(
             "Domain error: %s — %s %s", exc.code, request.method, request.url.path,
-            extra={"error_code": exc.code, "http_status": exc.http_status},
+            extra={"error_code": exc.code, "http_status": exc.status_code},
         )
+        error_response: dict[str, Any] = {
+            "code": exc.code,
+            "message": exc.detail,
+        }
+        # Only include "details" key if context is present
+        if exc.context:
+            error_response["details"] = exc.context
+
         return JSONResponse(
-            status_code=exc.http_status,
-            content={
-                "error": {
-                    "code": exc.code,
-                    "message": exc.message,
-                    "details": exc.details if exc.details else None,
-                }
-            },
+            status_code=exc.status_code,
+            content={"error": error_response},
         )
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
-        field_errors: dict = {}
+        field_errors: dict[str, str] = {}
         for error in exc.errors():
             loc = " → ".join(str(p) for p in error["loc"] if p != "body")
             field_errors[loc or "request"] = error["msg"]
@@ -230,7 +232,7 @@ def create_application() -> FastAPI:
     app.include_router(integrity_router, prefix=API_V1)
 
     @app.get("/", include_in_schema=False)
-    async def root() -> dict:
+    async def root() -> dict[str, str]:
         return {
             "service": settings.APP_NAME,
             "version": settings.APP_VERSION,

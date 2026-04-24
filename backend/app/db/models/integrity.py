@@ -48,24 +48,18 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
+from app.db.base import AppendOnlyModel, BaseModel, utcnow
+from app.db.enums import (IntegrityEventType, IntegrityFlagRaisedBy,
+                          IntegrityFlagStatus, RiskLevel,
+                          SupervisionSessionStatus, WarningLevel)
+from app.db.mixins import composite_index
 from sqlalchemy import Column, ForeignKey, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
-from app.db.base import AppendOnlyModel, BaseModel, utcnow
-from app.db.enums import (
-    IntegrityEventType,
-    IntegrityFlagRaisedBy,
-    IntegrityFlagStatus,
-    RiskLevel,
-    SupervisionSessionStatus,
-    WarningLevel,
-)
-from app.db.mixins import composite_index
-
 if TYPE_CHECKING:
-    from app.db.models.attempt import AssessmentAttempt
     from app.db.models.assessment import Assessment
+    from app.db.models.attempt import AssessmentAttempt
 
 
 class IntegrityEvent(AppendOnlyModel, table=True):

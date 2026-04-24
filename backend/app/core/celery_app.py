@@ -87,9 +87,11 @@ def create_celery() -> Celery:
         Queue("email", email_exchange, routing_key="email"),
         Queue("cleanup", cleanup_exchange, routing_key="cleanup"),
     ]
-    app.conf.task_default_queue = "default"
-    app.conf.task_default_exchange = "default"
-    app.conf.task_default_routing_key = "default"
+    app.conf.update(
+        task_default_queue="default",
+        task_default_exchange="default",
+        task_default_routing_key="default",
+    )
 
     # ── Task routing ──────────────────────────────────────────────────────────
     app.conf.task_routes = {

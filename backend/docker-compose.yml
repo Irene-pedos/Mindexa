@@ -41,8 +41,8 @@ services:
     container_name: mindexa-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-mindexa}
-      POSTGRES_USER: ${POSTGRES_USER:-mindexa}
+      POSTGRES_DB: ${POSTGRES_DB:-mindexa_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       # Performance tuning for a 2GB RAM server
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
@@ -51,12 +51,12 @@ services:
       # Optional: custom postgres config
       # - ./infra/postgres/postgresql.conf:/etc/postgresql/postgresql.conf
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${POSTGRES_PORT:-5433}:5433"
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-mindexa} -d ${POSTGRES_DB:-mindexa}",
+          "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-mindexa_db}",
         ]
       interval: 10s
       timeout: 5s
@@ -103,7 +103,7 @@ services:
       - .env
     environment:
       # Override DB/Redis URLs to use Docker service names
-      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5433/${POSTGRES_DB:-mindexa_db}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -152,7 +152,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5433/${POSTGRES_DB:-mindexa_db}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2
@@ -198,7 +198,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-mindexa}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mindexa}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@postgres:5433/${POSTGRES_DB:-mindexa_db}
       REDIS_URL: redis://redis:6379/0
       CELERY_BROKER_URL: redis://redis:6379/1
       CELERY_RESULT_BACKEND: redis://redis:6379/2

@@ -134,7 +134,6 @@ async def calculate_result(
     """
     service = ResultService(db)
     result, created = await service.calculate_result(attempt_id=attempt_id)
-    await db.commit()
     return AssessmentResultResponse.model_validate(result)
 
 
@@ -165,7 +164,6 @@ async def release_results(
         released_by_id=current_user.id,
         attempt_ids=body.attempt_ids,
     )
-    await db.commit()
     return ResultReleaseResponse(**release_data)
 
 
@@ -196,7 +194,6 @@ async def clear_integrity_hold(
         result_id=result_id,
         cleared_by_id=current_user.id,
     )
-    await db.commit()
     return {
         "message": "Integrity hold cleared. Result is now eligible for release.",
         "result_id": str(result_id),

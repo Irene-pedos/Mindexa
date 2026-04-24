@@ -97,7 +97,7 @@ async def _check_redis() -> dict[str, Any]:
     response_description="Service health with dependency status",
     include_in_schema=False,
 )
-async def health_check() -> dict[str, Any]:
+async def health_check() -> Response:
     """
     Comprehensive health check.
 
@@ -229,7 +229,7 @@ async def _build_prometheus_metrics() -> list[str]:
     lines: list[str] = []
     now_ms = int(time.time() * 1000)
 
-    def metric(name: str, value: Any, labels: dict = None, help_text: str = "", type_: str = "gauge") -> None:
+    def metric(name: str, value: Any, labels: dict | None = None, help_text: str = "", type_: str = "gauge") -> None:
         if help_text:
             lines.append(f"# HELP {name} {help_text}")
         lines.append(f"# TYPE {name} {type_}")
@@ -256,17 +256,17 @@ async def _build_prometheus_metrics() -> list[str]:
         pool = async_engine.pool
         metric(
             "mindexa_db_pool_size",
-            pool.size(),
+            getattr(pool, "size", lambda: 0)(),
             help_text="Database connection pool size",
         )
         metric(
             "mindexa_db_pool_checked_out",
-            pool.checkedout(),
+            getattr(pool, "checkedout", lambda: 0)(),
             help_text="Database connections currently in use",
         )
         metric(
             "mindexa_db_pool_overflow",
-            pool.overflow(),
+            getattr(pool, "overflow", lambda: 0)(),
             help_text="Database overflow connections",
         )
     except Exception:

@@ -52,10 +52,11 @@ RESPONSE PATTERNS:
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
 import structlog
 from app.core.config import settings
+from app.core.constants import UserRole as CoreUserRole
 from app.core.exceptions import AuthenticationError, InvalidTokenError
 from app.db.schemas.auth import (AuthMessageResponse, ChangePasswordRequest,
                                  ForgotPasswordRequest, LoginResponse,
@@ -70,6 +71,7 @@ from app.db.session import get_db
 from app.dependencies.auth import (ActiveUser, CurrentUser, VerifiedUser,
                                    require_active_user, require_verified_email)
 from app.services.auth_service import AuthService
+from app.workers.tasks import send_email_notification
 from fastapi import APIRouter, Cookie, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -229,24 +231,25 @@ async def register(
         password=body.password,
         first_name=body.first_name,
         last_name=body.last_name,
-        role=body.role,
+        role=CoreUserRole(body.role.value) if hasattr(body.role, "value") else CoreUserRole(str(body.role)),
         ip_address=ip,
     )
 
     # ── EMAIL SENDING HOOK ────────────────────────────────────────────────────
-    # TODO (Email Phase): Send verification email here.
-    # The raw_verification_token should be included as a URL query parameter:
-    #   https://app.mindexa.ac/verify-email?token={raw_verification_token}
-    #
-    # Example Celery task call (when email tasks are implemented):
-    #   from app.workers.tasks.email import send_verification_email
-    #   send_verification_email.delay(
-    #       recipient_email=user.email,
-    #       token=raw_verification_token,
-    #       user_name=body.first_name,
-    #   )
-    #
-    # For now, log the token in development so you can test manually:
+    # Dispatch verification email via Celery
+    verification_url = settings.build_verification_url(raw_verification_token)
+    send_email_notification.delay(
+        to_email=user.email,
+        subject="Verify your Mindexa account",
+        template_name="verification",
+        context={
+            "first_name": body.first_name,
+            "verification_url": verification_url,
+            "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
+            "app_name": settings.APP_NAME,
+        },
+    )
+
     if settings.is_development:
         logger.debug(
             "dev_verification_token",
@@ -254,8 +257,6 @@ async def register(
             token=raw_verification_token,
         )
     # ── END EMAIL HOOK ────────────────────────────────────────────────────────
-
-    await db.commit()
 
     return AuthMessageResponse(
         message=(
@@ -321,8 +322,6 @@ async def login(
     # Set refresh token as HttpOnly cookie
     _set_refresh_cookie(response, result["refresh_token"])
 
-    await db.commit()
-
     return LoginResponse(
         access_token=result["access_token"],
         token_type="bearer",
@@ -386,8 +385,6 @@ async def refresh_tokens(
     # Update the cookie with the new refresh token
     _set_refresh_cookie(response, result["refresh_token"])
 
-    await db.commit()
-
     return TokenResponse(
         access_token=result["access_token"],
         token_type="bearer",
@@ -448,8 +445,6 @@ async def logout(
     # Clear the refresh token cookie
     _clear_refresh_cookie(response)
 
-    await db.commit()
-
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -486,8 +481,6 @@ async def logout_all_sessions(
 
     # Clear cookie on this device
     _clear_refresh_cookie(response)
-
-    await db.commit()
 
     return AuthMessageResponse(
         message=f"Successfully logged out from {count} active session(s).",
@@ -538,8 +531,6 @@ async def verify_email(
 
     await service.verify_email(raw_token=token, ip_address=ip)
 
-    await db.commit()
-
     return AuthMessageResponse(
         message=(
             "Email address verified successfully. "
@@ -582,19 +573,26 @@ async def resend_verification(
     ip = _get_client_ip(request)
     service = AuthService(db)
 
-    raw_token = await service.resend_verification_email(
+    user, raw_token = await service.resend_verification_email(
         email=str(body.email),
         ip_address=ip,
     )
 
-    if raw_token:
+    if raw_token and user:
         # ── EMAIL SENDING HOOK ────────────────────────────────────────────────
-        # TODO (Email Phase): Send new verification email.
-        # from app.workers.tasks.email import send_verification_email
-        # send_verification_email.delay(
-        #     recipient_email=str(body.email),
-        #     token=raw_token,
-        # )
+        # Dispatch new verification email via Celery
+        verification_url = settings.build_verification_url(raw_token)
+        send_email_notification.delay(
+            to_email=user.email,
+            subject="Verify your Mindexa account",
+            template_name="verification",
+            context={
+                "first_name": user.profile.first_name if user.profile else "there",
+                "verification_url": verification_url,
+                "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
+                "app_name": settings.APP_NAME,
+            },
+        )
         if settings.is_development:
             logger.debug(
                 "dev_resend_verification_token",
@@ -602,8 +600,6 @@ async def resend_verification(
                 token=raw_token,
             )
         # ── END EMAIL HOOK ────────────────────────────────────────────────────
-
-    await db.commit()
 
     # Always return the same message (prevents enumeration)
     return AuthMessageResponse(
@@ -647,22 +643,26 @@ async def forgot_password(
     ip = _get_client_ip(request)
     service = AuthService(db)
 
-    raw_token = await service.request_password_reset(
+    user, raw_token = await service.request_password_reset(
         email=str(body.email),
         ip_address=ip,
     )
 
-    if raw_token:
+    if raw_token and user:
         # ── EMAIL SENDING HOOK ────────────────────────────────────────────────
-        # TODO (Email Phase): Send password reset email.
-        # The reset link should look like:
-        #   https://app.mindexa.ac/reset-password?token={raw_token}
-        #
-        # from app.workers.tasks.email import send_password_reset_email
-        # send_password_reset_email.delay(
-        #     recipient_email=str(body.email),
-        #     token=raw_token,
-        # )
+        # Dispatch password reset email via Celery
+        reset_url = settings.build_password_reset_url(raw_token)
+        send_email_notification.delay(
+            to_email=user.email,
+            subject="Reset your Mindexa password",
+            template_name="password_reset",
+            context={
+                "first_name": user.profile.first_name if user.profile else "there",
+                "reset_url": reset_url,
+                "expires_minutes": settings.PASSWORD_RESET_EXPIRE_MINUTES,
+                "app_name": settings.APP_NAME,
+            },
+        )
         if settings.is_development:
             logger.debug(
                 "dev_password_reset_token",
@@ -670,8 +670,6 @@ async def forgot_password(
                 token=raw_token,
             )
         # ── END EMAIL HOOK ────────────────────────────────────────────────────
-
-    await db.commit()
 
     # Always the same message — prevents email enumeration
     return AuthMessageResponse(
@@ -722,8 +720,6 @@ async def reset_password(
         new_password=body.new_password,
         ip_address=ip,
     )
-
-    await db.commit()
 
     return AuthMessageResponse(
         message=(
@@ -803,7 +799,6 @@ async def update_me(
     db.add(profile)
     await db.flush()
     await db.refresh(profile)
-    await db.commit()
 
     return _build_user_response(current_user)
 
@@ -851,8 +846,6 @@ async def change_password(
     # Clear the refresh token cookie on this device too
     # (user will need to log in again with new password on all devices)
     _clear_refresh_cookie(response)
-
-    await db.commit()
 
     return AuthMessageResponse(
         message=(

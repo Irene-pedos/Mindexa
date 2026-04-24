@@ -147,7 +147,7 @@ class RedisCache:
         namespace: str,
         key: str,
         value: Any,
-        ttl: int = None,
+        ttl: int | None = None,
     ) -> None:
         """Generic cache set with TTL (default: REDIS_CACHE_DEFAULT_TTL)."""
         await self._set_json(

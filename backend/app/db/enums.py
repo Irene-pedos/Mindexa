@@ -100,8 +100,9 @@ class BlueprintRuleType(str, Enum):
     SECTION_MARKS = "section_marks"
     TOPIC_COVERAGE = "topic_coverage"
 
-
-BlueprintRuleType.ALL_TYPES = {member.value for member in BlueprintRuleType}
+    @classmethod
+    def all_types(cls) -> set[str]:
+        return {member.value for member in cls}
 
 
 class QuestionType(str, Enum):
@@ -241,6 +242,7 @@ class GradingQueueStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    FAILED = "failed"
 
 
 class GradingQueuePriority(str, Enum):

@@ -59,7 +59,6 @@ async def generate_questions(
 ) -> AIGenerationBatchDetailResponse:
     svc = _service(db)
     result = await svc.generate_questions_batch(body, current_user)
-    await db.commit()
     return result
 
 
@@ -127,7 +126,6 @@ async def review_ai_question(
     review, promoted_question = await svc.review_ai_question(
         ai_question_id, body, current_user
     )
-    await db.commit()
 
     response: dict = {
         "review": {

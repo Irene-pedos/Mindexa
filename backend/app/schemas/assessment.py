@@ -135,10 +135,10 @@ class AssessmentCreateRequest(BaseModel):
     description: Optional[str] = None
     instructions: Optional[str] = None
     assessment_type: str = Field(default=AssessmentType.FORMATIVE.value)
+    course_id: Optional[uuid.UUID] = None
+    subject_id: Optional[uuid.UUID] = None
     grading_mode: str = Field(default=GradingMode.MANUAL.value)
     result_release_mode: str = Field(default="manual")
-    subject: Optional[str] = Field(default=None, max_length=200)
-    target_class: Optional[str] = Field(default=None, max_length=200)
     total_marks: int = Field(default=100, ge=1, le=10000)
     passing_marks: Optional[int] = Field(default=None, ge=0)
     duration_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
@@ -182,21 +182,21 @@ class AssessmentSecuritySettingsUpdate(BaseModel):
     window_start: Optional[datetime] = None
     window_end: Optional[datetime] = None
     max_attempts: int = Field(default=1, ge=1, le=10)
-    grace_period_minutes: int = Field(default=0, ge=0, le=60)
-    allow_late_submission: bool = False
-    late_submission_penalty_percent: int = Field(default=0, ge=0, le=100)
+    grace_period_minutes: Optional[int] = Field(default=0, ge=0, le=60)
+    late_submission_allowed: bool = False
+    late_penalty_percent: Optional[float] = Field(default=0, ge=0, le=100)
     is_password_protected: bool = False
     access_password: Optional[str] = Field(
         default=None, min_length=4, max_length=50,
         description="Plain text password (will be hashed before storage)"
     )
-    is_fullscreen_required: bool = True
+    fullscreen_required: bool = True
     is_supervised: bool = False
-    is_ai_allowed: bool = False
+    ai_assistance_allowed: bool = False
     is_open_book: bool = False
-    is_integrity_monitoring_enabled: bool = True
-    is_shuffle_enabled: bool = False
-    is_shuffle_options_enabled: bool = False
+    integrity_monitoring_enabled: bool = True
+    randomize_questions: bool = Field(default=False, alias="randomise_questions")
+    randomize_options: bool = Field(default=False, alias="randomise_options")
 
     @model_validator(mode="after")
     def validate_window(self) -> "AssessmentSecuritySettingsUpdate":
@@ -220,6 +220,7 @@ class AssessmentGeneralUpdate(BaseModel):
     grading_mode: Optional[str] = None
     result_release_mode: Optional[str] = None
     subject: Optional[str] = Field(default=None, max_length=200)
+    subject_id: Optional[uuid.UUID] = None
     target_class: Optional[str] = Field(default=None, max_length=200)
     total_marks: Optional[int] = Field(default=None, ge=1, le=10000)
     passing_marks: Optional[int] = Field(default=None, ge=0)
@@ -227,7 +228,7 @@ class AssessmentGeneralUpdate(BaseModel):
     show_marks_per_question: Optional[bool] = None
     show_feedback_after_submit: Optional[bool] = None
     is_ai_generation_enabled: Optional[bool] = None
-    wizard_step: Optional[int] = Field(default=None, ge=1, le=5)
+    draft_step: Optional[int] = Field(default=None, ge=1, le=6)
 
     model_config = {"str_strip_whitespace": True}
 
@@ -248,7 +249,7 @@ class AssessmentSummaryResponse(BaseModel):
     window_start: Optional[datetime]
     window_end: Optional[datetime]
     is_finalized: bool
-    wizard_step: int
+    draft_step: Optional[int]
     created_by_id: uuid.UUID
     subject: Optional[str]
     target_class: Optional[str]
@@ -275,21 +276,21 @@ class AssessmentDetailResponse(BaseModel):
     window_start: Optional[datetime]
     window_end: Optional[datetime]
     max_attempts: int
-    grace_period_minutes: int
-    allow_late_submission: bool
-    late_submission_penalty_percent: int
+    grace_period_minutes: Optional[int]
+    late_submission_allowed: bool
+    late_penalty_percent: Optional[float]
     is_password_protected: bool
-    is_fullscreen_required: bool
+    fullscreen_required: bool
     is_supervised: bool
-    is_ai_allowed: bool
+    ai_assistance_allowed: bool
     is_open_book: bool
-    is_integrity_monitoring_enabled: bool
-    is_shuffle_enabled: bool
-    is_shuffle_options_enabled: bool
+    integrity_monitoring_enabled: bool
+    randomize_questions: bool = Field(serialization_alias="randomise_questions")
+    randomize_options: bool = Field(serialization_alias="randomise_options")
     is_ai_generation_enabled: bool
     show_marks_per_question: bool
     show_feedback_after_submit: bool
-    wizard_step: int
+    draft_step: Optional[int]
     is_finalized: bool
     finalized_at: Optional[datetime]
     subject: Optional[str]
@@ -302,7 +303,7 @@ class AssessmentDetailResponse(BaseModel):
     assessment_questions: List[AssessmentQuestionResponse] = []
     draft_progress: Optional[AssessmentDraftProgressResponse] = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class AssessmentListResponse(BaseModel):

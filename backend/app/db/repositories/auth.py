@@ -170,7 +170,8 @@ class UserRepository:
 
     async def soft_delete(self, user: User) -> None:
         """Soft-delete a user account (preserves academic records)."""
-        user.soft_delete()
+        user.is_deleted = True
+        user.deleted_at = datetime.now(timezone.utc)
         self.db.add(user)
         await self.db.flush()
 
@@ -205,7 +206,6 @@ class RefreshTokenRepository:
                 RefreshToken.jti == jti,
                 RefreshToken.revoked == False,
                 RefreshToken.expires_at > now,
-                RefreshToken.is_deleted == False,
             )
         )
         return result.scalar_one_or_none()
@@ -221,7 +221,6 @@ class RefreshTokenRepository:
                 RefreshToken.user_id == user_id,
                 RefreshToken.revoked == False,
                 RefreshToken.expires_at > now,
-                RefreshToken.is_deleted == False,
             )
         )
         return list(result.scalars().all())
@@ -313,7 +312,7 @@ class PasswordResetTokenRepository:
     Data access methods for the `password_reset_token` table.
 
     Covers both password-reset and email-verification token types.
-    The token_type field distinguishes them.
+    The token_purpose field distinguishes them.
     """
 
     def __init__(self, db: AsyncSession) -> None:
@@ -324,7 +323,7 @@ class PasswordResetTokenRepository:
     async def get_by_hash(
         self,
         token_hash: str,
-        token_type: str,
+        token_purpose: str,
     ) -> Optional[PasswordResetToken]:
         """
         Fetch an unused, non-expired token by its SHA-256 hash and type.
@@ -336,10 +335,9 @@ class PasswordResetTokenRepository:
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.token_hash == token_hash,
-                PasswordResetToken.token_type == token_type,
-                PasswordResetToken.used == False,
+                PasswordResetToken.token_purpose == token_purpose,
+                PasswordResetToken.used.is_(False),
                 PasswordResetToken.expires_at > now,
-                PasswordResetToken.is_deleted == False,
             )
         )
         return result.scalar_one_or_none()
@@ -347,7 +345,7 @@ class PasswordResetTokenRepository:
     async def get_active_for_user(
         self,
         user_id: uuid.UUID,
-        token_type: str,
+        token_purpose: str,
     ) -> Optional[PasswordResetToken]:
         """
         Fetch the most recent unused, non-expired token of a given type for a user.
@@ -357,10 +355,9 @@ class PasswordResetTokenRepository:
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.token_type == token_type,
-                PasswordResetToken.used == False,
+                PasswordResetToken.token_purpose == token_purpose,
+                PasswordResetToken.used.is_(False),
                 PasswordResetToken.expires_at > now,
-                PasswordResetToken.is_deleted == False,
             ).order_by(col(PasswordResetToken.created_at).desc()).limit(1)
         )
         return result.scalar_one_or_none()
@@ -388,7 +385,7 @@ class PasswordResetTokenRepository:
     async def invalidate_all_for_user(
         self,
         user_id: uuid.UUID,
-        token_type: str,
+        token_purpose: str,
     ) -> int:
         """
         Hard-delete all unused tokens of a given type for a user.
@@ -398,9 +395,8 @@ class PasswordResetTokenRepository:
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.token_type == token_type,
-                PasswordResetToken.used == False,
-                PasswordResetToken.is_deleted == False,
+                PasswordResetToken.token_purpose == token_purpose,
+                PasswordResetToken.used.is_(False),
             )
         )
         tokens = list(result.scalars().all())
@@ -414,7 +410,7 @@ class PasswordResetTokenRepository:
         await self.db.delete(token)
         await self.db.flush()
 
-    async def delete_expired(self, user_id: uuid.UUID, token_type: str) -> int:
+    async def delete_expired(self, user_id: uuid.UUID, token_purpose: str) -> int:
         """
         Hard-delete expired tokens for a user + type combination.
         Called opportunistically on each new token issuance.
@@ -424,7 +420,7 @@ class PasswordResetTokenRepository:
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user_id,
-                PasswordResetToken.token_type == token_type,
+                PasswordResetToken.token_purpose == token_purpose,
                 PasswordResetToken.expires_at <= now,
             )
         )
@@ -456,7 +452,7 @@ class UserProfileRepository:
         result = await self.db.execute(
             select(UserProfile).where(
                 UserProfile.user_id == user_id,
-                UserProfile.is_deleted == False,
+                UserProfile.is_deleted.is_(False),
             )
         )
         return result.scalar_one_or_none()

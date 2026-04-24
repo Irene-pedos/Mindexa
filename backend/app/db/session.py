@@ -42,6 +42,7 @@ def _build_engine() -> AsyncEngine:
 
 
 engine: AsyncEngine = _build_engine()
+async_engine = engine  # Alias for compatibility
 
 AsyncSessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(
     bind=engine,
@@ -50,6 +51,7 @@ AsyncSessionFactory: async_sessionmaker[AsyncSession] = async_sessionmaker(
     autoflush=False,
     autocommit=False,
 )
+AsyncSessionLocal = AsyncSessionFactory  # Alias for compatibility
 
 
 async def get_db() -> AsyncGenerator[AsyncSession, None]:

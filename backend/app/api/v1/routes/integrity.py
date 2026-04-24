@@ -74,7 +74,6 @@ async def record_event(
         event_type=body.event_type,
         metadata_json=body.metadata_json,
     )
-    await db.commit()
 
     response: dict = {
         "event_id": str(event.id),
@@ -113,7 +112,6 @@ async def acknowledge_warning(
         student_id=current_user.id,
         access_token=body.access_token,
     )
-    await db.commit()
     return {"message": "Warning acknowledged", "warning_id": str(body.warning_id)}
 
 
@@ -154,7 +152,6 @@ async def raise_flag(
         risk_level=body.risk_level,
         evidence_event_ids=[str(e) for e in body.evidence_event_ids] if body.evidence_event_ids else None,
     )
-    await db.commit()
     return IntegrityFlagResponse.model_validate(flag)
 
 
@@ -185,7 +182,6 @@ async def resolve_flag(
         resolved_by_id=current_user.id,
         resolution_notes=body.resolution_notes,
     )
-    await db.commit()
     return {
         "message": f"Flag resolved with status: {body.status}",
         "flag_id": str(flag_id),
@@ -310,7 +306,6 @@ async def start_supervision(
         assessment_id=assessment_id,
         supervisor_id=current_user.id,
     )
-    await db.commit()
     return {
         "message": "Supervision session started",
         "assessment_id": str(assessment_id),
@@ -338,7 +333,6 @@ async def end_supervision(
         assessment_id=assessment_id,
         supervisor_id=current_user.id,
     )
-    await db.commit()
     return {
         "message": "Supervision session ended",
         "assessment_id": str(assessment_id),

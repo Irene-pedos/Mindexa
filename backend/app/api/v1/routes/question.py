@@ -18,6 +18,7 @@ import uuid
 from typing import List, Optional
 
 from app.db.models.auth import User
+from app.db.models.question import Question
 from app.db.session import get_db
 from app.dependencies.auth import (require_active_user,
                                    require_lecturer_or_admin)
@@ -59,7 +60,6 @@ async def create_question(
 ) -> QuestionDetailResponse:
     svc = _service(db)
     question = await svc.create_question(body, current_user)
-    await db.commit()
     # Reload with relationships
     question = await svc.get_question(question.id)
     return _to_detail_response(question)
@@ -115,9 +115,17 @@ async def list_tags(
     db: AsyncSession = Depends(get_db),
 ) -> List[QuestionTagResponse]:
     from app.db.repositories.question_repo import QuestionRepository
+
     repo = QuestionRepository(db)
     tags = await repo.list_tags()
-    return [QuestionTagResponse.model_validate(t) for t in tags]
+    return [
+        QuestionTagResponse(
+            id=uuid.uuid5(uuid.NAMESPACE_URL, f"question-tag:{tag}"),
+            name=tag,
+            description=None,
+        )
+        for tag in tags
+    ]
 
 
 @router.get(
@@ -152,7 +160,6 @@ async def update_question(
 ) -> QuestionDetailResponse:
     svc = _service(db)
     question = await svc.version_question(question_id, body, current_user)
-    await db.commit()
     question = await svc.get_question(question.id)
     return _to_detail_response(question)
 
@@ -173,7 +180,6 @@ async def delete_question(
 ) -> None:
     svc = _service(db)
     await svc.soft_delete_question(question_id, current_user)
-    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -191,10 +197,9 @@ async def attach_tags(
     body: AttachTagsRequest,
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     svc = _service(db)
     await svc.attach_tags(question_id, body.tag_names)
-    await db.commit()
     return {"message": f"Attached {len(body.tag_names)} tag(s) to question."}
 
 
@@ -207,10 +212,9 @@ async def detach_tags(
     body: DetachTagsRequest,
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
-) -> dict:
+) -> dict[str, str]:
     svc = _service(db)
     await svc.detach_tags(question_id, body.tag_names)
-    await db.commit()
     return {"message": f"Detached {len(body.tag_names)} tag(s) from question."}
 
 
@@ -219,18 +223,27 @@ async def detach_tags(
 # ---------------------------------------------------------------------------
 
 
-def _to_detail_response(question) -> QuestionDetailResponse:
+def _to_detail_response(question: Question) -> QuestionDetailResponse:
     """Safely serialise a Question ORM object to QuestionDetailResponse."""
     from app.schemas.question import (QuestionOptionResponse,
                                       QuestionTagResponse)
 
-    options = [
-        QuestionOptionResponse.model_validate(opt) for opt in (question.options or [])
-    ]
+    options = []
+    if question.options:
+        options = [
+            QuestionOptionResponse.model_validate(opt) for opt in question.options
+        ]
+
     tags = []
-    for link in question.tag_links or []:
-        if link.tag:
-            tags.append(QuestionTagResponse.model_validate(link.tag))
+    if question.topic_tag:
+        # The current model stores a single topic_tag string; synthesize a stable ID.
+        tags.append(
+            QuestionTagResponse(
+                id=uuid.uuid5(uuid.NAMESPACE_URL, f"question-tag:{question.topic_tag}"),
+                name=question.topic_tag,
+                description=None,
+            )
+        )
 
     return QuestionDetailResponse(
         id=question.id,
@@ -239,18 +252,18 @@ def _to_detail_response(question) -> QuestionDetailResponse:
         hint=getattr(question, "hint", None),
         question_type=question.question_type,
         difficulty=question.difficulty,
-        grading_mode=question.grading_mode,
-        status=question.status,
+        grading_mode=getattr(question, "grading_mode", "auto"),
+        status=getattr(question, "status", "active"),
         source_type=question.source_type,
-        subject=question.subject,
-        topic=question.topic,
-        bloom_level=question.bloom_level,
-        suggested_marks=question.suggested_marks,
-        estimated_time_minutes=question.estimated_time_minutes,
+        subject=getattr(question, "subject", None),
+        topic=question.topic_tag,
+        bloom_level=getattr(question, "bloom_level", None),
+        suggested_marks=question.marks,
+        estimated_time_minutes=getattr(question, "estimated_time_minutes", 0),
         fill_blank_template=getattr(question, "fill_blank_template", None),
         correct_order_json=getattr(question, "correct_order_json", None),
         is_active=question.is_active,
-        version_number=question.version_number,
+        version_number=question.version,
         parent_question_id=question.parent_question_id,
         created_by_id=question.created_by_id,
         created_at=question.created_at,

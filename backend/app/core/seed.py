@@ -47,7 +47,8 @@ from app.core.security import hash_password, normalize_email
 from app.db.enums import (AssessmentStatus, AssessmentType, AttemptStatus,
                           DifficultyLevel, GradingMode, QuestionSourceType,
                           QuestionType, ResultReleaseMode,
-                          SubmissionAnswerType, SupervisorRole)
+                          SubmissionAnswerType, SupervisorRole, UserRole,
+                          UserStatus)
 from app.db.models.attempt import AssessmentAttempt, StudentResponse
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -176,7 +177,7 @@ async def seed_users(
         repo, session,
         email=ADMIN_EMAIL,
         password=ADMIN_PASSWORD,
-        role="admin",
+        role=UserRole.ADMIN.value,
         first_name=ADMIN_FIRST,
         last_name=ADMIN_LAST,
         label="Admin",
@@ -186,7 +187,7 @@ async def seed_users(
         repo, session,
         email=LECTURER_EMAIL,
         password=LECTURER_PASSWORD,
-        role="lecturer",
+        role=UserRole.LECTURER.value,
         first_name=LECTURER_FIRST,
         last_name=LECTURER_LAST,
         label="Lecturer",
@@ -196,7 +197,7 @@ async def seed_users(
         repo, session,
         email=STUDENT_EMAIL,
         password=STUDENT_PASSWORD,
-        role="student",
+        role=UserRole.STUDENT.value,
         first_name=STUDENT_FIRST,
         last_name=STUDENT_LAST,
         label="Student",
@@ -228,21 +229,28 @@ async def _ensure_user(
         return existing.id
 
     pw_hash = hash_password(password)
-    user = await repo.create_user(
-        email=normalized,
-        hashed_password=pw_hash,
-        role=role,
-        status="active",
+    from app.db.models.auth import User
+    user = await repo.create(
+        User(
+            email=normalized,
+            hashed_password=pw_hash,
+            role=role,
+            status="active",
+        )
     )
 
-    await repo.create_profile(
+    from app.db.models.auth import UserProfile
+    profile = UserProfile(
         user_id=user.id,
         first_name=first_name,
         last_name=last_name,
     )
+    session.add(profile)
 
-    # Mark email verified — seed accounts don't need verification flow
-    await repo.mark_email_verified(user.id)
+    # Mark email verified and active — seed accounts don't need verification flow
+    user.email_verified = True
+    user.email_verified_at = _utcnow()
+    user.status = "active"
 
     await session.flush()
     logger.info("  %s user created (%s)", label, email)
@@ -483,7 +491,7 @@ async def seed_assessment(
     # Immediately set status to ACTIVE and publish timestamps
     await repo.update_fields(
         assessment.id,
-        updated_by_id=lecturer_id,
+        lecturer_id,
         status=AssessmentStatus.ACTIVE,
         window_start=window_start,
         window_end=window_end,
@@ -830,6 +838,7 @@ async def seed_attempt_data(
         assessment_id=assessment_id,
         student_id=student_id,
         attempt_number=1,
+        grading_mode=GradingMode.AUTO,
         status=AttemptStatus.IN_PROGRESS,
         started_at=now,
         expires_at=expires_at,
@@ -1019,7 +1028,7 @@ async def reset_seed_data(session: AsyncSession) -> None:
         "subject",
         "course",
         # Phase 3 — auth
-        "security_events",
+        "security_event",
         "password_reset_tokens",
         "refresh_tokens",
         "user_profiles",

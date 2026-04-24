@@ -28,7 +28,7 @@ IMPORT ALIGNMENT:
     - Crypto from app.core.security (hash_password, verify_password,
       create_access_token, create_refresh_token, decode_token,
       generate_secure_token, TokenPayload, TokenType)
-    - Redis from app.core.redis (blocklist_token, is_token_blocklisted)
+    - Redis from app.core.redis (cache_revoked_jti, is_jti_revoked_in_cache)
 """
 
 from __future__ import annotations
@@ -39,11 +39,11 @@ from datetime import datetime, timedelta, timezone
 import bcrypt
 from app.core.config import settings
 from app.core.constants import (SecurityEventSeverity, SecurityEventType,
-                                 TokenType, UserRole, UserStatus)
+                                TokenType, UserRole, UserStatus)
 from app.core.exceptions import (AccountLockedError, AlreadyExistsError,
                                  AuthenticationError, InvalidTokenError,
                                  NotFoundError, PermissionDeniedError)
-from app.core.logging import get_logger
+from app.core.logger import get_logger
 from app.core.redis import cache_revoked_jti, is_jti_revoked_in_cache
 from app.core.security import (TOKEN_TYPE_REFRESH, TokenPayload,
                                create_access_token, create_refresh_token,
@@ -54,7 +54,6 @@ from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
 from app.db.repositories.auth import (PasswordResetTokenRepository,
                                       RefreshTokenRepository, UserRepository)
 from sqlalchemy.ext.asyncio import AsyncSession
-
 
 logger = get_logger(__name__)
 
@@ -167,16 +166,19 @@ class AuthService:
         raw_token = await self._create_verification_token(user.id)
 
         await self._record_security_event(
-            event_type="account_created",
+            event_type=SecurityEventType.ACCOUNT_CREATED,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
         logger.info(
             "user_registered",
-            user_id=str(user.id),
-            email=email,
-            role=role.value,
+            extra={
+                "user_id": str(user.id),
+                "email": email,
+                "role": role.value,
+            },
         )
 
         return user, raw_token
@@ -228,9 +230,11 @@ class AuthService:
         if user is None:
             _dummy_bcrypt_verify()
             await self._record_security_event(
-                event_type="login_failed_unknown_email",
+                event_type=SecurityEventType.LOGIN_FAILED,
                 user_id=None,
+                severity=SecurityEventSeverity.LOW,
                 ip_address=ip_address,
+                details={"reason": "unknown_email"},
             )
             raise AuthenticationError("Invalid email or password.")
 
@@ -240,8 +244,9 @@ class AuthService:
         # Temporary lockout check
         if user.locked_until and user.locked_until > datetime.now(timezone.utc):
             await self._record_security_event(
-                event_type="login_blocked_lockout",
+                event_type=SecurityEventType.LOGIN_LOCKED,
                 user_id=user.id,
+                severity=SecurityEventSeverity.MEDIUM,
                 ip_address=ip_address,
             )
             raise AccountLockedError(
@@ -265,37 +270,43 @@ class AuthService:
                 await self._users.update(user)
 
                 await self._record_security_event(
-                    event_type="account_locked",
+                    event_type=SecurityEventType.LOGIN_LOCKED,
                     user_id=user.id,
+                    severity=SecurityEventSeverity.CRITICAL,
                     ip_address=ip_address,
-                    extra={"failed_count": new_count},
+                    details={"failed_count": new_count},
                 )
                 logger.warning(
                     "account_locked",
-                    user_id=str(user.id),
-                    failed_count=new_count,
+                    extra={
+                        "user_id": str(user.id),
+                        "failed_count": new_count,
+                    },
                 )
                 # Still raise the same vague error — don't reveal lockout reason
                 raise AuthenticationError("Invalid email or password.")
 
             await self._record_security_event(
-                event_type="login_failed_wrong_password",
+                event_type=SecurityEventType.LOGIN_FAILED,
                 user_id=user.id,
+                severity=SecurityEventSeverity.LOW,
                 ip_address=ip_address,
-                extra={"failed_count": new_count},
+                details={"failed_count": new_count},
             )
             raise AuthenticationError("Invalid email or password.")
 
         # ── Successful authentication ──────────────────────────────────────
         await self._users.set_last_login(user)
 
-        access_token, access_expires_at = create_access_token(
+        access_token, _access_jti, access_expires_at = create_access_token(
             user_id=str(user.id),
             role=user.role,
             email=user.email,
+            return_expires=True,
         )
         refresh_token_str, refresh_jti, refresh_expires_at = create_refresh_token(
-            str(user.id)
+            str(user.id),
+            return_expires=True,
         )
 
         new_refresh_token = RefreshToken(
@@ -308,12 +319,16 @@ class AuthService:
         await self._refresh_tokens.create(new_refresh_token)
 
         await self._record_security_event(
-            event_type="login_success",
+            event_type=SecurityEventType.LOGIN_SUCCESS,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
-        logger.info("login_success", user_id=str(user.id), email=user.email)
+        logger.info(
+            "login_success",
+            extra={"user_id": str(user.id), "email": user.email},
+        )
 
         return {
             "access_token":  access_token,
@@ -322,7 +337,7 @@ class AuthService:
             "refresh_token": refresh_token_str,
             "jti":           refresh_jti,
             "user_id":       user.id,
-            "role":          user.role.value,
+            "role":          user.role,
             "email":         user.email,
         }
 
@@ -361,13 +376,14 @@ class AuthService:
         user_id_str: str = payload.sub
 
         # Step 2: Redis fast-path revocation check
-
-        if await is_token_blocklisted(jti):
+        if await is_jti_revoked_in_cache(jti):
             logger.warning(
                 "refresh_token_replayed_or_stolen",
-                jti=jti,
-                user_id=user_id_str,
-                ip=ip_address,
+                extra={
+                    "jti": jti,
+                    "user_id": user_id_str,
+                    "ip": ip_address,
+                },
             )
             # Revoke all sessions — potential theft scenario
             try:
@@ -382,8 +398,10 @@ class AuthService:
         if db_token is None:
             logger.warning(
                 "refresh_token_not_in_db",
-                jti=jti,
-                user_id=user_id_str,
+                extra={
+                    "jti": jti,
+                    "user_id": user_id_str,
+                },
             )
             raise InvalidTokenError("Refresh token is not valid.")
 
@@ -405,32 +423,31 @@ class AuthService:
         now = datetime.now(timezone.utc)
         remaining_ttl = max(0, int((db_token.expires_at - now).total_seconds()))
         if remaining_ttl > 0:
-
-            await blocklist_token(jti, remaining_ttl)
+            await cache_revoked_jti(jti, remaining_ttl)
 
         # Step 6: Issue fresh token pair
-        new_access_token, access_expires_at = create_access_token(
+        new_access_token, _access_jti, access_expires_at = create_access_token(
             user_id=str(user.id),
             role=user.role,
             email=user.email,
+            return_expires=True,
         )
-        new_refresh_str, new_jti, new_refresh_expires_at = create_refresh_token(str(user.id))
-
-        new_refresh_expires_at = datetime.now(timezone.utc) + timedelta(
-            days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS
+        new_refresh_str, new_jti, new_refresh_expires_at = create_refresh_token(
+            str(user.id), return_expires=True
         )
 
-        await self._refresh_tokens.create_token(
+        await self._refresh_tokens.create(RefreshToken(
             user_id=user.id,
-            jti=new_jti, # This is wrong, create_token does not exist
-            expires_at=new_refresh_expires_at, # This is wrong
-            device_hint=db_token.device_hint, # This is wrong
-            ip_address=ip_address, # This is wrong
-        )
+            jti=new_jti,
+            expires_at=new_refresh_expires_at,
+            device_hint=db_token.device_hint,
+            ip_address=ip_address,
+        ))
 
-        await self._record_security_event( # This is wrong
-            event_type="token_refreshed",
+        await self._record_security_event(
+            event_type=SecurityEventType.TOKEN_REFRESHED,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
@@ -462,7 +479,10 @@ class AuthService:
             jti = payload.jti
         except Exception:
             # Malformed token on logout — still count as success
-            logger.debug("logout_with_invalid_token", user_id=str(user_id))
+            logger.debug(
+                "logout_with_invalid_token",
+                extra={"user_id": str(user_id)},
+            )
             return
 
         token_to_revoke = await self._refresh_tokens.get_by_jti(jti)
@@ -475,16 +495,19 @@ class AuthService:
 
         if revoked:
             # Push to Redis blocklist to immediately block in-flight requests
-
-            await blocklist_token(jti, settings.refresh_token_expire_seconds)
+            await cache_revoked_jti(jti, settings.refresh_token_expire_seconds)
 
         await self._record_security_event(
-            event_type="logout",
+            event_type=SecurityEventType.LOGOUT,
             user_id=user_id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
-        logger.info("user_logged_out", user_id=str(user_id))
+        logger.info(
+            "user_logged_out",
+            extra={"user_id": str(user_id)},
+        )
 
     async def logout_all_sessions(
         self,
@@ -507,13 +530,17 @@ class AuthService:
         # for immediate effect, although the docstring says otherwise.
 
         await self._record_security_event(
-            event_type="logout_all_sessions",
+            event_type=SecurityEventType.LOGOUT_ALL,
             user_id=user_id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
-            extra={"sessions_revoked": count},
+            details={"sessions_revoked": count},
         )
 
-        logger.info("all_sessions_revoked", user_id=str(user_id), count=count)
+        logger.info(
+            "all_sessions_revoked",
+            extra={"user_id": str(user_id), "count": count},
+        )
         return count
 
     # ─────────────────────────────────────────────────────────────────────────
@@ -542,7 +569,7 @@ class AuthService:
         token_hash = hash_token(raw_token)
         db_token = await self._reset_tokens.get_by_hash(
             token_hash,
-            token_type=TokenType.EMAIL_VERIFICATION.value,
+            token_purpose=TokenType.EMAIL_VERIFICATION.value,
         )
 
         if db_token is None:
@@ -567,39 +594,44 @@ class AuthService:
 
         await self._reset_tokens.mark_used(db_token)
 
-        logger.info("email_verified", user_id=str(user.id), email=user.email)
+        logger.info(
+            "email_verified",
+            extra={"user_id": str(user.id), "email": user.email},
+        )
         return user
 
     async def resend_verification_email(
         self,
         email: str,
         ip_address: str | None = None,
-    ) -> str | None:
+    ) -> tuple[User | None, str | None]:
         """
         Generate a new email verification token for an unverified user.
 
-        Returns the raw token to include in the verification email URL.
-        Returns None silently if the email is not found or already verified
+        Returns (User, raw_token) to include in the verification email.
+        Returns (None, None) silently if the email is not found or already verified
         (prevents email enumeration — the route always returns the same message).
         """
         user = await self._users.get_by_email(email)
 
         if user is None or user.email_verified:
-            return None
+            return None, None
 
         # Invalidate any old outstanding verification tokens for this user
         await self._reset_tokens.invalidate_all_for_user(
-            user.id, token_type=TokenType.EMAIL_VERIFICATION.value
+            user.id, token_purpose=TokenType.EMAIL_VERIFICATION.value
         )
 
         raw_token = await self._create_verification_token(user.id)
 
         logger.info(
             "verification_email_resent",
-            user_id=str(user.id),
-            email=user.email,
+            extra={
+                "user_id": str(user.id),
+                "email": user.email,
+            },
         )
-        return raw_token
+        return user, raw_token
 
     # ─────────────────────────────────────────────────────────────────────────
     # PASSWORD RESET
@@ -609,22 +641,22 @@ class AuthService:
         self,
         email: str,
         ip_address: str | None = None,
-    ) -> str | None:
+    ) -> tuple[User | None, str | None]:
         """
         Initiate the password reset flow for the given email.
 
-        Returns the raw reset token to include in the reset email URL.
-        Returns None silently if the email is not registered
+        Returns (User, raw_token) to include in the reset email.
+        Returns (None, None) silently if the email is not registered
         (prevents email enumeration — the route always returns the same message).
         """
         user = await self._users.get_by_email(email)
 
         if user is None:
-            return None
+            return None, None
 
         # Invalidate any previous unused reset tokens for this user
         await self._reset_tokens.invalidate_all_for_user(
-            user.id, token_type=TokenType.PASSWORD_RESET.value
+            user.id, token_purpose=TokenType.PASSWORD_RESET.value
         )
 
         raw_token = generate_secure_token()
@@ -637,21 +669,24 @@ class AuthService:
             user_id=user.id,
             token_hash=token_hash,
             expires_at=expires_at,
-            token_type=TokenType.PASSWORD_RESET.value,
+            token_purpose=TokenType.PASSWORD_RESET.value,
         ))
 
         await self._record_security_event(
-            event_type="password_reset_requested",
+            event_type=SecurityEventType.PASSWORD_RESET_REQUESTED,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
         logger.info(
             "password_reset_requested",
-            user_id=str(user.id),
-            email=email,
+            extra={
+                "user_id": str(user.id),
+                "email": email,
+            },
         )
-        return raw_token
+        return user, raw_token
 
     async def confirm_password_reset(
         self,
@@ -677,7 +712,7 @@ class AuthService:
         token_hash = hash_token(raw_token)
         db_token = await self._reset_tokens.get_by_hash(
             token_hash,
-            token_type=TokenType.PASSWORD_RESET.value,
+            token_purpose=TokenType.PASSWORD_RESET.value,
         )
 
         if db_token is None:
@@ -699,16 +734,19 @@ class AuthService:
         revoked_count = await self._refresh_tokens.revoke_all_for_user(user.id)
 
         await self._record_security_event(
-            event_type="password_reset_completed",
+            event_type=SecurityEventType.PASSWORD_RESET_COMPLETED,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
-            extra={"sessions_revoked": revoked_count},
+            details={"sessions_revoked": revoked_count},
         )
 
         logger.info(
             "password_reset_complete",
-            user_id=str(user.id),
-            sessions_revoked=revoked_count,
+            extra={
+                "user_id": str(user.id),
+                "sessions_revoked": revoked_count,
+            },
         )
         return user
 
@@ -743,17 +781,23 @@ class AuthService:
             revoked = await self._refresh_tokens.revoke_all_for_user(user.id)
             logger.info(
                 "password_changed_sessions_revoked",
-                user_id=str(user.id),
-                sessions_revoked=revoked,
+                extra={
+                    "user_id": str(user.id),
+                    "sessions_revoked": revoked,
+                },
             )
 
         await self._record_security_event(
-            event_type="password_changed",
+            event_type=SecurityEventType.PASSWORD_CHANGED,
             user_id=user.id,
+            severity=SecurityEventSeverity.INFO,
             ip_address=ip_address,
         )
 
-        logger.info("password_changed", user_id=str(user.id))
+        logger.info(
+            "password_changed",
+            extra={"user_id": str(user.id)},
+        )
 
     # ─────────────────────────────────────────────────────────────────────────
     # CURRENT USER LOADING
@@ -792,7 +836,7 @@ class AuthService:
             user_id=user_id,
             token_hash=token_hash,
             expires_at=expires_at,
-            token_type=TokenType.EMAIL_VERIFICATION.value,
+            token_purpose=TokenType.EMAIL_VERIFICATION.value,
         ))
         return raw_token
 
@@ -829,10 +873,11 @@ class AuthService:
 
     async def _record_security_event(
         self,
-        event_type: str,
+        event_type: SecurityEventType,
         user_id: uuid.UUID | None,
+        severity: SecurityEventSeverity = SecurityEventSeverity.INFO,
         ip_address: str | None = None,
-        extra: dict | None = None,
+        details: dict | None = None,
     ) -> None:
         """
         Write a security event to the audit trail.
@@ -842,19 +887,30 @@ class AuthService:
         integrated, this silently no-ops.
         """
         try:
+            from app.db.enums import \
+                SecurityEventSeverity as DBSecurityEventSeverity
+            from app.db.enums import SecurityEventType as DBSecurityEventType
             from app.db.models.audit import SecurityEvent
+
+            # Convert from constants.py enums to db.enums
+            db_event_type = DBSecurityEventType(event_type.value)
+            db_severity = DBSecurityEventSeverity(severity.value)
+
             event = SecurityEvent(
-                event_type=event_type,
+                event_type=db_event_type,
+                severity=db_severity,
                 user_id=user_id,
                 ip_address=ip_address,
-                extra=extra,
+                details=details,
             )
             self.db.add(event)
             await self.db.flush()
         except Exception as exc:
             logger.warning(
                 "security_event_write_failed",
-                event_type=event_type,
-                user_id=str(user_id) if user_id else None,
-                error=str(exc),
+                extra={
+                    "event_type": event_type.value,
+                    "user_id": str(user_id) if user_id else None,
+                    "error": str(exc),
+                },
             )

@@ -14,7 +14,7 @@ USAGE:
 """
 
 from functools import lru_cache
-from typing import List, Literal
+from typing import List, Literal, Optional
 
 from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,17 +38,24 @@ class Settings(BaseSettings):
     # ─── Application ──────────────────────────────────────────────────────────
     APP_NAME: str = "Mindexa Platform"
     APP_VERSION: str = "0.1.0"
-    ENVIRONMENT: Literal["development", "staging", "production"] = "development"
+    ENVIRONMENT: Literal["development", "staging", "production", "test"] = "development"
     DEBUG: bool = False
 
     # ─── Server ───────────────────────────────────────────────────────────────
     HOST: str = "0.0.0.0"
     PORT: int = 8000
     WORKERS: int = 1
+    docs_enabled: bool = True
 
     # ─── Security / Secrets ───────────────────────────────────────────────────
-    SECRET_KEY: str  # REQUIRED — no default, must be set in env
+    SECRET_KEY: str = "986104b16962f8f3e1b6d4631148c71ffac35cf7e32b70d5504d3ab1ad37a664"
     # For future RS256 support, add PUBLIC_KEY / PRIVATE_KEY here.
+
+    # ─── Monitoring ───────────────────────────────────────────────────────────
+    SENTRY_DSN: Optional[str] = None
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+    METRICS_ENABLED: bool = True
+    METRICS_API_KEY: str = ""
 
     # ─── JWT Configuration ────────────────────────────────────────────────────
     JWT_ALGORITHM: str = "HS256"
@@ -60,6 +67,9 @@ class Settings(BaseSettings):
     PASSWORD_RESET_EXPIRE_MINUTES: int = 60
     MAX_FAILED_LOGIN_ATTEMPTS: int = 5
     ACCOUNT_LOCKOUT_MINUTES: int = 15
+    RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
+    RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
+    RATE_LIMIT_DEFAULT_PER_MINUTE: int = 120
 
     # ─── Password Policy ──────────────────────────────────────────────────────
     BCRYPT_ROUNDS: int = 12
@@ -77,19 +87,23 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
     CORS_ALLOW_CREDENTIALS: bool = True
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # ─── Database ─────────────────────────────────────────────────────────────
-    DATABASE_URL: str  # REQUIRED
-    # Async URL derived automatically if not provided explicitly
+    DATABASE_URL: str = "postgresql://postgres:Postgre123@localhost:5433/mindexa_db"
     DATABASE_ASYNC_URL: str = ""
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_PRE_PING: bool = True
     DATABASE_ECHO: bool = False  # Set True for SQL query logging in dev
+    POSTGRES_DB: str = "mindexa_db"
 
     # ─── Redis ────────────────────────────────────────────────────────────────
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_MAX_CONNECTIONS: int = 20
+    REDIS_CACHE_DEFAULT_TTL: int = 300
+    REDIS_USER_PROFILE_TTL: int = 600
+    REDIS_ASSESSMENT_TTL: int = 120
     # TTL for revoked JTI cache entries (seconds); should match refresh token lifetime
     REDIS_REVOKED_JTI_TTL: int = 60 * 60 * 24 * 7  # 7 days
 
@@ -98,6 +112,7 @@ class Settings(BaseSettings):
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/2"
     CELERY_TASK_ALWAYS_EAGER: bool = False
 
+    # ─── Rate Limiting ────────────────────────────────────────────────────────
     # ─── Email ────────────────────────────────────────────────────────────────
     # Used when email delivery is wired up (Phase N)
     SMTP_HOST: str = "localhost"
@@ -105,17 +120,28 @@ class Settings(BaseSettings):
     SMTP_USER: str = ""
     SMTP_PASSWORD: str = ""
     SMTP_TLS: bool = True
+    SMTP_SSL: bool = False
     EMAILS_FROM_EMAIL: str = "noreply@mindexa.ac"
     EMAILS_FROM_NAME: str = "Mindexa Platform"
     # In development, log emails instead of sending
     EMAIL_DEV_MODE: bool = True
 
-    # ─── File Upload ──────────────────────────────────────────────────────────
+    # ─── File Storage ─────────────────────────────────────────────────────────
+    # local | s3
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+    STORAGE_LOCAL_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 25
     ALLOWED_UPLOAD_EXTENSIONS: List[str] = [
         ".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg",
     ]
     UPLOAD_DIR: str = "uploads"
+
+    # AWS S3 (required only when STORAGE_BACKEND=s3)
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_REGION: str = "us-east-1"
+    AWS_S3_BUCKET: Optional[str] = None
+    AWS_S3_ENDPOINT_URL: Optional[str] = None
 
     # ─── AI / LLM ─────────────────────────────────────────────────────────────
     OPENAI_API_KEY: str = ""
@@ -182,6 +208,24 @@ class Settings(BaseSettings):
                 )
         return self
 
+    @model_validator(mode="after")
+    def validate_s3_config(self) -> "Settings":
+        """Validate S3 configuration when S3 backend is enabled."""
+        if self.STORAGE_BACKEND == "s3":
+            missing = []
+            if not self.AWS_ACCESS_KEY_ID:
+                missing.append("AWS_ACCESS_KEY_ID")
+            if not self.AWS_SECRET_ACCESS_KEY:
+                missing.append("AWS_SECRET_ACCESS_KEY")
+            if not self.AWS_S3_BUCKET:
+                missing.append("AWS_S3_BUCKET")
+            if missing:
+                raise ValueError(
+                    f"STORAGE_BACKEND is set to 's3' but the following "
+                    f"required environment variables are missing: {', '.join(missing)}"
+                )
+        return self
+
     # ─── Computed Properties ──────────────────────────────────────────────────
 
     @property
@@ -211,6 +255,16 @@ class Settings(BaseSettings):
     @property
     def max_upload_size_bytes(self) -> int:
         return self.MAX_UPLOAD_SIZE_MB * 1024 * 1024
+
+    # ─── URL Builders ─────────────────────────────────────────────────────────
+
+    def build_verification_url(self, token: str) -> str:
+        """Build a full URL for email verification."""
+        return f"{self.FRONTEND_URL}/verify-email?token={token}"
+
+    def build_password_reset_url(self, token: str) -> str:
+        """Build a full URL for password reset."""
+        return f"{self.FRONTEND_URL}/reset-password?token={token}"
 
 
 @lru_cache(maxsize=1)

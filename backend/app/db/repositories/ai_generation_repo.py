@@ -4,16 +4,18 @@ app/db/repositories/ai_generation_repo.py
 Repository for AI Generation data access.
 """
 
-import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from __future__ import annotations
 
-from app.db.enums import AIBatchStatus, AIQuestionDecision
-from app.db.models.question import (AIGeneratedQuestion, AIGenerationBatch,
-                                    AIQuestionReview)
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
 from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlmodel import col
+
+from app.db.enums import AIBatchStatus, AIQuestionDecision
+from app.db.models.question import AIGeneratedQuestion, AIGenerationBatch, AIQuestionReview
 
 
 class AIGenerationRepository:
@@ -28,12 +30,12 @@ class AIGenerationRepository:
         question_type: str,
         difficulty: str,
         total_requested: int,
-        assessment_id: Optional[uuid.UUID] = None,
-        subject: Optional[str] = None,
-        topic: Optional[str] = None,
-        bloom_level: Optional[str] = None,
-        full_prompt: Optional[str] = None,
-        additional_context: Optional[str] = None,
+        assessment_id: uuid.UUID | None = None,
+        subject: str | None = None,
+        topic: str | None = None,
+        bloom_level: str | None = None,
+        full_prompt: str | None = None,
+        additional_context: str | None = None,
     ) -> AIGenerationBatch:
         batch = AIGenerationBatch(
             created_by_id=created_by_id,
@@ -56,11 +58,10 @@ class AIGenerationRepository:
 
     async def get_batch_by_id(
         self, batch_id: uuid.UUID
-    ) -> Optional[AIGenerationBatch]:
+    ) -> AIGenerationBatch | None:
         result = await self.db.execute(
             select(AIGenerationBatch)
-            .options(selectinload(AIGenerationBatch.generated_questions))
-            .where(AIGenerationBatch.id == batch_id)
+            .where(col(AIGenerationBatch.id) == batch_id)
         )
         return result.scalar_one_or_none()
 
@@ -69,17 +70,17 @@ class AIGenerationRepository:
         created_by_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[AIGenerationBatch], int]:
+    ) -> tuple[list[AIGenerationBatch], int]:
         count_q = await self.db.execute(
-            select(func.count(AIGenerationBatch.id)).where(
-                AIGenerationBatch.created_by_id == created_by_id
+            select(func.count(col(AIGenerationBatch.id))).where(
+                col(AIGenerationBatch.created_by_id) == created_by_id
             )
         )
-        total = count_q.scalar_one()
+        total = int(count_q.scalar_one() or 0)
         result = await self.db.execute(
             select(AIGenerationBatch)
-            .where(AIGenerationBatch.created_by_id == created_by_id)
-            .order_by(AIGenerationBatch.created_at.desc())
+            .where(col(AIGenerationBatch.created_by_id) == created_by_id)
+            .order_by(col(AIGenerationBatch.created_at).desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -89,16 +90,16 @@ class AIGenerationRepository:
         self,
         batch_id: uuid.UUID,
         status: str,
-        total_generated: Optional[int] = None,
-        total_failed: Optional[int] = None,
-        started_at: Optional[datetime] = None,
-        completed_at: Optional[datetime] = None,
-        error_message: Optional[str] = None,
-        ai_model_used: Optional[str] = None,
-        ai_provider: Optional[str] = None,
-        total_tokens_used: Optional[int] = None,
+        total_generated: int | None = None,
+        total_failed: int | None = None,
+        started_at: datetime | None = None,
+        completed_at: datetime | None = None,
+        error_message: str | None = None,
+        ai_model_used: str | None = None,
+        ai_provider: str | None = None,
+        total_tokens_used: int | None = None,
     ) -> None:
-        values = {"status": status}
+        values: dict[str, Any] = {"status": status}
         if total_generated is not None:
             values["total_generated"] = total_generated
         if total_failed is not None:
@@ -117,7 +118,7 @@ class AIGenerationRepository:
             values["total_tokens_used"] = total_tokens_used
         await self.db.execute(
             update(AIGenerationBatch)
-            .where(AIGenerationBatch.id == batch_id)
+            .where(col(AIGenerationBatch.id) == batch_id)
             .values(**values)
         )
 
@@ -129,12 +130,12 @@ class AIGenerationRepository:
         generated_content: str,
         question_type: str,
         difficulty: str,
-        raw_prompt: Optional[str] = None,
+        raw_prompt: str | None = None,
         parsed_successfully: bool = False,
-        parsed_question_text: Optional[str] = None,
-        parsed_options_json: Optional[str] = None,
-        parsed_explanation: Optional[str] = None,
-        parse_error: Optional[str] = None,
+        parsed_question_text: str | None = None,
+        parsed_options_json: str | None = None,
+        parsed_explanation: str | None = None,
+        parse_error: str | None = None,
     ) -> AIGeneratedQuestion:
         q = AIGeneratedQuestion(
             batch_id=batch_id,
@@ -155,32 +156,31 @@ class AIGenerationRepository:
 
     async def get_generated_question(
         self, ai_question_id: uuid.UUID
-    ) -> Optional[AIGeneratedQuestion]:
+    ) -> AIGeneratedQuestion | None:
         result = await self.db.execute(
             select(AIGeneratedQuestion)
-            .options(selectinload(AIGeneratedQuestion.review))
-            .where(AIGeneratedQuestion.id == ai_question_id)
+            .where(col(AIGeneratedQuestion.id) == ai_question_id)
         )
         return result.scalar_one_or_none()
 
     async def update_generated_question(
-        self, ai_question_id: uuid.UUID, **fields
+        self, ai_question_id: uuid.UUID, **fields: Any
     ) -> None:
         await self.db.execute(
             update(AIGeneratedQuestion)
-            .where(AIGeneratedQuestion.id == ai_question_id)
+            .where(col(AIGeneratedQuestion.id) == ai_question_id)
             .values(**fields)
         )
 
     async def list_pending_for_batch(
         self, batch_id: uuid.UUID
-    ) -> List[AIGeneratedQuestion]:
+    ) -> list[AIGeneratedQuestion]:
         result = await self.db.execute(
             select(AIGeneratedQuestion).where(
                 and_(
-                    AIGeneratedQuestion.batch_id == batch_id,
-                    AIGeneratedQuestion.review_status == AIQuestionDecision.PENDING,
-                    AIGeneratedQuestion.parsed_successfully.is_(True),
+                    col(AIGeneratedQuestion.batch_id) == batch_id,
+                    col(AIGeneratedQuestion.review_status) == AIQuestionDecision.PENDING,
+                    col(AIGeneratedQuestion.parsed_successfully).is_(True),
                 )
             )
         )
@@ -193,12 +193,12 @@ class AIGenerationRepository:
         ai_question_id: uuid.UUID,
         reviewer_id: uuid.UUID,
         decision: str,
-        modified_question_text: Optional[str] = None,
-        modified_options_json: Optional[str] = None,
-        modified_explanation: Optional[str] = None,
-        reviewer_notes: Optional[str] = None,
+        modified_question_text: str | None = None,
+        modified_options_json: str | None = None,
+        modified_explanation: str | None = None,
+        reviewer_notes: str | None = None,
     ) -> AIQuestionReview:
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         review = AIQuestionReview(
             ai_question_id=ai_question_id,
             reviewer_id=reviewer_id,

@@ -67,8 +67,7 @@ if TYPE_CHECKING:
     from app.db.models.auth import User
     from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
                                          IntegrityWarning, SupervisionSession)
-    from app.db.models.question import (AIGenerationBatch,
-                                        AssessmentQuestion)
+    from app.db.models.question import AIGenerationBatch, AssessmentQuestion
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,11 +125,12 @@ class Assessment(AuditedBaseModel, table=True):
 
     # ── Core references ───────────────────────────────────────────────────────
 
-    course_id: uuid.UUID = Field(
+    course_id: Optional[uuid.UUID] = Field(
+        default=None,
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("course.id", ondelete="RESTRICT"),
-            nullable=False,
+            nullable=True,
             index=True,
         )
     )
@@ -158,7 +158,10 @@ class Assessment(AuditedBaseModel, table=True):
     # ── Identity ──────────────────────────────────────────────────────────────
 
     title: str = Field(nullable=False, max_length=255)
+    description: Optional[str] = Field(default=None, nullable=True)
     instructions: Optional[str] = Field(default=None, nullable=True)
+    subject: Optional[str] = Field(default=None, nullable=True, max_length=200)
+    target_class: Optional[str] = Field(default=None, nullable=True, max_length=200)
     assessment_type: AssessmentType = Field(nullable=False, index=True)
     status: AssessmentStatus = Field(
         default=AssessmentStatus.DRAFT,
@@ -209,9 +212,15 @@ class Assessment(AuditedBaseModel, table=True):
     is_open_book: bool = Field(default=False, nullable=False)
     fullscreen_required: bool = Field(default=True, nullable=False)
     integrity_monitoring_enabled: bool = Field(default=True, nullable=False)
-    randomise_questions: bool = Field(default=False, nullable=False)
-    randomise_options: bool = Field(default=False, nullable=False)
+    randomize_questions: bool = Field(default=False, nullable=False)
+    randomize_options: bool = Field(default=False, nullable=False)
     is_group_assessment: bool = Field(default=False, nullable=False)
+
+    # ── UI & AI flags ─────────────────────────────────────────────────────────
+
+    is_ai_generation_enabled: bool = Field(default=False, nullable=False)
+    show_marks_per_question: bool = Field(default=True, nullable=False)
+    show_feedback_after_submit: bool = Field(default=True, nullable=False)
 
     # ── Late submission ───────────────────────────────────────────────────────
 

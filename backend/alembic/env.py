@@ -21,58 +21,48 @@ from typing import Any
 from alembic import context
 # Import Base FIRST (SQLAlchemy declarative base)
 from app.db.base import Base  # noqa: F401
-# Phase 4 — Assessment + Questions
-from app.db.models.assessment import Assessment  # noqa: F401
-from app.db.models.assessment import (AssessmentAutosave,
-                                      AssessmentBlueprintRule,
-                                      AssessmentDraftProgress,
-                                      AssessmentPublishValidation,
-                                      AssessmentSection, AssessmentSupervisor,
-                                      AssessmentTargetSection)
-# Phase 5 — Attempts, Submissions, Grading, Results, Integrity
-from app.db.models.attempt import AssessmentAttempt  # noqa: F401
-from app.db.models.attempt import GradingQueueItem  # noqa: F401
-from app.db.models.attempt import (StudentResponse, StudentResponseLog,
-                                   SubmissionGrade)
-# Phase 3 — Auth models
-from app.db.models.auth import (PasswordResetToken, RefreshToken,  # noqa: F401
-                                SecurityEvent, User, UserProfile)
-from app.db.models.integrity import IntegrityEvent  # noqa: F401
-from app.db.models.integrity import (IntegrityFlag, IntegrityWarning,
-                                     SupervisionSession)
-from app.db.models.question import (AssessmentQuestion, Question,  # noqa: F401
-                                    QuestionBankEntry, QuestionBlank,
-                                    QuestionOption)
-from app.db.models.result import AssessmentResult  # noqa: F401
-from app.db.models.result import ResultBreakdown
+# Import all models in the correct dependency order
+# This ensures SQLModel.metadata is fully populated before Alembic inspects it
+from app.db.models import (AcademicPeriod, AIActionLog,  # noqa: F401
+                           AIGeneratedQuestion, AIGenerationBatch,
+                           AIGradeReview, AIQuestionReview, Assessment,
+                           AssessmentAttempt, AssessmentAutosave,
+                           AssessmentBlueprintRule, AssessmentDraftProgress,
+                           AssessmentPublishValidation, AssessmentQuestion,
+                           AssessmentResult, AssessmentSection,
+                           AssessmentSupervisor, AssessmentTargetSection,
+                           AuditLog, ClassSection, Course, CourseSubject,
+                           Department, Institution, IntegrityEvent,
+                           IntegrityFlag, IntegrityWarning,
+                           LecturerCourseAssignment, LecturerMaterial,
+                           Notification, PasswordResetToken, Question,
+                           QuestionBankEntry, QuestionBlank, QuestionOption,
+                           RefreshToken, Reminder, ResourceChunk, ResultAppeal,
+                           ResultBreakdown, Rubric, RubricCriterion,
+                           RubricCriterionLevel, RubricGrade, ScheduledEvent,
+                           SecurityEvent, StudentEnrollment, StudentGroup,
+                           StudentGroupMember, StudentResource,
+                           StudentResponse, Subject, SubmissionGrade,
+                           SupervisionSession, User, UserProfile)
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
 
-# ---------------------------------------------------------------------------
-# Import ALL models so Alembic can detect schema changes via autogenerate.
-# Every model module must be imported here.
-# ---------------------------------------------------------------------------
+# Merge both metadata registries so Alembic can see all tables
+# This is necessary because Phase 3 models (User) use Base (SQLAlchemy ORM)
+# while Phase 4+ models use BaseModel (SQLModel)
+merged_metadata = Base.metadata
+for table in list(SQLModel.metadata.tables.values()):
+    if table.name not in merged_metadata.tables:
+        table._set_parent(merged_metadata)
 
-
-
-
-
-# ---------------------------------------------------------------------------
-# Alembic Config
-# ---------------------------------------------------------------------------
-
-config = context.config
-
-# Interpret the config file for Python logging.
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
-
-# Autogenerate target — all SQLModel/SQLAlchemy metadata
-target_metadata = Base.metadata
+# Autogenerate target — unified metadata with all tables
+target_metadata = merged_metadata
 
 # ---------------------------------------------------------------------------
 # Database URL — pulled from app settings (never from alembic.ini)
+...
 # ---------------------------------------------------------------------------
 
 def get_url() -> str:

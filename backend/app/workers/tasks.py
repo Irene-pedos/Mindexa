@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -147,15 +148,14 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
                 """
                 SELECT id, student_id, assessment_id
                 FROM assessment_attempt
-                WHERE status = 'in_progress'
+                WHERE status = :status
                   AND expires_at IS NOT NULL
                   AND expires_at < :now
-                  AND is_deleted = false
                 ORDER BY expires_at
                 LIMIT 100
                 """
             ),
-            {"now": now},
+            {"now": now, "status": AttemptStatus.IN_PROGRESS.value},
         )
         expired = result.fetchall()
 
@@ -172,13 +172,17 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
                     text(
                         """
                         UPDATE assessment_attempt
-                        SET status = 'auto_submitted',
+                        SET status = :status,
                             submitted_at = :now,
                             updated_at = :now
                         WHERE id = :id
                         """
                     ),
-                    {"now": now, "id": str(attempt_id)},
+                    {
+                        "now": now,
+                        "id": attempt_id,
+                        "status": AttemptStatus.AUTO_SUBMITTED.value
+                    },
                 )
                 submitted_count += 1
                 logger.info(
@@ -246,15 +250,15 @@ async def _cleanup_expired_tokens_async() -> dict[str, Any]:
         # Delete used or expired password reset / verification tokens
         prt_result = await session.execute(
             text(
-                "DELETE FROM password_reset_tokens WHERE expires_at < :now OR used_at IS NOT NULL"
+                "DELETE FROM password_reset_tokens WHERE expires_at < :now OR used = true"
             ),
             {"now": now},
         )
 
         await session.commit()
 
-        rt_deleted = rt_result.rowcount
-        prt_deleted = prt_result.rowcount
+        rt_deleted = getattr(rt_result, "rowcount", 0)
+        prt_deleted = getattr(prt_result, "rowcount", 0)
 
         logger.info(
             "cleanup_expired_tokens: removed %d refresh tokens, %d reset tokens",
@@ -264,6 +268,7 @@ async def _cleanup_expired_tokens_async() -> dict[str, Any]:
             "refresh_tokens_deleted": rt_deleted,
             "reset_tokens_deleted": prt_deleted,
         }
+
 
 
 # ---------------------------------------------------------------------------
@@ -383,10 +388,10 @@ async def _purge_old_logs_async(retention_days: int) -> dict[str, Any]:
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            text("DELETE FROM security_events WHERE created_at < :cutoff"),
+            text("DELETE FROM security_event WHERE created_at < :cutoff"),
             {"cutoff": cutoff},
         )
-        deleted = result.rowcount
+        deleted = getattr(result, "rowcount", 0)
         await session.commit()
 
     logger.info(
@@ -465,19 +470,194 @@ async def _process_ai_grading_async(grading_queue_item_id: str) -> dict[str, Any
 async def _mark_grading_item_failed(item_id: str, reason: str) -> None:
     """Update GradingQueueItem status to failed (best-effort, non-blocking)."""
     try:
+        from app.db.enums import GradingQueueStatus
         from app.db.session import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             await session.execute(
                 text(
                     """
                     UPDATE grading_queue_item
-                    SET status = 'failed',
+                    SET status = :status,
                         updated_at = :now
                     WHERE id = :id
                     """
                 ),
-                {"now": _utcnow(), "id": item_id},
+                {"status": GradingQueueStatus.FAILED.value, "now": _utcnow(), "id": item_id},
             )
             await session.commit()
     except Exception as exc:
         logger.error("_mark_grading_item_failed error: %s", str(exc))
+
+
+# ---------------------------------------------------------------------------
+# TASK 6 — PROCESS AI GENERATION BATCH
+# ---------------------------------------------------------------------------
+
+@celery.task(
+    bind=True,
+    base=MindexaTask,
+    name="app.workers.tasks.process_ai_generation_batch",
+    max_retries=2,
+    queue="ai",
+    soft_time_limit=300,
+    time_limit=360,
+)
+def process_ai_generation_batch(
+    self: MindexaTask,
+    batch_id: str,
+) -> dict[str, Any]:
+    """
+    Orchestrate AI question generation for a batch in the background.
+
+    Args:
+        batch_id: UUID string of the AIGenerationBatch row
+    """
+    try:
+        return _run(_process_ai_generation_async(batch_id))
+    except SoftTimeLimitExceeded:
+        logger.error("process_ai_generation_batch: soft time limit for batch %s", batch_id)
+        _run(_mark_batch_failed(batch_id, "soft_time_limit"))
+        raise
+    except Exception as exc:
+        logger.error(
+            "process_ai_generation_batch: error for batch %s: %s",
+            batch_id, str(exc),
+            exc_info=True,
+        )
+        countdown = (2 ** self.request.retries) * self.default_retry_delay
+        try:
+            raise self.retry(exc=exc, countdown=countdown)
+        except MaxRetriesExceededError:
+            _run(_mark_batch_failed(batch_id, str(exc)))
+            logger.critical("process_ai_generation_batch: max retries for batch %s", batch_id)
+            raise
+
+
+async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
+    import json
+    from datetime import timezone
+
+    from app.core.ai.question_generator import (GenerationContext,
+                                                build_prompt,
+                                                generate_questions)
+    from app.db.enums import AIBatchStatus
+    from app.db.repositories.ai_generation_repo import AIGenerationRepository
+    from app.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        repo = AIGenerationRepository(session)
+        try:
+            batch_uuid = uuid.UUID(batch_id)
+        except ValueError:
+            return {"error": "Invalid batch_id format", "batch_id": batch_id}
+        batch = await repo.get_batch_by_id(batch_uuid)
+        if not batch:
+            return {"error": "Batch not found", "batch_id": batch_id}
+
+        # Mark as processing
+        now = datetime.now(tz=timezone.utc)
+        await repo.update_batch_status(
+            batch_id=batch.id,
+            status=AIBatchStatus.PROCESSING,
+            started_at=now,
+        )
+
+        # Build context from batch record
+        context = GenerationContext(
+            question_type=batch.question_type,
+            difficulty=batch.difficulty,
+            count=batch.total_requested,
+            subject=batch.subject,
+            topic=batch.topic,
+            bloom_level=batch.bloom_level,
+            additional_context=batch.additional_context,
+            request_id=str(batch.id),
+        )
+
+        full_prompt = build_prompt(context)
+        # Store the prompt back to the batch
+        from app.db.models.question import AIGenerationBatch
+        from sqlalchemy import update
+        from sqlmodel import col
+        await session.execute(
+            update(AIGenerationBatch)
+            .where(col(AIGenerationBatch.id) == batch.id)
+            .values(full_prompt=full_prompt)
+        )
+
+        # Call AI generator
+        result = await generate_questions(context)
+
+        # Store each generated question
+        for generated in result.questions:
+            options_json = (
+                json.dumps(generated.options) if generated.options else None
+            )
+            await repo.create_generated_question(
+                batch_id=batch.id,
+                generated_content=generated.raw_content,
+                question_type=generated.question_type,
+                difficulty=generated.difficulty,
+                raw_prompt=full_prompt,
+                parsed_successfully=generated.parsed_successfully,
+                parsed_question_text=generated.question_text,
+                parsed_options_json=options_json,
+                parsed_explanation=generated.explanation,
+                parse_error=generated.parse_error,
+            )
+
+        # Determine final batch status
+        final_status = AIBatchStatus.COMPLETED
+        if result.total_generated == 0:
+            final_status = AIBatchStatus.FAILED
+        elif result.total_failed > 0:
+            final_status = AIBatchStatus.PARTIAL_FAILURE
+
+        completed_at = datetime.now(tz=timezone.utc)
+        await repo.update_batch_status(
+            batch_id=batch.id,
+            status=final_status,
+            total_generated=result.total_generated,
+            total_failed=result.total_failed,
+            completed_at=completed_at,
+            error_message=result.error,
+            ai_model_used=result.model_used,
+            ai_provider=result.provider,
+            total_tokens_used=result.tokens_used,
+        )
+
+        await session.commit()
+        return {
+            "batch_id": batch_id,
+            "status": final_status,
+            "generated": result.total_generated,
+        }
+
+
+async def _mark_batch_failed(batch_id: str, error: str) -> None:
+    """Update AIGenerationBatch status to failed."""
+    try:
+        from app.db.enums import AIBatchStatus
+        from app.db.session import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                text(
+                    """
+                    UPDATE ai_generation_batch
+                    SET status = :status,
+                        error_message = :error,
+                        completed_at = :now,
+                        updated_at = :now
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "status": AIBatchStatus.FAILED.value,
+                    "error": error,
+                    "now": _utcnow(),
+                    "id": batch_id
+                },
+            )
+            await session.commit()
+    except Exception as exc:
+        logger.error("_mark_batch_failed error: %s", str(exc))

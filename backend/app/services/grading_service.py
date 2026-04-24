@@ -28,19 +28,20 @@ RULES ENFORCED HERE:
 from __future__ import annotations
 
 import uuid
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.db.enums import GradingMode, GradingQueuePriority, QuestionType
-from app.db.models.attempt import GradingQueueItem, SubmissionGrade
+from app.db.models.attempt import (GradingQueueItem, StudentResponse,
+                                   SubmissionGrade)
 from app.db.models.question import Question
-from app.db.models.attempt import StudentResponse
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
+from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# AUTO-GRADABLE question types
+# AUTO-GRADABLE question types (can be fully graded by code)
 AUTO_GRADABLE = {
     QuestionType.MCQ,
     QuestionType.TRUE_FALSE,
@@ -49,7 +50,7 @@ AUTO_GRADABLE = {
     QuestionType.FILL_BLANK,
 }
 
-# Requires human or AI review
+# Requires human or AI review (open-ended)
 OPEN_ENDED = {
     QuestionType.SHORT_ANSWER,
     QuestionType.ESSAY,
@@ -64,6 +65,7 @@ class GradingService:
         self.grading_repo = GradingRepository(db)
         self.submission_repo = SubmissionRepository(db)
         self.assessment_repo = AssessmentRepository(db)
+        self.question_repo = QuestionRepository(db)
 
     # -----------------------------------------------------------------------
     # AUTO-GRADE MCQ / CLOSED QUESTIONS
@@ -75,6 +77,8 @@ class GradingService:
         response: StudentResponse,
         question: Question,
         max_score: float,
+        assessment_id: uuid.UUID,
+        student_id: uuid.UUID,
         graded_by_id: Optional[uuid.UUID] = None,
     ) -> SubmissionGrade:
         """
@@ -109,6 +113,8 @@ class GradingService:
         grade = await self.grading_repo.create_grade(
             response_id=response.id,
             attempt_id=response.attempt_id,
+            assessment_id=assessment_id,
+            student_id=student_id,
             question_id=response.question_id,
             max_score=max_score,
             grading_mode=GradingMode.AUTO,
@@ -146,6 +152,8 @@ class GradingService:
             await self.grading_repo.create_grade(
                 response_id=response.id,
                 attempt_id=response.attempt_id,
+                assessment_id=assessment_id,
+                student_id=student_id,
                 question_id=response.question_id,
                 max_score=0.0,  # updated when the actual max is known
                 grading_mode=grading_mode,
@@ -169,6 +177,69 @@ class GradingService:
             priority=priority,
         )
         return item
+
+    # -----------------------------------------------------------------------
+    # PROCESS AI QUEUE ITEM (Called by worker)
+    # -----------------------------------------------------------------------
+
+    async def process_ai_queue_item(
+        self,
+        item_id: str | uuid.UUID,
+    ) -> dict[str, Any]:
+        """
+        Orchestrate AI grading for a single queue item.
+
+        FLOW:
+            1. Fetch queue item
+            2. Fetch student response
+            3. Fetch question context (rubric, difficulty, model answers)
+            4. Dispatch to AI Provider (Mocked)
+            5. Store AI suggestion using apply_ai_grading()
+            6. Return status
+
+        Called by: Celery task `process_ai_grading_job`.
+        """
+        # 1. Fetch queue item
+        item_uuid = uuid.UUID(str(item_id))
+        item = await self.grading_repo.get_queue_item_by_id(item_uuid)
+        if not item:
+            raise NotFoundError(f"GradingQueueItem {item_id} not found.")
+
+        # 2. Fetch student response
+        response = await self.submission_repo.get_response_by_id(item.response_id)
+        if not response:
+            raise NotFoundError(f"StudentResponse {item.student_response_id} not found.")
+
+        # 3. Fetch question
+        question = await self.question_repo.get_by_id_simple(response.question_id)
+        if not question:
+            raise NotFoundError(f"Question {response.question_id} not found.")
+
+        # 4. Mock AI Provider Call
+        # In a real implementation, we would call an AI service here.
+        mock_score = float(question.marks) * 0.8  # Assume 80% correct
+        mock_rationale = (
+            "The student demonstrated a strong understanding of the core concepts, "
+            "but missed minor nuances in the second paragraph."
+        )
+        mock_confidence = 0.95
+
+        # 5. Apply suggestion
+        await self.apply_ai_grading(
+            response_id=response.id,
+            ai_suggested_score=mock_score,
+            ai_rationale=mock_rationale,
+            ai_confidence=mock_confidence,
+            max_score=float(question.marks),
+            graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+        )
+
+        return {
+            "status": "completed",
+            "item_id": str(item_id),
+            "response_id": str(response.id),
+            "suggested_score": mock_score,
+        }
 
     # -----------------------------------------------------------------------
     # APPLY AI GRADING SUGGESTION
@@ -358,6 +429,8 @@ class GradingService:
                     response=response,
                     question=question,
                     max_score=max_score,
+                    assessment_id=assessment_id,
+                    student_id=student_id,
                 )
                 counts["skipped"] += 1
             elif q_type in AUTO_GRADABLE:
@@ -365,6 +438,8 @@ class GradingService:
                     response=response,
                     question=question,
                     max_score=max_score,
+                    assessment_id=assessment_id,
+                    student_id=student_id,
                 )
                 counts["auto"] += 1
             elif q_type in OPEN_ENDED:
@@ -393,9 +468,7 @@ class GradingService:
 
         Returns (score, is_correct).
         """
-        from app.db.repositories.question_repo import QuestionRepository
-        q_repo = QuestionRepository(self.db)
-        options = await q_repo.list_options(question.id)
+        options = await self.question_repo.list_options(question.id)
 
         q_type = QuestionType(question.question_type)
 
@@ -417,13 +490,15 @@ class GradingService:
         if q_type == QuestionType.ORDERING:
             correct_order = [str(o.id) for o in sorted(options, key=lambda o: o.order_index)]
             student_order = [str(i) for i in (response.ordered_option_ids or [])]
+            if not correct_order:
+                return 0.0, False
             if student_order == correct_order:
                 return max_score, True
             # Partial scoring: award marks per correct position
             correct_positions = sum(
                 1 for s, c in zip(student_order, correct_order) if s == c
             )
-            score = round((correct_positions / len(correct_order)) * max_score, 2) if correct_order else 0.0
+            score = round((correct_positions / len(correct_order)) * max_score, 2)
             return score, score == max_score
 
         # ── MATCHING ────────────────────────────────────────────────────────
@@ -441,9 +516,7 @@ class GradingService:
 
         # ── FILL_BLANK ───────────────────────────────────────────────────────
         if q_type == QuestionType.FILL_BLANK:
-            from app.db.repositories.question_repo import QuestionRepository
-            q_repo2 = QuestionRepository(self.db)
-            blanks = await q_repo2.list_blanks(question.id)
+            blanks = await self.question_repo.list_blanks(question.id)
             if not blanks:
                 return 0.0, False
             student_answers = response.fill_blank_answers or {}

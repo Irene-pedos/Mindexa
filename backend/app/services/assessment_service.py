@@ -35,6 +35,9 @@ from app.core.constants import AssessmentStatus, AssessmentType, UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
                                  NotFoundError, ValidationError)
 from app.core.security import hash_password
+from app.db.enums import AssessmentStatus as DbAssessmentStatus
+from app.db.enums import AssessmentType as DbAssessmentType
+from app.db.enums import GradingMode, ResultReleaseMode
 from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.blueprint_repo import BlueprintRepository
@@ -77,7 +80,7 @@ class AssessmentService:
             )
 
     def _assert_not_finalized(self, assessment) -> None:
-        if assessment.is_finalized:
+        if assessment.draft_is_complete:
             raise ConflictError(
                 "This assessment is finalized and cannot be modified.",
                 code="ASSESSMENT_FINALIZED",
@@ -96,17 +99,45 @@ class AssessmentService:
         Creates the assessment record and an initial draft progress row.
         Returns the full assessment detail.
         """
+        if not data.course_id:
+            raise ValidationError("course_id is required to create an assessment.")
+
+        # Validate enum values
+        try:
+            assessment_type = DbAssessmentType(data.assessment_type)
+        except ValueError as e:
+            raise ValidationError(
+                f"Invalid assessment_type: '{data.assessment_type}'. "
+                f"Valid values are: {', '.join([t.value for t in DbAssessmentType])}"
+            ) from e
+
+        try:
+            grading_mode = GradingMode(data.grading_mode)
+        except ValueError as e:
+            raise ValidationError(
+                f"Invalid grading_mode: '{data.grading_mode}'. "
+                f"Valid values are: {', '.join([m.value for m in GradingMode])}"
+            ) from e
+
+        try:
+            result_release_mode = ResultReleaseMode(data.result_release_mode)
+        except ValueError as e:
+            raise ValidationError(
+                f"Invalid result_release_mode: '{data.result_release_mode}'. "
+                f"Valid values are: {', '.join([r.value for r in ResultReleaseMode])}"
+            ) from e
+
         assessment = await self._repo.create(
             title=data.title,
-            assessment_type=data.assessment_type,
-            created_by_id=created_by.id,
-            grading_mode=data.grading_mode,
-            result_release_mode=data.result_release_mode,
-            total_marks=data.total_marks,
             description=data.description,
+            assessment_type=assessment_type,
+            course_id=data.course_id,
+            subject_id=data.subject_id,
+            created_by_id=created_by.id,
+            grading_mode=grading_mode,
+            result_release_mode=result_release_mode,
+            total_marks=data.total_marks,
             instructions=data.instructions,
-            subject=data.subject,
-            target_class=data.target_class,
             passing_marks=data.passing_marks,
             duration_minutes=data.duration_minutes,
         )
@@ -114,7 +145,7 @@ class AssessmentService:
         # Initialize draft progress
         await self._repo.upsert_draft_progress(
             assessment_id=assessment.id,
-            current_step=1,
+            last_active_step=1,
         )
 
         return await self._repo.get_by_id(assessment.id)
@@ -142,11 +173,29 @@ class AssessmentService:
         if data.instructions is not None:
             update_fields["instructions"] = data.instructions
         if data.assessment_type is not None:
-            update_fields["assessment_type"] = data.assessment_type
+            try:
+                update_fields["assessment_type"] = DbAssessmentType(data.assessment_type)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid assessment_type: '{data.assessment_type}'. "
+                    f"Valid values are: {', '.join([t.value for t in DbAssessmentType])}"
+                ) from e
         if data.grading_mode is not None:
-            update_fields["grading_mode"] = data.grading_mode
+            try:
+                update_fields["grading_mode"] = GradingMode(data.grading_mode)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid grading_mode: '{data.grading_mode}'. "
+                    f"Valid values are: {', '.join([m.value for m in GradingMode])}"
+                ) from e
         if data.result_release_mode is not None:
-            update_fields["result_release_mode"] = data.result_release_mode
+            try:
+                update_fields["result_release_mode"] = ResultReleaseMode(data.result_release_mode)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid result_release_mode: '{data.result_release_mode}'. "
+                    f"Valid values are: {', '.join([r.value for r in ResultReleaseMode])}"
+                ) from e
         if data.subject is not None:
             update_fields["subject"] = data.subject
         if data.target_class is not None:
@@ -165,15 +214,19 @@ class AssessmentService:
             update_fields["is_ai_generation_enabled"] = data.is_ai_generation_enabled
 
         # Advance wizard step if moving forward
-        if step > assessment.wizard_step:
-            update_fields["wizard_step"] = step
+        if step > (assessment.draft_step or 0):
+            update_fields["draft_step"] = step
 
         if update_fields:
-            await self._repo.update_fields(assessment_id, **update_fields)
+            await self._repo.update_fields(
+                assessment_id,
+                updated_by_id=current_user.id,
+                **update_fields
+            )
 
         await self._repo.upsert_draft_progress(
             assessment_id=assessment_id,
-            current_step=step,
+            last_active_step=step,
         )
 
         return await self._repo.get_by_id(assessment_id)
@@ -195,16 +248,16 @@ class AssessmentService:
         update_fields: dict = {
             "max_attempts": data.max_attempts,
             "grace_period_minutes": data.grace_period_minutes,
-            "allow_late_submission": data.allow_late_submission,
-            "late_submission_penalty_percent": data.late_submission_penalty_percent,
+            "late_submission_allowed": data.late_submission_allowed,
+            "late_penalty_percent": data.late_penalty_percent,
             "is_password_protected": data.is_password_protected,
-            "is_fullscreen_required": data.is_fullscreen_required,
+            "fullscreen_required": data.fullscreen_required,
             "is_supervised": data.is_supervised,
-            "is_ai_allowed": data.is_ai_allowed,
+            "ai_assistance_allowed": data.ai_assistance_allowed,
             "is_open_book": data.is_open_book,
-            "is_integrity_monitoring_enabled": data.is_integrity_monitoring_enabled,
-            "is_shuffle_enabled": data.is_shuffle_enabled,
-            "is_shuffle_options_enabled": data.is_shuffle_options_enabled,
+            "integrity_monitoring_enabled": data.integrity_monitoring_enabled,
+            "randomise_questions": data.randomize_questions,
+            "randomise_options": data.randomize_options,
         }
 
         if data.window_start:
@@ -213,17 +266,22 @@ class AssessmentService:
             update_fields["window_end"] = data.window_end
 
         if data.is_password_protected and data.access_password:
-            update_fields["password_hash"] = hash_password(data.access_password)
+            update_fields["access_password_hash"] = hash_password(data.access_password)
         elif not data.is_password_protected:
-            update_fields["password_hash"] = None
+            update_fields["access_password_hash"] = None
 
         # Advance to step 2 if not already past it
-        if assessment.wizard_step < 2:
-            update_fields["wizard_step"] = 2
+        if (assessment.draft_step or 0) < 2:
+            update_fields["draft_step"] = 2
 
-        await self._repo.update_fields(assessment_id, **update_fields)
+        await self._repo.update_fields(
+            assessment_id,
+            updated_by_id=current_user.id,
+            **update_fields
+        )
         await self._repo.upsert_draft_progress(
-            assessment_id=assessment_id, current_step=2
+            assessment_id=assessment_id,
+            last_active_step=2
         )
 
         return await self._repo.get_by_id(assessment_id)
@@ -240,15 +298,19 @@ class AssessmentService:
         section = await self._repo.create_section(
             assessment_id=assessment_id,
             title=data.title,
-            order_index=data.order_index,
             description=data.description,
+            order_index=data.order_index,
             instructions=data.instructions,
-            allocated_marks=data.allocated_marks,
+            marks_allocated=data.allocated_marks or 0,
         )
 
         # Advance wizard step if needed
-        if assessment.wizard_step < 3:
-            await self._repo.update_fields(assessment_id, wizard_step=3)
+        if (assessment.draft_step or 0) < 3:
+            await self._repo.update_fields(
+                assessment_id,
+                updated_by_id=current_user.id,
+                draft_step=3
+            )
 
         return section
 
@@ -301,10 +363,10 @@ class AssessmentService:
         assessment = await self._get_and_validate(assessment_id, current_user)
 
         question = await self._question_repo.get_by_id_simple(data.question_id)
-        if not question or not question.is_active:
+        if not question or question.is_deleted:
             raise NotFoundError("Question not found or not active.")
 
-        already_added = await self._repo.question_already_in_assessment(
+        already_added = await self._repo.question_in_assessment(
             assessment_id, data.question_id
         )
         if already_added:
@@ -316,15 +378,19 @@ class AssessmentService:
         aq = await self._repo.add_question(
             assessment_id=assessment_id,
             question_id=data.question_id,
-            marks=data.marks,
+            marks_override=data.marks,
             order_index=data.order_index,
             added_via=data.added_via,
-            section_id=data.section_id,
+            assessment_section_id=data.section_id,
         )
 
         # Advance wizard step if needed
-        if assessment.wizard_step < 4:
-            await self._repo.update_fields(assessment_id, wizard_step=4)
+        if (assessment.draft_step or 0) < 4:
+            await self._repo.update_fields(
+                assessment_id,
+                updated_by_id=current_user.id,
+                draft_step=4
+            )
 
         return aq
 
@@ -354,7 +420,7 @@ class AssessmentService:
             question_id = uuid.UUID(str(item["question_id"]))
             order_index = int(item["order_index"])
 
-            aq = await self._repo.get_assessment_question_by_ids(
+            aq = await self._repo.get_assessment_question(
                 assessment_id, question_id
             )
             if not aq:
@@ -389,13 +455,13 @@ class AssessmentService:
         warnings: List[str] = []
 
         # Check 1: Not already finalized
-        if assessment.is_finalized:
+        if assessment.draft_is_complete:
             return FinalizeAssessmentResponse(
                 id=assessment.id,
                 title=assessment.title,
                 status=assessment.status,
                 is_finalized=True,
-                finalized_at=assessment.finalized_at,
+                finalized_at=assessment.published_at,
                 validation_passed=False,
                 errors=["Assessment is already finalized."],
             )
@@ -447,7 +513,7 @@ class AssessmentService:
             )
 
         # All checks passed — finalize
-        await self._repo.finalize(assessment_id)
+        await self._repo.publish(assessment_id, updated_by_id=current_user.id)
 
         # Delete draft progress (no longer needed)
         await self._repo.delete_draft_progress(assessment_id)
@@ -482,7 +548,7 @@ class AssessmentService:
 
         # Students can only see finalized assessments
         if current_user.role == UserRole.STUDENT.value:
-            if not assessment.is_finalized:
+            if not assessment.draft_is_complete:
                 raise NotFoundError("Assessment not found.")
 
         return assessment
@@ -496,18 +562,38 @@ class AssessmentService:
         page_size: int = 20,
     ):
         """Paginated list of assessments (role-aware)."""
+        db_status = None
+        if status:
+            try:
+                db_status = DbAssessmentStatus(status)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid status: '{status}'. "
+                    f"Valid values are: {', '.join([s.value for s in DbAssessmentStatus])}"
+                ) from e
+
+        db_type = None
+        if assessment_type:
+            try:
+                db_type = DbAssessmentType(assessment_type)
+            except ValueError as e:
+                raise ValidationError(
+                    f"Invalid assessment_type: '{assessment_type}'. "
+                    f"Valid values are: {', '.join([t.value for t in DbAssessmentType])}"
+                ) from e
+
         if current_user.role == UserRole.ADMIN.value:
             items, total = await self._repo.list_all(
-                status=status,
-                assessment_type=assessment_type,
+                status=db_status,
+                assessment_type=db_type,
                 page=page,
                 page_size=page_size,
             )
         else:
             items, total = await self._repo.list_by_creator(
                 created_by_id=current_user.id,
-                status=status,
-                assessment_type=assessment_type,
+                status=db_status,
+                assessment_type=db_type,
                 page=page,
                 page_size=page_size,
             )
@@ -526,12 +612,12 @@ class AssessmentService:
         current_user: User,
     ) -> None:
         assessment = await self._get_and_validate(assessment_id, current_user)
-        if assessment.is_finalized and current_user.role != UserRole.ADMIN.value:
+        if assessment.draft_is_complete and current_user.role != UserRole.ADMIN.value:
             raise ConflictError(
                 "Finalized assessments cannot be deleted. Contact an admin.",
                 code="CANNOT_DELETE_FINALIZED",
             )
-        await self._repo.soft_delete(assessment_id)
+        await self._repo.soft_delete(assessment_id, deleted_by_id=current_user.id)
 
     # ─── Internal Helpers ─────────────────────────────────────────────────────
 

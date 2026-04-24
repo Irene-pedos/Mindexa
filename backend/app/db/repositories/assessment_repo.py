@@ -30,8 +30,8 @@ FIELD MAPPING (model -> repo):
         grading_mode, result_release_mode, result_release_at,
         is_password_protected, access_password_hash,
         ai_assistance_allowed, is_open_book, fullscreen_required,
-        integrity_monitoring_enabled, randomise_questions,
-        randomise_options, is_group_assessment,
+        integrity_monitoring_enabled, randomize_questions,
+        randomize_options, is_group_assessment,
         late_submission_allowed, late_penalty_percent, grace_period_minutes,
         draft_step, draft_is_complete, autosave_token,
         publish_validated_at, published_at,
@@ -127,6 +127,7 @@ class AssessmentRepository:
         result_release_mode: ResultReleaseMode,
         total_marks: int,
         subject_id: Optional[uuid.UUID] = None,
+        description: Optional[str] = None,
         reassessment_of_id: Optional[uuid.UUID] = None,
         instructions: Optional[str] = None,
         passing_marks: Optional[int] = None,
@@ -142,6 +143,7 @@ class AssessmentRepository:
         """
         assessment = Assessment(
             title=title,
+            description=description,
             assessment_type=assessment_type,
             course_id=course_id,
             subject_id=subject_id,
@@ -372,6 +374,7 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         title: str,
         order_index: int,
+        description: Optional[str] = None,
         instructions: Optional[str] = None,
         marks_allocated: int = 0,
         question_count_target: Optional[int] = None,
@@ -382,6 +385,7 @@ class AssessmentRepository:
         section = AssessmentSection(
             assessment_id=assessment_id,
             title=title,
+            description=description,
             order_index=order_index,
             instructions=instructions,
             marks_allocated=marks_allocated,

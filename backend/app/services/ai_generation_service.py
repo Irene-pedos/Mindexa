@@ -38,8 +38,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
-from app.core.ai.question_generator import (GenerationContext,
-                                            generate_questions)
 from app.core.constants import UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
                                  NotFoundError, ValidationError)
@@ -118,75 +116,24 @@ class AIGenerationService:
             additional_context=data.additional_context,
         )
 
-        # Build context
-        context = GenerationContext(
-            question_type=data.question_type,
-            difficulty=data.difficulty,
-            count=data.count,
-            subject=data.subject,
-            topic=data.topic,
-            bloom_level=data.bloom_level,
-            additional_context=data.additional_context,
-        )
+        # Ensure the batch is flushed to the DB before dispatching Celery.
+        await self.db.flush()
 
-        # Mark batch as processing
-        now = datetime.now(tz=timezone.utc)
-        await self._repo.update_batch_status(
-            batch_id=batch.id,
-            status=AIBatchStatus.PROCESSING,
-            started_at=now,
-        )
-
-        # Store the full prompt
-        from app.core.ai.question_generator import build_prompt
-        full_prompt = build_prompt(context)
-        await self._repo.update_batch_status(
-            batch_id=batch.id,
-            status=AIBatchStatus.PROCESSING,
-        )
-
-        # Call AI generator
-        result = await generate_questions(context)
-
-        # Store each generated question
-        for generated in result.questions:
-            options_json = (
-                json.dumps(generated.options) if generated.options else None
-            )
-            await self._repo.create_generated_question(
+        # Dispatch generation to Celery
+        from app.workers.tasks import process_ai_generation_batch
+        try:
+            process_ai_generation_batch.delay(batch_id=str(batch.id))
+        except Exception as exc:
+            await self._repo.update_batch_status(
                 batch_id=batch.id,
-                generated_content=generated.raw_content,
-                question_type=generated.question_type,
-                difficulty=generated.difficulty,
-                raw_prompt=full_prompt,
-                parsed_successfully=generated.parsed_successfully,
-                parsed_question_text=generated.question_text,
-                parsed_options_json=options_json,
-                parsed_explanation=generated.explanation,
-                parse_error=generated.parse_error,
+                status=AIBatchStatus.FAILED.value,
+                error_message=str(exc),
+                completed_at=datetime.now(timezone.utc),
             )
+            raise
 
-        # Determine final batch status
-        final_status = AIBatchStatus.COMPLETED
-        if result.total_generated == 0:
-            final_status = AIBatchStatus.FAILED
-        elif result.total_failed > 0:
-            final_status = AIBatchStatus.PARTIAL_FAILURE
-
-        completed_at = datetime.now(tz=timezone.utc)
-        await self._repo.update_batch_status(
-            batch_id=batch.id,
-            status=final_status,
-            total_generated=result.total_generated,
-            total_failed=result.total_failed,
-            completed_at=completed_at,
-            error_message=result.error,
-            ai_model_used=result.model_used,
-            ai_provider=result.provider,
-            total_tokens_used=result.tokens_used,
-        )
-
-        # Load full batch for response
+        # Return the pending batch detail
+        # Note: generated_questions will be empty at this point
         full_batch = await self._repo.get_batch_by_id(batch.id)
         return AIGenerationBatchDetailResponse.model_validate(full_batch)
 
@@ -288,7 +235,7 @@ class AIGenerationService:
                     await self._assessment_repo.add_question(
                         assessment_id=data.add_to_assessment_id,
                         question_id=promoted_question.id,
-                        marks=marks,
+                        marks_override=marks,
                         order_index=existing_count,
                         added_via="ai_generated",
                     )
@@ -338,13 +285,10 @@ class AIGenerationService:
             else ai_question.parsed_options_json
         )
 
-        grading_mode = infer_grading_mode(ai_question.question_type)
-
         question = await self._question_repo.create(
             content=question_text or "AI generated question",
             question_type=ai_question.question_type,
             difficulty=ai_question.difficulty,
-            grading_mode=grading_mode,
             created_by_id=created_by.id,
             source_type="ai_generated",
             explanation=explanation,
@@ -357,10 +301,9 @@ class AIGenerationService:
                 for i, opt in enumerate(options):
                     await self._question_repo.add_option(
                         question_id=question.id,
-                        option_text=opt.get("text", ""),
+                        content=opt.get("text", ""),
                         is_correct=bool(opt.get("is_correct", False)),
                         order_index=i,
-                        explanation=opt.get("explanation"),
                     )
             except (json.JSONDecodeError, TypeError, KeyError):
                 pass  # Proceed without options if parsing fails
