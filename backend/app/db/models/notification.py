@@ -193,11 +193,10 @@ class Notification(BaseModel, table=True):
 
     # ── Content ───────────────────────────────────────────────────────────────
 
-    notification_type: NotificationType = Field(nullable=False, index=True)
+    notification_type: NotificationType = Field(nullable=False)
     channel: NotificationChannel = Field(
         default=NotificationChannel.IN_APP,
         nullable=False,
-        index=True,
     )
     title: str = Field(nullable=False, max_length=255)
     body: str = Field(nullable=False, max_length=1000)
@@ -212,7 +211,6 @@ class Notification(BaseModel, table=True):
     reference_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
         # Plain UUID — the referenced object's PK. No FK declared because
         # reference_type determines which table this points to and SQLAlchemy
         # does not support polymorphic FK references natively.
@@ -221,14 +219,13 @@ class Notification(BaseModel, table=True):
         default=None,
         nullable=True,
         max_length=50,
-        index=True,
     )
 
     # ── State ─────────────────────────────────────────────────────────────────
 
-    is_read: bool = Field(default=False, nullable=False, index=True)
+    is_read: bool = Field(default=False, nullable=False)
     read_at: Optional[datetime] = Field(default=None, nullable=True)
-    is_dismissed: bool = Field(default=False, nullable=False, index=True)
+    is_dismissed: bool = Field(default=False, nullable=False)
     dismissed_at: Optional[datetime] = Field(default=None, nullable=True)
 
     # ── Delivery tracking ─────────────────────────────────────────────────────
@@ -236,7 +233,6 @@ class Notification(BaseModel, table=True):
     delivered_at: Optional[datetime] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
     delivery_error: Optional[str] = Field(
         default=None,
@@ -251,9 +247,8 @@ class Notification(BaseModel, table=True):
     expires_at: Optional[datetime] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
-    is_expired: bool = Field(default=False, nullable=False, index=True)
+    is_expired: bool = Field(default=False, nullable=False)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -340,13 +335,13 @@ class ScheduledEvent(BaseModel, table=True):
 
     # ── Event identity ────────────────────────────────────────────────────────
 
-    event_type: ScheduledEventType = Field(nullable=False, index=True)
+    event_type: ScheduledEventType = Field(nullable=False)
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None, nullable=True)
 
     # ── Timing ────────────────────────────────────────────────────────────────
 
-    starts_at: datetime = Field(nullable=False, index=True)
+    starts_at: datetime = Field(nullable=False)
     ends_at: Optional[datetime] = Field(
         default=None,
         nullable=True,
@@ -363,19 +358,17 @@ class ScheduledEvent(BaseModel, table=True):
 
     event_source_id: uuid.UUID = Field(
         nullable=False,
-        index=True,
         # Plain UUID — no declared FK because source_type determines the table.
     )
     event_source_type: str = Field(
         nullable=False,
         max_length=50,
-        index=True,
         # "assessment" | "submission_grade" | "result_appeal" | "assessment_attempt"
     )
 
     # ── State ─────────────────────────────────────────────────────────────────
 
-    is_cancelled: bool = Field(default=False, nullable=False, index=True)
+    is_cancelled: bool = Field(default=False, nullable=False)
     cancelled_at: Optional[datetime] = Field(default=None, nullable=True)
     cancellation_reason: Optional[str] = Field(
         default=None,
@@ -495,7 +488,7 @@ class Reminder(BaseModel, table=True):
 
     # ── Content template ──────────────────────────────────────────────────────
 
-    reminder_type: NotificationType = Field(nullable=False, index=True)
+    reminder_type: NotificationType = Field(nullable=False)
     title_template: str = Field(
         nullable=False,
         max_length=255,
@@ -515,7 +508,6 @@ class Reminder(BaseModel, table=True):
     reference_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
     reference_type: Optional[str] = Field(
         default=None,
@@ -542,18 +534,18 @@ class Reminder(BaseModel, table=True):
 
     # ── Scheduling ────────────────────────────────────────────────────────────
 
-    fires_at: datetime = Field(nullable=False, index=True)
+    fires_at: datetime = Field(nullable=False)
 
     # ── State ─────────────────────────────────────────────────────────────────
 
-    is_fired: bool = Field(default=False, nullable=False, index=True)
+    is_fired: bool = Field(default=False, nullable=False)
     fired_at: Optional[datetime] = Field(default=None, nullable=True)
     fired_notification_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
         # Plain UUID — the Notification row created when this reminder fired.
     )
-    is_cancelled: bool = Field(default=False, nullable=False, index=True)
+    is_cancelled: bool = Field(default=False, nullable=False)
     cancelled_at: Optional[datetime] = Field(default=None, nullable=True)
     cancellation_reason: Optional[str] = Field(
         default=None,

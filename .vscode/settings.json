@@ -31,11 +31,9 @@
   "ruff.lint.enable": true,
   "ruff.format.enable": true,
   "ruff.nativeServer": "on", // Use Ruff's fast native server (recommended 2025+)
-  "ruff.interpreter": [
-    "D:\\Projects\\mindexa\\backend\\.venv\\Scripts\\python.exe"
-  ],
-  "ruff.path": ["D:\\Projects\\mindexa\\backend\\.venv\\Scripts\\ruff.exe"],
-  "ruff.cwd": "D:\\Projects\\mindexa\\backend",
+  "ruff.interpreter": ["${workspaceFolder}/backend/.venv/Scripts/python.exe"],
+  "ruff.path": ["${workspaceFolder}/backend/.venv/Scripts/ruff.exe"],
+  "ruff.cwd": "${workspaceFolder}/backend",
   "ruff.importStrategy": "fromEnvironment", // ensure Ruff uses the same environment for imports
   // Optional: strict mode vibes (can move to ruff.toml later)
   "ruff.lint.select": [

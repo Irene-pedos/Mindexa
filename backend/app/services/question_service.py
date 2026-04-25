@@ -86,7 +86,7 @@ class QuestionService:
         )
         await self._repo.update_fields(question.id, grading_mode=grading_mode)
 
-        for opt in (data.options or []):
+        for opt in data.options or []:
             await self._repo.add_option(
                 question_id=question.id,
                 content=opt.option_text,
@@ -131,9 +131,7 @@ class QuestionService:
                     data.difficulty if data.difficulty is not None else existing.difficulty
                 ),
                 marks=(
-                    data.suggested_marks
-                    if data.suggested_marks is not None
-                    else existing.marks
+                    data.suggested_marks if data.suggested_marks is not None else existing.marks
                 ),
                 created_by_id=existing.created_by_id,
                 source_type=(
@@ -162,7 +160,7 @@ class QuestionService:
                         match_value=opt.match_value,
                     )
             else:
-                for new_opt in (data.options or []):
+                for new_opt in data.options or []:
                     await self._repo.add_option(
                         question_id=new_question.id,
                         content=new_opt.option_text,
@@ -247,10 +245,18 @@ class QuestionService:
         if not question:
             raise NotFoundError("Question not found.")
 
-        normalized_tags = [t.strip().lower() for t in tag_names if t and t.strip()]
-        if not normalized_tags:
+        new_tags = [t.strip().lower() for t in tag_names if t and t.strip()]
+        if not new_tags:
             return
-        await self._repo.update_fields(question_id, topic_tag=",".join(normalized_tags))
+
+        existing_tags = (
+            [t.strip().lower() for t in question.topic_tag.split(",")] if question.topic_tag else []
+        )
+        for tag in new_tags:
+            if tag not in existing_tags:
+                existing_tags.append(tag)
+
+        await self._repo.update_fields(question_id, topic_tag=",".join(existing_tags))
 
     async def detach_tags(self, question_id: uuid.UUID, tag_names: list[str]) -> None:
         question = await self._repo.get_by_id_simple(question_id)
@@ -259,8 +265,13 @@ class QuestionService:
         if not question.topic_tag:
             return
 
-        normalized_tags = {t.strip().lower() for t in tag_names if t and t.strip()}
-        if question.topic_tag.lower() in normalized_tags:
+        tags_to_remove = {t.strip().lower() for t in tag_names if t and t.strip()}
+        existing_tags = [t.strip().lower() for t in question.topic_tag.split(",") if t.strip()]
+        remaining_tags = [t for t in existing_tags if t not in tags_to_remove]
+
+        if remaining_tags:
+            await self._repo.update_fields(question_id, topic_tag=",".join(remaining_tags))
+        else:
             await self._repo.update_fields(question_id, topic_tag=None)
 
     async def soft_delete_question(self, question_id: uuid.UUID, current_user: User) -> None:

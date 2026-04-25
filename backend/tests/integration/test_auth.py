@@ -8,10 +8,92 @@ These tests use the real test database and the async test client.
 from __future__ import annotations
 
 import pytest
-from httpx import AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.enums import UserRole, UserStatus
-from app.core.security import verify_password
+import pytest_asyncio
+from app.core.config import settings
+from app.core.constants import UserRole
+from app.core.security import create_access_token
+from app.db.base import Base
+from app.db.models import auth as _auth_models  # noqa: F401
+from app.db.models.auth import User
+from app.db.session import get_db
+from app.main import app
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+
+
+@pytest_asyncio.fixture
+async def engine():
+    test_database_url = settings.DATABASE_URL.replace(
+        f"/{settings.POSTGRES_DB}",
+        f"/{settings.POSTGRES_DB}_test",
+    )
+    engine = create_async_engine(
+        test_database_url,
+        echo=False,
+        poolclass=NullPool,
+    )
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def setup_test_database(engine):
+    yield
+
+
+@pytest_asyncio.fixture
+async def db(engine: AsyncEngine) -> AsyncSession:
+    async with engine.connect() as connection:
+        await connection.begin()
+        await connection.begin_nested()
+
+        session = AsyncSession(
+            bind=connection,
+            expire_on_commit=False,
+            autoflush=False,
+        )
+        try:
+            yield session
+        finally:
+            await session.close()
+            await connection.rollback()
+
+
+@pytest_asyncio.fixture
+async def client(db: AsyncSession):
+    async def override_get_db():
+        yield db
+
+    app.dependency_overrides[get_db] = override_get_db
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def make_auth_headers():
+    def _make(
+        user_id: str,
+        role: UserRole = UserRole.STUDENT,
+        email: str = "test@mindexa.ac",
+    ) -> dict[str, str]:
+        token, _ = create_access_token(user_id, role, email)
+        return {"Authorization": f"Bearer {token}"}
+
+    return _make
+
+
+@pytest.fixture(autouse=True)
+def mock_email_task():
+    """Avoid Celery loop/retry side effects during auth route integration tests."""
+    from unittest.mock import patch
+
+    with patch("app.api.v1.routes.auth.send_email_notification.delay", return_value=None):
+        yield
 
 
 @pytest.mark.asyncio
@@ -30,10 +112,8 @@ class TestRegistration:
         
         assert response.status_code == 201
         data = response.json()
-        assert data["email"] == "student@mindexa.ac"
-        assert data["role"] == "student"
-        assert data["status"] == "pending_verification"
-        assert "id" in data
+        assert data["success"] is True
+        assert "account created successfully" in data["message"].lower()
 
     async def test_register_duplicate_email(self, client: AsyncClient):
         """Cannot register with an existing email."""
@@ -50,9 +130,9 @@ class TestRegistration:
         # Second registration with same email
         response = await client.post("/api/v1/auth/register", json=payload)
         assert response.status_code == 409
-        assert "already exists" in response.json()["detail"].lower()
+        assert response.json()["error"]["code"] == "already_exists"
 
-    async def test_register_cannot_force_admin_role(self, client: AsyncClient):
+    async def test_register_cannot_force_admin_role(self, client: AsyncClient, db: AsyncSession):
         """Self-registration as admin is downgraded to student."""
         payload = {
             "email": "sneaky_admin@mindexa.ac",
@@ -63,7 +143,11 @@ class TestRegistration:
         }
         response = await client.post("/api/v1/auth/register", json=payload)
         assert response.status_code == 201
-        assert response.json()["role"] == "student"
+
+        user = (
+            await db.execute(select(User).where(User.email == "sneaky_admin@mindexa.ac"))
+        ).scalar_one()
+        assert user.role == "student"
 
 
 @pytest.mark.asyncio
@@ -111,7 +195,7 @@ class TestLogin:
         }
         response = await client.post("/api/v1/auth/login", json=login_payload)
         assert response.status_code == 401
-        assert "invalid credentials" in response.json()["detail"].lower()
+        assert "invalid email or password" in response.json()["error"]["message"].lower()
 
     async def test_login_nonexistent_user(self, client: AsyncClient):
         """Login fails for unregistered email."""

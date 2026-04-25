@@ -39,30 +39,51 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
+
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.security import hash_password, normalize_email
-from app.db.enums import (AcademicPeriodType, AssessmentStatus, AssessmentType,
-                          AttemptStatus, DifficultyLevel, EnrollmentStatus,
-                          GradingMode, LecturerAssignmentRole,
-                          QuestionAddedVia, QuestionSourceType, QuestionType,
-                          ResultReleaseMode, SubmissionAnswerType,
-                          SupervisorRole, UserRole, UserStatus)
-from app.db.models import (AcademicPeriod, Assessment, AssessmentAttempt,
-                           AssessmentSupervisor, AssessmentTargetSection,
-                           ClassSection, Course, CourseSubject, Department,
-                           Institution, LecturerCourseAssignment, Question,
-                           StudentEnrollment, StudentResponse, Subject, User,
-                           UserProfile)
+from app.db.enums import (
+    AcademicPeriodType,
+    AssessmentStatus,
+    AssessmentType,
+    AttemptStatus,
+    DifficultyLevel,
+    EnrollmentStatus,
+    GradingMode,
+    LecturerAssignmentRole,
+    QuestionAddedVia,
+    QuestionSourceType,
+    QuestionType,
+    ResultReleaseMode,
+    SubmissionAnswerType,
+    SupervisorRole,
+    UserRole,
+    UserStatus,
+)
+from app.db.models import (
+    AcademicPeriod,
+    AssessmentAttempt,
+    ClassSection,
+    Course,
+    CourseSubject,
+    Department,
+    Institution,
+    LecturerCourseAssignment,
+    StudentEnrollment,
+    StudentResponse,
+    Subject,
+    User,
+    UserProfile,
+)
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.auth import UserRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("mindexa.seed")
 
@@ -106,6 +127,7 @@ ASSESSMENT_TITLE = "Intro to Programming CAT"
 # ENVIRONMENT GUARD (called first — aborts if not development)
 # ---------------------------------------------------------------------------
 
+
 def _assert_development() -> None:
     """Hard abort if not in development environment."""
     if settings.ENVIRONMENT != "development":
@@ -119,6 +141,7 @@ def _assert_development() -> None:
 # ---------------------------------------------------------------------------
 # MAIN ORCHESTRATOR
 # ---------------------------------------------------------------------------
+
 
 async def seed_all(session: AsyncSession) -> None:
     """
@@ -175,6 +198,7 @@ async def seed_all(session: AsyncSession) -> None:
 # SEED 1 — USERS
 # ---------------------------------------------------------------------------
 
+
 async def seed_users(
     session: AsyncSession,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
@@ -190,7 +214,8 @@ async def seed_users(
     repo = UserRepository(session)
 
     admin_id = await _ensure_user(
-        repo, session,
+        repo,
+        session,
         email=ADMIN_EMAIL,
         password=ADMIN_PASSWORD,
         role=UserRole.ADMIN.value,
@@ -200,7 +225,8 @@ async def seed_users(
     )
 
     lecturer_id = await _ensure_user(
-        repo, session,
+        repo,
+        session,
         email=LECTURER_EMAIL,
         password=LECTURER_PASSWORD,
         role=UserRole.LECTURER.value,
@@ -210,7 +236,8 @@ async def seed_users(
     )
 
     student_id = await _ensure_user(
-        repo, session,
+        repo,
+        session,
         email=STUDENT_EMAIL,
         password=STUDENT_PASSWORD,
         role=UserRole.STUDENT.value,
@@ -275,6 +302,7 @@ async def _ensure_user(
 # SEED 2 — ACADEMIC STRUCTURE
 # ---------------------------------------------------------------------------
 
+
 async def seed_academic_structure(
     session: AsyncSession,
     lecturer_id: uuid.UUID,
@@ -316,13 +344,11 @@ async def seed_academic_structure(
 
 async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
     """Upsert the seed institution."""
-    result = await session.execute(
-        select(Institution.id).where(Institution.code == INSTITUTION_CODE)
-    )
-    row = result.fetchone()
-    if row:
+    result = await session.execute(select(Institution).where(Institution.code == INSTITUTION_CODE))
+    inst = result.scalar_one_or_none()
+    if inst:
         logger.info("  ⟳  Institution already exists (%s)", INSTITUTION_CODE)
-        return row[0]
+        return inst.id
 
     inst = Institution(
         name=INSTITUTION_NAME,
@@ -338,15 +364,14 @@ async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
 async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed department."""
     result = await session.execute(
-        select(Department.id).where(
-            Department.code == DEPT_CODE,
-            Department.institution_id == institution_id
+        select(Department).where(
+            Department.code == DEPT_CODE, Department.institution_id == institution_id
         )
     )
-    row = result.fetchone()
-    if row:
+    dept = result.scalar_one_or_none()
+    if dept:
         logger.info("  ⟳  Department already exists (%s)", DEPT_CODE)
-        return row[0]
+        return dept.id
 
     dept = Department(
         institution_id=institution_id,
@@ -363,15 +388,14 @@ async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -
 async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed academic period."""
     result = await session.execute(
-        select(AcademicPeriod.id).where(
-            AcademicPeriod.name == PERIOD_NAME,
-            AcademicPeriod.institution_id == institution_id
+        select(AcademicPeriod).where(
+            AcademicPeriod.name == PERIOD_NAME, AcademicPeriod.institution_id == institution_id
         )
     )
-    row = result.fetchone()
-    if row:
+    period = result.scalar_one_or_none()
+    if period:
         logger.info("  ⟳  AcademicPeriod already exists (%s)", PERIOD_NAME)
-        return row[0]
+        return period.id
 
     now = _utcnow()
     period = AcademicPeriod(
@@ -389,23 +413,20 @@ async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UU
 
 
 async def _ensure_course(
-    session: AsyncSession,
-    institution_id: uuid.UUID,
-    department_id: uuid.UUID,
-    period_id: uuid.UUID
+    session: AsyncSession, institution_id: uuid.UUID, department_id: uuid.UUID, period_id: uuid.UUID
 ) -> uuid.UUID:
     """Upsert the seed course."""
     result = await session.execute(
-        select(Course.id).where(
+        select(Course).where(
             Course.code == COURSE_CODE,
             Course.institution_id == institution_id,
-            Course.academic_period_id == period_id
+            Course.academic_period_id == period_id,
         )
     )
-    row = result.fetchone()
-    if row:
+    course = result.scalar_one_or_none()
+    if course:
         logger.info("  ⟳  Course already exists (%s)", COURSE_CODE)
-        return row[0]
+        return course.id
 
     course = Course(
         institution_id=institution_id,
@@ -422,22 +443,30 @@ async def _ensure_course(
 
 
 async def _ensure_subject(
-    session: AsyncSession,
-    institution_id: uuid.UUID,
-    department_id: uuid.UUID,
-    course_id: uuid.UUID
+    session: AsyncSession, institution_id: uuid.UUID, department_id: uuid.UUID, course_id: uuid.UUID
 ) -> uuid.UUID:
     """Upsert the seed subject."""
     result = await session.execute(
         select(Subject.id).where(
-            Subject.code == SUBJECT_CODE,
-            Subject.institution_id == institution_id
+            Subject.code == SUBJECT_CODE, Subject.institution_id == institution_id
         )
     )
     row = result.fetchone()
     if row:
         logger.info("  ⟳  Subject already exists (%s)", SUBJECT_CODE)
-        return row[0]
+        subject_id = row[0]
+        # Ensure CourseSubject link exists
+        cs_result = await session.execute(
+            select(CourseSubject.id).where(
+                CourseSubject.course_id == course_id, CourseSubject.subject_id == subject_id
+            )
+        )
+        if not cs_result.fetchone():
+            cs = CourseSubject(course_id=course_id, subject_id=subject_id)
+            session.add(cs)
+            await session.flush()
+            logger.info("  ✔  CourseSubject link created")
+        return subject_id
 
     subject = Subject(
         institution_id=institution_id,
@@ -463,15 +492,14 @@ async def _ensure_class_section(
 ) -> uuid.UUID:
     """Upsert the seed class section."""
     result = await session.execute(
-        select(ClassSection.id).where(
-            ClassSection.name == SECTION_NAME,
-            ClassSection.course_id == course_id
+        select(ClassSection).where(
+            ClassSection.name == SECTION_NAME, ClassSection.course_id == course_id
         )
     )
-    row = result.fetchone()
-    if row:
+    section = result.scalar_one_or_none()
+    if section:
         logger.info("  ⟳  ClassSection already exists (%s)", SECTION_NAME)
-        return row[0]
+        return section.id
 
     section = ClassSection(
         course_id=course_id,
@@ -492,12 +520,12 @@ async def _ensure_lecturer_assignment(
 ) -> None:
     """Assign lecturer to course."""
     result = await session.execute(
-        select(LecturerCourseAssignment.id).where(
+        select(LecturerCourseAssignment).where(
             LecturerCourseAssignment.lecturer_id == lecturer_id,
-            LecturerCourseAssignment.course_id == course_id
+            LecturerCourseAssignment.course_id == course_id,
         )
     )
-    if result.fetchone():
+    if result.scalar_one_or_none():
         logger.info("  ⟳  Lecturer assignment already exists")
         return
 
@@ -519,12 +547,12 @@ async def _ensure_enrollment(
 ) -> None:
     """Enroll the student in the class section."""
     result = await session.execute(
-        select(StudentEnrollment.id).where(
+        select(StudentEnrollment).where(
             StudentEnrollment.student_id == student_id,
-            StudentEnrollment.class_section_id == section_id
+            StudentEnrollment.class_section_id == section_id,
         )
     )
-    if result.fetchone():
+    if result.scalar_one_or_none():
         logger.info("  ⟳  Student enrollment already exists")
         return
 
@@ -544,6 +572,7 @@ async def _ensure_enrollment(
 # SEED 3 — ASSESSMENT
 # ---------------------------------------------------------------------------
 
+
 async def seed_assessment(
     session: AsyncSession,
     course_id: uuid.UUID,
@@ -561,9 +590,7 @@ async def seed_assessment(
 
     # Idempotency check
     existing_result = await session.execute(
-        text(
-            "SELECT id FROM assessment WHERE title = :title AND course_id = :course_id LIMIT 1"
-        ),
+        text("SELECT id FROM assessment WHERE title = :title AND course_id = :course_id LIMIT 1"),
         {"title": ASSESSMENT_TITLE, "course_id": str(course_id)},
     )
     existing_row = existing_result.fetchone()
@@ -572,8 +599,8 @@ async def seed_assessment(
         return uuid.UUID(str(existing_row[0]))
 
     now = _utcnow()
-    window_start = now - timedelta(hours=1)   # already open
-    window_end = now + timedelta(hours=23)    # closes in 23h
+    window_start = now - timedelta(hours=1)  # already open
+    window_end = now + timedelta(hours=23)  # closes in 23h
 
     assessment = await repo.create(
         title=ASSESSMENT_TITLE,
@@ -585,8 +612,7 @@ async def seed_assessment(
         result_release_mode=ResultReleaseMode.DELAYED,
         total_marks=25,
         instructions=(
-            "Closed Book. No AI assistance allowed. "
-            "Complete all sections within the time limit."
+            "Closed Book. No AI assistance allowed. Complete all sections within the time limit."
         ),
         passing_marks=15,
         duration_minutes=60,
@@ -649,6 +675,7 @@ async def seed_assessment(
 # ---------------------------------------------------------------------------
 # SEED 4 — QUESTIONS
 # ---------------------------------------------------------------------------
+
 
 async def seed_questions(
     session: AsyncSession,
@@ -895,8 +922,7 @@ async def seed_questions(
 
     await session.commit()
     logger.info(
-        "  ✔  Questions seeded: 5 MCQ + 2 True/False + 2 Short Answer "
-        "(%d total)", len(question_ids)
+        "  ✔  Questions seeded: 5 MCQ + 2 True/False + 2 Short Answer (%d total)", len(question_ids)
     )
     return question_ids
 
@@ -904,6 +930,7 @@ async def seed_questions(
 # ---------------------------------------------------------------------------
 # SEED 5 — ATTEMPT DATA
 # ---------------------------------------------------------------------------
+
 
 async def seed_attempt_data(
     session: AsyncSession,
@@ -1070,8 +1097,7 @@ async def seed_attempt_data(
 
     await session.commit()
     logger.info(
-        "  ✔  Attempt seeded: IN_PROGRESS, 3 answers saved, "
-        "%d questions unanswered",
+        "  ✔  Attempt seeded: IN_PROGRESS, 3 answers saved, %d questions unanswered",
         max(0, len(question_ids) - 3),
     )
     logger.info("  ℹ   access_token: %s", attempt.access_token)
@@ -1080,6 +1106,7 @@ async def seed_attempt_data(
 # ---------------------------------------------------------------------------
 # RESET (--reset flag support)
 # ---------------------------------------------------------------------------
+
 
 async def reset_seed_data(session: AsyncSession) -> None:
     """
@@ -1159,8 +1186,9 @@ async def reset_seed_data(session: AsyncSession) -> None:
 # INTERNAL HELPERS
 # ---------------------------------------------------------------------------
 
+
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _print_credentials() -> None:

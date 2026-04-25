@@ -196,13 +196,11 @@ class StudentResource(BaseModel, table=True):
     resource_category: ResourceCategory = Field(
         default=ResourceCategory.GENERAL,
         nullable=False,
-        index=True,
     )
     subject_tag: Optional[str] = Field(
         default=None,
         nullable=True,
         max_length=100,
-        index=True,
     )
     display_name: Optional[str] = Field(
         default=None,
@@ -217,7 +215,6 @@ class StudentResource(BaseModel, table=True):
     processing_status: ResourceProcessingStatus = Field(
         default=ResourceProcessingStatus.PENDING,
         nullable=False,
-        index=True,
     )
     processing_started_at: Optional[datetime] = Field(default=None, nullable=True)
     processing_completed_at: Optional[datetime] = Field(default=None, nullable=True)
@@ -238,7 +235,6 @@ class StudentResource(BaseModel, table=True):
     expires_at: Optional[datetime] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
@@ -319,7 +315,6 @@ class ResourceChunk(BaseModel, table=True):
         default="text-embedding-3-small",
         nullable=False,
         max_length=100,
-        index=True,
     )
 
     # pgvector VECTOR column — nullable until embedding task completes
@@ -446,7 +441,6 @@ class LecturerMaterial(BaseModel, table=True):
     material_category: ResourceCategory = Field(
         default=ResourceCategory.GENERAL,
         nullable=False,
-        index=True,
     )
     display_name: Optional[str] = Field(
         default=None,
@@ -457,9 +451,9 @@ class LecturerMaterial(BaseModel, table=True):
 
     # ── Access control ────────────────────────────────────────────────────────
 
-    is_student_visible: bool = Field(default=False, nullable=False, index=True)
+    is_student_visible: bool = Field(default=False, nullable=False)
 
     # ── Versioning ────────────────────────────────────────────────────────────
 
     version: int = Field(default=1, nullable=False)
-    is_current: bool = Field(default=True, nullable=False, index=True)
+    is_current: bool = Field(default=True, nullable=False)

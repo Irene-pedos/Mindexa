@@ -8,7 +8,6 @@ Models:
     UserProfile           — Extended personal information
     RefreshToken          — Tracked refresh token sessions (JTI-based)
     PasswordResetToken    — Email verification + password reset tokens
-    SecurityEvent         — Auth and security audit log entries
 
 DESIGN:
     - All models extend UUIDBase (from app/db/base.py) for UUID PKs + timestamps
@@ -23,8 +22,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from app.core.constants import (SecurityEventSeverity, SecurityEventType,
-                                UserRole, UserStatus)
+from app.core.constants import (UserRole, UserStatus)
 from app.db.base import Base
 from app.db.mixins import SoftDeleteMixin, TimestampMixin
 from sqlalchemy import (Boolean, DateTime, ForeignKey, Index, Integer, String,
@@ -141,13 +139,6 @@ class User(Base, TimestampMixin, SoftDeleteMixin):
 
     password_reset_tokens: Mapped[List["PasswordResetToken"]] = relationship(
         "PasswordResetToken",
-        back_populates="user",
-        cascade="all, delete-orphan",
-        lazy="dynamic",
-    )
-
-    security_events: Mapped[List["SecurityEvent"]] = relationship(
-        "SecurityEvent",
         back_populates="user",
         cascade="all, delete-orphan",
         lazy="dynamic",
@@ -492,100 +483,3 @@ class PasswordResetToken(Base, TimestampMixin):
         from datetime import timezone
         now = datetime.now(tz=timezone.utc)
         return not self.used and self.expires_at > now
-
-
-# ─── SecurityEvent ────────────────────────────────────────────────────────────
-
-
-class SecurityEvent(Base, TimestampMixin):
-    """
-    Security audit log for auth and account events.
-
-    Every significant auth action creates a security event.
-    This provides a full audit trail for:
-        - Login history
-        - Failed logins / lockouts
-        - Password changes
-        - Token operations
-        - Suspicious activity
-
-    DESIGN:
-        - Append-only: events are never updated or deleted in normal operation
-        - Best-effort: security event writes should NOT block the auth flow
-        - Queryable by user, event type, severity, and time range
-
-    FUTURE:
-        - Admin security dashboard will query this table
-        - Alerts can be triggered on CRITICAL events
-        - SIEM integration export can use this as the audit source
-    """
-
-    __tablename__ = "security_event"
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True),
-        primary_key=True,
-        default=uuid.uuid4,
-        nullable=False,
-    )
-
-    # Who triggered the event (nullable for system events)
-    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True),
-        ForeignKey("user.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
-
-    event_type: Mapped[str] = mapped_column(
-        String(60),
-        nullable=False,
-        index=True,
-        comment="SecurityEventType value",
-    )
-
-    severity: Mapped[str] = mapped_column(
-        String(20),
-        nullable=False,
-        default=SecurityEventSeverity.INFO.value,
-        index=True,
-        comment="info | low | medium | high | critical",
-    )
-
-    # Network context
-    ip_address: Mapped[Optional[str]] = mapped_column(
-        String(45),
-        nullable=True,
-    )
-
-    user_agent: Mapped[Optional[str]] = mapped_column(
-        String(500),
-        nullable=True,
-    )
-
-    # Free-form context data (JSON-serializable dict)
-    details: Mapped[Optional[str]] = mapped_column(
-        Text,
-        nullable=True,
-        comment="JSON-encoded additional context for this event",
-    )
-
-    # ─── Relationships ────────────────────────────────────────────────────────
-
-    user: Mapped[Optional["User"]] = relationship(
-        "User",
-        back_populates="security_events",
-    )
-
-    # ─── Composite Indexes ────────────────────────────────────────────────────
-
-    __table_args__ = (
-        Index("ix_security_events_user_type", "user_id", "event_type"),
-        Index("ix_security_events_severity_created", "severity", "created_at"),
-    )
-
-    def __repr__(self) -> str:
-        return (
-            f"<SecurityEvent type={self.event_type} "
-            f"severity={self.severity} user_id={self.user_id}>"
-        )

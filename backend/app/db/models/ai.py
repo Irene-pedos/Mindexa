@@ -168,11 +168,10 @@ class AIActionLog(AppendOnlyModel, table=True):
 
     # ── Action identity ───────────────────────────────────────────────────────
 
-    action_type: AIActionType = Field(nullable=False, index=True)
+    action_type: AIActionType = Field(nullable=False)
     status: AIActionStatus = Field(
         default=AIActionStatus.INITIATED,
         nullable=False,
-        index=True,
     )
 
     # ── Actor ─────────────────────────────────────────────────────────────────
@@ -181,7 +180,6 @@ class AIActionLog(AppendOnlyModel, table=True):
     actor_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
     actor_role: Optional[str] = Field(
         default=None,
@@ -197,17 +195,15 @@ class AIActionLog(AppendOnlyModel, table=True):
         default=None,
         nullable=True,
         max_length=50,
-        index=True,
     )
     subject_entity_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
 
     # ── Model & performance ───────────────────────────────────────────────────
 
-    model_name: str = Field(nullable=False, max_length=100, index=True)
+    model_name: str = Field(nullable=False, max_length=100)
     prompt_tokens: Optional[int] = Field(default=None, nullable=True)
     completion_tokens: Optional[int] = Field(default=None, nullable=True)
     total_tokens: Optional[int] = Field(default=None, nullable=True)
@@ -240,7 +236,6 @@ class AIActionLog(AppendOnlyModel, table=True):
     human_reviewed: Optional[bool] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
     human_reviewed_at: Optional[datetime] = Field(default=None, nullable=True)
     # Plain UUID — the lecturer/admin who reviewed this output
@@ -255,7 +250,6 @@ class AIActionLog(AppendOnlyModel, table=True):
     parent_log_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
 
 

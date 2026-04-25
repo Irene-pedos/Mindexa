@@ -80,10 +80,10 @@ class Institution(BaseModel, table=True):
     )
 
     name: str = Field(nullable=False, max_length=255)
-    code: str = Field(nullable=False, max_length=20, index=True)
+    code: str = Field(nullable=False, max_length=20)
     logo_url: Optional[str] = Field(default=None, nullable=True, max_length=500)
     timezone: str = Field(default="UTC", nullable=False, max_length=64)
-    is_active: bool = Field(default=True, nullable=False, index=True)
+    is_active: bool = Field(default=True, nullable=False)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     departments: List["Department"] = Relationship(back_populates="institution")

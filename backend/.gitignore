@@ -71,7 +71,10 @@ uploads/
 # ── Alembic ───────────────────────────────────────────────────────────────────
 # Keep the versions directory but not the runtime schedule file
 /tmp/celerybeat-schedule
-celerybeat-schedule
+celerybeat-schedule*
+celerybeat-schedule.dat
+celerybeat-schedule.dir
+celerybeat-schedule.bak
 celerybeat.pid
 
 # ── Docker ────────────────────────────────────────────────────────────────────

@@ -40,12 +40,14 @@ class BlueprintService:
     def _json_load(raw: str | None) -> dict[str, Any]:
         if not raw:
             return {}
+
+        safe_raw = raw if len(raw) <= 200 else raw[:200] + "..."
         try:
             loaded = json.loads(raw)
             if not isinstance(loaded, dict):
                 logger.warning(
                     "Blueprint rule value_json is not an object. raw=%r parsed_type=%s",
-                    raw,
+                    safe_raw,
                     type(loaded).__name__,
                 )
                 return {}
@@ -53,7 +55,7 @@ class BlueprintService:
         except json.JSONDecodeError as exc:
             logger.warning(
                 "Malformed blueprint rule value_json. raw=%r error=%s",
-                raw,
+                safe_raw,
                 str(exc),
             )
             return {}

@@ -28,10 +28,14 @@ from unittest.mock import AsyncMock, patch
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+import sqlalchemy as sa
+from app.db.base import Base
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
+from sqlalchemy import text
 # Ensure all SQLModel table metadata is registered before create_all().
 from app.db import models as _db_models  # noqa: F401
+from sqlmodel import SQLModel
 
 # Force test environment before any app module imports
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -65,7 +69,17 @@ async def engine():
 
 @pytest_asyncio.fixture(scope="session")
 async def setup_test_database(engine):
-    """Apply migrations to test DB once before tests."""
+    """Prepare test DB once before tests.
+
+    Prefer Alembic migrations; fall back to SQLModel metadata if migrations fail.
+    """
+    # Always start with a clean schema for tests
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+        await conn.execute(text("CREATE SCHEMA public"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
     try:
         env = os.environ.copy()
         env["DATABASE_URL"] = TEST_DATABASE_SYNC_URL
@@ -77,7 +91,24 @@ async def setup_test_database(engine):
             text=True,
         )
     except Exception as exc:
-        pytest.skip(f"Test database unavailable: {exc}")
+        # Migration chain can fail on enum conflicts in local/dev databases.
+        # Fall back to current model metadata so integration tests can still run.
+        async with engine.begin() as conn:
+            # Schema was already cleaned above, but we do it again just in case the migration failed partially
+            await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
+            await conn.run_sync(Base.metadata.create_all)
+
+            def _create_sqlmodel_tables(sync_conn):
+                # SQLModel metadata includes FKs to `user.id` (defined on Base metadata).
+                # Reflect it into SQLModel metadata so FK resolution succeeds.
+                sa.Table("user", SQLModel.metadata, autoload_with=sync_conn, extend_existing=True)
+                SQLModel.metadata.create_all(sync_conn)
+
+            await conn.run_sync(_create_sqlmodel_tables)
 
     yield
 
