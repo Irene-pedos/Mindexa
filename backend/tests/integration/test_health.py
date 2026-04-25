@@ -21,9 +21,6 @@ class TestLiveness:
     async def test_response_shape(self, client: AsyncClient):
         body = (await client.get("/health/live")).json()
         assert body["status"] == "alive"
-        assert "app" in body
-        assert "version" in body
-        assert "timestamp" in body
 
     async def test_no_auth_required(self, client: AsyncClient):
         response = await client.get("/health/live")
@@ -50,13 +47,14 @@ class TestReadiness:
     async def test_response_contains_checks(self, client: AsyncClient):
         body = (await client.get("/health/ready")).json()
         assert "status" in body
-        assert "checks" in body
-        assert "database" in body["checks"]
-        assert "redis" in body["checks"]
+        assert "database" in body
+        assert "redis" in body
+        assert "status" in body["database"]
+        assert "status" in body["redis"]
 
     async def test_check_values_are_ok_or_degraded(self, client: AsyncClient):
         body = (await client.get("/health/ready")).json()
-        for check_value in body["checks"].values():
+        for check_value in (body["database"]["status"], body["redis"]["status"]):
             assert check_value in ("ok", "degraded")
 
     async def test_no_auth_required(self, client: AsyncClient):

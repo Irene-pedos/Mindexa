@@ -58,6 +58,8 @@ instead of:
 from __future__ import annotations
 
 # ── 3. Academic (depends on user) ─────────────────────────────────────────────
+from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
+                                UserProfile)
 from app.db.models.academic import (AcademicPeriod, ClassSection, Course,
                                     CourseSubject, Department, Institution,
                                     LecturerCourseAssignment,
@@ -80,8 +82,6 @@ from app.db.models.attempt import (AssessmentAttempt, ResultAppeal,
 # ── 1. Audit (no FK deps — always first) ──────────────────────────────────────
 from app.db.models.audit import AuditLog, SecurityEvent
 # ── 2. Auth (defines `user` table) ────────────────────────────────────────────
-from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
-                                UserProfile)
 # ── 7. Integrity (depends on attempt, assessment) ─────────────────────────────
 from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
                                      IntegrityWarning, SupervisionSession)
@@ -166,4 +166,7 @@ __all__: list[str] = [
     "StudentResource",
     "ResourceChunk",
     "LecturerMaterial",
+    # —— Results ————————————————————————————————————————————————————————————————————————————
+    "AssessmentResult",
+    "ResultBreakdown",
 ]

@@ -25,40 +25,57 @@ RETRY POLICY:
 from __future__ import annotations
 
 import asyncio
-import logging
+import json
+import threading
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from collections.abc import Awaitable
+from datetime import datetime, timedelta
+from typing import Any, TypeVar
+
+from celery import Task
+from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
+from sqlalchemy import text, update
+from sqlmodel import col
 
 from app.core.celery_app import celery
 from app.core.logger import get_logger
-from celery import Task
-from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
-from sqlalchemy import text
+from app.db.models.question import AIGenerationBatch
 
 logger = get_logger("mindexa.tasks")
-
+_event_loop_local = threading.local()
+T = TypeVar("T")
 
 # ---------------------------------------------------------------------------
 # HELPERS
 # ---------------------------------------------------------------------------
 
-def _run(coro):
+def _run(coro: Awaitable[T]) -> T:
     """
     Run an async coroutine from a synchronous Celery task.
 
-    Creates a new event loop per task call (safe — each task is a
-    separate worker thread/process in Celery).
+    Reuses a per-thread event loop to keep async DB connections valid
+    across multiple task executions in the same worker.
     """
-    loop = asyncio.new_event_loop()
+    loop = getattr(_event_loop_local, "loop", None)
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _event_loop_local.loop = loop
+
+    previous_loop = None
     try:
+        try:
+            previous_loop = asyncio.get_event_loop()
+        except RuntimeError:
+            previous_loop = None
+        asyncio.set_event_loop(loop)
         return loop.run_until_complete(coro)
     finally:
-        loop.close()
+        if previous_loop is not None and previous_loop is not loop:
+            asyncio.set_event_loop(previous_loop)
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +94,14 @@ class MindexaTask(Task):
     max_retries = 3
     default_retry_delay = 60   # seconds (doubles on each retry)
 
-    def on_failure(self, exc, task_id, args, kwargs, einfo):
+    def on_failure(
+        self,
+        exc: Exception,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        einfo: Any,
+    ) -> None:
         logger.error(
             "Task %s[%s] FAILED: %s",
             self.name, task_id, str(exc),
@@ -85,14 +109,23 @@ class MindexaTask(Task):
             extra={"task_id": task_id, "task_name": self.name},
         )
 
-    def on_retry(self, exc, task_id, args, kwargs, einfo):
+    def on_retry(
+        self,
+        exc: Exception,
+        task_id: str,
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        einfo: Any,
+    ) -> None:
         logger.warning(
             "Task %s[%s] RETRY #%d: %s",
             self.name, task_id, self.request.retries, str(exc),
             extra={"task_id": task_id, "task_name": self.name},
         )
 
-    def on_success(self, retval, task_id, args, kwargs):
+    def on_success(
+        self, retval: Any, task_id: str, args: tuple[Any, ...], kwargs: dict[str, Any]
+    ) -> None:
         logger.info(
             "Task %s[%s] completed: %s",
             self.name, task_id, str(retval),
@@ -118,8 +151,7 @@ def auto_submit_expired_attempts(self: MindexaTask) -> dict[str, Any]:
     Each expired attempt is submitted with status AUTO_SUBMITTED.
     """
     try:
-        result = _run(_auto_submit_expired_attempts_async())
-        return result
+        return _run(_auto_submit_expired_attempts_async())
     except SoftTimeLimitExceeded:
         logger.error("auto_submit_expired_attempts: soft time limit exceeded")
         raise
@@ -166,7 +198,7 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
         logger.info("auto_submit: found %d expired attempts to process", len(expired))
 
         for row in expired:
-            attempt_id, student_id, assessment_id = row[0], row[1], row[2]
+            attempt_id, student_id, _ = row[0], row[1], row[2]
             try:
                 await session.execute(
                     text(
@@ -242,7 +274,7 @@ async def _cleanup_expired_tokens_async() -> dict[str, Any]:
         # Delete expired refresh tokens
         rt_result = await session.execute(
             text(
-                "DELETE FROM refresh_tokens WHERE expires_at < :now"
+                "DELETE FROM refresh_token WHERE expires_at < :now"
             ),
             {"now": now},
         )
@@ -250,7 +282,7 @@ async def _cleanup_expired_tokens_async() -> dict[str, Any]:
         # Delete used or expired password reset / verification tokens
         prt_result = await session.execute(
             text(
-                "DELETE FROM password_reset_tokens WHERE expires_at < :now OR used = true"
+                "DELETE FROM password_reset_token WHERE expires_at < :now OR used = true"
             ),
             {"now": now},
         )
@@ -498,7 +530,7 @@ async def _mark_grading_item_failed(item_id: str, reason: str) -> None:
     base=MindexaTask,
     name="app.workers.tasks.process_ai_generation_batch",
     max_retries=2,
-    queue="ai",
+    queue="default",
     soft_time_limit=300,
     time_limit=360,
 )
@@ -534,12 +566,11 @@ def process_ai_generation_batch(
 
 
 async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
-    import json
-    from datetime import timezone
-
-    from app.core.ai.question_generator import (GenerationContext,
-                                                build_prompt,
-                                                generate_questions)
+    from app.core.ai.question_generator import (
+        GenerationContext,
+        build_prompt,
+        generate_questions,
+    )
     from app.db.enums import AIBatchStatus
     from app.db.repositories.ai_generation_repo import AIGenerationRepository
     from app.db.session import AsyncSessionLocal
@@ -548,14 +579,14 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
         repo = AIGenerationRepository(session)
         try:
             batch_uuid = uuid.UUID(batch_id)
-        except ValueError:
-            return {"error": "Invalid batch_id format", "batch_id": batch_id}
+        except ValueError as exc:
+            raise ValueError(f"Invalid batch_id format: {batch_id}") from exc
         batch = await repo.get_batch_by_id(batch_uuid)
         if not batch:
-            return {"error": "Batch not found", "batch_id": batch_id}
+            raise ValueError(f"Batch not found: {batch_id}")
 
         # Mark as processing
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(datetime.UTC)
         await repo.update_batch_status(
             batch_id=batch.id,
             status=AIBatchStatus.PROCESSING,
@@ -576,9 +607,6 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
 
         full_prompt = build_prompt(context)
         # Store the prompt back to the batch
-        from app.db.models.question import AIGenerationBatch
-        from sqlalchemy import update
-        from sqlmodel import col
         await session.execute(
             update(AIGenerationBatch)
             .where(col(AIGenerationBatch.id) == batch.id)
@@ -613,7 +641,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
         elif result.total_failed > 0:
             final_status = AIBatchStatus.PARTIAL_FAILURE
 
-        completed_at = datetime.now(tz=timezone.utc)
+        completed_at = datetime.now(datetime.UTC)
         await repo.update_batch_status(
             batch_id=batch.id,
             status=final_status,
@@ -629,7 +657,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
         await session.commit()
         return {
             "batch_id": batch_id,
-            "status": final_status,
+            "status": final_status.value,
             "generated": result.total_generated,
         }
 
@@ -661,3 +689,4 @@ async def _mark_batch_failed(batch_id: str, error: str) -> None:
             await session.commit()
     except Exception as exc:
         logger.error("_mark_batch_failed error: %s", str(exc))
+

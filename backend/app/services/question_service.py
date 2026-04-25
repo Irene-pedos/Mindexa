@@ -78,7 +78,7 @@ class QuestionService:
             content=data.content,
             question_type=data.question_type,
             difficulty=data.difficulty,
-            marks=data.suggested_marks or 1,
+            marks=(1 if data.suggested_marks is None else data.suggested_marks),
             created_by_id=created_by.id,
             source_type="manual",
             explanation=data.explanation,
@@ -127,8 +127,14 @@ class QuestionService:
             new_question = await self._repo.create(
                 content=new_content,
                 question_type=existing_qtype,
-                difficulty=data.difficulty or str(existing.difficulty),
-                marks=data.suggested_marks or existing.marks,
+                difficulty=(
+                    data.difficulty if data.difficulty is not None else existing.difficulty
+                ),
+                marks=(
+                    data.suggested_marks
+                    if data.suggested_marks is not None
+                    else existing.marks
+                ),
                 created_by_id=existing.created_by_id,
                 source_type=(
                     existing.source_type.value
@@ -244,7 +250,7 @@ class QuestionService:
         normalized_tags = [t.strip().lower() for t in tag_names if t and t.strip()]
         if not normalized_tags:
             return
-        await self._repo.update_fields(question_id, topic_tag=normalized_tags[0])
+        await self._repo.update_fields(question_id, topic_tag=",".join(normalized_tags))
 
     async def detach_tags(self, question_id: uuid.UUID, tag_names: list[str]) -> None:
         question = await self._repo.get_by_id_simple(question_id)

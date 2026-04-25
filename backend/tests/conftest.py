@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import subprocess
+import sys
 import uuid
 from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, patch
@@ -28,7 +30,8 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
                                     create_async_engine)
-from sqlmodel import SQLModel
+# Ensure all SQLModel table metadata is registered before create_all().
+from app.db import models as _db_models  # noqa: F401
 
 # Force test environment before any app module imports
 os.environ.setdefault("ENVIRONMENT", "test")
@@ -44,55 +47,48 @@ from app.core.config import settings
 from app.db.session import get_db
 from app.main import app
 
-# ── Event Loop ────────────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Single event loop for the entire test session."""
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
-
-
 # ── Test Database ─────────────────────────────────────────────────────────────
 
 TEST_DATABASE_URL = settings.DATABASE_URL.replace(
     f"/{settings.POSTGRES_DB}",
     f"/{settings.POSTGRES_DB}_test",
 )
+TEST_DATABASE_SYNC_URL = TEST_DATABASE_URL.replace("+asyncpg", "")
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-TestSessionFactory = async_sessionmaker(
-    bind=test_engine,
-    class_=AsyncSession,
-    expire_on_commit=False,
-    autoflush=False,
-    autocommit=False,
-)
+@pytest_asyncio.fixture(scope="session")
+async def engine():
+    """Session-scoped engine to avoid loop issues."""
+    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+    yield engine
+    await engine.dispose()
 
 
 @pytest_asyncio.fixture(scope="session")
-async def setup_test_database():
-    """Create all tables once before tests, drop all after."""
+async def setup_test_database(engine):
+    """Apply migrations to test DB once before tests."""
     try:
-        async with test_engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
+        env = os.environ.copy()
+        env["DATABASE_URL"] = TEST_DATABASE_SYNC_URL
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            check=True,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     except Exception as exc:
         pytest.skip(f"Test database unavailable: {exc}")
 
     yield
-    async with test_engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
-    await test_engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def db(setup_test_database) -> AsyncGenerator[AsyncSession, None]:
+async def db(engine, setup_test_database) -> AsyncGenerator[AsyncSession, None]:
     """
     Per-test database session wrapped in a savepoint.
     All changes roll back after each test — no cleanup needed.
     """
-    async with test_engine.connect() as connection:
+    async with engine.connect() as connection:
         await connection.begin()
         await connection.begin_nested()
 
@@ -142,6 +138,8 @@ def mock_redis():
     mock.get.return_value = None
     mock.set.return_value = True
     mock.setex.return_value = True
+    mock.incr.return_value = 1
+    mock.expire.return_value = True
     mock.delete.return_value = 1
     mock.exists.return_value = 0
 

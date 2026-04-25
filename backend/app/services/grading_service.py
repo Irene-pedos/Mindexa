@@ -31,7 +31,7 @@ import uuid
 from typing import Any, List, Optional
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
-from app.db.enums import GradingMode, GradingQueuePriority, QuestionType
+from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus, QuestionType
 from app.db.models.attempt import (GradingQueueItem, StudentResponse,
                                    SubmissionGrade)
 from app.db.models.question import Question
@@ -204,11 +204,15 @@ class GradingService:
         item = await self.grading_repo.get_queue_item_by_id(item_uuid)
         if not item:
             raise NotFoundError(f"GradingQueueItem {item_id} not found.")
+        await self.grading_repo.update_queue_item(
+            item.id,
+            status=GradingQueueStatus.IN_PROGRESS,
+        )
 
         # 2. Fetch student response
         response = await self.submission_repo.get_response_by_id(item.response_id)
         if not response:
-            raise NotFoundError(f"StudentResponse {item.student_response_id} not found.")
+            raise NotFoundError(f"StudentResponse {item.response_id} not found.")
 
         # 3. Fetch question
         question = await self.question_repo.get_by_id_simple(response.question_id)
@@ -232,6 +236,10 @@ class GradingService:
             ai_confidence=mock_confidence,
             max_score=float(question.marks),
             graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+        )
+        await self.grading_repo.update_queue_item(
+            item.id,
+            status=GradingQueueStatus.COMPLETED,
         )
 
         return {

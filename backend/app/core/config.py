@@ -15,6 +15,7 @@ USAGE:
 
 from functools import lru_cache
 from typing import List, Literal, Optional
+from urllib.parse import quote
 
 from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -48,13 +49,13 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
 
     # ─── Security / Secrets ───────────────────────────────────────────────────
-    SECRET_KEY: str = "986104b16962f8f3e1b6d4631148c71ffac35cf7e32b70d5504d3ab1ad37a664"
+    SECRET_KEY: Optional[str] = None
     # For future RS256 support, add PUBLIC_KEY / PRIVATE_KEY here.
 
     # ─── Monitoring ───────────────────────────────────────────────────────────
     SENTRY_DSN: Optional[str] = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
-    METRICS_ENABLED: bool = True
+    METRICS_ENABLED: bool = False
     METRICS_API_KEY: str = ""
 
     # ─── JWT Configuration ────────────────────────────────────────────────────
@@ -90,12 +91,16 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     # ─── Database ─────────────────────────────────────────────────────────────
-    DATABASE_URL: str = "postgresql://postgres:Postgre123@localhost:5433/mindexa_db"
+    DATABASE_URL: str = ""
     DATABASE_ASYNC_URL: str = ""
     DATABASE_POOL_SIZE: int = 10
     DATABASE_MAX_OVERFLOW: int = 20
     DATABASE_POOL_PRE_PING: bool = True
     DATABASE_ECHO: bool = False  # Set True for SQL query logging in dev
+    POSTGRES_HOST: str = "localhost"
+    POSTGRES_PORT: int = 5432
+    POSTGRES_USER: str = ""
+    POSTGRES_PASSWORD: str = ""
     POSTGRES_DB: str = "mindexa_db"
 
     # ─── Redis ────────────────────────────────────────────────────────────────
@@ -132,7 +137,13 @@ class Settings(BaseSettings):
     STORAGE_LOCAL_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 25
     ALLOWED_UPLOAD_EXTENSIONS: List[str] = [
-        ".pdf", ".doc", ".docx", ".txt", ".png", ".jpg", ".jpeg",
+        ".pdf",
+        ".doc",
+        ".docx",
+        ".txt",
+        ".png",
+        ".jpg",
+        ".jpeg",
     ]
     UPLOAD_DIR: str = "uploads"
 
@@ -162,13 +173,45 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     @classmethod
-    def validate_secret_key(cls, v: str) -> str:
+    def validate_secret_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None or not v.strip():
+            return None
         if len(v) < 32:
             raise ValueError(
                 "SECRET_KEY must be at least 32 characters long. "
                 "Generate one with: openssl rand -hex 32"
             )
         return v
+
+    @model_validator(mode="after")
+    def build_database_url(self) -> "Settings":
+        """Build DATABASE_URL from POSTGRES_* settings when not explicitly provided."""
+        if (
+            not self.DATABASE_URL
+            and self.POSTGRES_USER
+            and self.POSTGRES_PASSWORD
+            and self.POSTGRES_DB
+        ):
+            self.DATABASE_URL = (
+                f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
+                f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_required_runtime_config(self) -> "Settings":
+        """Enforce required runtime settings per environment."""
+        if self.ENVIRONMENT in {"staging", "production"} and not self.SECRET_KEY:
+            raise ValueError(
+                "SECRET_KEY is required in staging/production. "
+                "Set SECRET_KEY via environment variable."
+            )
+        if self.ENVIRONMENT != "test" and not self.DATABASE_URL:
+            raise ValueError(
+                "DATABASE_URL is required outside test environment. "
+                "Set DATABASE_URL via environment variable or .env."
+            )
+        return self
 
     @model_validator(mode="after")
     def build_async_database_url(self) -> "Settings":
@@ -201,6 +244,7 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT == "production":
             if not self.ACCESS_TOKEN_COOKIE_SECURE:
                 import warnings
+
                 warnings.warn(
                     "ACCESS_TOKEN_COOKIE_SECURE=False in production! "
                     "Refresh tokens will be sent over HTTP.",
@@ -224,6 +268,16 @@ class Settings(BaseSettings):
                     f"STORAGE_BACKEND is set to 's3' but the following "
                     f"required environment variables are missing: {', '.join(missing)}"
                 )
+        return self
+
+    @model_validator(mode="after")
+    def validate_metrics_config(self) -> "Settings":
+        """Validate metrics config when metrics collection is enabled."""
+        if self.METRICS_ENABLED and not self.METRICS_API_KEY.strip():
+            raise ValueError(
+                "METRICS_ENABLED is True but METRICS_API_KEY is missing. "
+                "Set METRICS_API_KEY or disable metrics."
+            )
         return self
 
     # ─── Computed Properties ──────────────────────────────────────────────────
@@ -260,11 +314,13 @@ class Settings(BaseSettings):
 
     def build_verification_url(self, token: str) -> str:
         """Build a full URL for email verification."""
-        return f"{self.FRONTEND_URL}/verify-email?token={token}"
+        encoded_token = quote(token, safe="")
+        return f"{self.FRONTEND_URL}/verify-email?token={encoded_token}"
 
     def build_password_reset_url(self, token: str) -> str:
         """Build a full URL for password reset."""
-        return f"{self.FRONTEND_URL}/reset-password?token={token}"
+        encoded_token = quote(token, safe="")
+        return f"{self.FRONTEND_URL}/reset-password?token={encoded_token}"
 
 
 @lru_cache(maxsize=1)

@@ -209,6 +209,8 @@ class AssessmentSecuritySettingsUpdate(BaseModel):
             )
         return self
 
+    model_config = {"populate_by_name": True}
+
 
 class AssessmentGeneralUpdate(BaseModel):
     """General update for any writable field on an unfinalised assessment."""

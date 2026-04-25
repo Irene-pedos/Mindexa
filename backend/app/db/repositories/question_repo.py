@@ -80,6 +80,18 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _escape_like(value: str) -> str:
+    """
+    Escape special LIKE metacharacters so they are treated literally.
+
+    Escapes: %, _, \
+    """
+    value = value.replace("\\", "\\\\")
+    value = value.replace("%", "\\%")
+    value = value.replace("_", "\\_")
+    return value
+
+
 # ---------------------------------------------------------------------------
 # QUESTION REPOSITORY
 # ---------------------------------------------------------------------------
@@ -252,7 +264,8 @@ class QuestionRepository:
             filters.append(col(Question.subject_id) == subject_id)
 
         if topic_tag is not None:
-            filters.append(col(Question.topic_tag).ilike(f"%{topic_tag}%"))
+            escaped_tag = _escape_like(topic_tag)
+            filters.append(col(Question.topic_tag).ilike(f"%{escaped_tag}%", escape="\\"))
 
         if source_type is not None:
             filters.append(col(Question.source_type) == source_type)
@@ -267,7 +280,8 @@ class QuestionRepository:
             filters.append(col(Question.is_shared) == is_shared)
 
         if q is not None:
-            filters.append(col(Question.content).ilike(f"%{q}%"))
+            escaped_q = _escape_like(q)
+            filters.append(col(Question.content).ilike(f"%{escaped_q}%", escape="\\"))
 
         count_result = await self.db.execute(
             select(func.count(col(Question.id))).where(*filters)
@@ -576,8 +590,14 @@ class QuestionRepository:
         return result.scalar_one_or_none()
 
     async def list_batches_for_assessment(
-        self, assessment_id: uuid.UUID
+        self, assessment_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> List[AIGenerationBatch]:
+        if page < 1:
+            page = 1
+        if page_size < 1:
+            page_size = 20
+
+        offset = (page - 1) * page_size
         result = await self.db.execute(
             select(AIGenerationBatch)
             .where(
@@ -585,6 +605,8 @@ class QuestionRepository:
                 col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
             )
             .order_by(col(AIGenerationBatch.created_at).desc())
+            .limit(page_size)
+            .offset(offset)
         )
         return list(result.scalars().all())
 
@@ -727,6 +749,7 @@ class QuestionRepository:
         filters = [
             col(AIGeneratedQuestion.batch_id) == batch_id,
             col(AIGeneratedQuestion.is_deleted) == False,  # noqa: E712
+            col(AIQuestionReview.is_deleted) == False,  # noqa: E712
         ]
         if decision_filter:
             filters.append(col(AIGeneratedQuestion.review_status) == decision_filter)

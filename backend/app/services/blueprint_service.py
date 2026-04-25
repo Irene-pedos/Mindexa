@@ -7,6 +7,7 @@ Blueprint Rule Engine service for Mindexa Platform.
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import Callable
 from typing import Any
@@ -26,6 +27,8 @@ from app.schemas.blueprint import (
     SetBlueprintRequest,
 )
 
+logger = logging.getLogger("mindexa.blueprint_service")
+
 
 class BlueprintService:
     def __init__(self, db: AsyncSession) -> None:
@@ -39,8 +42,20 @@ class BlueprintService:
             return {}
         try:
             loaded = json.loads(raw)
-            return loaded if isinstance(loaded, dict) else {}
-        except json.JSONDecodeError:
+            if not isinstance(loaded, dict):
+                logger.warning(
+                    "Blueprint rule value_json is not an object. raw=%r parsed_type=%s",
+                    raw,
+                    type(loaded).__name__,
+                )
+                return {}
+            return loaded
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "Malformed blueprint rule value_json. raw=%r error=%s",
+                raw,
+                str(exc),
+            )
             return {}
 
     @staticmethod
@@ -50,9 +65,15 @@ class BlueprintService:
     @staticmethod
     def _question_marks(assessment_question: Any) -> int:
         if assessment_question.marks_override is not None:
-            return int(assessment_question.marks_override)
-        if assessment_question.question:
-            return int(assessment_question.question.marks)
+            try:
+                return int(assessment_question.marks_override)
+            except (TypeError, ValueError):
+                return 0
+        if assessment_question.question and assessment_question.question.marks is not None:
+            try:
+                return int(assessment_question.question.marks)
+            except (TypeError, ValueError):
+                return 0
         return 0
 
     @staticmethod

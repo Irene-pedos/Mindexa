@@ -44,18 +44,24 @@ from typing import Optional
 
 from app.core.config import settings
 from app.core.security import hash_password, normalize_email
-from app.db.enums import (AssessmentStatus, AssessmentType, AttemptStatus,
-                          DifficultyLevel, GradingMode, QuestionSourceType,
-                          QuestionType, ResultReleaseMode,
-                          SubmissionAnswerType, SupervisorRole, UserRole,
-                          UserStatus)
-from app.db.models.attempt import AssessmentAttempt, StudentResponse
+from app.db.enums import (AcademicPeriodType, AssessmentStatus, AssessmentType,
+                          AttemptStatus, DifficultyLevel, EnrollmentStatus,
+                          GradingMode, LecturerAssignmentRole,
+                          QuestionAddedVia, QuestionSourceType, QuestionType,
+                          ResultReleaseMode, SubmissionAnswerType,
+                          SupervisorRole, UserRole, UserStatus)
+from app.db.models import (AcademicPeriod, Assessment, AssessmentAttempt,
+                           AssessmentSupervisor, AssessmentTargetSection,
+                           ClassSection, Course, CourseSubject, Department,
+                           Institution, LecturerCourseAssignment, Question,
+                           StudentEnrollment, StudentResponse, Subject, User,
+                           UserProfile)
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.auth import UserRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger("mindexa.seed")
@@ -79,10 +85,20 @@ STUDENT_PASSWORD = "Student@123"
 STUDENT_FIRST = "Alex"
 STUDENT_LAST = "Rivera"
 
+INSTITUTION_NAME = "Mindexa University"
+INSTITUTION_CODE = "MINDEXA_U"
+
+DEPT_NAME = "Computer Science"
+DEPT_CODE = "CS"
+
+PERIOD_NAME = "Semester 1 2026"
+PERIOD_TYPE = AcademicPeriodType.SEMESTER
+
 COURSE_CODE = "CS101"
-COURSE_NAME = "Introduction to Computer Science"
-SUBJECT_NAME = "Programming Fundamentals"
-SECTION_CODE = "CS101-A"
+COURSE_TITLE = "Introduction to Computer Science"
+SUBJECT_CODE = "CS101_SUB"
+SUBJECT_TITLE = "Programming Fundamentals"
+SECTION_NAME = "Section A"
 ASSESSMENT_TITLE = "Intro to Programming CAT"
 
 
@@ -229,17 +245,15 @@ async def _ensure_user(
         return existing.id
 
     pw_hash = hash_password(password)
-    from app.db.models.auth import User
     user = await repo.create(
         User(
             email=normalized,
             hashed_password=pw_hash,
             role=role,
-            status="active",
+            status=UserStatus.ACTIVE.value,
         )
     )
 
-    from app.db.models.auth import UserProfile
     profile = UserProfile(
         user_id=user.id,
         first_name=first_name,
@@ -250,7 +264,7 @@ async def _ensure_user(
     # Mark email verified and active — seed accounts don't need verification flow
     user.email_verified = True
     user.email_verified_at = _utcnow()
-    user.status = "active"
+    user.status = UserStatus.ACTIVE.value
 
     await session.flush()
     logger.info("  %s user created (%s)", label, email)
@@ -267,24 +281,30 @@ async def seed_academic_structure(
     student_id: uuid.UUID,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """
-    Create course → subject → class_section → enrollment.
-
-    These tables are referenced by FK in Assessment and AttemptTargetSection
-    but do not yet have SQLModel definitions. We use raw SQL with ON CONFLICT
-    DO NOTHING for idempotency.
+    Create institution -> department -> period -> course -> subject -> section -> enrollment.
 
     Returns (course_id, subject_id, section_id).
     """
+    # ── Institution ──────────────────────────────────────────────────────────
+    inst_id = await _ensure_institution(session)
+
+    # ── Department ────────────────────────────────────────────────────────────
+    dept_id = await _ensure_department(session, inst_id)
+
+    # ── AcademicPeriod ────────────────────────────────────────────────────────
+    period_id = await _ensure_academic_period(session, inst_id)
+
     # ── Course ────────────────────────────────────────────────────────────────
-    course_id = await _ensure_course(session)
+    course_id = await _ensure_course(session, inst_id, dept_id, period_id)
 
     # ── Subject ───────────────────────────────────────────────────────────────
-    subject_id = await _ensure_subject(session, course_id)
+    subject_id = await _ensure_subject(session, inst_id, dept_id, course_id)
 
     # ── ClassSection ──────────────────────────────────────────────────────────
-    section_id = await _ensure_class_section(
-        session, course_id=course_id, lecturer_id=lecturer_id
-    )
+    section_id = await _ensure_class_section(session, course_id=course_id)
+
+    # ── Lecturer Assignment ───────────────────────────────────────────────────
+    await _ensure_lecturer_assignment(session, lecturer_id=lecturer_id, course_id=course_id)
 
     # ── Student Enrollment ────────────────────────────────────────────────────
     await _ensure_enrollment(session, student_id=student_id, section_id=section_id)
@@ -294,106 +314,202 @@ async def seed_academic_structure(
     return course_id, subject_id, section_id
 
 
-async def _ensure_course(session: AsyncSession) -> uuid.UUID:
-    """
-    Upsert the seed course. Returns its UUID.
-    Uses ON CONFLICT DO NOTHING on code column (assumed unique).
-    """
+async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
+    """Upsert the seed institution."""
     result = await session.execute(
-        text("SELECT id FROM course WHERE code = :code LIMIT 1"),
-        {"code": COURSE_CODE},
+        select(Institution.id).where(Institution.code == INSTITUTION_CODE)
+    )
+    row = result.fetchone()
+    if row:
+        logger.info("  ⟳  Institution already exists (%s)", INSTITUTION_CODE)
+        return row[0]
+
+    inst = Institution(
+        name=INSTITUTION_NAME,
+        code=INSTITUTION_CODE,
+        is_active=True,
+    )
+    session.add(inst)
+    await session.flush()
+    logger.info("  ✔  Institution created (%s)", INSTITUTION_CODE)
+    return inst.id
+
+
+async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
+    """Upsert the seed department."""
+    result = await session.execute(
+        select(Department.id).where(
+            Department.code == DEPT_CODE,
+            Department.institution_id == institution_id
+        )
+    )
+    row = result.fetchone()
+    if row:
+        logger.info("  ⟳  Department already exists (%s)", DEPT_CODE)
+        return row[0]
+
+    dept = Department(
+        institution_id=institution_id,
+        name=DEPT_NAME,
+        code=DEPT_CODE,
+        is_active=True,
+    )
+    session.add(dept)
+    await session.flush()
+    logger.info("  ✔  Department created (%s)", DEPT_CODE)
+    return dept.id
+
+
+async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
+    """Upsert the seed academic period."""
+    result = await session.execute(
+        select(AcademicPeriod.id).where(
+            AcademicPeriod.name == PERIOD_NAME,
+            AcademicPeriod.institution_id == institution_id
+        )
+    )
+    row = result.fetchone()
+    if row:
+        logger.info("  ⟳  AcademicPeriod already exists (%s)", PERIOD_NAME)
+        return row[0]
+
+    now = _utcnow()
+    period = AcademicPeriod(
+        institution_id=institution_id,
+        name=PERIOD_NAME,
+        period_type=PERIOD_TYPE,
+        start_date=now - timedelta(days=30),
+        end_date=now + timedelta(days=90),
+        is_active=True,
+    )
+    session.add(period)
+    await session.flush()
+    logger.info("  ✔  AcademicPeriod created (%s)", PERIOD_NAME)
+    return period.id
+
+
+async def _ensure_course(
+    session: AsyncSession,
+    institution_id: uuid.UUID,
+    department_id: uuid.UUID,
+    period_id: uuid.UUID
+) -> uuid.UUID:
+    """Upsert the seed course."""
+    result = await session.execute(
+        select(Course.id).where(
+            Course.code == COURSE_CODE,
+            Course.institution_id == institution_id,
+            Course.academic_period_id == period_id
+        )
     )
     row = result.fetchone()
     if row:
         logger.info("  ⟳  Course already exists (%s)", COURSE_CODE)
-        return uuid.UUID(str(row[0]))
+        return row[0]
 
-    course_id = uuid.uuid4()
-    now = _utcnow()
-    await session.execute(
-        text(
-            """
-            INSERT INTO course (id, code, name, is_active, created_at, updated_at)
-            VALUES (:id, :code, :name, true, :now, :now)
-            ON CONFLICT DO NOTHING
-            """
-        ),
-        {"id": str(course_id), "code": COURSE_CODE, "name": COURSE_NAME, "now": now},
+    course = Course(
+        institution_id=institution_id,
+        department_id=department_id,
+        academic_period_id=period_id,
+        code=COURSE_CODE,
+        title=COURSE_TITLE,
+        is_active=True,
     )
+    session.add(course)
     await session.flush()
     logger.info("  ✔  Course created (%s)", COURSE_CODE)
-    return course_id
+    return course.id
 
 
 async def _ensure_subject(
-    session: AsyncSession, course_id: uuid.UUID
+    session: AsyncSession,
+    institution_id: uuid.UUID,
+    department_id: uuid.UUID,
+    course_id: uuid.UUID
 ) -> uuid.UUID:
-    """Upsert the seed subject. Returns its UUID."""
+    """Upsert the seed subject."""
     result = await session.execute(
-        text("SELECT id FROM subject WHERE name = :name AND course_id = :course_id LIMIT 1"),
-        {"name": SUBJECT_NAME, "course_id": str(course_id)},
+        select(Subject.id).where(
+            Subject.code == SUBJECT_CODE,
+            Subject.institution_id == institution_id
+        )
     )
     row = result.fetchone()
     if row:
-        logger.info("  ⟳  Subject already exists (%s)", SUBJECT_NAME)
-        return uuid.UUID(str(row[0]))
+        logger.info("  ⟳  Subject already exists (%s)", SUBJECT_CODE)
+        return row[0]
 
-    subject_id = uuid.uuid4()
-    now = _utcnow()
-    await session.execute(
-        text(
-            """
-            INSERT INTO subject (id, name, course_id, created_at, updated_at)
-            VALUES (:id, :name, :course_id, :now, :now)
-            ON CONFLICT DO NOTHING
-            """
-        ),
-        {"id": str(subject_id), "name": SUBJECT_NAME, "course_id": str(course_id), "now": now},
+    subject = Subject(
+        institution_id=institution_id,
+        department_id=department_id,
+        code=SUBJECT_CODE,
+        title=SUBJECT_TITLE,
+        is_active=True,
     )
+    session.add(subject)
     await session.flush()
-    logger.info("  ✔  Subject created (%s)", SUBJECT_NAME)
-    return subject_id
+
+    # Link to course
+    cs = CourseSubject(course_id=course_id, subject_id=subject.id)
+    session.add(cs)
+
+    logger.info("  ✔  Subject created (%s)", SUBJECT_CODE)
+    return subject.id
 
 
 async def _ensure_class_section(
     session: AsyncSession,
     course_id: uuid.UUID,
-    lecturer_id: uuid.UUID,
 ) -> uuid.UUID:
-    """Upsert the seed class section. Returns its UUID."""
+    """Upsert the seed class section."""
     result = await session.execute(
-        text("SELECT id FROM class_section WHERE code = :code LIMIT 1"),
-        {"code": SECTION_CODE},
+        select(ClassSection.id).where(
+            ClassSection.name == SECTION_NAME,
+            ClassSection.course_id == course_id
+        )
     )
     row = result.fetchone()
     if row:
-        logger.info("  ⟳  ClassSection already exists (%s)", SECTION_CODE)
-        return uuid.UUID(str(row[0]))
+        logger.info("  ⟳  ClassSection already exists (%s)", SECTION_NAME)
+        return row[0]
 
-    section_id = uuid.uuid4()
-    now = _utcnow()
-    await session.execute(
-        text(
-            """
-            INSERT INTO class_section
-                (id, code, name, course_id, lecturer_id, is_active, created_at, updated_at)
-            VALUES
-                (:id, :code, :name, :course_id, :lecturer_id, true, :now, :now)
-            ON CONFLICT DO NOTHING
-            """
-        ),
-        {
-            "id": str(section_id),
-            "code": SECTION_CODE,
-            "name": f"{COURSE_CODE} Section A",
-            "course_id": str(course_id),
-            "lecturer_id": str(lecturer_id),
-            "now": now,
-        },
+    section = ClassSection(
+        course_id=course_id,
+        name=SECTION_NAME,
+        capacity=50,
+        is_active=True,
     )
+    session.add(section)
     await session.flush()
-    logger.info("  ✔  ClassSection created (%s)", SECTION_CODE)
-    return section_id
+    logger.info("  ✔  ClassSection created (%s)", SECTION_NAME)
+    return section.id
+
+
+async def _ensure_lecturer_assignment(
+    session: AsyncSession,
+    lecturer_id: uuid.UUID,
+    course_id: uuid.UUID,
+) -> None:
+    """Assign lecturer to course."""
+    result = await session.execute(
+        select(LecturerCourseAssignment.id).where(
+            LecturerCourseAssignment.lecturer_id == lecturer_id,
+            LecturerCourseAssignment.course_id == course_id
+        )
+    )
+    if result.fetchone():
+        logger.info("  ⟳  Lecturer assignment already exists")
+        return
+
+    assignment = LecturerCourseAssignment(
+        lecturer_id=lecturer_id,
+        course_id=course_id,
+        role=LecturerAssignmentRole.PRIMARY,
+        is_active=True,
+    )
+    session.add(assignment)
+    await session.flush()
+    logger.info("  ✔  Lecturer assigned to course")
 
 
 async def _ensure_enrollment(
@@ -401,39 +517,27 @@ async def _ensure_enrollment(
     student_id: uuid.UUID,
     section_id: uuid.UUID,
 ) -> None:
-    """Enroll the student in the class section if not already enrolled."""
+    """Enroll the student in the class section."""
     result = await session.execute(
-        text(
-            "SELECT id FROM student_enrollment "
-            "WHERE student_id = :sid AND section_id = :secid LIMIT 1"
-        ),
-        {"sid": str(student_id), "secid": str(section_id)},
+        select(StudentEnrollment.id).where(
+            StudentEnrollment.student_id == student_id,
+            StudentEnrollment.class_section_id == section_id
+        )
     )
     if result.fetchone():
         logger.info("  ⟳  Student enrollment already exists")
         return
 
-    enrollment_id = uuid.uuid4()
-    now = _utcnow()
-    await session.execute(
-        text(
-            """
-            INSERT INTO student_enrollment
-                (id, student_id, section_id, enrolled_at, is_active, created_at, updated_at)
-            VALUES
-                (:id, :student_id, :section_id, :now, true, :now, :now)
-            ON CONFLICT DO NOTHING
-            """
-        ),
-        {
-            "id": str(enrollment_id),
-            "student_id": str(student_id),
-            "section_id": str(section_id),
-            "now": now,
-        },
+    enrollment = StudentEnrollment(
+        student_id=student_id,
+        class_section_id=section_id,
+        enrollment_status=EnrollmentStatus.ENROLLED,
+        enrolled_at=_utcnow(),
+        is_active=True,
     )
+    session.add(enrollment)
     await session.flush()
-    logger.info("  ✔  Student enrolled in section %s", SECTION_CODE)
+    logger.info("  ✔  Student enrolled in section %s", SECTION_NAME)
 
 
 # ---------------------------------------------------------------------------
@@ -670,7 +774,7 @@ async def seed_questions(
             assessment_id=assessment_id,
             question_id=question.id,
             order_index=order,
-            added_via="manual_write",
+            added_via=QuestionAddedVia.MANUAL_WRITE.value,
             marks_override=q_data["marks"],
         )
         question_ids.append(question.id)
@@ -727,7 +831,7 @@ async def seed_questions(
             assessment_id=assessment_id,
             question_id=question.id,
             order_index=order,
-            added_via="manual_write",
+            added_via=QuestionAddedVia.MANUAL_WRITE.value,
             marks_override=q_data["marks"],
         )
         question_ids.append(question.id)
@@ -784,7 +888,7 @@ async def seed_questions(
             assessment_id=assessment_id,
             question_id=question.id,
             order_index=order,
-            added_via="manual_write",
+            added_via=QuestionAddedVia.MANUAL_WRITE.value,
             marks_override=q_data["marks"],
         )
         question_ids.append(question.id)
@@ -1022,11 +1126,16 @@ async def reset_seed_data(session: AsyncSession) -> None:
         "rubric_criterion_level",
         "rubric_criterion",
         "rubric",
-        # Phase 2 — academic structure (raw tables)
+        # Phase 2 — academic structure (SQLModel tables)
         "student_enrollment",
+        "lecturer_course_assignment",
         "class_section",
+        "course_subject",
         "subject",
         "course",
+        "academic_period",
+        "department",
+        "institution",
         # Phase 3 — auth
         "security_event",
         "password_reset_tokens",
