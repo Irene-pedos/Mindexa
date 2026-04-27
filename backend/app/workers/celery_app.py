@@ -21,28 +21,25 @@ celery_app = Celery(
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
-        "app.workers.tasks.grading",
-        "app.workers.tasks.notifications",
-        "app.workers.tasks.documents",
-        "app.workers.tasks.integrity",
-        "app.workers.tasks.reports",
+        "app.workers.tasks",
     ],
 )
 
 celery_app.conf.task_queues = (
     Queue("default",       Exchange("default"),       routing_key="default"),
     Queue("grading",       Exchange("grading"),        routing_key="grading"),
-    Queue("documents",     Exchange("documents"),      routing_key="documents"),
-    Queue("integrity",     Exchange("integrity"),      routing_key="integrity"),
+    Queue("email",         Exchange("email"),          routing_key="email"),
+    Queue("cleanup",       Exchange("cleanup"),        routing_key="cleanup"),
     Queue("high_priority", Exchange("high_priority"),  routing_key="high_priority"),
 )
 
 celery_app.conf.task_routes = {
-    "app.workers.tasks.grading.*":       {"queue": "grading"},
-    "app.workers.tasks.documents.*":     {"queue": "documents"},
-    "app.workers.tasks.integrity.*":     {"queue": "integrity"},
-    "app.workers.tasks.notifications.*": {"queue": "default"},
-    "app.workers.tasks.reports.*":       {"queue": "default"},
+    "app.workers.tasks.process_ai_grading_job":    {"queue": "grading"},
+    "app.workers.tasks.send_email_notification":   {"queue": "email"},
+    "app.workers.tasks.purge_old_logs":            {"queue": "cleanup"},
+    "app.workers.tasks.cleanup_expired_tokens":    {"queue": "cleanup"},
+    "app.workers.tasks.auto_submit_expired_attempts": {"queue": "default"},
+    "app.workers.tasks.process_ai_generation_batch": {"queue": "default"},
 }
 
 celery_app.conf.update(
@@ -68,28 +65,29 @@ celery_app.conf.update(
 )
 
 celery_app.conf.beat_schedule = {
-    "send-assessment-reminders": {
-        "task": "app.workers.tasks.notifications.send_assessment_reminders",
-        "schedule": 3600.0,
+    "auto-submit-expired-attempts": {
+        "task": "app.workers.tasks.auto_submit_expired_attempts",
+        "schedule": 300.0,  # Every 5 minutes
     },
-    "close-expired-assessments": {
-        "task": "app.workers.tasks.grading.close_expired_assessments",
-        "schedule": 300.0,
+    "cleanup-expired-tokens": {
+        "task": "app.workers.tasks.cleanup_expired_tokens",
+        "schedule": 1800.0,  # Every 30 minutes
     },
-    "cleanup-stale-attempts": {
-        "task": "app.workers.tasks.grading.cleanup_stale_attempts",
-        "schedule": 1800.0,
+    "purge-old-logs": {
+        "task": "app.workers.tasks.purge_old_logs",
+        "schedule": 86400.0,  # Daily
     },
 }
 
 
 @worker_ready.connect
 def on_worker_ready(**kwargs: object) -> None:
-    import structlog
-    structlog.get_logger("celery.worker").info("celery_worker_ready")
+    # Use standard logging if structlog not available or configured
+    import logging
+    logging.getLogger("celery.worker").info("celery_worker_ready")
 
 
 @worker_shutdown.connect
 def on_worker_shutdown(**kwargs: object) -> None:
-    import structlog
-    structlog.get_logger("celery.worker").info("celery_worker_shutdown")
+    import logging
+    logging.getLogger("celery.worker").info("celery_worker_shutdown")

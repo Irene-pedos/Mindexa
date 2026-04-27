@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.db.enums import SubmissionAnswerType
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -36,19 +35,19 @@ class SubmitAnswerRequest(BaseModel):
     answer_type: SubmissionAnswerType
 
     # Payload fields — only one populated per request
-    answer_text: Optional[str] = None
-    selected_option_ids: Optional[List[uuid.UUID]] = None
-    ordered_option_ids: Optional[List[uuid.UUID]] = None
-    match_pairs_json: Optional[Dict[str, str]] = None
-    fill_blank_answers: Optional[Dict[str, str]] = None
-    file_url: Optional[str] = Field(default=None, max_length=2000)
+    answer_text: str | None = None
+    selected_option_ids: list[uuid.UUID] | None = None
+    ordered_option_ids: list[uuid.UUID] | None = None
+    match_pairs_json: dict[str, str] | None = None
+    fill_blank_answers: dict[str, str] | None = None
+    file_url: str | None = Field(default=None, max_length=2000)
 
     # Client metadata
     change_type: str = Field(
         default="manual_save",
         description="autosave | manual_save | submit | auto_submit",
     )
-    time_spent_seconds: Optional[int] = Field(
+    time_spent_seconds: int | None = Field(
         default=None,
         ge=0,
         description="Time spent on this question in seconds (reported by frontend)",
@@ -56,7 +55,7 @@ class SubmitAnswerRequest(BaseModel):
     is_skipped: bool = False
 
     @model_validator(mode="after")
-    def validate_answer_payload(self) -> "SubmitAnswerRequest":
+    def validate_answer_payload(self) -> SubmitAnswerRequest:
         t = self.answer_type
         if t == SubmissionAnswerType.TEXT and self.answer_text is None and not self.is_skipped:
             raise ValueError("answer_text required for TEXT answer_type")
@@ -87,16 +86,16 @@ class SubmissionResponse(BaseModel):
     attempt_id: uuid.UUID
     question_id: uuid.UUID
     answer_type: SubmissionAnswerType
-    answer_text: Optional[str]
-    selected_option_ids: Optional[List[Any]]
-    ordered_option_ids: Optional[List[Any]]
-    match_pairs_json: Optional[Dict[str, Any]]
-    fill_blank_answers: Optional[Dict[str, Any]]
-    file_url: Optional[str]
+    answer_text: str | None
+    selected_option_ids: list[Any] | None
+    ordered_option_ids: list[Any] | None
+    match_pairs_json: dict[str, Any] | None
+    fill_blank_answers: dict[str, Any] | None
+    file_url: str | None
     is_final: bool
-    saved_at: Optional[datetime]
-    submitted_at: Optional[datetime]
-    time_spent_seconds: Optional[int]
+    saved_at: datetime | None
+    submitted_at: datetime | None
+    time_spent_seconds: int | None
     is_skipped: bool
     created_at: datetime
     updated_at: datetime
@@ -111,7 +110,7 @@ class SubmissionSummary(BaseModel):
     answer_type: SubmissionAnswerType
     is_final: bool
     is_skipped: bool
-    saved_at: Optional[datetime]
+    saved_at: datetime | None
 
 
 class SubmissionLogEntry(BaseModel):
@@ -123,13 +122,13 @@ class SubmissionLogEntry(BaseModel):
     attempt_id: uuid.UUID
     question_id: uuid.UUID
     change_type: str
-    previous_value: Optional[Dict[str, Any]]
-    new_value: Optional[Dict[str, Any]]
+    previous_value: dict[str, Any] | None
+    new_value: dict[str, Any] | None
     created_at: datetime
 
 
 class AttemptSubmissionsResponse(BaseModel):
     """All submissions for an attempt (used at grading time)."""
     attempt_id: uuid.UUID
-    submissions: List[SubmissionResponse]
+    submissions: list[SubmissionResponse]
     total: int

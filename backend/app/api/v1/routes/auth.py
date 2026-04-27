@@ -52,29 +52,37 @@ RESPONSE PATTERNS:
 
 from __future__ import annotations
 
-from typing import Any, Optional
-
 import structlog
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
 from app.core.constants import UserRole as CoreUserRole
-from app.core.exceptions import AuthenticationError, InvalidTokenError
-from app.db.schemas.auth import (AuthMessageResponse, ChangePasswordRequest,
-                                 ForgotPasswordRequest, LoginResponse,
-                                 LogoutRequest, RefreshRequest,
-                                 ResendVerificationRequest,
-                                 ResetPasswordRequest, TokenResponse,
-                                 UserLoginRequest, UserProfileResponse,
-                                 UserProfileUpdate, UserRegisterRequest,
-                                 UserResponse)
-from app.db.schemas.base import MessageResponse
+from app.core.exceptions import AuthenticationError
+from app.db.schemas.auth import (
+    AuthMessageResponse,
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    LoginResponse,
+    LogoutRequest,
+    RefreshRequest,
+    ResendVerificationRequest,
+    ResetPasswordRequest,
+    TokenResponse,
+    UserLoginRequest,
+    UserProfileResponse,
+    UserProfileUpdate,
+    UserRegisterRequest,
+    UserResponse,
+)
 from app.db.session import get_db
-from app.dependencies.auth import (ActiveUser, CurrentUser, VerifiedUser,
-                                   require_active_user, require_verified_email)
+from app.dependencies.auth import (
+    ActiveUser,
+    CurrentUser,
+    VerifiedUser,
+)
 from app.services.auth_service import AuthService
 from app.workers.tasks import send_email_notification
-from fastapi import APIRouter, Cookie, Depends, Request, Response, status
-from fastapi.responses import JSONResponse
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 logger = structlog.get_logger(__name__)
@@ -352,7 +360,7 @@ async def refresh_tokens(
     db: AsyncSession = Depends(get_db),
     body: RefreshRequest | None = None,
     # Also accept from HttpOnly cookie (cookie name matches settings)
-    refresh_cookie: Optional[str] = Cookie(
+    refresh_cookie: str | None = Cookie(
         default=None,
         alias=settings.REFRESH_TOKEN_COOKIE_NAME,
     ),
@@ -413,7 +421,7 @@ async def logout(
     current_user: ActiveUser,
     db: AsyncSession = Depends(get_db),
     body: LogoutRequest | None = None,
-    refresh_cookie: Optional[str] = Cookie(
+    refresh_cookie: str | None = Cookie(
         default=None,
         alias=settings.REFRESH_TOKEN_COOKIE_NAME,
     ),

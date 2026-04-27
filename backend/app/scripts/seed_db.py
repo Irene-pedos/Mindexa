@@ -59,6 +59,7 @@ logger = logging.getLogger("mindexa.seed")
 # ARGUMENT PARSER
 # ---------------------------------------------------------------------------
 
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="seed_db",
@@ -87,10 +88,7 @@ def _parse_args() -> argparse.Namespace:
         "--check",
         action="store_true",
         default=False,
-        help=(
-            "Dry-run: verify environment and DB connection only. "
-            "No data is written."
-        ),
+        help=("Dry-run: verify environment and DB connection only. No data is written."),
     )
     return parser.parse_args()
 
@@ -98,6 +96,7 @@ def _parse_args() -> argparse.Namespace:
 # ---------------------------------------------------------------------------
 # ENVIRONMENT CHECK
 # ---------------------------------------------------------------------------
+
 
 def _check_environment() -> None:
     """
@@ -110,8 +109,7 @@ def _check_environment() -> None:
         from app.core.config import settings
     except Exception as exc:
         logger.critical(
-            "Failed to load app settings. "
-            "Is your .env file configured correctly? Error: %s", exc
+            "Failed to load app settings. Is your .env file configured correctly? Error: %s", exc
         )
         sys.exit(1)
 
@@ -125,18 +123,25 @@ def _check_environment() -> None:
         sys.exit(1)
 
     logger.info("  ✔  Environment: %s", settings.ENVIRONMENT)
-    logger.info("  ✔  Database: %s", settings.DATABASE_URL.split("@")[-1] if "@" in settings.DATABASE_URL else settings.DATABASE_URL)
+    logger.info(
+        "  ✔  Database: %s",
+        settings.DATABASE_URL.split("@")[-1]
+        if "@" in settings.DATABASE_URL
+        else settings.DATABASE_URL,
+    )
 
 
 # ---------------------------------------------------------------------------
 # DATABASE CHECK
 # ---------------------------------------------------------------------------
 
+
 async def _check_db_connection() -> bool:
     """Test that we can reach the database."""
     try:
-        from app.db.session import AsyncSessionLocal
         from sqlalchemy import text
+
+        from app.db.session import AsyncSessionLocal
 
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
@@ -150,6 +155,7 @@ async def _check_db_connection() -> bool:
 # ---------------------------------------------------------------------------
 # MAIN ASYNC RUNNER
 # ---------------------------------------------------------------------------
+
 
 async def main(args: argparse.Namespace) -> int:
     """
@@ -238,6 +244,7 @@ async def main(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 # ENTRY POINT
 # ---------------------------------------------------------------------------
+
 
 def run() -> None:
     """Synchronous wrapper — called by `python -m app.scripts.seed_db`."""

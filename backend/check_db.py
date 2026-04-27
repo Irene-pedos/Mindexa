@@ -1,6 +1,9 @@
 import asyncio
+
 from sqlalchemy import text
+
 from app.db.session import AsyncSessionLocal
+
 
 async def check_columns():
     async with AsyncSessionLocal() as session:

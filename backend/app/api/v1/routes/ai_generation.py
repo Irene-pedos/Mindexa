@@ -17,16 +17,19 @@ IMPORTANT:
 
 import uuid
 
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.db.models.auth import User
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin
-from app.schemas.ai_generation import (AIGenerationBatchDetailResponse,
-                                       AIGenerationBatchListResponse,
-                                       GenerateQuestionsRequest,
-                                       ReviewAIQuestionRequest)
+from app.schemas.ai_generation import (
+    AIGenerationBatchDetailResponse,
+    AIGenerationBatchListResponse,
+    GenerateQuestionsRequest,
+    ReviewAIQuestionRequest,
+)
 from app.services.ai_generation_service import AIGenerationService
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/ai", tags=["AI Question Generation"])
 

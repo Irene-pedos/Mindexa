@@ -32,9 +32,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Generic, List, Optional, TypeVar
+from typing import Generic, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 # ─────────────────────────────────────────────────────────────────────────────
 # BASE CONFIG
@@ -106,7 +106,7 @@ class PaginatedResponse(MindexaSchema, Generic[T]):
     }
     """
 
-    items: List[T]
+    items: list[T]
     total: int = Field(ge=0, description="Total number of matching records.")
     page: int = Field(ge=1, description="Current page number (1-based).")
     page_size: int = Field(ge=1, le=100, description="Records per page.")
@@ -155,9 +155,9 @@ class MessageResponse(MindexaSchema):
 class ErrorDetail(MindexaSchema):
     """Single error detail object within an ErrorResponse."""
 
-    field: Optional[str] = None
+    field: str | None = None
     message: str
-    code: Optional[str] = None
+    code: str | None = None
 
 
 class ErrorResponse(MindexaSchema):
@@ -171,5 +171,5 @@ class ErrorResponse(MindexaSchema):
 
     success: bool = False
     message: str
-    errors: List[ErrorDetail] = Field(default_factory=list)
-    request_id: Optional[str] = None
+    errors: list[ErrorDetail] = Field(default_factory=list)
+    request_id: str | None = None

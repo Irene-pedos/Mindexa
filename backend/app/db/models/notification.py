@@ -68,19 +68,20 @@ JSONB:
     a high-read, insert-heavy table.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, List, Optional
 
-from app.db.base import BaseModel, utcnow
-from app.db.enums import (NotificationChannel, NotificationType,
-                          ScheduledEventType)
-from app.db.mixins import composite_index
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
+
+from app.db.base import BaseModel
+from app.db.enums import NotificationChannel, NotificationType, ScheduledEventType
+from app.db.mixins import composite_index
+
+if TYPE_CHECKING:
+    from app.db.models.auth import User
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NOTIFICATION
@@ -191,6 +192,9 @@ class Notification(BaseModel, table=True):
         )
     )
 
+    # ── Relationships ─────────────────────────────────────────────────────────
+    recipient: Optional["User"] = Relationship(back_populates="notifications")
+
     # ── Content ───────────────────────────────────────────────────────────────
 
     notification_type: NotificationType = Field(nullable=False)
@@ -200,7 +204,7 @@ class Notification(BaseModel, table=True):
     )
     title: str = Field(nullable=False, max_length=255)
     body: str = Field(nullable=False, max_length=1000)
-    action_url: Optional[str] = Field(
+    action_url: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,
@@ -208,14 +212,14 @@ class Notification(BaseModel, table=True):
 
     # ── Deep-link reference ───────────────────────────────────────────────────
 
-    reference_id: Optional[uuid.UUID] = Field(
+    reference_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         # Plain UUID — the referenced object's PK. No FK declared because
         # reference_type determines which table this points to and SQLAlchemy
         # does not support polymorphic FK references natively.
     )
-    reference_type: Optional[str] = Field(
+    reference_type: str | None = Field(
         default=None,
         nullable=True,
         max_length=50,
@@ -224,17 +228,17 @@ class Notification(BaseModel, table=True):
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_read: bool = Field(default=False, nullable=False)
-    read_at: Optional[datetime] = Field(default=None, nullable=True)
+    read_at: datetime | None = Field(default=None, nullable=True)
     is_dismissed: bool = Field(default=False, nullable=False)
-    dismissed_at: Optional[datetime] = Field(default=None, nullable=True)
+    dismissed_at: datetime | None = Field(default=None, nullable=True)
 
     # ── Delivery tracking ─────────────────────────────────────────────────────
 
-    delivered_at: Optional[datetime] = Field(
+    delivered_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
-    delivery_error: Optional[str] = Field(
+    delivery_error: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,
@@ -244,7 +248,7 @@ class Notification(BaseModel, table=True):
 
     # ── Expiry ────────────────────────────────────────────────────────────────
 
-    expires_at: Optional[datetime] = Field(
+    expires_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
@@ -333,16 +337,19 @@ class ScheduledEvent(BaseModel, table=True):
         )
     )
 
+    # ── Relationships ─────────────────────────────────────────────────────────
+    user: Optional["User"] = Relationship()
+
     # ── Event identity ────────────────────────────────────────────────────────
 
     event_type: ScheduledEventType = Field(nullable=False)
     title: str = Field(nullable=False, max_length=255)
-    description: Optional[str] = Field(default=None, nullable=True)
+    description: str | None = Field(default=None, nullable=True)
 
     # ── Timing ────────────────────────────────────────────────────────────────
 
     starts_at: datetime = Field(nullable=False)
-    ends_at: Optional[datetime] = Field(
+    ends_at: datetime | None = Field(
         default=None,
         nullable=True,
         # NULL for point-in-time events (e.g. RESULT_RELEASE).
@@ -369,8 +376,8 @@ class ScheduledEvent(BaseModel, table=True):
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_cancelled: bool = Field(default=False, nullable=False)
-    cancelled_at: Optional[datetime] = Field(default=None, nullable=True)
-    cancellation_reason: Optional[str] = Field(
+    cancelled_at: datetime | None = Field(default=None, nullable=True)
+    cancellation_reason: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,
@@ -378,13 +385,13 @@ class ScheduledEvent(BaseModel, table=True):
 
     # ── Display ───────────────────────────────────────────────────────────────
 
-    colour_hint: Optional[str] = Field(
+    colour_hint: str | None = Field(
         default=None,
         nullable=True,
         max_length=7,
         # Hex colour code, e.g. "#E53935". 7 chars = # + 6 hex digits.
     )
-    action_url: Optional[str] = Field(
+    action_url: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,
@@ -486,6 +493,9 @@ class Reminder(BaseModel, table=True):
         )
     )
 
+    # ── Relationships ─────────────────────────────────────────────────────────
+    recipient: Optional["User"] = Relationship()
+
     # ── Content template ──────────────────────────────────────────────────────
 
     reminder_type: NotificationType = Field(nullable=False)
@@ -505,22 +515,22 @@ class Reminder(BaseModel, table=True):
 
     # ── Source reference ──────────────────────────────────────────────────────
 
-    reference_id: Optional[uuid.UUID] = Field(
+    reference_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
     )
-    reference_type: Optional[str] = Field(
+    reference_type: str | None = Field(
         default=None,
         nullable=True,
         max_length=50,
     )
-    action_url: Optional[str] = Field(
+    action_url: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,
     )
     # Assessment FK — used for bulk cancellation when an assessment changes
-    assessment_id: Optional[uuid.UUID] = Field(
+    assessment_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
             UUID(as_uuid=True),
@@ -539,15 +549,15 @@ class Reminder(BaseModel, table=True):
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_fired: bool = Field(default=False, nullable=False)
-    fired_at: Optional[datetime] = Field(default=None, nullable=True)
-    fired_notification_id: Optional[uuid.UUID] = Field(
+    fired_at: datetime | None = Field(default=None, nullable=True)
+    fired_notification_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         # Plain UUID — the Notification row created when this reminder fired.
     )
     is_cancelled: bool = Field(default=False, nullable=False)
-    cancelled_at: Optional[datetime] = Field(default=None, nullable=True)
-    cancellation_reason: Optional[str] = Field(
+    cancelled_at: datetime | None = Field(default=None, nullable=True)
+    cancellation_reason: str | None = Field(
         default=None,
         nullable=True,
         max_length=500,

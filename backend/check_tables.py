@@ -1,7 +1,8 @@
 import asyncio
 
-from app.db.session import AsyncSessionLocal
 from sqlalchemy import text
+
+from app.db.session import AsyncSessionLocal
 
 
 async def check():

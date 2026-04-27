@@ -28,18 +28,18 @@ RULES ENFORCED HERE:
 from __future__ import annotations
 
 import uuid
-from typing import Any, List, Optional
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus, QuestionType
-from app.db.models.attempt import (GradingQueueItem, StudentResponse,
-                                   SubmissionGrade)
+from app.db.models.attempt import GradingQueueItem, StudentResponse, SubmissionGrade
 from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # AUTO-GRADABLE question types (can be fully graded by code)
 AUTO_GRADABLE = {
@@ -79,7 +79,7 @@ class GradingService:
         max_score: float,
         assessment_id: uuid.UUID,
         student_id: uuid.UUID,
-        graded_by_id: Optional[uuid.UUID] = None,
+        graded_by_id: uuid.UUID | None = None,
     ) -> SubmissionGrade:
         """
         Auto-grade a single response for a closed question type.
@@ -261,7 +261,7 @@ class GradingService:
         ai_rationale: str,
         ai_confidence: float,
         max_score: float,
-        graded_by_ai_id: Optional[uuid.UUID] = None,
+        graded_by_ai_id: uuid.UUID | None = None,
     ) -> SubmissionGrade:
         """
         Store an AI-generated grading suggestion.
@@ -318,9 +318,9 @@ class GradingService:
         response_id: uuid.UUID,
         lecturer_id: uuid.UUID,
         score: float,
-        feedback: Optional[str] = None,
-        internal_notes: Optional[str] = None,
-        rubric_scores: Optional[list] = None,
+        feedback: str | None = None,
+        internal_notes: str | None = None,
+        rubric_scores: list | None = None,
         accept_ai_suggestion: bool = False,
     ) -> SubmissionGrade:
         """

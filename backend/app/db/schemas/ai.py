@@ -8,11 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional
 
-from pydantic import Field
-
-from app.db.enums import AIActionStatus, AIActionType, AIGradeDecision
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 
@@ -27,18 +23,18 @@ class AIActionLogResponse(MindexaSchema):
     id: uuid.UUID
     action_type: str
     status: str
-    actor_id: Optional[uuid.UUID]
-    actor_role: Optional[str]
-    subject_entity_type: Optional[str]
-    subject_entity_id: Optional[uuid.UUID]
+    actor_id: uuid.UUID | None
+    actor_role: str | None
+    subject_entity_type: str | None
+    subject_entity_id: uuid.UUID | None
     model_name: str
-    prompt_tokens: Optional[int]
-    completion_tokens: Optional[int]
-    total_tokens: Optional[int]
-    latency_ms: Optional[int]
-    prompt_summary: Optional[str]
-    human_reviewed: Optional[bool]
-    human_reviewed_at: Optional[datetime]
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    latency_ms: int | None
+    prompt_summary: str | None
+    human_reviewed: bool | None
+    human_reviewed_at: datetime | None
     created_at: datetime
 
 
@@ -47,12 +43,12 @@ class AIGradeReviewResponse(BaseAuditedResponse):
     assessment_id: uuid.UUID
     student_id: uuid.UUID
     grading_decision: str
-    ai_suggested_total: Optional[float]
-    lecturer_final_total: Optional[float]
-    score_delta: Optional[float]
-    max_possible_score: Optional[float]
-    lecturer_id: Optional[uuid.UUID]
-    review_started_at: Optional[datetime]
-    review_completed_at: Optional[datetime]
-    review_duration_seconds: Optional[int]
-    lecturer_notes: Optional[str]
+    ai_suggested_total: float | None
+    lecturer_final_total: float | None
+    score_delta: float | None
+    max_possible_score: float | None
+    lecturer_id: uuid.UUID | None
+    review_started_at: datetime | None
+    review_completed_at: datetime | None
+    review_duration_seconds: int | None
+    lecturer_notes: str | None

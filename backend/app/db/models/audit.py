@@ -45,12 +45,9 @@ Import order safety:
     This file can be imported first in alembic/env.py with zero risk.
 """
 
-from __future__ import annotations
-
 import uuid
 from typing import Optional
 
-from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field
 

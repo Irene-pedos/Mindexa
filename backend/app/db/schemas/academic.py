@@ -8,14 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime
-from typing import List, Optional
 
 from pydantic import Field, field_validator
 
-from app.db.enums import (AcademicPeriodType, EnrollmentStatus,
-                          LecturerAssignmentRole)
-from app.db.schemas.base import (BaseAuditedResponse, BaseResponse,
-                                 MindexaSchema)
+from app.db.enums import AcademicPeriodType, EnrollmentStatus, LecturerAssignmentRole
+from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
 # INSTITUTION
@@ -25,21 +22,21 @@ class InstitutionCreate(MindexaSchema):
     name: str = Field(min_length=2, max_length=255)
     code: str = Field(min_length=2, max_length=20)
     timezone: str = Field(default="UTC", max_length=64)
-    logo_url: Optional[str] = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None, max_length=500)
 
 
 class InstitutionUpdate(MindexaSchema):
-    name: Optional[str] = Field(default=None, min_length=2, max_length=255)
-    timezone: Optional[str] = Field(default=None, max_length=64)
-    logo_url: Optional[str] = Field(default=None, max_length=500)
-    is_active: Optional[bool] = None
+    name: str | None = Field(default=None, min_length=2, max_length=255)
+    timezone: str | None = Field(default=None, max_length=64)
+    logo_url: str | None = Field(default=None, max_length=500)
+    is_active: bool | None = None
 
 
 class InstitutionResponse(BaseAuditedResponse):
     name: str
     code: str
     timezone: str
-    logo_url: Optional[str]
+    logo_url: str | None
     is_active: bool
 
 
@@ -79,18 +76,18 @@ class AcademicPeriodResponse(BaseAuditedResponse):
 
 class SubjectCreate(MindexaSchema):
     institution_id: uuid.UUID
-    department_id: Optional[uuid.UUID] = None
+    department_id: uuid.UUID | None = None
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
 
 
 class SubjectResponse(BaseAuditedResponse):
     institution_id: uuid.UUID
-    department_id: Optional[uuid.UUID]
+    department_id: uuid.UUID | None
     code: str
     title: str
-    description: Optional[str]
+    description: str | None
     is_active: bool
 
 
@@ -100,29 +97,29 @@ class SubjectResponse(BaseAuditedResponse):
 
 class CourseCreate(MindexaSchema):
     institution_id: uuid.UUID
-    department_id: Optional[uuid.UUID] = None
+    department_id: uuid.UUID | None = None
     academic_period_id: uuid.UUID
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=255)
-    description: Optional[str] = None
-    credit_hours: Optional[int] = Field(default=None, ge=1, le=30)
+    description: str | None = None
+    credit_hours: int | None = Field(default=None, ge=1, le=30)
 
 
 class CourseUpdate(MindexaSchema):
-    title: Optional[str] = Field(default=None, min_length=2, max_length=255)
-    description: Optional[str] = None
-    credit_hours: Optional[int] = Field(default=None, ge=1, le=30)
-    is_active: Optional[bool] = None
+    title: str | None = Field(default=None, min_length=2, max_length=255)
+    description: str | None = None
+    credit_hours: int | None = Field(default=None, ge=1, le=30)
+    is_active: bool | None = None
 
 
 class CourseResponse(BaseAuditedResponse):
     institution_id: uuid.UUID
-    department_id: Optional[uuid.UUID]
+    department_id: uuid.UUID | None
     academic_period_id: uuid.UUID
     code: str
     title: str
-    description: Optional[str]
-    credit_hours: Optional[int]
+    description: str | None
+    credit_hours: int | None
     is_active: bool
 
 
@@ -141,17 +138,17 @@ class CourseSummaryResponse(MindexaSchema):
 class ClassSectionCreate(MindexaSchema):
     course_id: uuid.UUID
     name: str = Field(min_length=1, max_length=100)
-    capacity: Optional[int] = Field(default=None, ge=1)
-    room: Optional[str] = Field(default=None, max_length=100)
-    schedule_notes: Optional[str] = None
+    capacity: int | None = Field(default=None, ge=1)
+    room: str | None = Field(default=None, max_length=100)
+    schedule_notes: str | None = None
 
 
 class ClassSectionResponse(BaseAuditedResponse):
     course_id: uuid.UUID
     name: str
-    capacity: Optional[int]
-    room: Optional[str]
-    schedule_notes: Optional[str]
+    capacity: int | None
+    room: str | None
+    schedule_notes: str | None
     is_active: bool
 
 
@@ -170,7 +167,7 @@ class EnrollmentStatusUpdate(MindexaSchema):
     """Request to change an enrollment's status (withdraw, defer, etc.)."""
 
     enrollment_status: EnrollmentStatus
-    withdrawal_reason: Optional[str] = Field(default=None, max_length=500)
+    withdrawal_reason: str | None = Field(default=None, max_length=500)
 
 
 class StudentEnrollmentResponse(BaseAuditedResponse):
@@ -178,8 +175,8 @@ class StudentEnrollmentResponse(BaseAuditedResponse):
     class_section_id: uuid.UUID
     enrollment_status: str
     enrolled_at: datetime
-    withdrawn_at: Optional[datetime]
-    withdrawal_reason: Optional[str]
+    withdrawn_at: datetime | None
+    withdrawal_reason: str | None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

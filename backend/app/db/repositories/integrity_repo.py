@@ -7,8 +7,7 @@ Data access for IntegrityEvent, IntegrityFlag, IntegrityWarning, SupervisionSess
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +22,7 @@ from app.db.models.integrity import (
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class IntegrityRepository:
@@ -41,7 +40,7 @@ class IntegrityRepository:
         assessment_id: uuid.UUID,
         student_id: uuid.UUID,
         event_type: str,
-        metadata_json: Optional[dict] = None,
+        metadata_json: dict | None = None,
     ) -> IntegrityEvent:
         event = IntegrityEvent(
             attempt_id=attempt_id,
@@ -56,7 +55,7 @@ class IntegrityRepository:
 
     async def list_events_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[IntegrityEvent]:
+    ) -> list[IntegrityEvent]:
         result = await self.db.execute(
             select(IntegrityEvent)
             .where(IntegrityEvent.attempt_id == attempt_id)
@@ -66,7 +65,7 @@ class IntegrityRepository:
 
     async def count_events_by_type(
         self, attempt_id: uuid.UUID
-    ) -> Dict[str, int]:
+    ) -> dict[str, int]:
         """Return {event_type: count} dict for an attempt. Used in risk evaluation."""
         result = await self.db.execute(
             select(IntegrityEvent.event_type, func.count(IntegrityEvent.id))
@@ -88,7 +87,7 @@ class IntegrityRepository:
 
     async def list_events_for_assessment(
         self, assessment_id: uuid.UUID, page: int = 1, page_size: int = 100
-    ) -> Tuple[List[IntegrityEvent], int]:
+    ) -> tuple[list[IntegrityEvent], int]:
         """Supervisor live feed — all events across all attempts for an assessment."""
         count_result = await self.db.execute(
             select(func.count(IntegrityEvent.id)).where(
@@ -119,8 +118,8 @@ class IntegrityRepository:
         raised_by: str,
         description: str,
         risk_level: str,
-        raised_by_id: Optional[uuid.UUID] = None,
-        evidence_event_ids: Optional[list] = None,
+        raised_by_id: uuid.UUID | None = None,
+        evidence_event_ids: list | None = None,
     ) -> IntegrityFlag:
         flag = IntegrityFlag(
             attempt_id=attempt_id,
@@ -137,7 +136,7 @@ class IntegrityRepository:
         await self.db.flush()
         return flag
 
-    async def get_flag_by_id(self, flag_id: uuid.UUID) -> Optional[IntegrityFlag]:
+    async def get_flag_by_id(self, flag_id: uuid.UUID) -> IntegrityFlag | None:
         result = await self.db.execute(
             select(IntegrityFlag).where(
                 IntegrityFlag.id == flag_id,
@@ -148,7 +147,7 @@ class IntegrityRepository:
 
     async def list_flags_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[IntegrityFlag]:
+    ) -> list[IntegrityFlag]:
         result = await self.db.execute(
             select(IntegrityFlag)
             .where(
@@ -161,7 +160,7 @@ class IntegrityRepository:
 
     async def list_open_flags_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[IntegrityFlag]:
+    ) -> list[IntegrityFlag]:
         result = await self.db.execute(
             select(IntegrityFlag).where(
                 IntegrityFlag.attempt_id == attempt_id,
@@ -202,10 +201,10 @@ class IntegrityRepository:
     async def list_flags_for_assessment(
         self,
         assessment_id: uuid.UUID,
-        status: Optional[str] = None,
+        status: str | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> Tuple[List[IntegrityFlag], int]:
+    ) -> tuple[list[IntegrityFlag], int]:
         filters = [
             IntegrityFlag.assessment_id == assessment_id,
             IntegrityFlag.is_deleted == False,  # noqa: E712
@@ -239,9 +238,9 @@ class IntegrityRepository:
         student_id: uuid.UUID,
         warning_level: str,
         message: str,
-        issued_by_id: Optional[uuid.UUID] = None,
-        trigger_event_id: Optional[uuid.UUID] = None,
-        raised_flag_id: Optional[uuid.UUID] = None,
+        issued_by_id: uuid.UUID | None = None,
+        trigger_event_id: uuid.UUID | None = None,
+        raised_flag_id: uuid.UUID | None = None,
     ) -> IntegrityWarning:
         warning = IntegrityWarning(
             attempt_id=attempt_id,
@@ -260,7 +259,7 @@ class IntegrityRepository:
 
     async def get_warning_by_id(
         self, warning_id: uuid.UUID
-    ) -> Optional[IntegrityWarning]:
+    ) -> IntegrityWarning | None:
         result = await self.db.execute(
             select(IntegrityWarning).where(
                 IntegrityWarning.id == warning_id,
@@ -287,7 +286,7 @@ class IntegrityRepository:
 
     async def list_warnings_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[IntegrityWarning]:
+    ) -> list[IntegrityWarning]:
         result = await self.db.execute(
             select(IntegrityWarning)
             .where(
@@ -327,7 +326,7 @@ class IntegrityRepository:
 
     async def get_active_session(
         self, assessment_id: uuid.UUID, supervisor_id: uuid.UUID
-    ) -> Optional[SupervisionSession]:
+    ) -> SupervisionSession | None:
         result = await self.db.execute(
             select(SupervisionSession).where(
                 SupervisionSession.assessment_id == assessment_id,
@@ -340,7 +339,7 @@ class IntegrityRepository:
 
     async def list_sessions_for_assessment(
         self, assessment_id: uuid.UUID
-    ) -> List[SupervisionSession]:
+    ) -> list[SupervisionSession]:
         result = await self.db.execute(
             select(SupervisionSession).where(
                 SupervisionSession.assessment_id == assessment_id,

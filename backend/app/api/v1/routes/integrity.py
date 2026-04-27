@@ -18,7 +18,6 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.exceptions import NotFoundError
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.session import get_db
-from app.dependencies.auth import require_active_user, require_lecturer_or_admin, require_student
+from app.dependencies.auth import require_lecturer_or_admin, require_student
 from app.schemas.integrity import (
     AcknowledgeWarningRequest,
     AttemptIntegrityReport,
@@ -36,7 +35,6 @@ from app.schemas.integrity import (
     RaiseFlagRequest,
     RecordEventRequest,
     ResolveFlagRequest,
-    SupervisionSessionResponse,
 )
 from app.services.integrity_service import IntegrityService
 
@@ -262,7 +260,7 @@ async def get_assessment_events(
 )
 async def get_assessment_flags(
     assessment_id: uuid.UUID,
-    status: Optional[str] = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     current_user=Depends(require_lecturer_or_admin),

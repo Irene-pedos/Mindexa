@@ -24,27 +24,27 @@ Endpoints:
 """
 
 import uuid
-from typing import Optional
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.auth import User
 from app.db.session import get_db
-from app.dependencies.auth import (require_active_user,
-                                   require_lecturer_or_admin)
-from app.schemas.assessment import (AddQuestionToAssessmentRequest,
-                                    AssessmentCreateRequest,
-                                    AssessmentDetailResponse,
-                                    AssessmentGeneralUpdate,
-                                    AssessmentListResponse,
-                                    AssessmentSectionCreate,
-                                    AssessmentSectionResponse,
-                                    AssessmentSectionUpdate,
-                                    AssessmentSecuritySettingsUpdate,
-                                    AssessmentSummaryResponse,
-                                    FinalizeAssessmentResponse,
-                                    ReorderQuestionsRequest)
+from app.dependencies.auth import require_active_user, require_lecturer_or_admin
+from app.schemas.assessment import (
+    AddQuestionToAssessmentRequest,
+    AssessmentCreateRequest,
+    AssessmentDetailResponse,
+    AssessmentGeneralUpdate,
+    AssessmentListResponse,
+    AssessmentSectionCreate,
+    AssessmentSectionResponse,
+    AssessmentSectionUpdate,
+    AssessmentSecuritySettingsUpdate,
+    FinalizeAssessmentResponse,
+    ReorderQuestionsRequest,
+)
 from app.services.assessment_service import AssessmentService
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/assessments", tags=["Assessments"])
 
@@ -86,8 +86,8 @@ async def create_assessment(
     ),
 )
 async def list_assessments(
-    status_filter: Optional[str] = Query(default=None, alias="status"),
-    assessment_type: Optional[str] = Query(default=None),
+    status_filter: str | None = Query(default=None, alias="status"),
+    assessment_type: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(require_active_user),

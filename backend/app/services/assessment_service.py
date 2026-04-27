@@ -28,34 +28,32 @@ FINALIZATION RULES (all must pass):
 """
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
-from app.core.constants import AssessmentStatus, AssessmentType, UserRole
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError, ValidationError)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.constants import AssessmentStatus, UserRole
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.core.security import hash_password
 from app.db.enums import AssessmentStatus as DbAssessmentStatus
 from app.db.enums import AssessmentType as DbAssessmentType
 from app.db.enums import GradingMode, ResultReleaseMode
 from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
-from app.db.repositories.blueprint_repo import BlueprintRepository
 from app.db.repositories.question_repo import QuestionRepository
-from app.schemas.assessment import (AddQuestionToAssessmentRequest,
-                                    AssessmentCreateRequest,
-                                    AssessmentDetailResponse,
-                                    AssessmentGeneralUpdate,
-                                    AssessmentListResponse,
-                                    AssessmentSectionCreate,
-                                    AssessmentSectionResponse,
-                                    AssessmentSectionUpdate,
-                                    AssessmentSecuritySettingsUpdate,
-                                    AssessmentSummaryResponse,
-                                    FinalizeAssessmentResponse,
-                                    ReorderQuestionsRequest)
+from app.schemas.assessment import (
+    AddQuestionToAssessmentRequest,
+    AssessmentCreateRequest,
+    AssessmentGeneralUpdate,
+    AssessmentListResponse,
+    AssessmentSectionCreate,
+    AssessmentSectionUpdate,
+    AssessmentSecuritySettingsUpdate,
+    AssessmentSummaryResponse,
+    FinalizeAssessmentResponse,
+    ReorderQuestionsRequest,
+)
 from app.services.blueprint_service import BlueprintService
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AssessmentService:
@@ -451,8 +449,8 @@ class AssessmentService:
         """
         assessment = await self._get_and_validate(assessment_id, current_user)
 
-        errors: List[str] = []
-        warnings: List[str] = []
+        errors: list[str] = []
+        warnings: list[str] = []
 
         # Check 1: Not already finalized
         if assessment.draft_is_complete:
@@ -523,7 +521,7 @@ class AssessmentService:
             title=assessment.title,
             status=AssessmentStatus.SCHEDULED.value,
             is_finalized=True,
-            finalized_at=datetime.now(tz=timezone.utc),
+            finalized_at=datetime.now(tz=UTC),
             validation_passed=True,
             errors=[],
             warnings=warnings,
@@ -556,8 +554,8 @@ class AssessmentService:
     async def list_assessments(
         self,
         current_user: User,
-        status: Optional[str] = None,
-        assessment_type: Optional[str] = None,
+        status: str | None = None,
+        assessment_type: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ):

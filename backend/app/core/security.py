@@ -44,13 +44,14 @@ import hmac
 import secrets
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any, Literal, overload
 
 import bcrypt
+from jose import JWTError, jwt
+
 from app.core.config import settings
 from app.core.exceptions import InvalidTokenError, TokenExpiredError
-from jose import JWTError, jwt
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -58,8 +59,8 @@ from jose import JWTError, jwt
 
 # Literal values embedded in the JWT "type" claim.
 # Using constants prevents typos and makes grep-ability easy.
-TOKEN_TYPE_ACCESS = "access"
-TOKEN_TYPE_REFRESH = "refresh"
+TOKEN_TYPE_ACCESS = "ACCESS"
+TOKEN_TYPE_REFRESH = "REFRESH"
 
 # Redis key prefix for revoked JTIs (used by cache_revoked_jti / is_jti_revoked_in_cache)
 _REVOKED_JTI_PREFIX = "revoked_jti:"
@@ -82,7 +83,7 @@ class TokenPayload:
     Fields:
         sub        — user_id (UUID string)
         jti        — unique token identifier (UUID string)
-        token_type — "access" or "refresh"
+        token_type — "ACCESS" or "REFRESH"
         role       — user role string (DISPLAY ONLY — re-read from DB for auth)
         email      — user email (DISPLAY ONLY — never trusted for auth decisions)
     """
@@ -335,7 +336,7 @@ def create_access_token(
     if expires_delta is None:
         expires_delta = timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + expires_delta
     role_value = role.value if hasattr(role, "value") else str(role)
     jti = str(uuid.uuid4())
@@ -405,7 +406,7 @@ def create_refresh_token(
     if expires_delta is None:
         expires_delta = timedelta(days=settings.JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     expires_at = now + expires_delta
     jti = str(uuid.uuid4())
 

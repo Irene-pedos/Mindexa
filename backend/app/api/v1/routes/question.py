@@ -15,21 +15,25 @@ Endpoints:
 """
 
 import uuid
-from typing import List, Optional
+
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.auth import User
 from app.db.models.question import Question
 from app.db.session import get_db
-from app.dependencies.auth import (require_active_user,
-                                   require_lecturer_or_admin)
-from app.schemas.question import (AttachTagsRequest, DetachTagsRequest,
-                                  QuestionCreateRequest,
-                                  QuestionDetailResponse, QuestionListResponse,
-                                  QuestionSearchParams, QuestionTagResponse,
-                                  QuestionUpdateRequest)
+from app.dependencies.auth import require_active_user, require_lecturer_or_admin
+from app.schemas.question import (
+    AttachTagsRequest,
+    DetachTagsRequest,
+    QuestionCreateRequest,
+    QuestionDetailResponse,
+    QuestionListResponse,
+    QuestionSearchParams,
+    QuestionTagResponse,
+    QuestionUpdateRequest,
+)
 from app.services.question_service import QuestionService
-from fastapi import APIRouter, Depends, Query, status
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/questions", tags=["Question Bank"])
 
@@ -75,15 +79,15 @@ async def create_question(
     ),
 )
 async def list_questions(
-    q: Optional[str] = Query(default=None, description="Full-text search on content"),
-    question_type: Optional[str] = Query(default=None),
-    difficulty: Optional[str] = Query(default=None),
-    subject: Optional[str] = Query(default=None),
-    topic: Optional[str] = Query(default=None),
-    bloom_level: Optional[str] = Query(default=None),
-    source_type: Optional[str] = Query(default=None),
-    tag_names: Optional[List[str]] = Query(default=None),
-    is_active: Optional[bool] = Query(default=True),
+    q: str | None = Query(default=None, description="Full-text search on content"),
+    question_type: str | None = Query(default=None),
+    difficulty: str | None = Query(default=None),
+    subject: str | None = Query(default=None),
+    topic: str | None = Query(default=None),
+    bloom_level: str | None = Query(default=None),
+    source_type: str | None = Query(default=None),
+    tag_names: list[str] | None = Query(default=None),
+    is_active: bool | None = Query(default=True),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(require_active_user),
@@ -113,7 +117,7 @@ async def list_questions(
 async def list_tags(
     current_user: User = Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
-) -> List[QuestionTagResponse]:
+) -> list[QuestionTagResponse]:
     from app.db.repositories.question_repo import QuestionRepository
 
     repo = QuestionRepository(db)
@@ -225,8 +229,7 @@ async def detach_tags(
 
 def _to_detail_response(question: Question) -> QuestionDetailResponse:
     """Safely serialise a Question ORM object to QuestionDetailResponse."""
-    from app.schemas.question import (QuestionOptionResponse,
-                                      QuestionTagResponse)
+    from app.schemas.question import QuestionOptionResponse, QuestionTagResponse
 
     options = []
     if question.options:

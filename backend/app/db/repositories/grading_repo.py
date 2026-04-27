@@ -7,8 +7,7 @@ Data access for SubmissionGrade and GradingQueueItem.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,7 @@ from app.db.models.attempt import GradingQueueItem, SubmissionGrade
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class GradingRepository:
@@ -39,14 +38,14 @@ class GradingRepository:
         question_id: uuid.UUID,
         max_score: float,
         grading_mode: str,
-        created_by_id: Optional[uuid.UUID] = None,
-        score: Optional[float] = None,
-        ai_suggested_score: Optional[float] = None,
-        ai_rationale: Optional[str] = None,
-        ai_confidence: Optional[float] = None,
-        feedback: Optional[str] = None,
-        internal_notes: Optional[str] = None,
-        rubric_scores: Optional[list] = None,
+        created_by_id: uuid.UUID | None = None,
+        score: float | None = None,
+        ai_suggested_score: float | None = None,
+        ai_rationale: str | None = None,
+        ai_confidence: float | None = None,
+        feedback: str | None = None,
+        internal_notes: str | None = None,
+        rubric_scores: list | None = None,
         is_final: bool = False,
     ) -> SubmissionGrade:
         grade = SubmissionGrade(
@@ -79,7 +78,7 @@ class GradingRepository:
 
     async def get_grade_by_response(
         self, response_id: uuid.UUID
-    ) -> Optional[SubmissionGrade]:
+    ) -> SubmissionGrade | None:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.response_id == response_id,
@@ -88,7 +87,7 @@ class GradingRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_grade_by_id(self, grade_id: uuid.UUID) -> Optional[SubmissionGrade]:
+    async def get_grade_by_id(self, grade_id: uuid.UUID) -> SubmissionGrade | None:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.id == grade_id,
@@ -99,7 +98,7 @@ class GradingRepository:
 
     async def list_grades_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[SubmissionGrade]:
+    ) -> list[SubmissionGrade]:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.attempt_id == attempt_id,
@@ -110,7 +109,7 @@ class GradingRepository:
 
     async def list_final_grades_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[SubmissionGrade]:
+    ) -> list[SubmissionGrade]:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.attempt_id == attempt_id,
@@ -175,10 +174,10 @@ class GradingRepository:
         grade_id: uuid.UUID,
         score: float,
         updated_by_id: uuid.UUID,
-        feedback: Optional[str] = None,
-        rubric_scores: Optional[list] = None,
+        feedback: str | None = None,
+        rubric_scores: list | None = None,
         lecturer_override: bool = False,
-        grading_mode: Optional[str] = None,
+        grading_mode: str | None = None,
     ) -> None:
         values = {
             "score": score,
@@ -233,7 +232,7 @@ class GradingRepository:
     # GradingQueueItem — READS
     # -----------------------------------------------------------------------
 
-    async def get_queue_item_by_id(self, item_id: uuid.UUID) -> Optional[GradingQueueItem]:
+    async def get_queue_item_by_id(self, item_id: uuid.UUID) -> GradingQueueItem | None:
         result = await self.db.execute(
             select(GradingQueueItem).where(GradingQueueItem.id == item_id)
         )
@@ -241,7 +240,7 @@ class GradingRepository:
 
     async def get_active_queue_item_for_response(
         self, response_id: uuid.UUID
-    ) -> Optional[GradingQueueItem]:
+    ) -> GradingQueueItem | None:
         result = await self.db.execute(
             select(GradingQueueItem).where(
                 GradingQueueItem.response_id == response_id,
@@ -256,13 +255,13 @@ class GradingRepository:
 
     async def list_queue(
         self,
-        assessment_id: Optional[uuid.UUID] = None,
-        status: Optional[str] = None,
-        assigned_to_id: Optional[uuid.UUID] = None,
-        priority: Optional[str] = None,
+        assessment_id: uuid.UUID | None = None,
+        status: str | None = None,
+        assigned_to_id: uuid.UUID | None = None,
+        priority: str | None = None,
         page: int = 1,
         page_size: int = 30,
-    ) -> Tuple[List[GradingQueueItem], int]:
+    ) -> tuple[list[GradingQueueItem], int]:
         filters = []
         if assessment_id:
             filters.append(GradingQueueItem.assessment_id == assessment_id)
@@ -302,7 +301,7 @@ class GradingRepository:
         self,
         item_id: uuid.UUID,
         assigned_to_id: uuid.UUID,
-        priority: Optional[str] = None,
+        priority: str | None = None,
     ) -> None:
         values: dict = {
             "assigned_to_id": assigned_to_id,

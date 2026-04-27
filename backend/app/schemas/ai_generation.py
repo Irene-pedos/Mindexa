@@ -6,10 +6,11 @@ Pydantic schemas for the AI Question Generation domain.
 
 import uuid
 from datetime import datetime
-from typing import ClassVar, List, Optional
+from typing import ClassVar
 
-from app.db.enums import AIBatchStatus, AIQuestionDecision
 from pydantic import BaseModel, Field, field_validator
+
+from app.db.enums import AIQuestionDecision
 
 # ─── Generation Request ───────────────────────────────────────────────────────
 
@@ -23,17 +24,17 @@ class GenerateQuestionsRequest(BaseModel):
     All generated questions require lecturer review before use.
     """
 
-    subject: Optional[str] = Field(default=None, max_length=200)
-    topic: Optional[str] = Field(default=None, max_length=200)
+    subject: str | None = Field(default=None, max_length=200)
+    topic: str | None = Field(default=None, max_length=200)
     question_type: str = Field(default="mcq")
     difficulty: str = Field(default="medium")
-    bloom_level: Optional[str] = None
+    bloom_level: str | None = None
     count: int = Field(default=5, ge=1, le=20)
-    additional_context: Optional[str] = Field(
+    additional_context: str | None = Field(
         default=None,
         description="Extra context for the AI: curriculum notes, learning outcomes, etc."
     )
-    assessment_id: Optional[uuid.UUID] = Field(
+    assessment_id: uuid.UUID | None = Field(
         default=None,
         description="Optional: link this batch to a specific assessment"
     )
@@ -67,7 +68,7 @@ class GenerateQuestionsRequest(BaseModel):
 
     @field_validator("bloom_level")
     @classmethod
-    def validate_bloom(cls, v: Optional[str]) -> Optional[str]:
+    def validate_bloom(cls, v: str | None) -> str | None:
         if v and v not in cls.VALID_BLOOM:
             raise ValueError(
                 f"bloom_level must be one of: {', '.join(sorted(cls.VALID_BLOOM))}"
@@ -92,26 +93,26 @@ class ReviewAIQuestionRequest(BaseModel):
     """
 
     decision: str = Field(...)
-    modified_question_text: Optional[str] = Field(
+    modified_question_text: str | None = Field(
         default=None,
         description="Required when decision=edited; the corrected question text"
     )
-    modified_options_json: Optional[str] = Field(
+    modified_options_json: str | None = Field(
         default=None,
         description=(
             "JSON array of options with is_correct flags, "
             "required when decision=edited and question has options"
         )
     )
-    modified_explanation: Optional[str] = None
-    reviewer_notes: Optional[str] = Field(
+    modified_explanation: str | None = None
+    reviewer_notes: str | None = Field(
         default=None,
         description="Optional notes about this review decision"
     )
 
     # If approving/editing, optionally add to an assessment immediately
-    add_to_assessment_id: Optional[uuid.UUID] = None
-    marks_if_added: Optional[int] = Field(default=None, ge=1)
+    add_to_assessment_id: uuid.UUID | None = None
+    marks_if_added: int | None = Field(default=None, ge=1)
 
     @field_validator("decision")
     @classmethod
@@ -128,7 +129,7 @@ class ReviewAIQuestionRequest(BaseModel):
 
     @field_validator("modified_question_text")
     @classmethod
-    def validate_modified_text(cls, v: Optional[str]) -> Optional[str]:
+    def validate_modified_text(cls, v: str | None) -> str | None:
         if v and len(v.strip()) < 5:
             raise ValueError("modified_question_text must be at least 5 characters.")
         return v
@@ -143,12 +144,12 @@ class AIGeneratedQuestionResponse(BaseModel):
     question_type: str
     difficulty: str
     parsed_successfully: bool
-    parsed_question_text: Optional[str]
-    parsed_options_json: Optional[str]
-    parsed_explanation: Optional[str]
-    parse_error: Optional[str]
+    parsed_question_text: str | None
+    parsed_options_json: str | None
+    parsed_explanation: str | None
+    parse_error: str | None
     review_status: str
-    promoted_question_id: Optional[uuid.UUID]
+    promoted_question_id: uuid.UUID | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -159,10 +160,10 @@ class AIQuestionReviewResponse(BaseModel):
     ai_question_id: uuid.UUID
     reviewer_id: uuid.UUID
     decision: str
-    modified_question_text: Optional[str]
-    modified_options_json: Optional[str]
-    modified_explanation: Optional[str]
-    reviewer_notes: Optional[str]
+    modified_question_text: str | None
+    modified_options_json: str | None
+    modified_explanation: str | None
+    reviewer_notes: str | None
     reviewed_at: datetime
 
     model_config = {"from_attributes": True}
@@ -171,32 +172,32 @@ class AIQuestionReviewResponse(BaseModel):
 class AIGenerationBatchResponse(BaseModel):
     id: uuid.UUID
     created_by_id: uuid.UUID
-    assessment_id: Optional[uuid.UUID]
-    subject: Optional[str]
-    topic: Optional[str]
+    assessment_id: uuid.UUID | None
+    subject: str | None
+    topic: str | None
     question_type: str
     difficulty: str
-    bloom_level: Optional[str]
+    bloom_level: str | None
     total_requested: int
     total_generated: int
     total_failed: int
     status: str
-    started_at: Optional[datetime]
-    completed_at: Optional[datetime]
-    error_message: Optional[str]
-    ai_model_used: Optional[str]
-    ai_provider: Optional[str]
+    started_at: datetime | None
+    completed_at: datetime | None
+    error_message: str | None
+    ai_model_used: str | None
+    ai_provider: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
 
 
 class AIGenerationBatchDetailResponse(AIGenerationBatchResponse):
-    generated_questions: List[AIGeneratedQuestionResponse] = []
+    generated_questions: list[AIGeneratedQuestionResponse] = []
 
 
 class AIGenerationBatchListResponse(BaseModel):
-    items: List[AIGenerationBatchResponse]
+    items: list[AIGenerationBatchResponse]
     total: int
     page: int
     page_size: int

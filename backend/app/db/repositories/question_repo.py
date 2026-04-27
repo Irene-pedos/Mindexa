@@ -58,26 +58,34 @@ FIELD MAPPING (model -> repo):
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
-from app.db.enums import (AIBatchStatus, AIQuestionDecision, DifficultyLevel,
-                          QuestionSourceType, QuestionType)
-from app.db.models.question import (AIGenerationBatch, AIQuestionReview,
-                                    AssessmentQuestion, Question,
-                                    QuestionBankEntry, QuestionBlank,
-                                    QuestionOption)
-from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
+
+from app.db.enums import (
+    AIBatchStatus,
+    AIQuestionDecision,
+    DifficultyLevel,
+    QuestionSourceType,
+    QuestionType,
+)
+from app.db.models.question import (
+    AIGenerationBatch,
+    AIQuestionReview,
+    Question,
+    QuestionBankEntry,
+    QuestionBlank,
+    QuestionOption,
+)
 
 # ---------------------------------------------------------------------------
 # INTERNAL HELPERS
 # ---------------------------------------------------------------------------
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _escape_like(value: str) -> str:
@@ -121,21 +129,21 @@ class QuestionRepository:
         marks: int = 1,
         source_type: str = QuestionSourceType.MANUAL,
         is_approved: bool = True,
-        explanation: Optional[str] = None,
-        subject_id: Optional[uuid.UUID] = None,
-        topic_tag: Optional[str] = None,
-        rubric_id: Optional[uuid.UUID] = None,
-        source_assessment_id: Optional[uuid.UUID] = None,
-        source_ai_batch_id: Optional[uuid.UUID] = None,
-        ai_action_log_id: Optional[uuid.UUID] = None,
+        explanation: str | None = None,
+        subject_id: uuid.UUID | None = None,
+        topic_tag: str | None = None,
+        rubric_id: uuid.UUID | None = None,
+        source_assessment_id: uuid.UUID | None = None,
+        source_ai_batch_id: uuid.UUID | None = None,
+        ai_action_log_id: uuid.UUID | None = None,
         is_shared: bool = False,
         is_in_question_bank: bool = False,
-        bank_added_at: Optional[datetime] = None,
-        bank_added_by_id: Optional[uuid.UUID] = None,
+        bank_added_at: datetime | None = None,
+        bank_added_by_id: uuid.UUID | None = None,
         version: int = 1,
-        parent_question_id: Optional[uuid.UUID] = None,
-        approved_by_id: Optional[uuid.UUID] = None,
-        approved_at: Optional[datetime] = None,
+        parent_question_id: uuid.UUID | None = None,
+        approved_by_id: uuid.UUID | None = None,
+        approved_at: datetime | None = None,
     ) -> Question:
         """
         Insert a new Question row.
@@ -180,7 +188,7 @@ class QuestionRepository:
     # Question — reads
     # -----------------------------------------------------------------------
 
-    async def get_by_id(self, question_id: uuid.UUID) -> Optional[Question]:
+    async def get_by_id(self, question_id: uuid.UUID) -> Question | None:
         """
         Load a Question.
 
@@ -198,7 +206,7 @@ class QuestionRepository:
 
     async def get_by_id_simple(
         self, question_id: uuid.UUID
-    ) -> Optional[Question]:
+    ) -> Question | None:
         """
         Lightweight load — scalar fields only, no relationships.
         Used for existence / permission checks and field updates.
@@ -214,20 +222,20 @@ class QuestionRepository:
     async def search(
         self,
         *,
-        q: Optional[str] = None,
-        question_type: Optional[str] = None,
-        difficulty: Optional[str] = None,
-        subject_id: Optional[uuid.UUID] = None,
-        topic_tag: Optional[str] = None,
-        source_type: Optional[str] = None,
-        created_by_id: Optional[uuid.UUID] = None,
-        is_approved: Optional[bool] = True,
-        is_in_question_bank: Optional[bool] = None,
-        is_shared: Optional[bool] = None,
+        q: str | None = None,
+        question_type: str | None = None,
+        difficulty: str | None = None,
+        subject_id: uuid.UUID | None = None,
+        topic_tag: str | None = None,
+        source_type: str | None = None,
+        created_by_id: uuid.UUID | None = None,
+        is_approved: bool | None = True,
+        is_in_question_bank: bool | None = None,
+        is_shared: bool | None = None,
         include_deleted: bool = False,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[Question], int]:
+    ) -> tuple[list[Question], int]:
         """
         Filtered, paginated question search.
 
@@ -299,7 +307,7 @@ class QuestionRepository:
 
     async def get_versions(
         self, parent_question_id: uuid.UUID
-    ) -> List[Question]:
+    ) -> list[Question]:
         """
         Return all child versions of a question, ordered oldest first.
         """
@@ -396,7 +404,7 @@ class QuestionRepository:
             .values(is_active=False)
         )
 
-    async def list_tags(self) -> List[str]:
+    async def list_tags(self) -> list[str]:
         """
         List all unique topic_tags currently in use.
         """
@@ -417,9 +425,9 @@ class QuestionRepository:
         question_id: uuid.UUID,
         content: str,
         order_index: int,
-        is_correct: Optional[bool] = None,
-        match_key: Optional[str] = None,
-        match_value: Optional[str] = None,
+        is_correct: bool | None = None,
+        match_key: str | None = None,
+        match_value: str | None = None,
     ) -> QuestionOption:
         """
         Add an answer option to a question.
@@ -444,7 +452,7 @@ class QuestionRepository:
         await self.db.flush()
         return option
 
-    async def list_options(self, question_id: uuid.UUID) -> List[QuestionOption]:
+    async def list_options(self, question_id: uuid.UUID) -> list[QuestionOption]:
         """Return all options for a question ordered by order_index."""
         result = await self.db.execute(
             select(QuestionOption)
@@ -477,7 +485,7 @@ class QuestionRepository:
         *,
         question_id: uuid.UUID,
         blank_index: int,
-        accepted_answers: List[str],
+        accepted_answers: list[str],
         case_sensitive: bool = False,
     ) -> QuestionBlank:
         """
@@ -496,7 +504,7 @@ class QuestionRepository:
         await self.db.flush()
         return blank
 
-    async def list_blanks(self, question_id: uuid.UUID) -> List[QuestionBlank]:
+    async def list_blanks(self, question_id: uuid.UUID) -> list[QuestionBlank]:
         """Return all blanks for a question ordered by blank_index."""
         result = await self.db.execute(
             select(QuestionBlank)
@@ -531,12 +539,12 @@ class QuestionRepository:
         question_type: str,
         difficulty: str,
         total_requested: int,
-        assessment_id: Optional[uuid.UUID] = None,
-        subject: Optional[str] = None,
-        topic: Optional[str] = None,
-        bloom_level: Optional[str] = None,
-        full_prompt: Optional[str] = None,
-        additional_context: Optional[str] = None,
+        assessment_id: uuid.UUID | None = None,
+        subject: str | None = None,
+        topic: str | None = None,
+        bloom_level: str | None = None,
+        full_prompt: str | None = None,
+        additional_context: str | None = None,
     ) -> AIGenerationBatch:
         """
         Create a new AI question generation batch.
@@ -567,7 +575,7 @@ class QuestionRepository:
 
     async def get_batch(
         self, batch_id: uuid.UUID
-    ) -> Optional[AIGenerationBatch]:
+    ) -> AIGenerationBatch | None:
         """Load a batch."""
         result = await self.db.execute(
             select(AIGenerationBatch)
@@ -580,7 +588,7 @@ class QuestionRepository:
 
     async def get_batch_simple(
         self, batch_id: uuid.UUID
-    ) -> Optional[AIGenerationBatch]:
+    ) -> AIGenerationBatch | None:
         result = await self.db.execute(
             select(AIGenerationBatch).where(
                 col(AIGenerationBatch.id) == batch_id,
@@ -591,7 +599,7 @@ class QuestionRepository:
 
     async def list_batches_for_assessment(
         self, assessment_id: uuid.UUID, page: int = 1, page_size: int = 20
-    ) -> List[AIGenerationBatch]:
+    ) -> list[AIGenerationBatch]:
         if page < 1:
             page = 1
         if page_size < 1:
@@ -615,7 +623,7 @@ class QuestionRepository:
         created_by_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[AIGenerationBatch], int]:
+    ) -> tuple[list[AIGenerationBatch], int]:
         filters = [
             col(AIGenerationBatch.created_by_id) == created_by_id,
             col(AIGenerationBatch.is_deleted) == False,  # noqa: E712
@@ -683,10 +691,10 @@ class QuestionRepository:
         ai_question_id: uuid.UUID,
         reviewer_id: uuid.UUID,
         decision: str = AIQuestionDecision.PENDING,
-        modified_question_text: Optional[str] = None,
-        modified_options_json: Optional[str] = None,
-        modified_explanation: Optional[str] = None,
-        reviewer_notes: Optional[str] = None,
+        modified_question_text: str | None = None,
+        modified_options_json: str | None = None,
+        modified_explanation: str | None = None,
+        reviewer_notes: str | None = None,
     ) -> AIQuestionReview:
         """
         Create an AIQuestionReview row for a generated question.
@@ -711,7 +719,7 @@ class QuestionRepository:
 
     async def get_review(
         self, review_id: uuid.UUID
-    ) -> Optional[AIQuestionReview]:
+    ) -> AIQuestionReview | None:
         result = await self.db.execute(
             select(AIQuestionReview)
             .where(
@@ -723,7 +731,7 @@ class QuestionRepository:
 
     async def get_review_by_ai_question(
         self, ai_question_id: uuid.UUID
-    ) -> Optional[AIQuestionReview]:
+    ) -> AIQuestionReview | None:
         """
         Fetch the review row for an AI-generated question.
         """
@@ -738,8 +746,8 @@ class QuestionRepository:
     async def list_reviews_for_batch(
         self,
         batch_id: uuid.UUID,
-        decision_filter: Optional[str] = None,
-    ) -> List[AIQuestionReview]:
+        decision_filter: str | None = None,
+    ) -> list[AIQuestionReview]:
         """
         Return all reviews for a batch.
 
@@ -781,10 +789,10 @@ class QuestionRepository:
         self,
         review_id: uuid.UUID,
         decision: str,
-        modified_question_text: Optional[str] = None,
-        modified_options_json: Optional[str] = None,
-        modified_explanation: Optional[str] = None,
-        reviewer_notes: Optional[str] = None,
+        modified_question_text: str | None = None,
+        modified_options_json: str | None = None,
+        modified_explanation: str | None = None,
+        reviewer_notes: str | None = None,
     ) -> None:
         """
         Convenience method to stamp a reviewer's decision on a review.
@@ -816,10 +824,10 @@ class QuestionRepository:
         *,
         question_id: uuid.UUID,
         added_by_id: uuid.UUID,
-        subject_id: Optional[uuid.UUID] = None,
-        difficulty: Optional[str] = None,
+        subject_id: uuid.UUID | None = None,
+        difficulty: str | None = None,
         source_type: str = QuestionSourceType.MANUAL,
-        source_assessment_id: Optional[uuid.UUID] = None,
+        source_assessment_id: uuid.UUID | None = None,
     ) -> QuestionBankEntry:
         """
         Add a question to a lecturer's question bank.
@@ -843,7 +851,7 @@ class QuestionRepository:
 
     async def get_bank_entry(
         self, question_id: uuid.UUID, added_by_id: uuid.UUID
-    ) -> Optional[QuestionBankEntry]:
+    ) -> QuestionBankEntry | None:
         """
         Load the bank entry for a specific (question, lecturer) pair.
         Unique per the DB constraint uq_question_bank_entry_question_lecturer.
@@ -859,7 +867,7 @@ class QuestionRepository:
 
     async def get_bank_entry_by_id(
         self, entry_id: uuid.UUID
-    ) -> Optional[QuestionBankEntry]:
+    ) -> QuestionBankEntry | None:
         result = await self.db.execute(
             select(QuestionBankEntry).where(
                 col(QuestionBankEntry.id) == entry_id,
@@ -872,13 +880,13 @@ class QuestionRepository:
         self,
         *,
         added_by_id: uuid.UUID,
-        subject_id: Optional[uuid.UUID] = None,
-        difficulty: Optional[str] = None,
-        source_type: Optional[str] = None,
+        subject_id: uuid.UUID | None = None,
+        difficulty: str | None = None,
+        source_type: str | None = None,
         is_active: bool = True,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[QuestionBankEntry], int]:
+    ) -> tuple[list[QuestionBankEntry], int]:
         """
         Paginated listing of a lecturer's question bank.
 
@@ -983,9 +991,9 @@ class QuestionRepository:
         question_id: uuid.UUID,
         added_by_id: uuid.UUID,
         *,
-        subject_id: Optional[uuid.UUID] = None,
-        difficulty: Optional[str] = None,
-        source_type: Optional[str] = None,
+        subject_id: uuid.UUID | None = None,
+        difficulty: str | None = None,
+        source_type: str | None = None,
     ) -> None:
         """
         Sync denormalised fields on the bank entry after the parent

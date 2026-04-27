@@ -48,17 +48,22 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
+from fastapi import Depends, Request
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.constants import TokenType, UserRole, UserStatus
-from app.core.exceptions import (AuthenticationError, InvalidTokenError,
-                                 PermissionDeniedError, RoleRequiredError,
-                                 TokenExpiredError)
+from app.core.exceptions import (
+    AuthenticationError,
+    InvalidTokenError,
+    PermissionDeniedError,
+    RoleRequiredError,
+    TokenExpiredError,
+)
 from app.core.logging import get_logger
 from app.core.security import TokenPayload, decode_token
 from app.db.models.auth import User
 from app.db.session import get_db
-from fastapi import Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 

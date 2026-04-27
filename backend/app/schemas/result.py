@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.db.enums import ResultLetterGrade
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -26,7 +24,7 @@ class ReleaseResultsRequest(BaseModel):
     Lecturer triggers result release for one or many attempts.
     """
     assessment_id: uuid.UUID
-    attempt_ids: Optional[List[uuid.UUID]] = Field(
+    attempt_ids: list[uuid.UUID] | None = Field(
         default=None,
         description="If None, releases results for ALL attempts in the assessment",
     )
@@ -57,11 +55,11 @@ class ResultBreakdownItem(BaseModel):
 
     id: uuid.UUID
     question_id: uuid.UUID
-    score: Optional[float]
+    score: float | None
     max_score: float
-    is_correct: Optional[bool]
-    feedback: Optional[str]
-    grading_mode: Optional[str]
+    is_correct: bool | None
+    feedback: str | None
+    grading_mode: str | None
     was_skipped: bool
 
 
@@ -79,15 +77,15 @@ class AssessmentResultResponse(BaseModel):
     total_score: float
     max_score: float
     percentage: float
-    letter_grade: Optional[ResultLetterGrade]
+    letter_grade: ResultLetterGrade | None
     is_passing: bool
     is_released: bool
-    released_at: Optional[datetime]
+    released_at: datetime | None
     integrity_hold: bool
     calculated_at: datetime
     graded_question_count: int
     total_question_count: int
-    breakdowns: List[ResultBreakdownItem] = []
+    breakdowns: list[ResultBreakdownItem] = []
 
 
 class ResultSummary(BaseModel):
@@ -101,7 +99,7 @@ class ResultSummary(BaseModel):
     total_score: float
     max_score: float
     percentage: float
-    letter_grade: Optional[ResultLetterGrade]
+    letter_grade: ResultLetterGrade | None
     is_passing: bool
     is_released: bool
     integrity_hold: bool
@@ -109,7 +107,7 @@ class ResultSummary(BaseModel):
 
 class ResultListResponse(BaseModel):
     """Paginated list of results (lecturer view)."""
-    items: List[ResultSummary]
+    items: list[ResultSummary]
     total: int
     page: int
     page_size: int
@@ -119,5 +117,5 @@ class ResultReleaseResponse(BaseModel):
     """Returned after POST /results/release."""
     released_count: int
     held_count: int
-    held_attempt_ids: List[uuid.UUID]
+    held_attempt_ids: list[uuid.UUID]
     message: str

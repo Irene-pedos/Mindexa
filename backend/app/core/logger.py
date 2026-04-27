@@ -30,11 +30,9 @@ from __future__ import annotations
 import json
 import logging
 import sys
-import traceback
-import uuid
 from contextvars import ContextVar
-from datetime import datetime, timezone
-from typing import Any, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from app.core.config import settings
 
@@ -107,7 +105,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         # Build the timestamp in UTC ISO-8601
-        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+        ts = datetime.fromtimestamp(record.created, tz=UTC).strftime(
             "%Y-%m-%dT%H:%M:%S.%f"
         )[:-3] + "Z"
 
@@ -164,7 +162,7 @@ class DevFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         colour = self.COLOURS.get(record.levelname, "")
-        ts = datetime.fromtimestamp(record.created, tz=timezone.utc).strftime(
+        ts = datetime.fromtimestamp(record.created, tz=UTC).strftime(
             "%H:%M:%S.%f"
         )[:-3]
         rid = _request_id_ctx.get()

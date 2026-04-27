@@ -7,8 +7,7 @@ Data access for StudentResponse and StudentResponseLog.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,7 @@ from app.db.models.attempt import StudentResponse, StudentResponseLog
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class SubmissionRepository:
@@ -35,15 +34,15 @@ class SubmissionRepository:
         attempt_id: uuid.UUID,
         question_id: uuid.UUID,
         answer_type: str,
-        answer_text: Optional[str] = None,
-        selected_option_ids: Optional[list] = None,
-        ordered_option_ids: Optional[list] = None,
-        match_pairs_json: Optional[dict] = None,
-        fill_blank_answers: Optional[dict] = None,
-        file_url: Optional[str] = None,
-        time_spent_seconds: Optional[int] = None,
+        answer_text: str | None = None,
+        selected_option_ids: list | None = None,
+        ordered_option_ids: list | None = None,
+        match_pairs_json: dict | None = None,
+        fill_blank_answers: dict | None = None,
+        file_url: str | None = None,
+        time_spent_seconds: int | None = None,
         is_skipped: bool = False,
-    ) -> Tuple[StudentResponse, bool]:
+    ) -> tuple[StudentResponse, bool]:
         """
         Create or update a student response. Returns (response, created).
 
@@ -94,7 +93,7 @@ class SubmissionRepository:
 
     async def get_response(
         self, attempt_id: uuid.UUID, question_id: uuid.UUID
-    ) -> Optional[StudentResponse]:
+    ) -> StudentResponse | None:
         result = await self.db.execute(
             select(StudentResponse).where(
                 StudentResponse.attempt_id == attempt_id,
@@ -104,7 +103,7 @@ class SubmissionRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_response_by_id(self, response_id: uuid.UUID) -> Optional[StudentResponse]:
+    async def get_response_by_id(self, response_id: uuid.UUID) -> StudentResponse | None:
         result = await self.db.execute(
             select(StudentResponse).where(
                 StudentResponse.id == response_id,
@@ -115,7 +114,7 @@ class SubmissionRepository:
 
     async def list_responses_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[StudentResponse]:
+    ) -> list[StudentResponse]:
         result = await self.db.execute(
             select(StudentResponse)
             .options(selectinload(StudentResponse.question))
@@ -126,7 +125,7 @@ class SubmissionRepository:
         )
         return list(result.scalars().all())
 
-    async def list_final_responses(self, attempt_id: uuid.UUID) -> List[StudentResponse]:
+    async def list_final_responses(self, attempt_id: uuid.UUID) -> list[StudentResponse]:
         """Return only is_final=True responses (after submission)."""
         result = await self.db.execute(
             select(StudentResponse).where(
@@ -176,8 +175,8 @@ class SubmissionRepository:
         attempt_id: uuid.UUID,
         question_id: uuid.UUID,
         change_type: str,
-        previous_value: Optional[dict],
-        new_value: Optional[dict],
+        previous_value: dict | None,
+        new_value: dict | None,
     ) -> StudentResponseLog:
         """Append an immutable audit log entry. Never call update on this."""
         entry = StudentResponseLog(
@@ -194,7 +193,7 @@ class SubmissionRepository:
 
     async def list_logs_for_response(
         self, response_id: uuid.UUID
-    ) -> List[StudentResponseLog]:
+    ) -> list[StudentResponseLog]:
         result = await self.db.execute(
             select(StudentResponseLog)
             .where(StudentResponseLog.response_id == response_id)
@@ -204,7 +203,7 @@ class SubmissionRepository:
 
     async def list_logs_for_attempt(
         self, attempt_id: uuid.UUID
-    ) -> List[StudentResponseLog]:
+    ) -> list[StudentResponseLog]:
         result = await self.db.execute(
             select(StudentResponseLog)
             .where(StudentResponseLog.attempt_id == attempt_id)

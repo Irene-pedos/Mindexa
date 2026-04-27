@@ -2,9 +2,7 @@
 app/core/constants.py
 
 Shared enums and constants for Mindexa Platform.
-
-These are Python-level enums used in application code.
-Database-level enums are in app/db/enums.py and should mirror these.
+Aligned with database ENUM values (UPPERCASE).
 
 IMPORTANT:
     The values here must match the corresponding SQLAlchemy Enum values
@@ -24,247 +22,193 @@ MAX_PAGE_SIZE = 100
 
 
 class UserRole(str, Enum):
-    """
-    Primary user role.
-
-    Used in:
-        - JWT claims (convenience, not trusted for authorization)
-        - DB User.role column
-        - Role guards in dependencies
-        - Permission checks in services
-    """
-
-    STUDENT = "student"
-    LECTURER = "lecturer"
-    ADMIN = "admin"
+    """Primary user role."""
+    STUDENT = "STUDENT"
+    LECTURER = "LECTURER"
+    ADMIN = "ADMIN"
 
 
 class UserStatus(str, Enum):
-    """
-    Account lifecycle status.
-
-    State transitions:
-        PENDING_VERIFICATION → ACTIVE (after email verified)
-        ACTIVE → SUSPENDED (admin action)
-        ACTIVE → INACTIVE (user deactivated or admin action)
-        SUSPENDED → ACTIVE (admin reinstates)
-        INACTIVE → ACTIVE (admin reinstates)
-
-    Login behavior:
-        ACTIVE                → Allowed
-        PENDING_VERIFICATION  → Allowed (but some features gated)
-        SUSPENDED             → Blocked (AccountSuspendedError)
-        INACTIVE              → Blocked (AccountInactiveError)
-    """
-
-    PENDING_VERIFICATION = "pending_verification"
-    ACTIVE = "active"
-    SUSPENDED = "suspended"
-    INACTIVE = "inactive"
+    """Account lifecycle status."""
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    INACTIVE = "INACTIVE"
 
 
 class TokenType(str, Enum):
-    """
-    JWT token type claim.
-
-    Used in JWT payload to differentiate access and refresh tokens.
-    Prevents a refresh token being used as an access token.
-    """
-
-    ACCESS = "access"
-    REFRESH = "refresh"
-    EMAIL_VERIFICATION = "email_verification"
-    PASSWORD_RESET = "password_reset"
+    """JWT token type claim."""
+    ACCESS = "ACCESS"
+    REFRESH = "REFRESH"
+    EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
+    PASSWORD_RESET = "PASSWORD_RESET"
 
 
 class SecurityEventType(str, Enum):
-    """
-    Types of security events recorded in the audit log.
-
-    These values map to the SecurityEvent.event_type DB column.
-    """
-
-    # Auth events
-    LOGIN_SUCCESS = "login_success"
-    LOGIN_FAILED = "login_failed"
-    LOGIN_LOCKED = "login_locked"
-    LOGOUT = "logout"
-    LOGOUT_ALL = "logout_all"
-    TOKEN_REFRESHED = "token_refreshed"
-
-    # Account events
-    ACCOUNT_CREATED = "account_created"
-    ACCOUNT_SUSPENDED = "account_suspended"
-    ACCOUNT_REACTIVATED = "account_reactivated"
-    EMAIL_VERIFIED = "email_verified"
-    VERIFICATION_EMAIL_RESENT = "verification_email_resent"
-
-    # Password events
-    PASSWORD_CHANGED = "password_changed"
-    PASSWORD_RESET_REQUESTED = "password_reset_requested"
-    PASSWORD_RESET_COMPLETED = "password_reset_completed"
-
-    # Integrity events (auth layer)
-    SUSPICIOUS_LOGIN = "suspicious_login"
-    TOKEN_THEFT_DETECTED = "token_theft_detected"
-
-    # Assessment integrity (recorded by integrity service later)
-    TAB_SWITCH = "tab_switch"
-    FULLSCREEN_EXIT = "fullscreen_exit"
-    COPY_ATTEMPT = "copy_attempt"
-    PASTE_ATTEMPT = "paste_attempt"
+    """Types of security events recorded in the audit log."""
+    FAILED_LOGIN = "FAILED_LOGIN"
+    ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+    TOKEN_REVOKED = "TOKEN_REVOKED"
+    SUSPICIOUS_IP = "SUSPICIOUS_IP"
+    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
+    ROLE_CHANGED = "ROLE_CHANGED"
+    ACCOUNT_SUSPENDED = "ACCOUNT_SUSPENDED"
+    LOGIN_SUCCESS = "LOGIN_SUCCESS"
+    LOGIN_FAILED = "LOGIN_FAILED"
+    LOGIN_LOCKED = "LOGIN_LOCKED"
+    LOGOUT = "LOGOUT"
+    LOGOUT_ALL = "LOGOUT_ALL"
+    TOKEN_REFRESHED = "TOKEN_REFRESHED"
+    ACCOUNT_CREATED = "ACCOUNT_CREATED"
+    ACCOUNT_REACTIVATED = "ACCOUNT_REACTIVATED"
+    EMAIL_VERIFIED = "EMAIL_VERIFIED"
+    VERIFICATION_EMAIL_RESENT = "VERIFICATION_EMAIL_RESENT"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"
+    PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED"
+    SUSPICIOUS_LOGIN = "SUSPICIOUS_LOGIN"
+    TOKEN_THEFT_DETECTED = "TOKEN_THEFT_DETECTED"
+    TAB_SWITCH = "TAB_SWITCH"
+    FULLSCREEN_EXIT = "FULLSCREEN_EXIT"
+    COPY_ATTEMPT = "COPY_ATTEMPT"
+    PASTE_ATTEMPT = "PASTE_ATTEMPT"
 
 
 class SecurityEventSeverity(str, Enum):
-    """
-    Severity classification for security events.
-
-    Used to prioritize alerts in the admin security dashboard.
-    """
-
-    INFO = "info"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    """Severity classification for security events."""
+    INFO = "INFO"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+    WARNING = "WARNING"
 
 
 class AssessmentType(str, Enum):
     """Assessment type classifications."""
-
-    FORMATIVE = "formative"
-    CAT = "cat"  # Continuous Assessment Test
-    SUMMATIVE = "summative"
-    HOMEWORK = "homework"
-    GROUP_WORK = "group_work"
-    REASSESSMENT = "reassessment"
+    FORMATIVE = "FORMATIVE"
+    CAT = "CAT"
+    SUMMATIVE = "SUMMATIVE"
+    HOMEWORK = "HOMEWORK"
+    GROUP_WORK = "GROUP_WORK"
+    REASSESSMENT = "REASSESSMENT"
 
 
 class AssessmentStatus(str, Enum):
     """Assessment lifecycle status."""
-
-    DRAFT = "draft"
-    SCHEDULED = "scheduled"
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
-    CANCELLED = "cancelled"
+    DRAFT = "DRAFT"
+    SCHEDULED = "SCHEDULED"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+    CANCELLED = "CANCELLED"
 
 
 class QuestionType(str, Enum):
     """Question type classifications."""
-
-    MCQ = "mcq"
-    TRUE_FALSE = "true_false"
-    SHORT_ANSWER = "short_answer"
-    ESSAY = "essay"
-    MATCHING = "matching"
-    FILL_BLANK = "fill_blank"
-    COMPUTATIONAL = "computational"
-    CASE_STUDY = "case_study"
-    ORDERING = "ordering"
+    MCQ = "MCQ"
+    TRUE_FALSE = "TRUE_FALSE"
+    SHORT_ANSWER = "SHORT_ANSWER"
+    ESSAY = "ESSAY"
+    MATCHING = "MATCHING"
+    FILL_BLANK = "FILL_BLANK"
+    COMPUTATIONAL = "COMPUTATIONAL"
+    CASE_STUDY = "CASE_STUDY"
+    ORDERING = "ORDERING"
 
 
 class GradingMode(str, Enum):
-    """
-    How a question or assessment will be graded.
-
-    AUTO: Fully auto-gradable (MCQ, True/False, Matching, Ordering, Fill-blank)
-    SEMI_AUTO: AI-assisted, lecturer confirms (Short Answer, Computational)
-    MANUAL: Human grading required (Essay, Case Study)
-    AI_ASSISTED: AI suggests, lecturer approves (open-ended)
-    """
-
-    AUTO = "auto"
-    SEMI_AUTO = "semi_auto"
-    MANUAL = "manual"
-    AI_ASSISTED = "ai_assisted"
+    """How a question or assessment will be graded."""
+    AUTO = "AUTO"
+    SEMI = "SEMI"
+    MANUAL = "MANUAL"
+    RUBRIC = "RUBRIC"
+    AI_ASSISTED = "AI_ASSISTED"
 
 
 class SubmissionStatus(str, Enum):
     """Assessment attempt / submission status."""
-
-    NOT_STARTED = "not_started"
-    IN_PROGRESS = "in_progress"
-    SUBMITTED = "submitted"
-    AUTO_SUBMITTED = "auto_submitted"
-    GRADED = "graded"
-    UNDER_REVIEW = "under_review"
-    RELEASED = "released"
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUBMITTED = "SUBMITTED"
+    AUTO_SUBMITTED = "AUTO_SUBMITTED"
+    PENDING_GRADING = "PENDING_GRADING"
+    AUTO_GRADED = "AUTO_GRADED"
+    AI_SUGGESTED = "AI_SUGGESTED"
+    LECTURER_REVIEWED = "LECTURER_REVIEWED"
+    FINAL = "FINAL"
+    GRADED = "GRADED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    RELEASED = "RELEASED"
 
 
 class GradeStatus(str, Enum):
     """Grade/result release lifecycle status."""
-
-    PENDING = "pending"
-    AUTO_GRADED = "auto_graded"
-    AI_SUGGESTED = "ai_suggested"
-    AWAITING_REVIEW = "awaiting_review"
-    LECTURER_REVIEWED = "lecturer_reviewed"
-    FINAL = "final"
-    RELEASED = "released"
-    UNDER_APPEAL = "under_appeal"
+    PENDING = "PENDING"
+    AUTO_GRADED = "AUTO_GRADED"
+    AI_SUGGESTED = "AI_SUGGESTED"
+    AWAITING_REVIEW = "AWAITING_REVIEW"
+    LECTURER_REVIEWED = "LECTURER_REVIEWED"
+    FINAL = "FINAL"
+    RELEASED = "RELEASED"
+    UNDER_APPEAL = "UNDER_APPEAL"
 
 
 class AppealStatus(str, Enum):
     """Appeal request status."""
-
-    SUBMITTED = "submitted"
-    UNDER_REVIEW = "under_review"
-    RESOLVED_UPHELD = "resolved_upheld"
-    RESOLVED_REJECTED = "resolved_rejected"
-    WITHDRAWN = "withdrawn"
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    REVISED = "REVISED"
+    WITHDRAWN = "WITHDRAWN"
 
 
 class NotificationChannel(str, Enum):
     """Supported notification delivery channels."""
-
-    IN_APP = "in_app"
-    EMAIL = "email"
-    PUSH = "push"
+    IN_APP = "IN_APP"
+    EMAIL = "EMAIL"
+    PUSH = "PUSH"
+    BOTH = "BOTH"
 
 
 class IntegrityEventType(str, Enum):
     """Browser-level integrity event types from the exam client."""
-
-    FULLSCREEN_EXIT = "fullscreen_exit"
-    TAB_SWITCH = "tab_switch"
-    WINDOW_BLUR = "window_blur"
-    WINDOW_FOCUS = "window_focus"
-    PAGE_HIDDEN = "page_hidden"
-    COPY_ATTEMPT = "copy_attempt"
-    PASTE_ATTEMPT = "paste_attempt"
-    RIGHT_CLICK_ATTEMPT = "right_click_attempt"
-    SUSPICIOUS_INACTIVITY = "suspicious_inactivity"
-    RECONNECT = "reconnect"
-    DEVTOOLS_DETECTED = "devtools_detected"
-    MULTIPLE_MONITORS = "multiple_monitors"
+    FULLSCREEN_EXIT = "FULLSCREEN_EXIT"
+    FULLSCREEN_ENTER = "FULLSCREEN_ENTER"
+    TAB_SWITCH = "TAB_SWITCH"
+    WINDOW_BLUR = "WINDOW_BLUR"
+    WINDOW_FOCUS = "WINDOW_FOCUS"
+    PAGE_HIDDEN = "PAGE_HIDDEN"
+    COPY_ATTEMPT = "COPY_ATTEMPT"
+    PASTE_ATTEMPT = "PASTE_ATTEMPT"
+    RIGHT_CLICK = "RIGHT_CLICK"
+    EXTENDED_INACTIVITY = "EXTENDED_INACTIVITY"
+    RECONNECT = "RECONNECT"
+    UNUSUAL_KEYPRESS = "UNUSUAL_KEYPRESS"
 
 
 class RiskLevel(str, Enum):
     """Risk level for integrity events and student sessions."""
-
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    NONE = "NONE"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 class AIAgentType(str, Enum):
     """AI agent type identifiers."""
-
-    ASSESSMENT_GENERATOR = "assessment_generator"
-    GRADING_ASSISTANT = "grading_assistant"
-    STUDY_SUPPORT = "study_support"
-    INTEGRITY_ANALYZER = "integrity_analyzer"
+    ASSESSMENT_GENERATOR = "ASSESSMENT_GENERATOR"
+    GRADING_ASSISTANT = "GRADING_ASSISTANT"
+    STUDY_SUPPORT = "STUDY_SUPPORT"
+    INTEGRITY_ANALYZER = "INTEGRITY_ANALYZER"
 
 
 class AIOutputStatus(str, Enum):
     """Status of an AI-generated output."""
-
-    DRAFT = "draft"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    EDITED_AND_APPROVED = "edited_and_approved"
+    DRAFT = "DRAFT"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EDITED_AND_APPROVED = "EDITED_AND_APPROVED"

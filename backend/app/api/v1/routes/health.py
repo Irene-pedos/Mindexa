@@ -39,14 +39,15 @@ STATUS CODES:
 from __future__ import annotations
 
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
+
+from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import PlainTextResponse, Response
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from fastapi import APIRouter, Header, HTTPException, status
-from fastapi.responses import PlainTextResponse, Response
-from sqlalchemy import text
 
 logger = get_logger("mindexa.health")
 
@@ -123,7 +124,7 @@ async def health_check() -> Response:
 
     response_body = {
         "status": overall,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT,
         "checks": checks,

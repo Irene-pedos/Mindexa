@@ -6,7 +6,7 @@ Pydantic schemas for the Question Bank domain.
 
 import uuid
 from datetime import datetime
-from typing import ClassVar, List, Optional
+from typing import ClassVar
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -15,20 +15,20 @@ from pydantic import BaseModel, Field, field_validator
 
 class QuestionOptionCreate(BaseModel):
     option_text: str = Field(..., min_length=1)
-    option_text_right: Optional[str] = None  # For matching questions
+    option_text_right: str | None = None  # For matching questions
     is_correct: bool = False
     order_index: int = Field(default=0, ge=0)
-    explanation: Optional[str] = None
+    explanation: str | None = None
 
 
 class QuestionOptionResponse(BaseModel):
     id: uuid.UUID
     question_id: uuid.UUID
     option_text: str
-    option_text_right: Optional[str]
+    option_text_right: str | None
     is_correct: bool
     order_index: int
-    explanation: Optional[str]
+    explanation: str | None
 
     model_config = {"from_attributes": True}
 
@@ -38,7 +38,7 @@ class QuestionOptionResponse(BaseModel):
 
 class QuestionTagCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(default=None, max_length=300)
+    description: str | None = Field(default=None, max_length=300)
 
     @field_validator("name")
     @classmethod
@@ -49,7 +49,7 @@ class QuestionTagCreate(BaseModel):
 class QuestionTagResponse(BaseModel):
     id: uuid.UUID
     name: str
-    description: Optional[str]
+    description: str | None
 
     model_config = {"from_attributes": True}
 
@@ -62,20 +62,20 @@ class QuestionCreateRequest(BaseModel):
         ..., min_length=5,
         description="The question stem / prompt text"
     )
-    explanation: Optional[str] = None
-    hint: Optional[str] = None
+    explanation: str | None = None
+    hint: str | None = None
     question_type: str = Field(...)
     difficulty: str = Field(default="medium")
-    grading_mode: Optional[str] = None
-    subject: Optional[str] = Field(default=None, max_length=200)
-    topic: Optional[str] = Field(default=None, max_length=200)
-    bloom_level: Optional[str] = None
-    suggested_marks: Optional[int] = Field(default=None, ge=1)
-    estimated_time_minutes: Optional[int] = Field(default=None, ge=1)
-    fill_blank_template: Optional[str] = None
-    correct_order_json: Optional[str] = None
-    options: List[QuestionOptionCreate] = Field(default_factory=list)
-    tag_names: List[str] = Field(
+    grading_mode: str | None = None
+    subject: str | None = Field(default=None, max_length=200)
+    topic: str | None = Field(default=None, max_length=200)
+    bloom_level: str | None = None
+    suggested_marks: int | None = Field(default=None, ge=1)
+    estimated_time_minutes: int | None = Field(default=None, ge=1)
+    fill_blank_template: str | None = None
+    correct_order_json: str | None = None
+    options: list[QuestionOptionCreate] = Field(default_factory=list)
+    tag_names: list[str] = Field(
         default_factory=list,
         description="Tag names to attach (created if they don't exist)"
     )
@@ -112,7 +112,7 @@ class QuestionCreateRequest(BaseModel):
 
     @field_validator("grading_mode")
     @classmethod
-    def validate_grading_mode(cls, v: Optional[str]) -> Optional[str]:
+    def validate_grading_mode(cls, v: str | None) -> str | None:
         if v and v not in cls.VALID_GRADING_MODES:
             raise ValueError(
                 f"grading_mode must be one of: {', '.join(sorted(cls.VALID_GRADING_MODES))}"
@@ -121,7 +121,7 @@ class QuestionCreateRequest(BaseModel):
 
     @field_validator("bloom_level")
     @classmethod
-    def validate_bloom(cls, v: Optional[str]) -> Optional[str]:
+    def validate_bloom(cls, v: str | None) -> str | None:
         if v and v not in cls.VALID_BLOOM:
             raise ValueError(
                 f"bloom_level must be one of: {', '.join(sorted(cls.VALID_BLOOM))}"
@@ -137,20 +137,20 @@ class QuestionUpdateRequest(BaseModel):
     All fields are optional — only provided fields are changed.
     """
 
-    content: Optional[str] = Field(default=None, min_length=5)
-    explanation: Optional[str] = None
-    hint: Optional[str] = None
-    difficulty: Optional[str] = None
-    grading_mode: Optional[str] = None
-    subject: Optional[str] = Field(default=None, max_length=200)
-    topic: Optional[str] = Field(default=None, max_length=200)
-    bloom_level: Optional[str] = None
-    suggested_marks: Optional[int] = Field(default=None, ge=1)
-    estimated_time_minutes: Optional[int] = Field(default=None, ge=1)
-    fill_blank_template: Optional[str] = None
-    correct_order_json: Optional[str] = None
-    options: Optional[List[QuestionOptionCreate]] = None
-    tag_names: Optional[List[str]] = None
+    content: str | None = Field(default=None, min_length=5)
+    explanation: str | None = None
+    hint: str | None = None
+    difficulty: str | None = None
+    grading_mode: str | None = None
+    subject: str | None = Field(default=None, max_length=200)
+    topic: str | None = Field(default=None, max_length=200)
+    bloom_level: str | None = None
+    suggested_marks: int | None = Field(default=None, ge=1)
+    estimated_time_minutes: int | None = Field(default=None, ge=1)
+    fill_blank_template: str | None = None
+    correct_order_json: str | None = None
+    options: list[QuestionOptionCreate] | None = None
+    tag_names: list[str] | None = None
     create_new_version: bool = Field(
         default=True,
         description=(
@@ -163,14 +163,14 @@ class QuestionUpdateRequest(BaseModel):
 
 
 class AttachTagsRequest(BaseModel):
-    tag_names: List[str] = Field(
+    tag_names: list[str] = Field(
         ..., min_length=1,
         description="Tag names to attach (created if they don't exist)"
     )
 
 
 class DetachTagsRequest(BaseModel):
-    tag_names: List[str] = Field(..., min_length=1)
+    tag_names: list[str] = Field(..., min_length=1)
 
 
 # ─── Question Response Schemas ────────────────────────────────────────────────
@@ -185,14 +185,14 @@ class QuestionSummaryResponse(BaseModel):
     difficulty: str
     grading_mode: str
     status: str
-    subject: Optional[str]
-    topic: Optional[str]
-    bloom_level: Optional[str]
-    suggested_marks: Optional[int]
+    subject: str | None
+    topic: str | None
+    bloom_level: str | None
+    suggested_marks: int | None
     is_active: bool
     source_type: str
     version_number: int
-    parent_question_id: Optional[uuid.UUID]
+    parent_question_id: uuid.UUID | None
     created_by_id: uuid.UUID
     created_at: datetime
 
@@ -204,34 +204,34 @@ class QuestionDetailResponse(BaseModel):
 
     id: uuid.UUID
     content: str
-    explanation: Optional[str]
-    hint: Optional[str]
+    explanation: str | None
+    hint: str | None
     question_type: str
     difficulty: str
     grading_mode: str
     status: str
     source_type: str
-    subject: Optional[str]
-    topic: Optional[str]
-    bloom_level: Optional[str]
-    suggested_marks: Optional[int]
-    estimated_time_minutes: Optional[int]
-    fill_blank_template: Optional[str]
-    correct_order_json: Optional[str]
+    subject: str | None
+    topic: str | None
+    bloom_level: str | None
+    suggested_marks: int | None
+    estimated_time_minutes: int | None
+    fill_blank_template: str | None
+    correct_order_json: str | None
     is_active: bool
     version_number: int
-    parent_question_id: Optional[uuid.UUID]
+    parent_question_id: uuid.UUID | None
     created_by_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
-    options: List[QuestionOptionResponse] = []
-    tags: List[QuestionTagResponse] = []
+    options: list[QuestionOptionResponse] = []
+    tags: list[QuestionTagResponse] = []
 
     model_config = {"from_attributes": True}
 
 
 class QuestionListResponse(BaseModel):
-    items: List[QuestionSummaryResponse]
+    items: list[QuestionSummaryResponse]
     total: int
     page: int
     page_size: int
@@ -242,17 +242,17 @@ class QuestionListResponse(BaseModel):
 
 
 class QuestionSearchParams(BaseModel):
-    q: Optional[str] = Field(
+    q: str | None = Field(
         default=None,
         description="Full-text search on question content"
     )
-    question_type: Optional[str] = None
-    difficulty: Optional[str] = None
-    subject: Optional[str] = None
-    topic: Optional[str] = None
-    bloom_level: Optional[str] = None
-    source_type: Optional[str] = None
-    tag_names: Optional[List[str]] = None
-    is_active: Optional[bool] = Field(default=True)
+    question_type: str | None = None
+    difficulty: str | None = None
+    subject: str | None = None
+    topic: str | None = None
+    bloom_level: str | None = None
+    source_type: str | None = None
+    tag_names: list[str] | None = None
+    is_active: bool | None = Field(default=True)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

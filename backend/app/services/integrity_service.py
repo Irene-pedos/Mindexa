@@ -37,17 +37,21 @@ RULES:
 from __future__ import annotations
 
 import uuid
-from typing import Dict, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthorizationError, NotFoundError
-from app.db.enums import (IntegrityEventType, IntegrityFlagRaisedBy,
-                          IntegrityFlagStatus, RiskLevel, WarningLevel)
-from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
-                                     IntegrityWarning)
+from app.db.enums import (
+    IntegrityEventType,
+    IntegrityFlagRaisedBy,
+    IntegrityFlagStatus,
+    RiskLevel,
+    WarningLevel,
+)
+from app.db.models.integrity import IntegrityEvent, IntegrityFlag, IntegrityWarning
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.repositories.result_repo import ResultRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # THRESHOLD CONFIGURATION
@@ -56,7 +60,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # (event_type -> {threshold: (warning_level, risk_level, description)})
 # Thresholds are counts; the entry fires when count EQUALS the threshold.
 
-THRESHOLDS: Dict[str, list] = {
+THRESHOLDS: dict[str, list] = {
     IntegrityEventType.TAB_SWITCH: [
         (3, WarningLevel.WARNING_1, RiskLevel.LOW,
          "Multiple tab switches detected during your assessment"),
@@ -138,8 +142,8 @@ class IntegrityService:
         student_id: uuid.UUID,
         access_token: uuid.UUID,
         event_type: str,
-        metadata_json: Optional[dict] = None,
-    ) -> tuple[IntegrityEvent, Optional[IntegrityWarning]]:
+        metadata_json: dict | None = None,
+    ) -> tuple[IntegrityEvent, IntegrityWarning | None]:
         """
         Record one integrity event and evaluate whether it crosses a threshold.
 
@@ -186,7 +190,7 @@ class IntegrityService:
         student_id: uuid.UUID,
         event_type: str,
         trigger_event_id: uuid.UUID,
-    ) -> Optional[IntegrityWarning]:
+    ) -> IntegrityWarning | None:
         """
         Check event count against thresholds and issue a warning if threshold crossed.
 
@@ -233,10 +237,10 @@ class IntegrityService:
         student_id: uuid.UUID,
         warning_level: str,
         risk_level: str,
-        trigger_event_id: Optional[uuid.UUID] = None,
-        issued_by_id: Optional[uuid.UUID] = None,
+        trigger_event_id: uuid.UUID | None = None,
+        issued_by_id: uuid.UUID | None = None,
         auto_raise_flag: bool = False,
-        flag_description: Optional[str] = None,
+        flag_description: str | None = None,
     ) -> IntegrityWarning:
         """
         Issue a warning to the student and log it.
@@ -247,7 +251,7 @@ class IntegrityService:
         message = WARNING_MESSAGES.get(WarningLevel(warning_level), "Warning issued.")
 
         # If WARNING_3, pre-create the flag to get its ID
-        flag_id: Optional[uuid.UUID] = None
+        flag_id: uuid.UUID | None = None
         if auto_raise_flag:
             flag = await self.raise_flag(
                 attempt_id=attempt_id,
@@ -289,8 +293,8 @@ class IntegrityService:
         raised_by: str,
         description: str,
         risk_level: str,
-        raised_by_id: Optional[uuid.UUID] = None,
-        evidence_event_ids: Optional[list] = None,
+        raised_by_id: uuid.UUID | None = None,
+        evidence_event_ids: list | None = None,
     ) -> IntegrityFlag:
         """
         Raise an integrity flag on an attempt.

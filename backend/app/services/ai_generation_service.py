@@ -35,26 +35,25 @@ REVIEW FLOW:
 
 import json
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserRole
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError, ValidationError)
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.db.enums import AIBatchStatus, AIQuestionDecision
 from app.db.models.auth import User
 from app.db.repositories.ai_generation_repo import AIGenerationRepository
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.question_repo import QuestionRepository
-from app.schemas.ai_generation import (AIGeneratedQuestionResponse,
-                                       AIGenerationBatchDetailResponse,
-                                       AIGenerationBatchListResponse,
-                                       AIGenerationBatchResponse,
-                                       AIQuestionReviewResponse,
-                                       GenerateQuestionsRequest,
-                                       ReviewAIQuestionRequest)
-from app.services.question_service import infer_grading_mode
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.schemas.ai_generation import (
+    AIGenerationBatchDetailResponse,
+    AIGenerationBatchListResponse,
+    AIGenerationBatchResponse,
+    AIQuestionReviewResponse,
+    GenerateQuestionsRequest,
+    ReviewAIQuestionRequest,
+)
 
 
 class AIGenerationService:
@@ -128,7 +127,7 @@ class AIGenerationService:
                 batch_id=batch.id,
                 status=AIBatchStatus.FAILED.value,
                 error_message=str(exc),
-                completed_at=datetime.now(timezone.utc),
+                completed_at=datetime.now(UTC),
             )
             raise
 
@@ -144,7 +143,7 @@ class AIGenerationService:
         ai_question_id: uuid.UUID,
         data: ReviewAIQuestionRequest,
         current_user: User,
-    ) -> Tuple[AIQuestionReviewResponse, Optional[dict]]:
+    ) -> tuple[AIQuestionReviewResponse, dict | None]:
         """
         Apply a lecturer review decision to an AI-generated question.
 

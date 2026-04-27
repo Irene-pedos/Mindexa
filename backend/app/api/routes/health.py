@@ -9,7 +9,7 @@ GET /health/ready  — readiness probe (are DB and Redis reachable?)
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
@@ -35,7 +35,7 @@ async def liveness() -> LivenessResponse:
         status="alive",
         app=settings.APP_NAME,
         version=settings.APP_VERSION,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
     )
 
 
@@ -59,7 +59,7 @@ async def readiness() -> JSONResponse:
             "status": "ready" if all_healthy else "degraded",
             "app": settings.APP_NAME,
             "version": settings.APP_VERSION,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "checks": checks,
         },
         status_code=(

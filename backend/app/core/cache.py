@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any, Optional
+from typing import Any
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -86,7 +86,7 @@ class RedisCache:
 
     async def get_user_profile(
         self, user_id: uuid.UUID | str
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Return cached user profile dict, or None on miss/error."""
         return await self._get_json(_user_key(user_id))
 
@@ -94,7 +94,7 @@ class RedisCache:
         self,
         user_id: uuid.UUID | str,
         data: dict[str, Any],
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> None:
         """Cache user profile with TTL (default: REDIS_USER_PROFILE_TTL)."""
         await self._set_json(
@@ -112,7 +112,7 @@ class RedisCache:
 
     async def get_assessment(
         self, assessment_id: uuid.UUID | str
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Return cached assessment summary, or None on miss/error."""
         return await self._get_json(_assessment_key(assessment_id))
 
@@ -120,7 +120,7 @@ class RedisCache:
         self,
         assessment_id: uuid.UUID | str,
         data: dict[str, Any],
-        ttl: Optional[int] = None,
+        ttl: int | None = None,
     ) -> None:
         """Cache assessment metadata with TTL (default: REDIS_ASSESSMENT_TTL)."""
         await self._set_json(
@@ -138,7 +138,7 @@ class RedisCache:
 
     async def get(
         self, namespace: str, key: str
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """Generic cache get. Returns deserialized value or None."""
         return await self._get_json(_custom_key(namespace, key))
 
@@ -197,7 +197,7 @@ class RedisCache:
 
     # ── Internal Helpers ──────────────────────────────────────────────────────
 
-    async def _get_json(self, key: str) -> Optional[Any]:
+    async def _get_json(self, key: str) -> Any | None:
         try:
             from app.core.redis import get_redis
             redis = await get_redis()

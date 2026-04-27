@@ -17,35 +17,35 @@ Setup:
 
 from __future__ import annotations
 
-import asyncio
 import os
-import subprocess
-import sys
 import uuid
 from collections.abc import AsyncGenerator
-from unittest.mock import AsyncMock, patch
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
 import sqlalchemy as sa
-from app.db.base import Base
-from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
-                                    create_async_engine)
-from sqlalchemy import text
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlmodel import SQLModel
+
 # Ensure all SQLModel table metadata is registered before create_all().
 from app.db import models as _db_models  # noqa: F401
-from sqlmodel import SQLModel
 
 # Force test environment before any app module imports
 os.environ.setdefault("ENVIRONMENT", "test")
 os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "true")
 # Provide a fallback SECRET_KEY so tests don't fail on missing env var
-os.environ.setdefault("SECRET_KEY", "986104b16962f8f3e1b6d4631148c71ffac35cf7e32b70d5504d3ab1ad37a664")
+os.environ.setdefault(
+    "SECRET_KEY", "986104b16962f8f3e1b6d4631148c71ffac35cf7e32b70d5504d3ab1ad37a664"
+)
 os.environ.setdefault("POSTGRES_PASSWORD", "Postgre123")
 # Build DATABASE_URL dynamically from POSTGRES_PASSWORD to avoid duplication
 postgres_password = os.environ["POSTGRES_PASSWORD"]
-os.environ.setdefault("DATABASE_URL", f"postgresql+asyncpg://postgres:{postgres_password}@localhost:5433/mindexa_db")
+os.environ.setdefault(
+    "DATABASE_URL",
+    f"postgresql+asyncpg://postgres:{postgres_password}@localhost:5433/mindexa_db",
+)
 
 from app.core.config import settings
 from app.db.session import get_db
@@ -53,96 +53,109 @@ from app.main import app
 
 # ── Test Database ─────────────────────────────────────────────────────────────
 
-TEST_DATABASE_URL = settings.DATABASE_URL.replace(
+TEST_DATABASE_URL = settings.DATABASE_ASYNC_URL.replace(
     f"/{settings.POSTGRES_DB}",
     f"/{settings.POSTGRES_DB}_test",
 )
 TEST_DATABASE_SYNC_URL = TEST_DATABASE_URL.replace("+asyncpg", "")
 
-@pytest_asyncio.fixture(scope="session")
-async def engine():
-    """Session-scoped engine to avoid loop issues."""
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False)
-    yield engine
-    await engine.dispose()
 
-
-@pytest_asyncio.fixture(scope="session")
-async def setup_test_database(engine):
-    """Prepare test DB once before tests.
-
-    Prefer Alembic migrations; fall back to SQLModel metadata if migrations fail.
+def _nuke_and_recreate_schema(sync_conn) -> None:
     """
-    # Always start with a clean schema for tests
-    async with engine.begin() as conn:
-        await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-        await conn.execute(text("CREATE SCHEMA public"))
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    Drop the entire public schema and recreate it from scratch.
+    """
+    # Force disconnect other sessions
+    sync_conn.execute(
+        sa.text(
+            "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+            "WHERE datname = current_database() AND pid <> pg_backend_pid()"
+        )
+    )
+
+    sync_conn.execute(sa.text("DROP SCHEMA IF EXISTS public CASCADE"))
+    sync_conn.execute(sa.text("CREATE SCHEMA public"))
+    sync_conn.execute(sa.text("GRANT ALL ON SCHEMA public TO public"))
+    sync_conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
+    # pgvector — ignore if not installed in the test environment
+    try:
+        sync_conn.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector"))
+    except Exception:
+        pass
+
+
+def _create_all_tables(sync_conn) -> None:
+    """
+    Create all tables from SQLModel metadata.
+    """
+    SQLModel.metadata.create_all(sync_conn)
+
+
+@pytest.fixture(scope="session")
+def event_loop():
+    """Create an instance of the default event loop for each test case."""
+    import asyncio
 
     try:
-        env = os.environ.copy()
-        env["DATABASE_URL"] = TEST_DATABASE_SYNC_URL
-        subprocess.run(
-            [sys.executable, "-m", "alembic", "upgrade", "head"],
-            check=True,
-            env=env,
-            capture_output=True,
-            text=True,
-        )
-    except Exception as exc:
-        # Migration chain can fail on enum conflicts in local/dev databases.
-        # Fall back to current model metadata so integration tests can still run.
-        async with engine.begin() as conn:
-            # Schema was already cleaned above, but we do it again just in case the migration failed partially
-            await conn.execute(text("DROP SCHEMA IF EXISTS public CASCADE"))
-            await conn.execute(text("CREATE SCHEMA public"))
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pgcrypto"))
-            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        loop = asyncio.get_event_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
 
-            await conn.run_sync(Base.metadata.create_all)
 
-            def _create_sqlmodel_tables(sync_conn):
-                # SQLModel metadata includes FKs to `user.id` (defined on Base metadata).
-                # Reflect it into SQLModel metadata so FK resolution succeeds.
-                sa.Table("user", SQLModel.metadata, autoload_with=sync_conn, extend_existing=True)
-                SQLModel.metadata.create_all(sync_conn)
+@pytest_asyncio.fixture(scope="session")
+async def engine() -> AsyncGenerator[AsyncEngine, None]:
+    """
+    Create the async engine for the test database.
+    """
+    # Use NullPool for tests to ensure each session gets a fresh connection
+    # and to avoid issues with connection state between tests.
+    test_engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        poolclass=NullPool,
+    )
+    yield test_engine
+    await test_engine.dispose()
 
-            await conn.run_sync(_create_sqlmodel_tables)
 
+@pytest_asyncio.fixture(scope="session", autouse=True)
+async def setup_test_database(engine: AsyncEngine):
+    """
+    Prepare the test database once per pytest session.
+    """
+    async with engine.begin() as conn:
+        await conn.run_sync(_nuke_and_recreate_schema)
+        await conn.run_sync(_create_all_tables)
     yield
 
 
 @pytest_asyncio.fixture
-async def db(engine, setup_test_database) -> AsyncGenerator[AsyncSession, None]:
+async def db(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     """
-    Per-test database session wrapped in a savepoint.
-    All changes roll back after each test — no cleanup needed.
+    Create a clean database session for each test.
+    Each test is wrapped in a transaction that is rolled back after.
     """
     async with engine.connect() as connection:
-        await connection.begin()
-        await connection.begin_nested()
+        # Start a nested transaction (savepoint)
+        trans = await connection.begin()
 
-        session = AsyncSession(
-            bind=connection,
-            expire_on_commit=False,
-            autoflush=False,
-        )
-        try:
-            yield session
-        finally:
-            await session.close()
-            await connection.rollback()
+        session = AsyncSession(bind=connection, expire_on_commit=False, autoflush=False)
 
+        yield session
 
-# ── HTTP Test Client ──────────────────────────────────────────────────────────
+        await session.close()
+        # Roll back the transaction to return the DB to its initial state
+        await trans.rollback()
+
 
 @pytest_asyncio.fixture
 async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     """
-    Async HTTP client that overrides the DB dependency with the test session.
+    FastAPI test client with database dependency override.
     """
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
+
+    async def override_get_db():
         yield db
 
     app.dependency_overrides[get_db] = override_get_db
@@ -156,38 +169,10 @@ async def client(db: AsyncSession) -> AsyncGenerator[AsyncClient, None]:
     app.dependency_overrides.clear()
 
 
-# ── Redis Mock ────────────────────────────────────────────────────────────────
-
-@pytest.fixture(autouse=True)
-def mock_redis():
-    """
-    Auto-mocked Redis for all tests.
-    Integration tests that need real Redis can override this fixture.
-    """
-    mock = AsyncMock()
-    mock.ping.return_value = True
-    mock.get.return_value = None
-    mock.set.return_value = True
-    mock.setex.return_value = True
-    mock.incr.return_value = 1
-    mock.expire.return_value = True
-    mock.delete.return_value = 1
-    mock.exists.return_value = 0
-
-    with patch("app.core.redis._redis_client", mock):
-        yield mock
-
-
-# ── Auth Header Factories ─────────────────────────────────────────────────────
-
 @pytest.fixture
 def make_auth_headers():
     """
-    Factory for generating valid JWT auth headers in tests.
-
-    Usage:
-        headers = make_auth_headers(role=UserRole.LECTURER)
-        response = await client.get("/api/v1/...", headers=headers)
+    Utility fixture to generate JWT auth headers for any role.
     """
     from app.core.constants import UserRole
     from app.core.security import create_access_token
@@ -206,17 +191,18 @@ def make_auth_headers():
 
 @pytest.fixture
 def student_headers(make_auth_headers):
-    from app.core.constants import UserRole
-    return make_auth_headers(role=UserRole.STUDENT)
+    return make_auth_headers(role="STUDENT")
 
 
 @pytest.fixture
 def lecturer_headers(make_auth_headers):
     from app.core.constants import UserRole
+
     return make_auth_headers(role=UserRole.LECTURER)
 
 
 @pytest.fixture
 def admin_headers(make_auth_headers):
     from app.core.constants import UserRole
+
     return make_auth_headers(role=UserRole.ADMIN)

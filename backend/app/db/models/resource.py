@@ -75,23 +75,20 @@ JSONB:
     This allows indexed queries on file type, status, and subject tags.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from app.db.base import BaseModel, utcnow
-from app.db.enums import ResourceCategory, ResourceProcessingStatus
-from app.db.mixins import composite_index
 from sqlalchemy import Column, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
+from app.db.base import BaseModel
+from app.db.enums import ResourceCategory, ResourceProcessingStatus
+from app.db.mixins import composite_index
+
 if TYPE_CHECKING:
-    from app.db.models.academic import Course
-    from app.db.models.assessment import Assessment
-    from app.db.models.auth import User
+    pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,7 +181,7 @@ class StudentResource(BaseModel, table=True):
     file_size_bytes: int = Field(nullable=False)
     file_extension: str = Field(nullable=False, max_length=20)
     mime_type: str = Field(nullable=False, max_length=100)
-    file_hash: Optional[str] = Field(
+    file_hash: str | None = Field(
         default=None,
         nullable=True,
         max_length=64,
@@ -197,12 +194,12 @@ class StudentResource(BaseModel, table=True):
         default=ResourceCategory.GENERAL,
         nullable=False,
     )
-    subject_tag: Optional[str] = Field(
+    subject_tag: str | None = Field(
         default=None,
         nullable=True,
         max_length=100,
     )
-    display_name: Optional[str] = Field(
+    display_name: str | None = Field(
         default=None,
         nullable=True,
         max_length=255,
@@ -216,15 +213,15 @@ class StudentResource(BaseModel, table=True):
         default=ResourceProcessingStatus.PENDING,
         nullable=False,
     )
-    processing_started_at: Optional[datetime] = Field(default=None, nullable=True)
-    processing_completed_at: Optional[datetime] = Field(default=None, nullable=True)
-    processing_error: Optional[str] = Field(
+    processing_started_at: datetime | None = Field(default=None, nullable=True)
+    processing_completed_at: datetime | None = Field(default=None, nullable=True)
+    processing_error: str | None = Field(
         default=None,
         nullable=True,
         max_length=1000,
     )
-    chunk_count: Optional[int] = Field(default=None, nullable=True)
-    page_count: Optional[int] = Field(
+    chunk_count: int | None = Field(default=None, nullable=True)
+    page_count: int | None = Field(
         default=None,
         nullable=True,
         # Total pages/sections detected during parsing.
@@ -232,7 +229,7 @@ class StudentResource(BaseModel, table=True):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    expires_at: Optional[datetime] = Field(
+    expires_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
@@ -309,8 +306,8 @@ class ResourceChunk(BaseModel, table=True):
     )
     chunk_index: int = Field(nullable=False)
     content: str = Field(nullable=False)
-    token_count: Optional[int] = Field(default=None, nullable=True)
-    source_page: Optional[int] = Field(default=None, nullable=True)
+    token_count: int | None = Field(default=None, nullable=True)
+    source_page: int | None = Field(default=None, nullable=True)
     embedding_model: str = Field(
         default="text-embedding-3-small",
         nullable=False,
@@ -320,7 +317,7 @@ class ResourceChunk(BaseModel, table=True):
     # pgvector VECTOR column — nullable until embedding task completes
     # Using sa_column with the pgvector Vector type
     # Dimension must match EMBEDDING_DIMENSIONS from mixins.py (1536)
-    embedding: Optional[List[float]] = Field(
+    embedding: list[float] | None = Field(
         default=None,
         sa_column=Column(
             "embedding",
@@ -408,7 +405,7 @@ class LecturerMaterial(BaseModel, table=True):
             index=True,
         )
     )
-    course_id: Optional[uuid.UUID] = Field(
+    course_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
             UUID(as_uuid=True),
@@ -417,7 +414,7 @@ class LecturerMaterial(BaseModel, table=True):
             index=True,
         )
     )
-    assessment_id: Optional[uuid.UUID] = Field(
+    assessment_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
             UUID(as_uuid=True),
@@ -442,12 +439,12 @@ class LecturerMaterial(BaseModel, table=True):
         default=ResourceCategory.GENERAL,
         nullable=False,
     )
-    display_name: Optional[str] = Field(
+    display_name: str | None = Field(
         default=None,
         nullable=True,
         max_length=255,
     )
-    description: Optional[str] = Field(default=None, nullable=True)
+    description: str | None = Field(default=None, nullable=True)
 
     # ── Access control ────────────────────────────────────────────────────────
 

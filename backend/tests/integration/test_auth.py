@@ -9,82 +9,19 @@ from __future__ import annotations
 
 import pytest
 import pytest_asyncio
-from app.core.config import settings
-from app.core.constants import UserRole
-from app.core.security import create_access_token
-from app.db.base import Base
-from app.db.models import auth as _auth_models  # noqa: F401
-from app.db.models.auth import User
-from app.db.session import get_db
-from app.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from sqlmodel import SQLModel
 
-@pytest_asyncio.fixture
-async def engine():
-    test_database_url = settings.DATABASE_URL.replace(
-        f"/{settings.POSTGRES_DB}",
-        f"/{settings.POSTGRES_DB}_test",
-    )
-    engine = create_async_engine(
-        test_database_url,
-        echo=False,
-        poolclass=NullPool,
-    )
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield engine
-    await engine.dispose()
-
-
-@pytest_asyncio.fixture
-async def setup_test_database(engine):
-    yield
-
-
-@pytest_asyncio.fixture
-async def db(engine: AsyncEngine) -> AsyncSession:
-    async with engine.connect() as connection:
-        await connection.begin()
-        await connection.begin_nested()
-
-        session = AsyncSession(
-            bind=connection,
-            expire_on_commit=False,
-            autoflush=False,
-        )
-        try:
-            yield session
-        finally:
-            await session.close()
-            await connection.rollback()
-
-
-@pytest_asyncio.fixture
-async def client(db: AsyncSession):
-    async def override_get_db():
-        yield db
-
-    app.dependency_overrides[get_db] = override_get_db
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        yield ac
-    app.dependency_overrides.clear()
-
-
-@pytest.fixture
-def make_auth_headers():
-    def _make(
-        user_id: str,
-        role: UserRole = UserRole.STUDENT,
-        email: str = "test@mindexa.ac",
-    ) -> dict[str, str]:
-        token, _ = create_access_token(user_id, role, email)
-        return {"Authorization": f"Bearer {token}"}
-
-    return _make
+from app.core.config import settings
+from app.core.constants import UserRole
+from app.core.security import create_access_token
+from app.db.models import auth as _auth_models  # noqa: F401
+from app.db.models.auth import User
+from app.main import app
 
 
 @pytest.fixture(autouse=True)
@@ -106,11 +43,14 @@ class TestRegistration:
             "password": "SecurePassword123!",
             "first_name": "Test",
             "last_name": "Student",
-            "role": "student"
+            "role": "STUDENT"
         }
         response = await client.post("/api/v1/auth/register", json=payload)
-        
+
+        if response.status_code != 201:
+            print(f"Registration failed: {response.json()}")
         assert response.status_code == 201
+
         data = response.json()
         assert data["success"] is True
         assert "account created successfully" in data["message"].lower()
@@ -122,7 +62,7 @@ class TestRegistration:
             "password": "SecurePassword123!",
             "first_name": "First",
             "last_name": "User",
-            "role": "student"
+            "role": "STUDENT"
         }
         # First registration
         await client.post("/api/v1/auth/register", json=payload)
@@ -142,7 +82,11 @@ class TestRegistration:
             "role": "admin"
         }
         response = await client.post("/api/v1/auth/register", json=payload)
+
+        if response.status_code != 201:
+            print(f"Registration failed: {response.json()}")
         assert response.status_code == 201
+
 
         user = (
             await db.execute(select(User).where(User.email == "sneaky_admin@mindexa.ac"))
@@ -213,9 +157,10 @@ class TestMe:
     async def test_get_me_success(self, client: AsyncClient, db: AsyncSession, make_auth_headers):
         """Authenticated user can get their own profile."""
         # 1. Create a user in the database
-        from app.db.models.auth import User, UserProfile
-        from app.db.enums import UserRole, UserStatus
         import uuid
+
+        from app.db.enums import UserRole, UserStatus
+        from app.db.models.auth import User, UserProfile
 
         user_id = uuid.uuid4()
         user = User(

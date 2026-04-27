@@ -41,32 +41,39 @@ Cascade rules:
     rubric_criterion_level        → CASCADE from rubric_criterion
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from app.db.base import AuditedBaseModel, BaseModel, utcnow
-from app.db.enums import (AssessmentStatus, AssessmentType, BlueprintRuleType,
-                          DifficultyLevel, GradingMode, QuestionType,
-                          ResultReleaseMode, SupervisorRole)
-from app.db.mixins import (bool_field, composite_index, optional_fk_uuid,
-                           positive_int, unique_composite_index)
-from app.db.models.integrity import SupervisionSession
-from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
+
+from app.db.base import AuditedBaseModel, BaseModel, utcnow
+from app.db.enums import (
+    AssessmentStatus,
+    AssessmentType,
+    BlueprintRuleType,
+    DifficultyLevel,
+    GradingMode,
+    QuestionType,
+    ResultReleaseMode,
+    SupervisorRole,
+)
+from app.db.mixins import (
+    composite_index,
+)
+from app.db.models.integrity import SupervisionSession
 
 # Constants from mixins (not enums — they are integers)
 ASSESSMENT_WIZARD_STEPS: int = 6
 
 if TYPE_CHECKING:
-    from app.db.models.academic import ClassSection, Course, Subject
+    from app.db.models.academic import ClassSection, Course
     from app.db.models.attempt import AssessmentAttempt
-    from app.db.models.auth import User
-    from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
-                                         IntegrityWarning, SupervisionSession)
+    from app.db.models.integrity import (
+        SupervisionSession,
+    )
     from app.db.models.question import AIGenerationBatch, AssessmentQuestion
 
 
@@ -131,7 +138,6 @@ class Assessment(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("course.id", ondelete="RESTRICT"),
             nullable=True,
-            index=True,
         )
     )
     subject_id: Optional[uuid.UUID] = Field(
@@ -140,7 +146,6 @@ class Assessment(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("subject.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
 
@@ -151,7 +156,6 @@ class Assessment(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
 
@@ -166,7 +170,6 @@ class Assessment(AuditedBaseModel, table=True):
     status: AssessmentStatus = Field(
         default=AssessmentStatus.DRAFT,
         nullable=False,
-        index=True,
     )
 
     # ── Scoring ───────────────────────────────────────────────────────────────
@@ -177,8 +180,14 @@ class Assessment(AuditedBaseModel, table=True):
     # ── Timing ────────────────────────────────────────────────────────────────
 
     duration_minutes: Optional[int] = Field(default=None, nullable=True)
-    window_start: Optional[datetime] = Field(default=None, nullable=True, index=True)
-    window_end: Optional[datetime] = Field(default=None, nullable=True, index=True)
+    window_start: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
+    window_end: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
+    )
     max_attempts: int = Field(default=1, nullable=False)
 
     # ── Grading & result release ──────────────────────────────────────────────
@@ -193,7 +202,7 @@ class Assessment(AuditedBaseModel, table=True):
     )
     result_release_at: Optional[datetime] = Field(
         default=None,
-        nullable=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
         # Only populated when result_release_mode = SCHEDULED
     )
 
@@ -235,13 +244,19 @@ class Assessment(AuditedBaseModel, table=True):
         nullable=True,
         # NULL after publish; 1–6 while in draft
     )
-    draft_is_complete: bool = Field(default=False, nullable=False, index=True)
+    draft_is_complete: bool = Field(default=False, nullable=False)
     autosave_token: Optional[uuid.UUID] = Field(default=None, nullable=True)
 
     # ── Publish timestamps ────────────────────────────────────────────────────
 
-    publish_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    published_at: Optional[datetime] = Field(default=None, nullable=True)
+    publish_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    published_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
@@ -318,7 +333,6 @@ class AssessmentTargetSection(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     class_section_id: uuid.UUID = Field(
@@ -326,7 +340,6 @@ class AssessmentTargetSection(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("class_section.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     # Plain UUID — validated at service layer
@@ -375,7 +388,6 @@ class AssessmentSupervisor(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     supervisor_id: uuid.UUID = Field(
@@ -383,7 +395,6 @@ class AssessmentSupervisor(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     supervisor_role: SupervisorRole = Field(
@@ -449,7 +460,6 @@ class AssessmentSection(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     title: str = Field(nullable=False, max_length=255)
@@ -526,7 +536,6 @@ class AssessmentBlueprintRule(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     assessment_section_id: Optional[uuid.UUID] = Field(
@@ -598,7 +607,6 @@ class AssessmentDraftProgress(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -617,12 +625,30 @@ class AssessmentDraftProgress(BaseModel, table=True):
     last_active_step: int = Field(default=1, nullable=False)
 
     # Step validation timestamps
-    step_1_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    step_2_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    step_3_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    step_4_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    step_5_validated_at: Optional[datetime] = Field(default=None, nullable=True)
-    step_6_validated_at: Optional[datetime] = Field(default=None, nullable=True)
+    step_1_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    step_2_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    step_3_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    step_4_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    step_5_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    step_6_validated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     assessment: Optional["Assessment"] = Relationship(
@@ -673,7 +699,6 @@ class AssessmentAutosave(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     # Plain UUID — validated at service layer
@@ -684,8 +709,13 @@ class AssessmentAutosave(BaseModel, table=True):
     sa_column=Column(JSONB, nullable=False),
 )
     client_version: int = Field(default=1, nullable=False)
-    saved_at: datetime = Field(default_factory=utcnow, nullable=False)
-    expires_at: datetime = Field(nullable=False, index=True)
+    saved_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    expires_at: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     assessment: Optional["Assessment"] = Relationship(back_populates="autosaves")
@@ -738,12 +768,14 @@ class AssessmentPublishValidation(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     # Plain UUID — validated at service layer
     checked_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
-    checked_at: datetime = Field(default_factory=utcnow, nullable=False, index=True)
+    checked_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False, index=True),
+    )
     overall_passed: bool = Field(default=False, nullable=False, index=True)
     validation_results: list = Field(
     sa_column=Column(JSONB, nullable=False),
@@ -823,7 +855,6 @@ class RubricCriterion(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("rubric.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     title: str = Field(nullable=False, max_length=255)

@@ -12,38 +12,38 @@ Covers:
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
 
-from app.core.constants import AssessmentStatus, AssessmentType, GradingMode
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+from app.core.constants import AssessmentType, GradingMode
 
 # ─── Assessment Section Schemas ───────────────────────────────────────────────
 
 
 class AssessmentSectionCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
-    description: Optional[str] = None
-    instructions: Optional[str] = None
+    description: str | None = None
+    instructions: str | None = None
     order_index: int = Field(default=0, ge=0)
-    allocated_marks: Optional[int] = Field(default=None, ge=0)
+    allocated_marks: int | None = Field(default=None, ge=0)
 
 
 class AssessmentSectionUpdate(BaseModel):
-    title: Optional[str] = Field(default=None, min_length=1, max_length=300)
-    description: Optional[str] = None
-    instructions: Optional[str] = None
-    order_index: Optional[int] = Field(default=None, ge=0)
-    allocated_marks: Optional[int] = Field(default=None, ge=0)
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    description: str | None = None
+    instructions: str | None = None
+    order_index: int | None = Field(default=None, ge=0)
+    allocated_marks: int | None = Field(default=None, ge=0)
 
 
 class AssessmentSectionResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     title: str
-    description: Optional[str]
-    instructions: Optional[str]
+    description: str | None
+    instructions: str | None
     order_index: int
-    allocated_marks: Optional[int]
+    allocated_marks: int | None
     created_at: datetime
     updated_at: datetime
 
@@ -55,7 +55,7 @@ class AssessmentSectionResponse(BaseModel):
 
 class AddQuestionToAssessmentRequest(BaseModel):
     question_id: uuid.UUID
-    section_id: Optional[uuid.UUID] = None
+    section_id: uuid.UUID | None = None
     marks: int = Field(..., ge=1, le=1000)
     order_index: int = Field(default=0, ge=0)
     added_via: str = Field(
@@ -78,7 +78,7 @@ class ReorderQuestionsRequest(BaseModel):
     Each item maps a question_id to its new order_index.
     """
 
-    order: List[dict] = Field(
+    order: list[dict] = Field(
         ...,
         description="List of {question_id: str, order_index: int} pairs",
     )
@@ -99,7 +99,7 @@ class AssessmentQuestionResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     question_id: uuid.UUID
-    section_id: Optional[uuid.UUID]
+    section_id: uuid.UUID | None
     marks: int
     order_index: int
     added_via: str
@@ -116,8 +116,8 @@ class AssessmentDraftProgressResponse(BaseModel):
     assessment_id: uuid.UUID
     current_step: int
     last_saved_at: datetime
-    step_data: Optional[str]
-    validation_errors: Optional[str]
+    step_data: str | None
+    validation_errors: str | None
 
     model_config = {"from_attributes": True}
 
@@ -132,16 +132,16 @@ class AssessmentCreateRequest(BaseModel):
     """
 
     title: str = Field(..., min_length=2, max_length=300)
-    description: Optional[str] = None
-    instructions: Optional[str] = None
+    description: str | None = None
+    instructions: str | None = None
     assessment_type: str = Field(default=AssessmentType.FORMATIVE.value)
-    course_id: Optional[uuid.UUID] = None
-    subject_id: Optional[uuid.UUID] = None
+    course_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
     grading_mode: str = Field(default=GradingMode.MANUAL.value)
     result_release_mode: str = Field(default="manual")
     total_marks: int = Field(default=100, ge=1, le=10000)
-    passing_marks: Optional[int] = Field(default=None, ge=0)
-    duration_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    passing_marks: int | None = Field(default=None, ge=0)
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
 
     @field_validator("assessment_type")
     @classmethod
@@ -179,14 +179,14 @@ class AssessmentCreateRequest(BaseModel):
 class AssessmentSecuritySettingsUpdate(BaseModel):
     """Step 2 of the wizard: security & integrity settings."""
 
-    window_start: Optional[datetime] = None
-    window_end: Optional[datetime] = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
     max_attempts: int = Field(default=1, ge=1, le=10)
-    grace_period_minutes: Optional[int] = Field(default=0, ge=0, le=60)
+    grace_period_minutes: int | None = Field(default=0, ge=0, le=60)
     late_submission_allowed: bool = False
-    late_penalty_percent: Optional[float] = Field(default=0, ge=0, le=100)
+    late_penalty_percent: float | None = Field(default=0, ge=0, le=100)
     is_password_protected: bool = False
-    access_password: Optional[str] = Field(
+    access_password: str | None = Field(
         default=None, min_length=4, max_length=50,
         description="Plain text password (will be hashed before storage)"
     )
@@ -215,22 +215,22 @@ class AssessmentSecuritySettingsUpdate(BaseModel):
 class AssessmentGeneralUpdate(BaseModel):
     """General update for any writable field on an unfinalised assessment."""
 
-    title: Optional[str] = Field(default=None, min_length=2, max_length=300)
-    description: Optional[str] = None
-    instructions: Optional[str] = None
-    assessment_type: Optional[str] = None
-    grading_mode: Optional[str] = None
-    result_release_mode: Optional[str] = None
-    subject: Optional[str] = Field(default=None, max_length=200)
-    subject_id: Optional[uuid.UUID] = None
-    target_class: Optional[str] = Field(default=None, max_length=200)
-    total_marks: Optional[int] = Field(default=None, ge=1, le=10000)
-    passing_marks: Optional[int] = Field(default=None, ge=0)
-    duration_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
-    show_marks_per_question: Optional[bool] = None
-    show_feedback_after_submit: Optional[bool] = None
-    is_ai_generation_enabled: Optional[bool] = None
-    draft_step: Optional[int] = Field(default=None, ge=1, le=6)
+    title: str | None = Field(default=None, min_length=2, max_length=300)
+    description: str | None = None
+    instructions: str | None = None
+    assessment_type: str | None = None
+    grading_mode: str | None = None
+    result_release_mode: str | None = None
+    subject: str | None = Field(default=None, max_length=200)
+    subject_id: uuid.UUID | None = None
+    target_class: str | None = Field(default=None, max_length=200)
+    total_marks: int | None = Field(default=None, ge=1, le=10000)
+    passing_marks: int | None = Field(default=None, ge=0)
+    duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    show_marks_per_question: bool | None = None
+    show_feedback_after_submit: bool | None = None
+    is_ai_generation_enabled: bool | None = None
+    draft_step: int | None = Field(default=None, ge=1, le=6)
 
     model_config = {"str_strip_whitespace": True}
 
@@ -247,14 +247,14 @@ class AssessmentSummaryResponse(BaseModel):
     status: str
     grading_mode: str
     total_marks: int
-    duration_minutes: Optional[int]
-    window_start: Optional[datetime]
-    window_end: Optional[datetime]
+    duration_minutes: int | None
+    window_start: datetime | None
+    window_end: datetime | None
     is_finalized: bool
-    draft_step: Optional[int]
+    draft_step: int | None
     created_by_id: uuid.UUID
-    subject: Optional[str]
-    target_class: Optional[str]
+    subject: str | None
+    target_class: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -266,21 +266,21 @@ class AssessmentDetailResponse(BaseModel):
 
     id: uuid.UUID
     title: str
-    description: Optional[str]
-    instructions: Optional[str]
+    description: str | None
+    instructions: str | None
     assessment_type: str
     status: str
     grading_mode: str
     result_release_mode: str
     total_marks: int
-    passing_marks: Optional[int]
-    duration_minutes: Optional[int]
-    window_start: Optional[datetime]
-    window_end: Optional[datetime]
+    passing_marks: int | None
+    duration_minutes: int | None
+    window_start: datetime | None
+    window_end: datetime | None
     max_attempts: int
-    grace_period_minutes: Optional[int]
+    grace_period_minutes: int | None
     late_submission_allowed: bool
-    late_penalty_percent: Optional[float]
+    late_penalty_percent: float | None
     is_password_protected: bool
     fullscreen_required: bool
     is_supervised: bool
@@ -292,24 +292,24 @@ class AssessmentDetailResponse(BaseModel):
     is_ai_generation_enabled: bool
     show_marks_per_question: bool
     show_feedback_after_submit: bool
-    draft_step: Optional[int]
+    draft_step: int | None
     is_finalized: bool
-    finalized_at: Optional[datetime]
-    subject: Optional[str]
-    target_class: Optional[str]
+    finalized_at: datetime | None
+    subject: str | None
+    target_class: str | None
     created_by_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
 
-    sections: List[AssessmentSectionResponse] = []
-    assessment_questions: List[AssessmentQuestionResponse] = []
-    draft_progress: Optional[AssessmentDraftProgressResponse] = None
+    sections: list[AssessmentSectionResponse] = []
+    assessment_questions: list[AssessmentQuestionResponse] = []
+    draft_progress: AssessmentDraftProgressResponse | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class AssessmentListResponse(BaseModel):
-    items: List[AssessmentSummaryResponse]
+    items: list[AssessmentSummaryResponse]
     total: int
     page: int
     page_size: int
@@ -321,9 +321,9 @@ class FinalizeAssessmentResponse(BaseModel):
     title: str
     status: str
     is_finalized: bool
-    finalized_at: Optional[datetime]
+    finalized_at: datetime | None
     validation_passed: bool
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     model_config = {"from_attributes": True}

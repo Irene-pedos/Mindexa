@@ -8,14 +8,20 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from app.db.enums import (AssessmentStatus, AssessmentType, BlueprintRuleType,
-                          DifficultyLevel, GradingMode, QuestionType,
-                          ResultReleaseMode, SupervisorRole)
-from app.db.schemas.base import (BaseAuditedResponse, BaseResponse,
-                                 MindexaSchema)
 from pydantic import Field, field_validator, model_validator
+
+from app.db.enums import (
+    AssessmentType,
+    BlueprintRuleType,
+    DifficultyLevel,
+    GradingMode,
+    QuestionType,
+    ResultReleaseMode,
+    SupervisorRole,
+)
+from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSESSMENT — STEP 1 (BASIC INFO)
@@ -28,22 +34,22 @@ class AssessmentStep1Request(MindexaSchema):
     """
 
     title: str = Field(min_length=3, max_length=255)
-    instructions: Optional[str] = Field(default=None, max_length=5000)
+    instructions: str | None = Field(default=None, max_length=5000)
     assessment_type: AssessmentType
     course_id: uuid.UUID
-    subject_id: Optional[uuid.UUID] = None
+    subject_id: uuid.UUID | None = None
     total_marks: int = Field(default=100, ge=1, le=1000)
-    passing_marks: Optional[int] = Field(default=None, ge=0)
-    duration_minutes: Optional[int] = Field(default=None, ge=1, le=480)
-    window_start: Optional[datetime] = None
-    window_end: Optional[datetime] = None
+    passing_marks: int | None = Field(default=None, ge=0)
+    duration_minutes: int | None = Field(default=None, ge=1, le=480)
+    window_start: datetime | None = None
+    window_end: datetime | None = None
     max_attempts: int = Field(default=1, ge=1, le=5)
-    grading_mode: GradingMode = GradingMode.HYBRID
+    grading_mode: GradingMode = GradingMode.RUBRIC
     result_release_mode: ResultReleaseMode = ResultReleaseMode.DELAYED
-    result_release_at: Optional[datetime] = None
+    result_release_at: datetime | None = None
 
     @model_validator(mode="after")
-    def validate_window(self) -> "AssessmentStep1Request":
+    def validate_window(self) -> AssessmentStep1Request:
         if self.window_start and self.window_end:
             if self.window_end <= self.window_start:
                 raise ValueError("window_end must be after window_start.")
@@ -70,34 +76,34 @@ class AssessmentStep2Request(MindexaSchema):
     All fields are optional — only provided fields are updated.
     """
 
-    is_password_protected: Optional[bool] = None
-    access_password: Optional[str] = Field(
+    is_password_protected: bool | None = None
+    access_password: str | None = Field(
         default=None,
         min_length=4,
         max_length=50,
         description="Plain-text password. Service layer hashes before storage.",
     )
-    ai_assistance_allowed: Optional[bool] = None
-    is_open_book: Optional[bool] = None
-    fullscreen_required: Optional[bool] = None
-    integrity_monitoring_enabled: Optional[bool] = None
-    randomize_questions: Optional[bool] = Field(default=None, alias="randomise_questions")
-    randomize_options: Optional[bool] = Field(default=None, alias="randomise_options")
-    is_group_assessment: Optional[bool] = None
-    late_submission_allowed: Optional[bool] = None
-    late_penalty_percent: Optional[float] = Field(
+    ai_assistance_allowed: bool | None = None
+    is_open_book: bool | None = None
+    fullscreen_required: bool | None = None
+    integrity_monitoring_enabled: bool | None = None
+    randomize_questions: bool | None = Field(default=None, alias="randomise_questions")
+    randomize_options: bool | None = Field(default=None, alias="randomise_options")
+    is_group_assessment: bool | None = None
+    late_submission_allowed: bool | None = None
+    late_penalty_percent: float | None = Field(
         default=None,
         ge=0.0,
         le=100.0,
     )
-    grace_period_minutes: Optional[int] = Field(
+    grace_period_minutes: int | None = Field(
         default=None,
         ge=0,
         le=1440,
     )
 
     @model_validator(mode="after")
-    def password_required_if_protected(self) -> "AssessmentStep2Request":
+    def password_required_if_protected(self) -> AssessmentStep2Request:
         if self.is_password_protected is True and not self.access_password:
             raise ValueError(
                 "access_password is required when is_password_protected is True."
@@ -115,11 +121,11 @@ class AssessmentStep3Request(MindexaSchema):
     Replaces the entire target section and supervisor list on each call.
     """
 
-    class_section_ids: List[uuid.UUID] = Field(
+    class_section_ids: list[uuid.UUID] = Field(
         min_length=1,
         description="At least one class section must be targeted.",
     )
-    supervisors: List["SupervisorAssignRequest"] = Field(
+    supervisors: list[SupervisorAssignRequest] = Field(
         default_factory=list
     )
 
@@ -137,13 +143,13 @@ class AssessmentSectionCreate(MindexaSchema):
     """A section within the assessment blueprint."""
 
     title: str = Field(min_length=1, max_length=255)
-    instructions: Optional[str] = Field(default=None, max_length=2000)
+    instructions: str | None = Field(default=None, max_length=2000)
     order_index: int = Field(ge=0)
     marks_allocated: int = Field(ge=0, le=1000)
-    question_count_target: Optional[int] = Field(default=None, ge=1)
-    allowed_question_types: Optional[List[str]] = None
-    difficulty_distribution: Optional[Dict[str, int]] = None
-    ai_generation_prompt_hint: Optional[str] = Field(
+    question_count_target: int | None = Field(default=None, ge=1)
+    allowed_question_types: list[str] | None = None
+    difficulty_distribution: dict[str, int] | None = None
+    ai_generation_prompt_hint: str | None = Field(
         default=None, max_length=500
     )
 
@@ -151,11 +157,11 @@ class AssessmentSectionCreate(MindexaSchema):
 class BlueprintRuleCreate(MindexaSchema):
     """A validation/guidance rule within the assessment blueprint."""
 
-    assessment_section_id: Optional[uuid.UUID] = None
+    assessment_section_id: uuid.UUID | None = None
     rule_type: BlueprintRuleType
-    question_type: Optional[QuestionType] = None
-    difficulty: Optional[DifficultyLevel] = None
-    numeric_value: Optional[float] = Field(default=None, ge=0)
+    question_type: QuestionType | None = None
+    difficulty: DifficultyLevel | None = None
+    numeric_value: float | None = Field(default=None, ge=0)
     is_enforced: bool = True
 
 
@@ -165,8 +171,8 @@ class AssessmentStep4Request(MindexaSchema):
     Replaces all sections and rules on each call.
     """
 
-    sections: List[AssessmentSectionCreate] = Field(min_length=1)
-    rules: List[BlueprintRuleCreate] = Field(default_factory=list)
+    sections: list[AssessmentSectionCreate] = Field(min_length=1)
+    rules: list[BlueprintRuleCreate] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -200,13 +206,13 @@ class AssessmentPublishRequest(MindexaSchema):
 class AssessmentSectionResponse(BaseAuditedResponse):
     assessment_id: uuid.UUID
     title: str
-    instructions: Optional[str]
+    instructions: str | None
     order_index: int
     marks_allocated: int
-    question_count_target: Optional[int]
-    allowed_question_types: Optional[Any]
-    difficulty_distribution: Optional[Any]
-    ai_generation_prompt_hint: Optional[str]
+    question_count_target: int | None
+    allowed_question_types: Any | None
+    difficulty_distribution: Any | None
+    ai_generation_prompt_hint: str | None
 
 
 class AssessmentSummaryResponse(MindexaSchema):
@@ -217,8 +223,8 @@ class AssessmentSummaryResponse(MindexaSchema):
     assessment_type: str
     status: str
     total_marks: int
-    window_start: Optional[datetime]
-    window_end: Optional[datetime]
+    window_start: datetime | None
+    window_end: datetime | None
     created_at: datetime
 
 
@@ -226,20 +232,20 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     """Full assessment detail — returned after creation and on GET."""
 
     title: str
-    instructions: Optional[str]
+    instructions: str | None
     assessment_type: str
     status: str
     course_id: uuid.UUID
-    subject_id: Optional[uuid.UUID]
+    subject_id: uuid.UUID | None
     total_marks: int
-    passing_marks: Optional[int]
-    duration_minutes: Optional[int]
-    window_start: Optional[datetime]
-    window_end: Optional[datetime]
+    passing_marks: int | None
+    duration_minutes: int | None
+    window_start: datetime | None
+    window_end: datetime | None
     max_attempts: int
     grading_mode: str
     result_release_mode: str
-    result_release_at: Optional[datetime]
+    result_release_at: datetime | None
     is_password_protected: bool
     ai_assistance_allowed: bool
     is_open_book: bool
@@ -249,12 +255,12 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     randomize_options: bool = Field(serialization_alias="randomise_options")
     is_group_assessment: bool
     late_submission_allowed: bool
-    late_penalty_percent: Optional[float]
-    grace_period_minutes: Optional[int]
-    draft_step: Optional[int]
+    late_penalty_percent: float | None
+    grace_period_minutes: int | None
+    draft_step: int | None
     draft_is_complete: bool
-    published_at: Optional[datetime]
-    sections: List[AssessmentSectionResponse] = Field(default_factory=list)
+    published_at: datetime | None
+    sections: list[AssessmentSectionResponse] = Field(default_factory=list)
 
 
 class AssessmentDraftProgressResponse(BaseAuditedResponse):
@@ -285,30 +291,30 @@ class AssessmentPublishValidationResponse(BaseAuditedResponse):
 
 class RubricCriterionLevelCreate(MindexaSchema):
     label: str = Field(min_length=1, max_length=100)
-    description: Optional[str] = None
+    description: str | None = None
     marks: int = Field(ge=0)
     order_index: int = Field(ge=0)
 
 
 class RubricCriterionCreate(MindexaSchema):
     title: str = Field(min_length=1, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     max_marks: int = Field(ge=1)
     order_index: int = Field(ge=0)
-    levels: List[RubricCriterionLevelCreate] = Field(min_length=1)
+    levels: list[RubricCriterionLevelCreate] = Field(min_length=1)
 
 
 class RubricCreate(MindexaSchema):
     title: str = Field(min_length=2, max_length=255)
-    description: Optional[str] = None
+    description: str | None = None
     is_shared: bool = False
-    criteria: List[RubricCriterionCreate] = Field(min_length=1)
+    criteria: list[RubricCriterionCreate] = Field(min_length=1)
 
 
 class RubricCriterionLevelResponse(BaseAuditedResponse):
     criterion_id: uuid.UUID
     label: str
-    description: Optional[str]
+    description: str | None
     marks: int
     order_index: int
 
@@ -316,14 +322,14 @@ class RubricCriterionLevelResponse(BaseAuditedResponse):
 class RubricCriterionResponse(BaseAuditedResponse):
     rubric_id: uuid.UUID
     title: str
-    description: Optional[str]
+    description: str | None
     max_marks: int
     order_index: int
-    levels: List[RubricCriterionLevelResponse] = Field(default_factory=list)
+    levels: list[RubricCriterionLevelResponse] = Field(default_factory=list)
 
 
 class RubricResponse(BaseAuditedResponse):
     title: str
-    description: Optional[str]
+    description: str | None
     is_shared: bool
-    criteria: List[RubricCriterionResponse] = Field(default_factory=list)
+    criteria: list[RubricCriterionResponse] = Field(default_factory=list)

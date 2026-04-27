@@ -87,9 +87,13 @@ from app.db.repositories.submission_repo import SubmissionRepository
 
 logger = logging.getLogger("mindexa.seed")
 
-# ---------------------------------------------------------------------------
-# SEED CONSTANTS
-# ---------------------------------------------------------------------------
+# Questions linked to assessment count before inserting
+MIN_QUESTIONS_SEEDED = 9
+FIRST_MCQ_INDEX = 1
+SECOND_MCQ_INDEX = 2
+FIRST_TF_INDEX = 6
+SECOND_TF_INDEX = 7
+FIRST_SA_INDEX = 8
 
 ADMIN_EMAIL = "admin@mindexa.dev"
 ADMIN_PASSWORD = "Admin@123"
@@ -131,11 +135,7 @@ ASSESSMENT_TITLE = "Intro to Programming CAT"
 def _assert_development() -> None:
     """Hard abort if not in development environment."""
     if settings.ENVIRONMENT != "development":
-        raise RuntimeError(
-            f"[SEED] ABORTED — seed_all() may only run in development. "
-            f"Current ENVIRONMENT = '{settings.ENVIRONMENT}'. "
-            "This is a safety guard. Do NOT bypass it."
-        )
+        raise RuntimeError("Seed requires development environment")
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +156,7 @@ async def seed_all(session: AsyncSession) -> None:
     logger.info("=" * 60)
 
     # Step 1 — Users (must be first — all other objects depend on user IDs)
-    admin_id, lecturer_id, student_id = await seed_users(session)
+    _, lecturer_id, student_id = await seed_users(session)
 
     # Step 2 — Academic structure (course / subject / section / enrollment)
     course_id, subject_id, section_id = await seed_academic_structure(
@@ -205,7 +205,7 @@ async def seed_users(
     """
     Create admin, lecturer, and student accounts.
 
-    Returns (admin_id, lecturer_id, student_id).
+    Returns (_, lecturer_id, student_id).
 
     Each user is:
         - email_verified = True
@@ -213,89 +213,73 @@ async def seed_users(
     """
     repo = UserRepository(session)
 
-    admin_id = await _ensure_user(
-        repo,
-        session,
-        email=ADMIN_EMAIL,
-        password=ADMIN_PASSWORD,
-        role=UserRole.ADMIN.value,
-        first_name=ADMIN_FIRST,
-        last_name=ADMIN_LAST,
-        label="Admin",
-    )
+    # User configs: (email, password, role, first_name, last_name, label)
+    user_configs = [
+        (
+            ADMIN_EMAIL,
+            ADMIN_PASSWORD,
+            UserRole.ADMIN.value,
+            ADMIN_FIRST,
+            ADMIN_LAST,
+            "Admin",
+        ),
+        (
+            LECTURER_EMAIL,
+            LECTURER_PASSWORD,
+            UserRole.LECTURER.value,
+            LECTURER_FIRST,
+            LECTURER_LAST,
+            "Lecturer",
+        ),
+        (
+            STUDENT_EMAIL,
+            STUDENT_PASSWORD,
+            UserRole.STUDENT.value,
+            STUDENT_FIRST,
+            STUDENT_LAST,
+            "Student",
+        ),
+    ]
 
-    lecturer_id = await _ensure_user(
-        repo,
-        session,
-        email=LECTURER_EMAIL,
-        password=LECTURER_PASSWORD,
-        role=UserRole.LECTURER.value,
-        first_name=LECTURER_FIRST,
-        last_name=LECTURER_LAST,
-        label="Lecturer",
-    )
+    user_ids = []
 
-    student_id = await _ensure_user(
-        repo,
-        session,
-        email=STUDENT_EMAIL,
-        password=STUDENT_PASSWORD,
-        role=UserRole.STUDENT.value,
-        first_name=STUDENT_FIRST,
-        last_name=STUDENT_LAST,
-        label="Student",
-    )
+    for email, password, role, first_name, last_name, label in user_configs:
+        normalized = normalize_email(email)
+        existing = await repo.get_by_email(normalized)
+
+        if existing:
+            logger.info("  ⟳  %s user already exists (%s)", label, email)
+            user_ids.append(existing.id)
+            continue
+
+        pw_hash = hash_password(password)
+        user = await repo.create(
+            User(
+                email=normalized,
+                hashed_password=pw_hash,
+                role=role,
+                status=UserStatus.ACTIVE.value,
+            )
+        )
+
+        profile = UserProfile(
+            user_id=user.id,
+            first_name=first_name,
+            last_name=last_name,
+        )
+        session.add(profile)
+
+        # Mark email verified and active — seed accounts don't need verification flow
+        user.email_verified = True
+        user.email_verified_at = _utcnow()
+        user.status = UserStatus.ACTIVE.value
+
+        await session.flush()
+        logger.info("  %s user created (%s)", label, email)
+        user_ids.append(user.id)
 
     await session.commit()
-    return admin_id, lecturer_id, student_id
-
-
-async def _ensure_user(
-    repo: UserRepository,
-    session: AsyncSession,
-    email: str,
-    password: str,
-    role: str,
-    first_name: str,
-    last_name: str,
-    label: str,
-) -> uuid.UUID:
-    """
-    Create a user if they do not already exist.
-    Returns the user's UUID either way.
-    """
-    normalized = normalize_email(email)
-    existing = await repo.get_by_email(normalized)
-
-    if existing:
-        logger.info("  ⟳  %s user already exists (%s)", label, email)
-        return existing.id
-
-    pw_hash = hash_password(password)
-    user = await repo.create(
-        User(
-            email=normalized,
-            hashed_password=pw_hash,
-            role=role,
-            status=UserStatus.ACTIVE.value,
-        )
-    )
-
-    profile = UserProfile(
-        user_id=user.id,
-        first_name=first_name,
-        last_name=last_name,
-    )
-    session.add(profile)
-
-    # Mark email verified and active — seed accounts don't need verification flow
-    user.email_verified = True
-    user.email_verified_at = _utcnow()
-    user.status = UserStatus.ACTIVE.value
-
-    await session.flush()
-    logger.info("  %s user created (%s)", label, email)
-    return user.id
+    return user_ids[0], user_ids[1], user_ids[2]
 
 
 # ---------------------------------------------------------------------------
@@ -364,9 +348,9 @@ async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
 async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed department."""
     result = await session.execute(
-        select(Department).where(
-            Department.code == DEPT_CODE, Department.institution_id == institution_id
-        )
+        select(Department)
+        .where(Department.code == DEPT_CODE)
+        .where(Department.institution_id == institution_id)
     )
     dept = result.scalar_one_or_none()
     if dept:
@@ -388,9 +372,9 @@ async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -
 async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed academic period."""
     result = await session.execute(
-        select(AcademicPeriod).where(
-            AcademicPeriod.name == PERIOD_NAME, AcademicPeriod.institution_id == institution_id
-        )
+        select(AcademicPeriod)
+        .where(AcademicPeriod.name == PERIOD_NAME)
+        .where(AcademicPeriod.institution_id == institution_id)
     )
     period = result.scalar_one_or_none()
     if period:
@@ -413,15 +397,17 @@ async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UU
 
 
 async def _ensure_course(
-    session: AsyncSession, institution_id: uuid.UUID, department_id: uuid.UUID, period_id: uuid.UUID
+    session: AsyncSession,
+    institution_id: uuid.UUID,
+    department_id: uuid.UUID,
+    period_id: uuid.UUID,
 ) -> uuid.UUID:
     """Upsert the seed course."""
     result = await session.execute(
-        select(Course).where(
-            Course.code == COURSE_CODE,
-            Course.institution_id == institution_id,
-            Course.academic_period_id == period_id,
-        )
+        select(Course)
+        .where(Course.code == COURSE_CODE)
+        .where(Course.institution_id == institution_id)
+        .where(Course.academic_period_id == period_id)
     )
     course = result.scalar_one_or_none()
     if course:
@@ -433,7 +419,7 @@ async def _ensure_course(
         department_id=department_id,
         academic_period_id=period_id,
         code=COURSE_CODE,
-        title=COURSE_TITLE,
+        name=COURSE_TITLE,
         is_active=True,
     )
     session.add(course)
@@ -443,23 +429,27 @@ async def _ensure_course(
 
 
 async def _ensure_subject(
-    session: AsyncSession, institution_id: uuid.UUID, department_id: uuid.UUID, course_id: uuid.UUID
+    session: AsyncSession,
+    institution_id: uuid.UUID,
+    department_id: uuid.UUID,
+    course_id: uuid.UUID,
 ) -> uuid.UUID:
     """Upsert the seed subject."""
     result = await session.execute(
-        select(Subject.id).where(
-            Subject.code == SUBJECT_CODE, Subject.institution_id == institution_id
-        )
+        select(Subject)
+        .where(Subject.title == SUBJECT_TITLE)
+        .where(Subject.institution_id == institution_id)
     )
     row = result.fetchone()
     if row:
-        logger.info("  ⟳  Subject already exists (%s)", SUBJECT_CODE)
-        subject_id = row[0]
+        logger.info("  ⟳  Subject already exists (%s)", SUBJECT_TITLE)
+        subject = row[0]
+        subject_id = subject.id
         # Ensure CourseSubject link exists
         cs_result = await session.execute(
-            select(CourseSubject.id).where(
-                CourseSubject.course_id == course_id, CourseSubject.subject_id == subject_id
-            )
+            select(CourseSubject)
+            .where(CourseSubject.course_id == course_id)
+            .where(CourseSubject.subject_id == subject_id)
         )
         if not cs_result.fetchone():
             cs = CourseSubject(course_id=course_id, subject_id=subject_id)
@@ -471,7 +461,6 @@ async def _ensure_subject(
     subject = Subject(
         institution_id=institution_id,
         department_id=department_id,
-        code=SUBJECT_CODE,
         title=SUBJECT_TITLE,
         is_active=True,
     )
@@ -482,7 +471,7 @@ async def _ensure_subject(
     cs = CourseSubject(course_id=course_id, subject_id=subject.id)
     session.add(cs)
 
-    logger.info("  ✔  Subject created (%s)", SUBJECT_CODE)
+    logger.info("  ✔  Subject created (%s)", SUBJECT_TITLE)
     return subject.id
 
 
@@ -492,9 +481,9 @@ async def _ensure_class_section(
 ) -> uuid.UUID:
     """Upsert the seed class section."""
     result = await session.execute(
-        select(ClassSection).where(
-            ClassSection.name == SECTION_NAME, ClassSection.course_id == course_id
-        )
+        select(ClassSection)
+        .where(ClassSection.name == SECTION_NAME)
+        .where(ClassSection.course_id == course_id)
     )
     section = result.scalar_one_or_none()
     if section:
@@ -520,10 +509,9 @@ async def _ensure_lecturer_assignment(
 ) -> None:
     """Assign lecturer to course."""
     result = await session.execute(
-        select(LecturerCourseAssignment).where(
-            LecturerCourseAssignment.lecturer_id == lecturer_id,
-            LecturerCourseAssignment.course_id == course_id,
-        )
+        select(LecturerCourseAssignment)
+        .where(LecturerCourseAssignment.lecturer_id == lecturer_id)
+        .where(LecturerCourseAssignment.course_id == course_id)
     )
     if result.scalar_one_or_none():
         logger.info("  ⟳  Lecturer assignment already exists")
@@ -532,7 +520,7 @@ async def _ensure_lecturer_assignment(
     assignment = LecturerCourseAssignment(
         lecturer_id=lecturer_id,
         course_id=course_id,
-        role=LecturerAssignmentRole.PRIMARY,
+        assignment_role=LecturerAssignmentRole.PRIMARY,
         is_active=True,
     )
     session.add(assignment)
@@ -547,10 +535,9 @@ async def _ensure_enrollment(
 ) -> None:
     """Enroll the student in the class section."""
     result = await session.execute(
-        select(StudentEnrollment).where(
-            StudentEnrollment.student_id == student_id,
-            StudentEnrollment.class_section_id == section_id,
-        )
+        select(StudentEnrollment)
+        .where(StudentEnrollment.student_id == student_id)
+        .where(StudentEnrollment.class_section_id == section_id)
     )
     if result.scalar_one_or_none():
         logger.info("  ⟳  Student enrollment already exists")
@@ -559,9 +546,8 @@ async def _ensure_enrollment(
     enrollment = StudentEnrollment(
         student_id=student_id,
         class_section_id=section_id,
-        enrollment_status=EnrollmentStatus.ENROLLED,
+        enrollment_status=EnrollmentStatus.ACTIVE,
         enrolled_at=_utcnow(),
-        is_active=True,
     )
     session.add(enrollment)
     await session.flush()
@@ -650,7 +636,7 @@ async def seed_assessment(
     )
 
     # Create two blueprint sections
-    sec_a = await repo.create_section(
+    await repo.create_section(
         assessment_id=assessment.id,
         title="Section A — Closed Questions",
         order_index=1,
@@ -658,13 +644,13 @@ async def seed_assessment(
         question_count_target=7,
         instructions="Answer ALL questions. Each MCQ is worth 2 marks. True/False: 1 mark each.",
     )
-    sec_b = await repo.create_section(
+    await repo.create_section(
         assessment_id=assessment.id,
         title="Section B — Short Answer",
         order_index=2,
         marks_allocated=8,
         question_count_target=2,
-        instructions="Answer in 2–4 sentences. Each question is worth 4 marks.",
+        instructions="Answer in 2-4 sentences. Each question is worth 4 marks.",
     )
 
     await session.commit()
@@ -696,7 +682,7 @@ async def seed_questions(
 
     # Idempotency check — if questions already linked, skip
     linked = await assessment_repo.count_questions(assessment_id)
-    if linked >= 9:
+    if linked >= MIN_QUESTIONS_SEEDED:
         logger.info("  ⟳  Questions already seeded (%d linked)", linked)
         result = await session.execute(
             text(
@@ -714,7 +700,9 @@ async def seed_questions(
 
     mcq_data = [
         {
-            "content": "Which of the following is the correct syntax to print 'Hello, World!' in Python?",
+            "content": (
+                "Which of the following is the correct syntax to print 'Hello, World!' in Python?"
+            ),
             "difficulty": DifficultyLevel.EASY,
             "marks": 2,
             "topic_tag": "python-basics",
@@ -762,7 +750,7 @@ async def seed_questions(
             ],
         },
         {
-            "content": "Which loop will execute its body AT LEAST once regardless of the condition?",
+            "content": "Which loop will execute its body AT LEAST once regardless of condition?",
             "difficulty": DifficultyLevel.MEDIUM,
             "marks": 2,
             "topic_tag": "control-flow",
@@ -982,7 +970,7 @@ async def seed_attempt_data(
     await session.flush()
 
     # Answer the first MCQ (question_ids[0])
-    if len(question_ids) >= 1:
+    if len(question_ids) >= FIRST_MCQ_INDEX + 1:
         # Get the correct option ID for Q1
         q1_options = await session.execute(
             text(
@@ -1021,7 +1009,7 @@ async def seed_attempt_data(
             )
 
     # Answer the second MCQ (question_ids[1]) — wrong answer
-    if len(question_ids) >= 2:
+    if len(question_ids) >= SECOND_MCQ_INDEX + 1:
         q2_options = await session.execute(
             text(
                 "SELECT id, is_correct FROM question_option "
@@ -1058,7 +1046,7 @@ async def seed_attempt_data(
             )
 
     # Answer True/False question (question_ids[5]) — correct
-    if len(question_ids) >= 6:
+    if len(question_ids) >= FIRST_TF_INDEX + 1:
         tf_q = question_ids[5]
         tf_options = await session.execute(
             text(
@@ -1100,7 +1088,7 @@ async def seed_attempt_data(
         "  ✔  Attempt seeded: IN_PROGRESS, 3 answers saved, %d questions unanswered",
         max(0, len(question_ids) - 3),
     )
-    logger.info("  ℹ   access_token: %s", attempt.access_token)
+    logger.info("  i   access_token: %s", attempt.access_token)
 
 
 # ---------------------------------------------------------------------------

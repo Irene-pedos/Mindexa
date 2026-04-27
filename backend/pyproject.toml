@@ -96,7 +96,7 @@ packages = ["app"]
 target-version = "py311"
 line-length = 100
 select = ["E", "F", "I", "N", "UP", "ANN", "S", "B", "A", "COM", "C4", "DTZ", "T20", "RET", "SIM"]
-ignore = ["ANN101", "ANN102", "ANN401", "S101", "COM812"]
+ignore = ["ANN101", "ANN102", "ANN401", "S101", "COM812", "B008"]
 exclude = ["alembic/versions/"]
 
 [tool.mypy]

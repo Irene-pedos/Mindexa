@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -26,15 +25,15 @@ class ManualGradeRequest(BaseModel):
     """
     response_id: uuid.UUID
     score: float = Field(..., ge=0, description="Awarded score. Must be <= max_score.")
-    feedback: Optional[str] = Field(
+    feedback: str | None = Field(
         default=None,
         description="Feedback shown to student after result release",
     )
-    internal_notes: Optional[str] = Field(
+    internal_notes: str | None = Field(
         default=None,
         description="Private grader notes — never shown to student",
     )
-    rubric_scores: Optional[List[Dict[str, Any]]] = Field(
+    rubric_scores: list[dict[str, Any]] | None = Field(
         default=None,
         description=(
             'Per-criterion scores: [{"criterion_id": "uuid", '
@@ -56,20 +55,20 @@ class AIGradeConfirmRequest(BaseModel):
         ...,
         description="True = use ai_suggested_score as final. False = override below.",
     )
-    override_score: Optional[float] = Field(
+    override_score: float | None = Field(
         default=None,
         ge=0,
         description="Required if accept_ai_suggestion=False",
     )
-    feedback: Optional[str] = None
-    internal_notes: Optional[str] = None
-    rubric_scores: Optional[List[Dict[str, Any]]] = None
+    feedback: str | None = None
+    internal_notes: str | None = None
+    rubric_scores: list[dict[str, Any]] | None = None
 
     @field_validator("override_score")
     @classmethod
     def override_required_when_not_accepting(
-        cls, v: Optional[float], info: Any
-    ) -> Optional[float]:
+        cls, v: float | None, info: Any
+    ) -> float | None:
         if not info.data.get("accept_ai_suggestion") and v is None:
             raise ValueError("override_score required when accept_ai_suggestion=False")
         return v
@@ -78,7 +77,7 @@ class AIGradeConfirmRequest(BaseModel):
 class QueueItemAssignRequest(BaseModel):
     """Assign a queue item to a specific lecturer."""
     assigned_to_id: uuid.UUID
-    priority: Optional[GradingQueuePriority] = None
+    priority: GradingQueuePriority | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -92,7 +91,7 @@ class RubricScoreDetail(BaseModel):
     criterion_title: str
     score: float
     max: float
-    feedback: Optional[str] = None
+    feedback: str | None = None
 
 
 class SubmissionGradeResponse(BaseModel):
@@ -103,19 +102,19 @@ class SubmissionGradeResponse(BaseModel):
     response_id: uuid.UUID
     attempt_id: uuid.UUID
     question_id: uuid.UUID
-    score: Optional[float]
+    score: float | None
     max_score: float
     grading_mode: GradingMode
-    ai_suggested_score: Optional[float]
-    ai_rationale: Optional[str]
-    ai_confidence: Optional[float]
+    ai_suggested_score: float | None
+    ai_rationale: str | None
+    ai_confidence: float | None
     lecturer_override: bool
-    feedback: Optional[str]
-    rubric_scores: Optional[List[Dict[str, Any]]]
+    feedback: str | None
+    rubric_scores: list[dict[str, Any]] | None
     is_final: bool
-    graded_at: Optional[datetime]
-    created_by_id: Optional[uuid.UUID]
-    updated_by_id: Optional[uuid.UUID]
+    graded_at: datetime | None
+    created_by_id: uuid.UUID | None
+    updated_by_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -133,16 +132,16 @@ class GradingQueueItemResponse(BaseModel):
     status: GradingQueueStatus
     priority: GradingQueuePriority
     grading_mode: GradingMode
-    assigned_to_id: Optional[uuid.UUID]
-    assigned_at: Optional[datetime]
-    completed_at: Optional[datetime]
+    assigned_to_id: uuid.UUID | None
+    assigned_at: datetime | None
+    completed_at: datetime | None
     ai_pre_graded: bool
     created_at: datetime
 
 
 class GradingQueueListResponse(BaseModel):
     """Paginated grading queue."""
-    items: List[GradingQueueItemResponse]
+    items: list[GradingQueueItemResponse]
     total: int
     page: int
     page_size: int

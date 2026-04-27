@@ -20,21 +20,20 @@ RULES ENFORCED HERE:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
-from typing import Optional
+from datetime import UTC, datetime, timedelta
 
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError, ValidationError)
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.db.enums import AssessmentStatus, AttemptStatus
 from app.db.models.attempt import AssessmentAttempt
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.submission_repo import SubmissionRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class AttemptService:
@@ -53,9 +52,9 @@ class AttemptService:
         *,
         student_id: uuid.UUID,
         assessment_id: uuid.UUID,
-        access_password: Optional[str] = None,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        access_password: str | None = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> AssessmentAttempt:
         """
         Create a new IN_PROGRESS attempt for a student.

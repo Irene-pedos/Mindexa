@@ -29,11 +29,11 @@ USAGE (in main.py):
 
 from __future__ import annotations
 
-from app.core.config import settings
 from fastapi import Request, Response
-from starlette.middleware.base import (BaseHTTPMiddleware,
-                                       RequestResponseEndpoint)
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
+
+from app.core.config import settings
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):

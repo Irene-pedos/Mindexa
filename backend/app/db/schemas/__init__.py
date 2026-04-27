@@ -16,98 +16,155 @@ import from enums only, never from other schema modules.
 from __future__ import annotations
 
 # ── Academic ──────────────────────────────────────────────────────────────────
-from app.db.schemas.academic import (AcademicPeriodCreate,
+from app.db.schemas.academic import (
+                                     AcademicPeriodCreate,
                                      AcademicPeriodResponse,
-                                     ClassSectionCreate, ClassSectionResponse,
-                                     CourseCreate, CourseResponse,
-                                     CourseSummaryResponse, CourseUpdate,
-                                     EnrollmentStatusUpdate, InstitutionCreate,
-                                     InstitutionResponse, InstitutionUpdate,
+                                     ClassSectionCreate,
+                                     ClassSectionResponse,
+                                     CourseCreate,
+                                     CourseResponse,
+                                     CourseSummaryResponse,
+                                     CourseUpdate,
+                                     EnrollmentStatusUpdate,
+                                     InstitutionCreate,
+                                     InstitutionResponse,
+                                     InstitutionUpdate,
                                      LecturerAssignRequest,
                                      LecturerCourseAssignmentResponse,
                                      StudentEnrollmentResponse,
-                                     StudentEnrollRequest, SubjectCreate,
-                                     SubjectResponse)
+                                     StudentEnrollRequest,
+                                     SubjectCreate,
+                                     SubjectResponse,
+)
+
 # ── AI traceability ────────────────────────────────────────────────────────────
 from app.db.schemas.ai import AIActionLogResponse, AIGradeReviewResponse
+
 # ── Assessment ────────────────────────────────────────────────────────────────
-from app.db.schemas.assessment import (AssessmentDetailResponse,
-                                       AssessmentDraftProgressResponse,
-                                       AssessmentPublishRequest,
-                                       AssessmentPublishValidationResponse,
-                                       AssessmentSectionCreate,
-                                       AssessmentSectionResponse,
-                                       AssessmentStep1Request,
-                                       AssessmentStep2Request,
-                                       AssessmentStep3Request,
-                                       AssessmentStep4Request,
-                                       AssessmentSummaryResponse,
-                                       BlueprintRuleCreate, RubricCreate,
-                                       RubricCriterionCreate,
-                                       RubricCriterionLevelCreate,
-                                       RubricCriterionLevelResponse,
-                                       RubricCriterionResponse, RubricResponse,
-                                       SupervisorAssignRequest)
+from app.db.schemas.assessment import (
+                                     AssessmentDetailResponse,
+                                     AssessmentDraftProgressResponse,
+                                     AssessmentPublishRequest,
+                                     AssessmentPublishValidationResponse,
+                                     AssessmentSectionCreate,
+                                     AssessmentSectionResponse,
+                                     AssessmentStep1Request,
+                                     AssessmentStep2Request,
+                                     AssessmentStep3Request,
+                                     AssessmentStep4Request,
+                                     AssessmentSummaryResponse,
+                                     BlueprintRuleCreate,
+                                     RubricCreate,
+                                     RubricCriterionCreate,
+                                     RubricCriterionLevelCreate,
+                                     RubricCriterionLevelResponse,
+                                     RubricCriterionResponse,
+                                     RubricResponse,
+                                     SupervisorAssignRequest,
+)
+
 # ── Attempt ───────────────────────────────────────────────────────────────────
-from app.db.schemas.attempt import (AttemptResponse, AttemptStartRequest,
-                                    AttemptSummaryResponse, BulkResponseSave,
-                                    StudentGroupCreate, StudentGroupMemberAdd,
-                                    StudentGroupResponse,
-                                    StudentResponseReadResponse,
-                                    StudentResponseSave, SubmitAttemptRequest)
+from app.db.schemas.attempt import (
+                                     AttemptResponse,
+                                     AttemptStartRequest,
+                                     AttemptSummaryResponse,
+                                     BulkResponseSave,
+                                     StudentGroupCreate,
+                                     StudentGroupMemberAdd,
+                                     StudentGroupResponse,
+                                     StudentResponseReadResponse,
+                                     StudentResponseSave,
+                                     SubmitAttemptRequest,
+)
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
-from app.db.schemas.auth import (PasswordChangeRequest,
-                                 PasswordResetConfirmRequest,
-                                 PasswordResetRequestBody, RefreshRequest,
-                                 TokenResponse, UserLoginRequest,
-                                 UserProfileResponse, UserProfileUpdate,
-                                 UserRegisterRequest, UserResponse,
-                                 UserSummaryResponse)
+from app.db.schemas.auth import (
+                                     PasswordChangeRequest,
+                                     PasswordResetConfirmRequest,
+                                     PasswordResetRequestBody,
+                                     RefreshRequest,
+                                     TokenResponse,
+                                     UserLoginRequest,
+                                     UserProfileResponse,
+                                     UserProfileUpdate,
+                                     UserRegisterRequest,
+                                     UserResponse,
+                                     UserSummaryResponse,
+)
+
 # ── Base ──────────────────────────────────────────────────────────────────────
-from app.db.schemas.base import (BaseAuditedResponse, BaseResponse,
-                                 ErrorDetail, ErrorResponse, MessageResponse,
-                                 MindexaSchema, PaginatedResponse,
-                                 PaginationParams)
+from app.db.schemas.base import (
+                                     BaseAuditedResponse,
+                                     BaseResponse,
+                                     ErrorDetail,
+                                     ErrorResponse,
+                                     MessageResponse,
+                                     MindexaSchema,
+                                     PaginatedResponse,
+                                     PaginationParams,
+)
+
 # ── Grading ───────────────────────────────────────────────────────────────────
-from app.db.schemas.grading import (AppealReviewDecision, GradeConfirmRequest,
-                                    GradeReleaseRequest, ResponseGradeOverride,
-                                    ResultAppealCreate, ResultAppealResponse,
-                                    RubricGradeEntry, RubricGradeResponse,
-                                    RubricGradingRequest,
-                                    SubmissionGradeResponse)
+from app.db.schemas.grading import (
+                                     AppealReviewDecision,
+                                     GradeConfirmRequest,
+                                     GradeReleaseRequest,
+                                     ResponseGradeOverride,
+                                     ResultAppealCreate,
+                                     ResultAppealResponse,
+                                     RubricGradeEntry,
+                                     RubricGradeResponse,
+                                     RubricGradingRequest,
+                                     SubmissionGradeResponse,
+)
+
 # ── Integrity ──────────────────────────────────────────────────────────────────
-from app.db.schemas.integrity import (FlagResolutionRequest,
-                                      IntegrityEventIngest,
-                                      IntegrityEventResponse,
-                                      IntegrityFlagResponse,
-                                      IntegrityWarningResponse,
-                                      LiveAttemptStatusResponse,
-                                      ManualFlagRequest, ManualWarningRequest,
-                                      SupervisionSessionResponse)
+from app.db.schemas.integrity import (
+                                     FlagResolutionRequest,
+                                     IntegrityEventIngest,
+                                     IntegrityEventResponse,
+                                     IntegrityFlagResponse,
+                                     IntegrityWarningResponse,
+                                     LiveAttemptStatusResponse,
+                                     ManualFlagRequest,
+                                     ManualWarningRequest,
+                                     SupervisionSessionResponse,
+)
+
 # ── Notifications (includes CalendarRangeRequest — belongs here) ───────────────
-from app.db.schemas.notification import (CalendarRangeRequest,
-                                         MarkNotificationsRead,
-                                         NotificationCountResponse,
-                                         NotificationResponse,
-                                         ScheduledEventResponse)
+from app.db.schemas.notification import (
+                                     CalendarRangeRequest,
+                                     MarkNotificationsRead,
+                                     NotificationCountResponse,
+                                     NotificationResponse,
+                                     ScheduledEventResponse,
+)
+
 # ── Question bank ──────────────────────────────────────────────────────────────
-from app.db.schemas.question import (AddQuestionToAssessmentRequest,
+from app.db.schemas.question import (
+                                     AddQuestionToAssessmentRequest,
                                      AIGenerationBatchResponse,
                                      AIGenerationRequest,
                                      AIQuestionReviewDecision,
                                      AIQuestionReviewResponse,
                                      AssessmentQuestionResponse,
                                      QuestionBlankCreate,
-                                     QuestionBlankResponse, QuestionCreate,
+                                     QuestionBlankResponse,
+                                     QuestionCreate,
                                      QuestionDetailResponse,
                                      QuestionOptionCreate,
                                      QuestionOptionResponse,
-                                     QuestionSummaryResponse, QuestionUpdate)
+                                     QuestionSummaryResponse,
+                                     QuestionUpdate,
+)
+
 # ── Resources ─────────────────────────────────────────────────────────────────
-from app.db.schemas.resource import (LecturerMaterialCreate,
+from app.db.schemas.resource import (
+                                     LecturerMaterialCreate,
                                      LecturerMaterialResponse,
                                      StudentResourceCreate,
-                                     StudentResourceResponse)
+                                     StudentResourceResponse,
+)
 
 __all__: list[str] = [
     # Base

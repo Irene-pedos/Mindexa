@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 from app.db.enums import AttemptStatus
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -27,7 +25,7 @@ class AttemptStartRequest(BaseModel):
     Optional: access_password if the assessment is password-protected.
     """
     assessment_id: uuid.UUID
-    access_password: Optional[str] = Field(
+    access_password: str | None = Field(
         default=None,
         description="Required only if the assessment is password-protected",
     )
@@ -54,7 +52,7 @@ class AttemptSubmitRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def confirm_must_be_true(self) -> "AttemptSubmitRequest":
+    def confirm_must_be_true(self) -> AttemptSubmitRequest:
         if not self.confirm:
             raise ValueError("confirm must be True to submit the attempt")
         return self
@@ -75,11 +73,11 @@ class AttemptResponse(BaseModel):
     attempt_number: int
     status: AttemptStatus
     started_at: datetime
-    submitted_at: Optional[datetime]
+    submitted_at: datetime | None
     expires_at: datetime
-    last_activity_at: Optional[datetime]
+    last_activity_at: datetime | None
     access_token: uuid.UUID
-    total_score: Optional[float]
+    total_score: float | None
     total_integrity_warnings: int
     is_flagged: bool
     created_at: datetime
@@ -100,7 +98,7 @@ class AttemptStartResponse(BaseModel):
     expires_at: datetime
     access_token: uuid.UUID
     # Seconds remaining (computed, not stored)
-    seconds_remaining: Optional[int] = None
+    seconds_remaining: int | None = None
 
 
 class AttemptSummary(BaseModel):
@@ -112,9 +110,9 @@ class AttemptSummary(BaseModel):
     attempt_number: int
     status: AttemptStatus
     started_at: datetime
-    submitted_at: Optional[datetime]
+    submitted_at: datetime | None
     expires_at: datetime
-    total_score: Optional[float]
+    total_score: float | None
     is_flagged: bool
 
 
@@ -144,7 +142,7 @@ class AttemptSupervisorView(BaseModel):
     status: AttemptStatus
     started_at: datetime
     expires_at: datetime
-    last_activity_at: Optional[datetime]
+    last_activity_at: datetime | None
     total_integrity_warnings: int
     is_flagged: bool
-    ip_address: Optional[str]
+    ip_address: str | None

@@ -7,8 +7,7 @@ Data access for AssessmentResult and ResultBreakdown.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +17,7 @@ from app.db.models.result import AssessmentResult, ResultBreakdown
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class ResultRepository:
@@ -38,11 +37,11 @@ class ResultRepository:
         total_score: float,
         max_score: float,
         percentage: float,
-        letter_grade: Optional[str],
+        letter_grade: str | None,
         is_passing: bool,
         graded_question_count: int,
         total_question_count: int,
-    ) -> Tuple[AssessmentResult, bool]:
+    ) -> tuple[AssessmentResult, bool]:
         """
         Upsert a result row. Returns (result, created).
         Recalculates are idempotent — safe to call multiple times.
@@ -84,7 +83,7 @@ class ResultRepository:
     # AssessmentResult — READS
     # -----------------------------------------------------------------------
 
-    async def get_by_id(self, result_id: uuid.UUID) -> Optional[AssessmentResult]:
+    async def get_by_id(self, result_id: uuid.UUID) -> AssessmentResult | None:
         result = await self.db.execute(
             select(AssessmentResult)
             .options(selectinload(AssessmentResult.breakdowns))
@@ -95,7 +94,7 @@ class ResultRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_attempt(self, attempt_id: uuid.UUID) -> Optional[AssessmentResult]:
+    async def get_by_attempt(self, attempt_id: uuid.UUID) -> AssessmentResult | None:
         result = await self.db.execute(
             select(AssessmentResult).where(
                 AssessmentResult.attempt_id == attempt_id,
@@ -106,7 +105,7 @@ class ResultRepository:
 
     async def get_by_attempt_with_breakdowns(
         self, attempt_id: uuid.UUID
-    ) -> Optional[AssessmentResult]:
+    ) -> AssessmentResult | None:
         result = await self.db.execute(
             select(AssessmentResult)
             .options(selectinload(AssessmentResult.breakdowns))
@@ -120,10 +119,10 @@ class ResultRepository:
     async def list_by_assessment(
         self,
         assessment_id: uuid.UUID,
-        is_released: Optional[bool] = None,
+        is_released: bool | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> Tuple[List[AssessmentResult], int]:
+    ) -> tuple[list[AssessmentResult], int]:
         filters = [
             AssessmentResult.assessment_id == assessment_id,
             AssessmentResult.is_deleted == False,  # noqa: E712
@@ -147,7 +146,7 @@ class ResultRepository:
 
     async def list_unreleased_without_hold(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentResult]:
+    ) -> list[AssessmentResult]:
         """Return all releasable results (not released, no integrity hold)."""
         result = await self.db.execute(
             select(AssessmentResult).where(
@@ -160,8 +159,8 @@ class ResultRepository:
         return list(result.scalars().all())
 
     async def list_by_attempt_ids(
-        self, attempt_ids: List[uuid.UUID]
-    ) -> List[AssessmentResult]:
+        self, attempt_ids: list[uuid.UUID]
+    ) -> list[AssessmentResult]:
         result = await self.db.execute(
             select(AssessmentResult).where(
                 AssessmentResult.attempt_id.in_(attempt_ids),
@@ -177,7 +176,7 @@ class ResultRepository:
     async def release(
         self,
         result_id: uuid.UUID,
-        released_by_id: Optional[uuid.UUID] = None,
+        released_by_id: uuid.UUID | None = None,
     ) -> None:
         now = _utcnow()
         await self.db.execute(
@@ -199,8 +198,8 @@ class ResultRepository:
 
     async def bulk_release(
         self,
-        result_ids: List[uuid.UUID],
-        released_by_id: Optional[uuid.UUID] = None,
+        result_ids: list[uuid.UUID],
+        released_by_id: uuid.UUID | None = None,
     ) -> int:
         """Release multiple results atomically. Returns count released."""
         now = _utcnow()
@@ -225,8 +224,8 @@ class ResultRepository:
     async def replace_breakdowns(
         self,
         result_id: uuid.UUID,
-        breakdowns: List[dict],
-    ) -> List[ResultBreakdown]:
+        breakdowns: list[dict],
+    ) -> list[ResultBreakdown]:
         """
         Delete existing breakdowns for a result, then insert fresh rows.
         Called each time calculate_result() runs (idempotent).
@@ -255,7 +254,7 @@ class ResultRepository:
         await self.db.flush()
         return rows
 
-    async def list_breakdowns(self, result_id: uuid.UUID) -> List[ResultBreakdown]:
+    async def list_breakdowns(self, result_id: uuid.UUID) -> list[ResultBreakdown]:
         result = await self.db.execute(
             select(ResultBreakdown).where(
                 ResultBreakdown.result_id == result_id,

@@ -19,14 +19,14 @@ KEY PREFIXES:
     rate_limit:{key}     — Rate limiting counters (future)
 """
 
-from typing import Optional
 
 import redis.asyncio as aioredis
+
 from app.core.config import settings
 
 # ─── Redis Client Singleton ────────────────────────────────────────────────────
 
-_redis_client: Optional[aioredis.Redis] = None
+_redis_client: aioredis.Redis | None = None
 
 
 async def get_redis() -> aioredis.Redis:
@@ -131,7 +131,7 @@ async def remove_jti_from_cache(jti: str) -> None:
 # ─── Generic Key Helpers ──────────────────────────────────────────────────────
 
 
-async def set_key(key: str, value: str, ttl_seconds: Optional[int] = None) -> None:
+async def set_key(key: str, value: str, ttl_seconds: int | None = None) -> None:
     """Set a Redis key with optional TTL."""
     client = await get_redis()
     if ttl_seconds:
@@ -140,7 +140,7 @@ async def set_key(key: str, value: str, ttl_seconds: Optional[int] = None) -> No
         await client.set(key, value)
 
 
-async def get_key(key: str) -> Optional[str]:
+async def get_key(key: str) -> str | None:
     """Get a Redis key value."""
     client = await get_redis()
     return await client.get(key)

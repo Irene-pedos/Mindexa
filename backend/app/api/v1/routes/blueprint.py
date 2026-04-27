@@ -15,16 +15,18 @@ Rules are validated during finalization — blocking rules prevent publishing.
 
 import uuid
 
-from app.db.models.auth import User
-from app.db.session import get_db
-from app.dependencies.auth import (require_active_user,
-                                   require_lecturer_or_admin)
-from app.schemas.blueprint import (BlueprintSummaryResponse,
-                                   BlueprintValidationResult,
-                                   SetBlueprintRequest)
-from app.services.blueprint_service import BlueprintService
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.auth import User
+from app.db.session import get_db
+from app.dependencies.auth import require_active_user, require_lecturer_or_admin
+from app.schemas.blueprint import (
+    BlueprintSummaryResponse,
+    BlueprintValidationResult,
+    SetBlueprintRequest,
+)
+from app.services.blueprint_service import BlueprintService
 
 router = APIRouter(prefix="/blueprint", tags=["Blueprint Engine"])
 

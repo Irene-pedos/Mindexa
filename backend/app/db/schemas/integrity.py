@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional
 
 from pydantic import Field
 
-from app.db.enums import (IntegrityEventType, IntegrityFlagStatus,
-                          IntegrityRiskLevel)
+from app.db.enums import IntegrityEventType, IntegrityFlagStatus
 from app.db.schemas.base import BaseResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -29,8 +27,8 @@ class IntegrityEventIngest(MindexaSchema):
     attempt_id: uuid.UUID
     event_type: IntegrityEventType
     occurred_at: datetime
-    question_id: Optional[uuid.UUID] = None
-    metadata_json: Optional[str] = Field(
+    question_id: uuid.UUID | None = None
+    metadata_json: str | None = Field(
         default=None,
         max_length=1000,
         description="JSON string with event-specific context data.",
@@ -48,8 +46,8 @@ class IntegrityEventResponse(MindexaSchema):
     occurred_at: datetime
     severity: str
     risk_score_delta: int
-    question_id: Optional[uuid.UUID]
-    metadata_json: Optional[str]
+    question_id: uuid.UUID | None
+    metadata_json: str | None
     created_at: datetime
 
 
@@ -65,7 +63,7 @@ class IntegrityWarningResponse(BaseResponse):
     warning_number: int
     message: str
     is_system_issued: bool
-    acknowledged_at: Optional[datetime]
+    acknowledged_at: datetime | None
 
 
 class ManualWarningRequest(MindexaSchema):
@@ -95,7 +93,7 @@ class FlagResolutionRequest(MindexaSchema):
 
     flag_status: IntegrityFlagStatus
     resolution_decision: str = Field(min_length=10, max_length=2000)
-    grade_impact: Optional[str] = Field(
+    grade_impact: str | None = Field(
         default=None,
         max_length=50,
         description="'NONE' | 'DEDUCTED' | 'VOID'",
@@ -110,10 +108,10 @@ class IntegrityFlagResponse(BaseResponse):
     raised_by: str
     summary: str
     raised_at: datetime
-    reviewer_id: Optional[uuid.UUID]
-    resolved_at: Optional[datetime]
-    resolution_decision: Optional[str]
-    grade_impact: Optional[str]
+    reviewer_id: uuid.UUID | None
+    resolved_at: datetime | None
+    resolution_decision: str | None
+    grade_impact: str | None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +124,7 @@ class SupervisionSessionResponse(BaseResponse):
     session_token: uuid.UUID
     is_active: bool
     started_at: datetime
-    ended_at: Optional[datetime]
+    ended_at: datetime | None
     last_heartbeat_at: datetime
     events_reviewed_count: int
     warnings_issued_count: int
@@ -141,10 +139,10 @@ class LiveAttemptStatusResponse(MindexaSchema):
 
     attempt_id: uuid.UUID
     student_id: uuid.UUID
-    student_name: Optional[str] = None
+    student_name: str | None = None
     status: str
-    started_at: Optional[datetime]
-    server_deadline: Optional[datetime]
+    started_at: datetime | None
+    server_deadline: datetime | None
     integrity_risk_score: int
     warning_count: int
     is_flagged: bool
@@ -152,4 +150,4 @@ class LiveAttemptStatusResponse(MindexaSchema):
     tab_switch_count: int
     copy_attempt_count: int
     reconnect_count: int
-    latest_event_at: Optional[datetime] = None
+    latest_event_at: datetime | None = None

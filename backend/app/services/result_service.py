@@ -19,23 +19,22 @@ RULES ENFORCED HERE:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError, ValidationError)
-from app.db.enums import AssessmentStatus, AttemptStatus, ResultLetterGrade
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
+from app.db.enums import AttemptStatus, ResultLetterGrade
 from app.db.models.result import AssessmentResult
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.submission_repo import SubmissionRepository
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # Grade band thresholds (percentage >= threshold → grade)
@@ -71,7 +70,7 @@ class ResultService:
         self,
         *,
         attempt_id: uuid.UUID,
-    ) -> Tuple[AssessmentResult, bool]:
+    ) -> tuple[AssessmentResult, bool]:
         """
         Compute the AssessmentResult for an attempt.
 
@@ -186,7 +185,7 @@ class ResultService:
         *,
         assessment_id: uuid.UUID,
         released_by_id: uuid.UUID,
-        attempt_ids: Optional[List[uuid.UUID]] = None,
+        attempt_ids: list[uuid.UUID] | None = None,
     ) -> dict:
         """
         Release results to students.
@@ -301,7 +300,7 @@ class ResultService:
 # HELPERS
 # ---------------------------------------------------------------------------
 
-def _compute_letter_grade(percentage: float) -> Optional[ResultLetterGrade]:
+def _compute_letter_grade(percentage: float) -> ResultLetterGrade | None:
     """Compute letter grade from percentage using institution bands."""
     for threshold, grade in GRADE_BANDS:
         if percentage >= threshold:

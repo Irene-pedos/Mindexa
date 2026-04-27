@@ -16,17 +16,15 @@ RULES ENFORCED HERE:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
 
-from app.core.exceptions import (AuthorizationError, ConflictError,
-                                 NotFoundError, ValidationError)
-from app.db.enums import SubmissionAnswerType
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
 from app.db.models.attempt import StudentResponse
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 from app.services.attempt_service import AttemptService
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class SubmissionService:
@@ -51,13 +49,13 @@ class SubmissionService:
         answer_type: str,
         change_type: str = "manual_save",
         # Payload fields
-        answer_text: Optional[str] = None,
-        selected_option_ids: Optional[list] = None,
-        ordered_option_ids: Optional[list] = None,
-        match_pairs_json: Optional[dict] = None,
-        fill_blank_answers: Optional[dict] = None,
-        file_url: Optional[str] = None,
-        time_spent_seconds: Optional[int] = None,
+        answer_text: str | None = None,
+        selected_option_ids: list | None = None,
+        ordered_option_ids: list | None = None,
+        match_pairs_json: dict | None = None,
+        fill_blank_answers: dict | None = None,
+        file_url: str | None = None,
+        time_spent_seconds: int | None = None,
         is_skipped: bool = False,
     ) -> tuple[StudentResponse, bool]:
         """
@@ -148,8 +146,8 @@ class SubmissionService:
         attempt_id: uuid.UUID,
         question_id: uuid.UUID,
         change_type: str,
-        previous_value: Optional[dict],
-        new_value: Optional[dict],
+        previous_value: dict | None,
+        new_value: dict | None,
     ) -> None:
         """
         Append one immutable audit log row.
@@ -176,7 +174,7 @@ class SubmissionService:
         attempt_id: uuid.UUID,
         question_id: uuid.UUID,
         student_id: uuid.UUID,
-    ) -> Optional[StudentResponse]:
+    ) -> StudentResponse | None:
         """
         Fetch a student's response for a specific question.
         Enforces ownership — student can only see their own response.
@@ -204,7 +202,7 @@ class SubmissionService:
 # HELPERS
 # ---------------------------------------------------------------------------
 
-def _extract_answer_payload(response: Optional[StudentResponse]) -> Optional[dict]:
+def _extract_answer_payload(response: StudentResponse | None) -> dict | None:
     """
     Extract the answer payload from a StudentResponse into a JSONB-safe dict.
     Returns None if response is None.

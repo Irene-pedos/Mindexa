@@ -42,20 +42,24 @@ Design decisions:
     - Used to determine supervisor availability during disputes.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from app.db.base import AppendOnlyModel, BaseModel, utcnow
-from app.db.enums import (IntegrityEventType, IntegrityFlagRaisedBy,
-                          IntegrityFlagStatus, RiskLevel,
-                          SupervisionSessionStatus, WarningLevel)
-from app.db.mixins import composite_index
 from sqlalchemy import Column, ForeignKey, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
+
+from app.db.base import AppendOnlyModel, BaseModel, utcnow
+from app.db.enums import (
+    IntegrityEventType,
+    IntegrityFlagRaisedBy,
+    IntegrityFlagStatus,
+    RiskLevel,
+    SupervisionSessionStatus,
+    WarningLevel,
+)
+from app.db.mixins import composite_index
 
 if TYPE_CHECKING:
     from app.db.models.assessment import Assessment
@@ -90,16 +94,15 @@ class IntegrityEvent(AppendOnlyModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     # Denormalised for supervisor live-feed queries per assessment
-    assessment_id: uuid.UUID = Field(nullable=False, index=True)
+    assessment_id: uuid.UUID = Field(nullable=False)
     student_id: uuid.UUID = Field(nullable=False, index=True)
 
     event_type: IntegrityEventType = Field(nullable=False, index=True)
 
-    metadata_json: Optional[dict] = Field(
+    metadata_json: dict | None = Field(
         default=None,
         sa_column=Column(
             JSONB,
@@ -109,9 +112,7 @@ class IntegrityEvent(AppendOnlyModel, table=True):
     )
 
     # -- Relationships --------------------------------------------------------
-    attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="integrity_events"
-    )
+    attempt: Optional["AssessmentAttempt"] = Relationship(back_populates="integrity_events")
 
 
 class IntegrityFlag(BaseModel, table=True):
@@ -152,11 +153,10 @@ class IntegrityFlag(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     # Denormalised for supervisor dashboard queries
-    assessment_id: uuid.UUID = Field(nullable=False, index=True)
+    assessment_id: uuid.UUID = Field(nullable=False)
     student_id: uuid.UUID = Field(nullable=False, index=True)
 
     # -- Flag content ---------------------------------------------------------
@@ -164,7 +164,6 @@ class IntegrityFlag(BaseModel, table=True):
     status: IntegrityFlagStatus = Field(
         default=IntegrityFlagStatus.OPEN,
         nullable=False,
-        index=True,
     )
     risk_level: RiskLevel = Field(
         default=RiskLevel.MEDIUM,
@@ -175,7 +174,7 @@ class IntegrityFlag(BaseModel, table=True):
         nullable=False,
         description="Who raised this flag: system | supervisor | admin",
     )
-    raised_by_id: Optional[uuid.UUID] = Field(
+    raised_by_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="UUID of supervisor/admin who raised flag. NULL for system flags.",
@@ -188,7 +187,7 @@ class IntegrityFlag(BaseModel, table=True):
             "For supervisor flags: typed by the supervisor."
         ),
     )
-    evidence_event_ids: Optional[list] = Field(
+    evidence_event_ids: list | None = Field(
         default=None,
         sa_column=Column(
             JSONB,
@@ -199,25 +198,23 @@ class IntegrityFlag(BaseModel, table=True):
 
     # -- Resolution -----------------------------------------------------------
 
-    resolved_by_id: Optional[uuid.UUID] = Field(
+    resolved_by_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="UUID of lecturer/admin who resolved this flag",
     )
-    resolved_at: Optional[datetime] = Field(
+    resolved_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
-    resolution_notes: Optional[str] = Field(
+    resolution_notes: str | None = Field(
         default=None,
         nullable=True,
         description="Lecturer/admin notes on resolution decision",
     )
 
     # -- Relationships --------------------------------------------------------
-    attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="integrity_flags"
-    )
+    attempt: Optional["AssessmentAttempt"] = Relationship(back_populates="integrity_flags")
 
 
 class IntegrityWarning(BaseModel, table=True):
@@ -246,7 +243,6 @@ class IntegrityWarning(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     assessment_id: uuid.UUID = Field(nullable=False, index=True)
@@ -257,7 +253,7 @@ class IntegrityWarning(BaseModel, table=True):
         nullable=False,
         description="Message shown to the student in the warning overlay",
     )
-    issued_by_id: Optional[uuid.UUID] = Field(
+    issued_by_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="NULL for system-issued warnings. Set for supervisor-issued.",
@@ -266,27 +262,25 @@ class IntegrityWarning(BaseModel, table=True):
         default_factory=utcnow,
         nullable=False,
     )
-    acknowledged_at: Optional[datetime] = Field(
+    acknowledged_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
     # Link to triggering event (for audit)
-    trigger_event_id: Optional[uuid.UUID] = Field(
+    trigger_event_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="IntegrityEvent.id that triggered this warning",
     )
     # Link to flag raised by WARNING_3
-    raised_flag_id: Optional[uuid.UUID] = Field(
+    raised_flag_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="IntegrityFlag.id auto-raised when warning_level=WARNING_3",
     )
 
     # -- Relationships --------------------------------------------------------
-    attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="integrity_warnings"
-    )
+    attempt: Optional["AssessmentAttempt"] = Relationship(back_populates="integrity_warnings")
 
 
 class SupervisionSession(BaseModel, table=True):
@@ -335,15 +329,10 @@ class SupervisionSession(BaseModel, table=True):
         default_factory=utcnow,
         nullable=False,
     )
-    ended_at: Optional[datetime] = Field(
+    ended_at: datetime | None = Field(
         default=None,
         nullable=True,
     )
 
     # -- Relationships --------------------------------------------------------
-    assessment: Optional["Assessment"] = Relationship(
-        back_populates="supervision_sessions"
-    )
-    attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="supervision_sessions"
-    )
+    assessment: Optional["Assessment"] = Relationship(back_populates="supervision_sessions")

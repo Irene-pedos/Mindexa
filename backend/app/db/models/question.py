@@ -14,28 +14,29 @@ Tables defined here:
     question_bank_entry           — The lecturer's question bank view
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from app.core.constants import GradingMode
-from app.db.base import BaseModel, utcnow
-from app.db.enums import (AIBatchStatus, AIQuestionDecision, DifficultyLevel,
-                          QuestionAddedVia, QuestionSourceType, QuestionType)
-from app.db.mixins import bool_field, composite_index, unique_composite_index
 from sqlalchemy import Column, ForeignKey, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
+
+from app.core.constants import GradingMode
+from app.db.base import BaseModel
+from app.db.enums import (
+    AIBatchStatus,
+    AIQuestionDecision,
+    DifficultyLevel,
+    QuestionAddedVia,
+    QuestionSourceType,
+    QuestionType,
+)
+from app.db.mixins import composite_index
 
 if TYPE_CHECKING:
-    from app.db.models.ai import AIActionLog
     from app.db.models.assessment import Assessment, AssessmentSection, Rubric
     from app.db.models.attempt import StudentResponse
-    from app.db.models.auth import User
-    from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
-                                         IntegrityWarning, SupervisionSession)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -65,45 +66,45 @@ class Question(BaseModel, table=True):
 
     created_by_id: uuid.UUID = Field(nullable=False, index=True)
 
-    subject_id: Optional[uuid.UUID] = Field(
+    subject_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id", ondelete="SET NULL"), nullable=True, index=True)
     )
 
     question_type: QuestionType = Field(nullable=False, index=True)
     content: str = Field(nullable=False)
-    explanation: Optional[str] = Field(default=None, nullable=True)
+    explanation: str | None = Field(default=None, nullable=True)
 
     marks: int = Field(default=1, nullable=False)
     difficulty: DifficultyLevel = Field(default=DifficultyLevel.MEDIUM, nullable=False, index=True)
     grading_mode: str = Field(default=GradingMode.AUTO.value, nullable=False, index=True)
-    topic_tag: Optional[str] = Field(default=None, nullable=True, max_length=100, index=True)
+    topic_tag: str | None = Field(default=None, nullable=True, max_length=100, index=True)
 
-    rubric_id: Optional[uuid.UUID] = Field(
+    rubric_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("rubric.id", ondelete="SET NULL"), nullable=True, index=True)
     )
 
     source_type: QuestionSourceType = Field(default=QuestionSourceType.MANUAL, nullable=False, index=True)
-    source_assessment_id: Optional[uuid.UUID] = Field(
+    source_assessment_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="SET NULL"), nullable=True, index=True)
     )
-    source_ai_batch_id: Optional[uuid.UUID] = Field(default=None, nullable=True, index=True)
-    ai_action_log_id: Optional[uuid.UUID] = Field(default=None, nullable=True, index=True)
+    source_ai_batch_id: uuid.UUID | None = Field(default=None, nullable=True, index=True)
+    ai_action_log_id: uuid.UUID | None = Field(default=None, nullable=True, index=True)
 
     is_approved: bool = Field(default=False, nullable=False, index=True)
-    approved_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
-    approved_at: Optional[datetime] = Field(default=None, nullable=True)
+    approved_by_id: uuid.UUID | None = Field(default=None, nullable=True)
+    approved_at: datetime | None = Field(default=None, nullable=True)
     is_shared: bool = Field(default=False, nullable=False, index=True)
     is_active: bool = Field(default=True, nullable=False, index=True)
 
     is_in_question_bank: bool = Field(default=False, nullable=False, index=True)
-    bank_added_at: Optional[datetime] = Field(default=None, nullable=True)
-    bank_added_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
+    bank_added_at: datetime | None = Field(default=None, nullable=True)
+    bank_added_by_id: uuid.UUID | None = Field(default=None, nullable=True)
 
     version: int = Field(default=1, nullable=False)
-    parent_question_id: Optional[uuid.UUID] = Field(
+    parent_question_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="SET NULL"), nullable=True, index=True)
     )
@@ -125,7 +126,6 @@ class Question(BaseModel, table=True):
         back_populates="question",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-    ai_reviews: List["AIQuestionReview"] = Relationship(back_populates="question")
     responses: List["StudentResponse"] = Relationship(back_populates="question")
 
 
@@ -145,9 +145,9 @@ class QuestionOption(BaseModel, table=True):
         sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False, index=True)
     )
     content: str = Field(nullable=False)
-    is_correct: Optional[bool] = Field(default=None, nullable=True)
-    match_key: Optional[str] = Field(default=None, nullable=True, max_length=500)
-    match_value: Optional[str] = Field(default=None, nullable=True, max_length=500)
+    is_correct: bool | None = Field(default=None, nullable=True)
+    match_key: str | None = Field(default=None, nullable=True, max_length=500)
+    match_value: str | None = Field(default=None, nullable=True, max_length=500)
     order_index: int = Field(nullable=False)
 
     question: Optional["Question"] = Relationship(back_populates="options")
@@ -169,7 +169,7 @@ class QuestionBlank(BaseModel, table=True):
         sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False, index=True)
     )
     blank_index: int = Field(nullable=False)
-    accepted_answers: List[str] = Field(
+    accepted_answers: list[str] = Field(
         default_factory=list,
         sa_column=Column(JSONB, nullable=False, server_default=text("'[]'::jsonb")),
     )
@@ -199,20 +199,20 @@ class AssessmentQuestion(BaseModel, table=True):
     question_id: uuid.UUID = Field(
         sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="RESTRICT"), nullable=False, index=True)
     )
-    assessment_section_id: Optional[uuid.UUID] = Field(
+    assessment_section_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment_section.id", ondelete="SET NULL"), nullable=True, index=True)
     )
     order_index: int = Field(nullable=False)
-    marks_override: Optional[int] = Field(default=None, nullable=True)
+    marks_override: int | None = Field(default=None, nullable=True)
     is_required: bool = Field(default=True, nullable=False)
 
     added_via: QuestionAddedVia = Field(default=QuestionAddedVia.MANUAL_WRITE, nullable=False, index=True)
-    ai_review_id: Optional[uuid.UUID] = Field(
+    ai_review_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("ai_question_review.id", ondelete="SET NULL"), nullable=True, index=True)
     )
-    bank_entry_id: Optional[uuid.UUID] = Field(
+    bank_entry_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("question_bank_entry.id", ondelete="SET NULL"), nullable=True, index=True)
     )
@@ -234,28 +234,28 @@ class AIGenerationBatch(BaseModel, table=True):
     created_by_id: uuid.UUID = Field(
         sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True)
     )
-    assessment_id: Optional[uuid.UUID] = Field(
+    assessment_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="CASCADE"), nullable=True, index=True)
     )
     question_type: str = Field(nullable=False)
     difficulty: str = Field(nullable=False)
     total_requested: int = Field(nullable=False)
-    subject: Optional[str] = Field(default=None, nullable=True)
-    topic: Optional[str] = Field(default=None, nullable=True)
-    bloom_level: Optional[str] = Field(default=None, nullable=True)
-    full_prompt: Optional[str] = Field(default=None, nullable=True)
-    additional_context: Optional[str] = Field(default=None, nullable=True)
+    subject: str | None = Field(default=None, nullable=True)
+    topic: str | None = Field(default=None, nullable=True)
+    bloom_level: str | None = Field(default=None, nullable=True)
+    full_prompt: str | None = Field(default=None, nullable=True)
+    additional_context: str | None = Field(default=None, nullable=True)
 
     status: AIBatchStatus = Field(default=AIBatchStatus.PENDING, nullable=False, index=True)
     total_generated: int = Field(default=0, nullable=False)
     total_failed: int = Field(default=0, nullable=False)
-    started_at: Optional[datetime] = Field(default=None, nullable=True)
-    completed_at: Optional[datetime] = Field(default=None, nullable=True)
-    error_message: Optional[str] = Field(default=None, nullable=True)
-    ai_model_used: Optional[str] = Field(default=None, nullable=True)
-    ai_provider: Optional[str] = Field(default=None, nullable=True)
-    total_tokens_used: Optional[int] = Field(default=None, nullable=True)
+    started_at: datetime | None = Field(default=None, nullable=True)
+    completed_at: datetime | None = Field(default=None, nullable=True)
+    error_message: str | None = Field(default=None, nullable=True)
+    ai_model_used: str | None = Field(default=None, nullable=True)
+    ai_provider: str | None = Field(default=None, nullable=True)
+    total_tokens_used: int | None = Field(default=None, nullable=True)
 
     assessment: Optional["Assessment"] = Relationship(back_populates="ai_generation_batches")
     generated_questions: List["AIGeneratedQuestion"] = Relationship(
@@ -277,12 +277,12 @@ class AIGeneratedQuestion(BaseModel, table=True):
     generated_content: str = Field(nullable=False)
     question_type: str = Field(nullable=False)
     difficulty: str = Field(nullable=False)
-    raw_prompt: Optional[str] = Field(default=None, nullable=True)
+    raw_prompt: str | None = Field(default=None, nullable=True)
     parsed_successfully: bool = Field(default=False, nullable=False)
-    parsed_question_text: Optional[str] = Field(default=None, nullable=True)
-    parsed_options_json: Optional[str] = Field(default=None, nullable=True)
-    parsed_explanation: Optional[str] = Field(default=None, nullable=True)
-    parse_error: Optional[str] = Field(default=None, nullable=True)
+    parsed_question_text: str | None = Field(default=None, nullable=True)
+    parsed_options_json: str | None = Field(default=None, nullable=True)
+    parsed_explanation: str | None = Field(default=None, nullable=True)
+    parse_error: str | None = Field(default=None, nullable=True)
     review_status: AIQuestionDecision = Field(default=AIQuestionDecision.PENDING, nullable=False, index=True)
 
     batch: Optional["AIGenerationBatch"] = Relationship(back_populates="generated_questions")
@@ -306,14 +306,13 @@ class AIQuestionReview(BaseModel, table=True):
         sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True)
     )
     decision: str = Field(nullable=False, index=True)
-    modified_question_text: Optional[str] = Field(default=None, nullable=True)
-    modified_options_json: Optional[str] = Field(default=None, nullable=True)
-    modified_explanation: Optional[str] = Field(default=None, nullable=True)
-    reviewer_notes: Optional[str] = Field(default=None, nullable=True)
+    modified_question_text: str | None = Field(default=None, nullable=True)
+    modified_options_json: str | None = Field(default=None, nullable=True)
+    modified_explanation: str | None = Field(default=None, nullable=True)
+    reviewer_notes: str | None = Field(default=None, nullable=True)
     reviewed_at: datetime = Field(nullable=False)
 
     generated_question: Optional["AIGeneratedQuestion"] = Relationship(back_populates="review")
-    question: Optional["Question"] = Relationship(back_populates="ai_reviews")
     assessment_question: Optional["AssessmentQuestion"] = Relationship(back_populates="ai_review")
 
 
@@ -337,19 +336,19 @@ class QuestionBankEntry(BaseModel, table=True):
     )
     added_by_id: uuid.UUID = Field(nullable=False, index=True)
 
-    subject_id: Optional[uuid.UUID] = Field(
+    subject_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id", ondelete="SET NULL"), nullable=True, index=True)
     )
-    difficulty: Optional[DifficultyLevel] = Field(default=None, nullable=True, index=True)
+    difficulty: DifficultyLevel | None = Field(default=None, nullable=True, index=True)
     source_type: QuestionSourceType = Field(default=QuestionSourceType.MANUAL, nullable=False, index=True)
-    source_assessment_id: Optional[uuid.UUID] = Field(
+    source_assessment_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="SET NULL"), nullable=True, index=True)
     )
 
     times_used: int = Field(default=0, nullable=False)
-    last_used_at: Optional[datetime] = Field(default=None, nullable=True)
+    last_used_at: datetime | None = Field(default=None, nullable=True)
     is_active: bool = Field(default=True, nullable=False, index=True)
 
     question: Optional["Question"] = Relationship(back_populates="bank_entry")

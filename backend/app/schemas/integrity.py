@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -20,7 +20,6 @@ from app.db.enums import (
     SupervisionSessionStatus,
     WarningLevel,
 )
-
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -38,7 +37,7 @@ class RecordEventRequest(BaseModel):
         description="Attempt access token — prevents spoofed event injection",
     )
     event_type: IntegrityEventType
-    metadata_json: Optional[Dict[str, Any]] = Field(
+    metadata_json: dict[str, Any] | None = Field(
         default=None,
         description="Event-specific context (duration_ms, tab_count, etc.)",
     )
@@ -51,7 +50,7 @@ class RaiseFlagRequest(BaseModel):
     attempt_id: uuid.UUID
     description: str = Field(..., min_length=10)
     risk_level: RiskLevel = RiskLevel.MEDIUM
-    evidence_event_ids: Optional[List[uuid.UUID]] = None
+    evidence_event_ids: list[uuid.UUID] | None = None
 
 
 class ResolveFlagRequest(BaseModel):
@@ -85,7 +84,7 @@ class IntegrityEventResponse(BaseModel):
     assessment_id: uuid.UUID
     student_id: uuid.UUID
     event_type: IntegrityEventType
-    metadata_json: Optional[Dict[str, Any]]
+    metadata_json: dict[str, Any] | None
     created_at: datetime
 
 
@@ -100,12 +99,12 @@ class IntegrityFlagResponse(BaseModel):
     status: IntegrityFlagStatus
     risk_level: RiskLevel
     raised_by: IntegrityFlagRaisedBy
-    raised_by_id: Optional[uuid.UUID]
+    raised_by_id: uuid.UUID | None
     description: str
-    evidence_event_ids: Optional[List[Any]]
-    resolved_by_id: Optional[uuid.UUID]
-    resolved_at: Optional[datetime]
-    resolution_notes: Optional[str]
+    evidence_event_ids: list[Any] | None
+    resolved_by_id: uuid.UUID | None
+    resolved_at: datetime | None
+    resolution_notes: str | None
     created_at: datetime
     updated_at: datetime
 
@@ -119,9 +118,9 @@ class IntegrityWarningResponse(BaseModel):
     warning_level: WarningLevel
     message: str
     issued_at: datetime
-    acknowledged_at: Optional[datetime]
-    trigger_event_id: Optional[uuid.UUID]
-    raised_flag_id: Optional[uuid.UUID]
+    acknowledged_at: datetime | None
+    trigger_event_id: uuid.UUID | None
+    raised_flag_id: uuid.UUID | None
 
 
 class AttemptIntegrityReport(BaseModel):
@@ -133,10 +132,10 @@ class AttemptIntegrityReport(BaseModel):
     student_id: uuid.UUID
     is_flagged: bool
     total_warnings: int
-    event_counts: Dict[str, int]       # {event_type: count}
-    events: List[IntegrityEventResponse]
-    flags: List[IntegrityFlagResponse]
-    warnings: List[IntegrityWarningResponse]
+    event_counts: dict[str, int]       # {event_type: count}
+    events: list[IntegrityEventResponse]
+    flags: list[IntegrityFlagResponse]
+    warnings: list[IntegrityWarningResponse]
 
 
 class SupervisionSessionResponse(BaseModel):
@@ -148,5 +147,5 @@ class SupervisionSessionResponse(BaseModel):
     supervisor_id: uuid.UUID
     status: SupervisionSessionStatus
     started_at: datetime
-    ended_at: Optional[datetime]
+    ended_at: datetime | None
     created_at: datetime

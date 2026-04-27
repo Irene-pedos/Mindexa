@@ -6,23 +6,24 @@ Pydantic schemas for the Blueprint Rule Engine.
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from pydantic import BaseModel, Field, field_validator
 
 from app.db.models.assessment import BlueprintRuleType
-from pydantic import BaseModel, Field, field_validator
 
 # ─── Blueprint Rule Schemas ───────────────────────────────────────────────────
 
 
 class BlueprintRuleCreate(BaseModel):
     rule_type: str = Field(...)
-    value_json: Dict[str, Any] = Field(
+    value_json: dict[str, Any] = Field(
         ...,
         description="Rule configuration. Schema depends on rule_type."
     )
     priority: int = Field(default=100, ge=1, le=1000)
     is_blocking: bool = True
-    description: Optional[str] = Field(default=None, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
 
     @field_validator("rule_type")
     @classmethod
@@ -35,10 +36,10 @@ class BlueprintRuleCreate(BaseModel):
 
 
 class BlueprintRuleUpdate(BaseModel):
-    value_json: Optional[Dict[str, Any]] = None
-    priority: Optional[int] = Field(default=None, ge=1, le=1000)
-    is_blocking: Optional[bool] = None
-    description: Optional[str] = Field(default=None, max_length=500)
+    value_json: dict[str, Any] | None = None
+    priority: int | None = Field(default=None, ge=1, le=1000)
+    is_blocking: bool | None = None
+    description: str | None = Field(default=None, max_length=500)
 
 
 class BlueprintRuleResponse(BaseModel):
@@ -48,7 +49,7 @@ class BlueprintRuleResponse(BaseModel):
     value_json: Any  # Can be dict (parsed) or string (raw)
     priority: int
     is_blocking: bool
-    description: Optional[str]
+    description: str | None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -71,7 +72,7 @@ class SetBlueprintRequest(BaseModel):
     Used when the lecturer completes Step 3 of the wizard.
     """
 
-    rules: List[BlueprintRuleCreate] = Field(
+    rules: list[BlueprintRuleCreate] = Field(
         ..., min_length=1,
         description="Complete set of rules. Existing rules will be replaced."
     )
@@ -82,26 +83,26 @@ class SetBlueprintRequest(BaseModel):
 
 class BlueprintViolation(BaseModel):
     rule_type: str
-    rule_id: Optional[uuid.UUID]
+    rule_id: uuid.UUID | None
     is_blocking: bool
     message: str
-    expected: Optional[Any] = None
-    actual: Optional[Any] = None
+    expected: Any | None = None
+    actual: Any | None = None
 
 
 class BlueprintValidationResult(BaseModel):
     assessment_id: uuid.UUID
     is_valid: bool
     can_finalize: bool
-    violations: List[BlueprintViolation] = []
-    warnings: List[BlueprintViolation] = []
+    violations: list[BlueprintViolation] = []
+    warnings: list[BlueprintViolation] = []
     total_marks_assigned: int
     total_questions: int
-    difficulty_distribution: Dict[str, int]
-    type_distribution: Dict[str, int]
+    difficulty_distribution: dict[str, int]
+    type_distribution: dict[str, int]
 
 
 class BlueprintSummaryResponse(BaseModel):
     assessment_id: uuid.UUID
-    rules: List[BlueprintRuleResponse]
-    last_validation: Optional[BlueprintValidationResult] = None
+    rules: list[BlueprintRuleResponse]
+    last_validation: BlueprintValidationResult | None = None

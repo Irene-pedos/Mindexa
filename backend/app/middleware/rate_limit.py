@@ -38,15 +38,14 @@ from __future__ import annotations
 
 import math
 import time
-from typing import Optional
+
+from fastapi import Request, Response
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.types import ASGIApp
 
 from app.core.config import settings
 from app.core.logger import get_logger
-from fastapi import Request, Response
-from fastapi.responses import JSONResponse
-from starlette.middleware.base import (BaseHTTPMiddleware,
-                                       RequestResponseEndpoint)
-from starlette.types import ASGIApp
 
 logger = get_logger("mindexa.rate_limit")
 

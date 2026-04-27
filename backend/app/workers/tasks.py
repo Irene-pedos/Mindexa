@@ -29,7 +29,7 @@ import json
 import threading
 import uuid
 from collections.abc import Awaitable
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 from celery import Task
@@ -75,7 +75,7 @@ def _run(coro: Awaitable[T]) -> T:
 
 
 def _utcnow() -> datetime:
-    return datetime.now(datetime.UTC)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------

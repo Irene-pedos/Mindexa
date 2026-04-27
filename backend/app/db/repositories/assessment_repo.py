@@ -71,29 +71,37 @@ FIELD MAPPING (model -> repo):
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
-from app.db.enums import (AssessmentStatus, AssessmentType, GradingMode,
-                          ResultReleaseMode, SupervisorRole)
-from app.db.models.assessment import (Assessment, AssessmentAutosave,
-                                      AssessmentBlueprintRule,
-                                      AssessmentDraftProgress,
-                                      AssessmentPublishValidation,
-                                      AssessmentSection, AssessmentSupervisor,
-                                      AssessmentTargetSection)
-from app.db.models.question import AssessmentQuestion
 from sqlalchemy import delete, func, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
+
+from app.db.enums import (
+    AssessmentStatus,
+    AssessmentType,
+    GradingMode,
+    ResultReleaseMode,
+)
+from app.db.models.assessment import (
+    Assessment,
+    AssessmentAutosave,
+    AssessmentBlueprintRule,
+    AssessmentDraftProgress,
+    AssessmentPublishValidation,
+    AssessmentSection,
+    AssessmentSupervisor,
+    AssessmentTargetSection,
+)
+from app.db.models.question import AssessmentQuestion
 
 # ---------------------------------------------------------------------------
 # INTERNAL HELPERS
 # ---------------------------------------------------------------------------
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +134,12 @@ class AssessmentRepository:
         grading_mode: GradingMode,
         result_release_mode: ResultReleaseMode,
         total_marks: int,
-        subject_id: Optional[uuid.UUID] = None,
-        description: Optional[str] = None,
-        reassessment_of_id: Optional[uuid.UUID] = None,
-        instructions: Optional[str] = None,
-        passing_marks: Optional[int] = None,
-        duration_minutes: Optional[int] = None,
+        subject_id: uuid.UUID | None = None,
+        description: str | None = None,
+        reassessment_of_id: uuid.UUID | None = None,
+        instructions: str | None = None,
+        passing_marks: int | None = None,
+        duration_minutes: int | None = None,
     ) -> Assessment:
         """
         Create a new Assessment row.
@@ -168,7 +176,7 @@ class AssessmentRepository:
     # Assessment — reads
     # -----------------------------------------------------------------------
 
-    async def get_by_id(self, assessment_id: uuid.UUID) -> Optional[Assessment]:
+    async def get_by_id(self, assessment_id: uuid.UUID) -> Assessment | None:
         """
         Load an Assessment with all first-level relationships.
 
@@ -201,7 +209,7 @@ class AssessmentRepository:
 
     async def get_by_id_simple(
         self, assessment_id: uuid.UUID
-    ) -> Optional[Assessment]:
+    ) -> Assessment | None:
         """
         Lightweight load — no relationships.
 
@@ -220,11 +228,11 @@ class AssessmentRepository:
         self,
         *,
         created_by_id: uuid.UUID,
-        status: Optional[AssessmentStatus] = None,
-        assessment_type: Optional[AssessmentType] = None,
+        status: AssessmentStatus | None = None,
+        assessment_type: AssessmentType | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[Assessment], int]:
+    ) -> tuple[list[Assessment], int]:
         """
         Paginated list of assessments owned by a given user.
         Returns (items, total_count).
@@ -255,12 +263,12 @@ class AssessmentRepository:
     async def list_all(
         self,
         *,
-        status: Optional[AssessmentStatus] = None,
-        assessment_type: Optional[AssessmentType] = None,
-        course_id: Optional[uuid.UUID] = None,
+        status: AssessmentStatus | None = None,
+        assessment_type: AssessmentType | None = None,
+        course_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[Assessment], int]:
+    ) -> tuple[list[Assessment], int]:
         """
         Paginated list of all assessments (admin use).
         Returns (items, total_count).
@@ -328,7 +336,7 @@ class AssessmentRepository:
         self,
         assessment_id: uuid.UUID,
         updated_by_id: uuid.UUID,
-        published_at: Optional[datetime] = None,
+        published_at: datetime | None = None,
     ) -> None:
         """
         Set status=SCHEDULED and published_at on a finalized assessment.
@@ -374,13 +382,13 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         title: str,
         order_index: int,
-        description: Optional[str] = None,
-        instructions: Optional[str] = None,
+        description: str | None = None,
+        instructions: str | None = None,
         marks_allocated: int = 0,
-        question_count_target: Optional[int] = None,
-        allowed_question_types: Optional[dict] = None,
-        difficulty_distribution: Optional[dict] = None,
-        ai_generation_prompt_hint: Optional[str] = None,
+        question_count_target: int | None = None,
+        allowed_question_types: dict | None = None,
+        difficulty_distribution: dict | None = None,
+        ai_generation_prompt_hint: str | None = None,
     ) -> AssessmentSection:
         section = AssessmentSection(
             assessment_id=assessment_id,
@@ -400,7 +408,7 @@ class AssessmentRepository:
 
     async def get_section(
         self, section_id: uuid.UUID
-    ) -> Optional[AssessmentSection]:
+    ) -> AssessmentSection | None:
         result = await self.db.execute(
             select(AssessmentSection).where(
                 col(AssessmentSection.id) == section_id,
@@ -411,7 +419,7 @@ class AssessmentRepository:
 
     async def list_sections(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentSection]:
+    ) -> list[AssessmentSection]:
         """
         Return all active sections for an assessment, ordered by order_index.
         """
@@ -453,7 +461,7 @@ class AssessmentRepository:
         )
 
     async def section_order_exists(
-        self, assessment_id: uuid.UUID, order_index: int, exclude_id: Optional[uuid.UUID] = None
+        self, assessment_id: uuid.UUID, order_index: int, exclude_id: uuid.UUID | None = None
     ) -> bool:
         """
         Check whether a given order_index is already taken within an assessment.
@@ -480,11 +488,11 @@ class AssessmentRepository:
         question_id: uuid.UUID,
         order_index: int,
         added_via: str,
-        assessment_section_id: Optional[uuid.UUID] = None,
-        marks_override: Optional[int] = None,
+        assessment_section_id: uuid.UUID | None = None,
+        marks_override: int | None = None,
         is_required: bool = True,
-        ai_review_id: Optional[uuid.UUID] = None,
-        bank_entry_id: Optional[uuid.UUID] = None,
+        ai_review_id: uuid.UUID | None = None,
+        bank_entry_id: uuid.UUID | None = None,
     ) -> AssessmentQuestion:
         """
         Link a question to an assessment.
@@ -518,7 +526,7 @@ class AssessmentRepository:
 
     async def get_assessment_question(
         self, assessment_id: uuid.UUID, question_id: uuid.UUID
-    ) -> Optional[AssessmentQuestion]:
+    ) -> AssessmentQuestion | None:
         """Load the junction row for a specific (assessment, question) pair."""
         result = await self.db.execute(
             select(AssessmentQuestion).where(
@@ -530,7 +538,7 @@ class AssessmentRepository:
 
     async def get_assessment_question_by_id(
         self, aq_id: uuid.UUID
-    ) -> Optional[AssessmentQuestion]:
+    ) -> AssessmentQuestion | None:
         result = await self.db.execute(
             select(AssessmentQuestion).where(col(AssessmentQuestion.id) == aq_id)
         )
@@ -550,7 +558,7 @@ class AssessmentRepository:
 
     async def list_assessment_questions(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentQuestion]:
+    ) -> list[AssessmentQuestion]:
         """
         Return all AssessmentQuestion rows for an assessment,
         ordered by order_index. Each row has question selectin-loaded.
@@ -581,8 +589,9 @@ class AssessmentRepository:
         Effective marks = marks_override if set, else question.marks.
         This query uses COALESCE to handle that logic at the DB level.
         """
-        from app.db.models.question import Question
         from sqlalchemy import case
+
+        from app.db.models.question import Question
 
         result = await self.db.execute(
             select(
@@ -662,10 +671,10 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         rule_type: str,
         is_enforced: bool = True,
-        assessment_section_id: Optional[uuid.UUID] = None,
-        question_type: Optional[str] = None,
-        difficulty: Optional[str] = None,
-        numeric_value: Optional[float] = None,
+        assessment_section_id: uuid.UUID | None = None,
+        question_type: str | None = None,
+        difficulty: str | None = None,
+        numeric_value: float | None = None,
     ) -> AssessmentBlueprintRule:
         rule = AssessmentBlueprintRule(
             assessment_id=assessment_id,
@@ -682,7 +691,7 @@ class AssessmentRepository:
 
     async def get_blueprint_rule(
         self, rule_id: uuid.UUID
-    ) -> Optional[AssessmentBlueprintRule]:
+    ) -> AssessmentBlueprintRule | None:
         result = await self.db.execute(
             select(AssessmentBlueprintRule).where(
                 col(AssessmentBlueprintRule.id) == rule_id,
@@ -694,8 +703,8 @@ class AssessmentRepository:
     async def list_blueprint_rules(
         self,
         assessment_id: uuid.UUID,
-        assessment_section_id: Optional[uuid.UUID] = None,
-    ) -> List[AssessmentBlueprintRule]:
+        assessment_section_id: uuid.UUID | None = None,
+    ) -> list[AssessmentBlueprintRule]:
         """
         List all active blueprint rules for an assessment.
         Optionally filter to a specific section (None = assessment-level rules only).
@@ -753,18 +762,18 @@ class AssessmentRepository:
         *,
         assessment_id: uuid.UUID,
         last_active_step: int,
-        step_1_complete: Optional[bool] = None,
-        step_2_complete: Optional[bool] = None,
-        step_3_complete: Optional[bool] = None,
-        step_4_complete: Optional[bool] = None,
-        step_5_complete: Optional[bool] = None,
-        step_6_complete: Optional[bool] = None,
-        step_1_validated_at: Optional[datetime] = None,
-        step_2_validated_at: Optional[datetime] = None,
-        step_3_validated_at: Optional[datetime] = None,
-        step_4_validated_at: Optional[datetime] = None,
-        step_5_validated_at: Optional[datetime] = None,
-        step_6_validated_at: Optional[datetime] = None,
+        step_1_complete: bool | None = None,
+        step_2_complete: bool | None = None,
+        step_3_complete: bool | None = None,
+        step_4_complete: bool | None = None,
+        step_5_complete: bool | None = None,
+        step_6_complete: bool | None = None,
+        step_1_validated_at: datetime | None = None,
+        step_2_validated_at: datetime | None = None,
+        step_3_validated_at: datetime | None = None,
+        step_4_validated_at: datetime | None = None,
+        step_5_validated_at: datetime | None = None,
+        step_6_validated_at: datetime | None = None,
     ) -> AssessmentDraftProgress:
         """
         Create or update the draft progress record for an assessment.
@@ -822,7 +831,7 @@ class AssessmentRepository:
 
     async def get_draft_progress(
         self, assessment_id: uuid.UUID
-    ) -> Optional[AssessmentDraftProgress]:
+    ) -> AssessmentDraftProgress | None:
         result = await self.db.execute(
             select(AssessmentDraftProgress).where(
                 col(AssessmentDraftProgress.assessment_id) == assessment_id,
@@ -901,7 +910,7 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         lecturer_id: uuid.UUID,
         step_number: int,
-    ) -> Optional[AssessmentAutosave]:
+    ) -> AssessmentAutosave | None:
         result = await self.db.execute(
             select(AssessmentAutosave).where(
                 col(AssessmentAutosave.assessment_id) == assessment_id,
@@ -941,7 +950,7 @@ class AssessmentRepository:
         self,
         *,
         assessment_id: uuid.UUID,
-        checked_by_id: Optional[uuid.UUID],
+        checked_by_id: uuid.UUID | None,
         overall_passed: bool,
         validation_results: list,
     ) -> AssessmentPublishValidation:
@@ -965,7 +974,7 @@ class AssessmentRepository:
 
     async def get_latest_passing_validation(
         self, assessment_id: uuid.UUID
-    ) -> Optional[AssessmentPublishValidation]:
+    ) -> AssessmentPublishValidation | None:
         """
         Return the most recent validation row where overall_passed=True.
         Returns None if no passing validation exists.
@@ -984,7 +993,7 @@ class AssessmentRepository:
 
     async def list_validations(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentPublishValidation]:
+    ) -> list[AssessmentPublishValidation]:
         """Return all validation runs for an assessment, newest first."""
         result = await self.db.execute(
             select(AssessmentPublishValidation)
@@ -1005,7 +1014,7 @@ class AssessmentRepository:
         *,
         assessment_id: uuid.UUID,
         class_section_id: uuid.UUID,
-        added_by_id: Optional[uuid.UUID] = None,
+        added_by_id: uuid.UUID | None = None,
     ) -> AssessmentTargetSection:
         target = AssessmentTargetSection(
             assessment_id=assessment_id,
@@ -1028,7 +1037,7 @@ class AssessmentRepository:
 
     async def list_target_sections(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentTargetSection]:
+    ) -> list[AssessmentTargetSection]:
         result = await self.db.execute(
             select(AssessmentTargetSection).where(
                 col(AssessmentTargetSection.assessment_id) == assessment_id,
@@ -1059,7 +1068,7 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         supervisor_id: uuid.UUID,
         supervisor_role: str,
-        assigned_by_id: Optional[uuid.UUID] = None,
+        assigned_by_id: uuid.UUID | None = None,
     ) -> AssessmentSupervisor:
         supervisor = AssessmentSupervisor(
             assessment_id=assessment_id,
@@ -1074,7 +1083,7 @@ class AssessmentRepository:
 
     async def get_supervisor(
         self, assessment_id: uuid.UUID, supervisor_id: uuid.UUID
-    ) -> Optional[AssessmentSupervisor]:
+    ) -> AssessmentSupervisor | None:
         result = await self.db.execute(
             select(AssessmentSupervisor).where(
                 col(AssessmentSupervisor.assessment_id) == assessment_id,
@@ -1096,7 +1105,7 @@ class AssessmentRepository:
 
     async def list_supervisors(
         self, assessment_id: uuid.UUID
-    ) -> List[AssessmentSupervisor]:
+    ) -> list[AssessmentSupervisor]:
         result = await self.db.execute(
             select(AssessmentSupervisor).where(
                 col(AssessmentSupervisor.assessment_id) == assessment_id,

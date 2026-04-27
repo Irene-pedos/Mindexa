@@ -15,20 +15,22 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
-from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.result_repo import ResultRepository
 from app.db.session import get_db
-from app.dependencies.auth import (require_active_user,
-                                   require_lecturer_or_admin, require_student)
-from app.schemas.result import (AssessmentResultResponse,
-                                ClearIntegrityHoldRequest,
-                                ReleaseResultsRequest, ResultBreakdownItem,
-                                ResultListResponse, ResultReleaseResponse,
-                                ResultSummary)
+from app.dependencies.auth import require_lecturer_or_admin, require_student
+from app.schemas.result import (
+    AssessmentResultResponse,
+    ClearIntegrityHoldRequest,
+    ReleaseResultsRequest,
+    ResultListResponse,
+    ResultReleaseResponse,
+    ResultSummary,
+)
 from app.services.result_service import ResultService
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/results", tags=["Results"])
 
@@ -91,7 +93,7 @@ async def get_result_for_lecturer(
 )
 async def list_results_for_assessment(
     assessment_id: uuid.UUID,
-    is_released: Optional[bool] = Query(default=None),
+    is_released: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     current_user=Depends(require_lecturer_or_admin),

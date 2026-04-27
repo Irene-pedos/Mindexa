@@ -45,10 +45,8 @@ USAGE:
 
 from __future__ import annotations
 
-import os
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from app.core.config import settings
 from app.core.logger import get_logger
@@ -84,7 +82,7 @@ class StorageBackend:
         file_bytes: bytes,
         filename: str,
         folder: str = "",
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         """
         Persist file_bytes and return the storage path/key.
@@ -168,7 +166,7 @@ class LocalStorage(StorageBackend):
         file_bytes: bytes,
         filename: str,
         folder: str = "",
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         suffix = self._validate(file_bytes, filename)
         path = self._unique_path(filename, folder)
@@ -240,7 +238,7 @@ class S3Storage(StorageBackend):
         file_bytes: bytes,
         filename: str,
         folder: str = "",
-        content_type: Optional[str] = None,
+        content_type: str | None = None,
     ) -> str:
         import io
         self._validate(file_bytes, filename)
@@ -310,7 +308,7 @@ def _create_storage() -> StorageBackend:
 
 # Lazy initialization — the backend is created on first access so that
 # LocalStorage directories are not created at import time in tests.
-_storage_instance: Optional[StorageBackend] = None
+_storage_instance: StorageBackend | None = None
 
 
 def _get_storage() -> StorageBackend:

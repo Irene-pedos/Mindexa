@@ -2,8 +2,9 @@ import asyncio
 import logging
 import sys
 
-from app.db.session import AsyncSessionLocal
 from sqlalchemy import text
+
+from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger("mindexa.drop_enums")
 

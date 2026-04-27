@@ -34,12 +34,12 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Optional
+
+from pydantic import EmailStr, Field, field_validator, model_validator
 
 from app.core.config import settings
 from app.db.enums import UserRole, UserStatus
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
-from pydantic import EmailStr, Field, field_validator, model_validator
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REQUEST SCHEMAS
@@ -141,7 +141,7 @@ class LogoutRequest(MindexaSchema):
     the HttpOnly cookie (if cookie mode is enabled).
     """
 
-    refresh_token: Optional[str] = Field(
+    refresh_token: str | None = Field(
         default=None,
         description="The refresh token for the session to revoke.",
     )
@@ -180,7 +180,7 @@ class ResetPasswordRequest(MindexaSchema):
     )
 
     @model_validator(mode="after")
-    def passwords_must_match(self) -> "ResetPasswordRequest":
+    def passwords_must_match(self) -> ResetPasswordRequest:
         if self.new_password != self.confirm_password:
             raise ValueError("new_password and confirm_password do not match.")
         return self
@@ -219,7 +219,7 @@ class ChangePasswordRequest(MindexaSchema):
     )
 
     @model_validator(mode="after")
-    def passwords_must_match(self) -> "ChangePasswordRequest":
+    def passwords_must_match(self) -> ChangePasswordRequest:
         if self.new_password != self.confirm_password:
             raise ValueError("new_password and confirm_password do not match.")
         return self
@@ -236,31 +236,31 @@ class UserProfileUpdate(MindexaSchema):
     Role, status, email — these are NOT updatable by the user directly.
     """
 
-    first_name: Optional[str] = Field(
+    first_name: str | None = Field(
         default=None,
         min_length=1,
         max_length=100,
         description="Updated first name.",
     )
-    last_name: Optional[str] = Field(
+    last_name: str | None = Field(
         default=None,
         min_length=1,
         max_length=100,
         description="Updated last name.",
     )
-    bio: Optional[str] = Field(
+    bio: str | None = Field(
         default=None,
         max_length=1000,
         description="Short biography or about text.",
     )
-    phone_number: Optional[str] = Field(
+    phone_number: str | None = Field(
         default=None,
         max_length=30,
         description="Contact phone number.",
     )
 
     @model_validator(mode="after")
-    def at_least_one_field(self) -> "UserProfileUpdate":
+    def at_least_one_field(self) -> UserProfileUpdate:
         values = {
             k: v for k, v in self.model_dump().items() if v is not None
         }
@@ -325,12 +325,12 @@ class UserProfileResponse(MindexaSchema):
     user_id: uuid.UUID
     first_name: str
     last_name: str
-    display_name: Optional[str] = None
-    bio: Optional[str] = None
-    phone_number: Optional[str] = None
-    profile_picture_url: Optional[str] = None
-    student_id: Optional[str] = None
-    staff_id: Optional[str] = None
+    display_name: str | None = None
+    bio: str | None = None
+    phone_number: str | None = None
+    profile_picture_url: str | None = None
+    student_id: str | None = None
+    staff_id: str | None = None
 
 
 class UserResponse(BaseAuditedResponse):
@@ -349,9 +349,9 @@ class UserResponse(BaseAuditedResponse):
     role: UserRole
     status: UserStatus
     email_verified: bool
-    email_verified_at: Optional[datetime] = None
-    last_login_at: Optional[datetime] = None
-    profile: Optional[UserProfileResponse] = None
+    email_verified_at: datetime | None = None
+    last_login_at: datetime | None = None
+    profile: UserProfileResponse | None = None
 
     @property
     def full_name(self) -> str:
@@ -373,8 +373,8 @@ class UserSummaryResponse(MindexaSchema):
     id: uuid.UUID
     email: str
     role: UserRole
-    first_name: Optional[str] = None
-    last_name: Optional[str] = None
+    first_name: str | None = None
+    last_name: str | None = None
 
     @property
     def display_name(self) -> str:

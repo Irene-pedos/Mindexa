@@ -51,7 +51,7 @@ import logging
 import random
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -70,10 +70,10 @@ class GenerationContext:
     question_type: str
     difficulty: str
     count: int
-    subject: Optional[str] = None
-    topic: Optional[str] = None
-    bloom_level: Optional[str] = None
-    additional_context: Optional[str] = None
+    subject: str | None = None
+    topic: str | None = None
+    bloom_level: str | None = None
+    additional_context: str | None = None
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
@@ -87,11 +87,11 @@ class GeneratedQuestionRaw:
     difficulty: str
     raw_content: str             # The full raw AI output for this question
     parsed_successfully: bool
-    question_text: Optional[str] = None
-    options: Optional[List[Dict[str, Any]]] = None   # List of option dicts
-    explanation: Optional[str] = None
-    parse_error: Optional[str] = None
-    bloom_level: Optional[str] = None
+    question_text: str | None = None
+    options: list[dict[str, Any]] | None = None   # List of option dicts
+    explanation: str | None = None
+    parse_error: str | None = None
+    bloom_level: str | None = None
 
 
 @dataclass
@@ -102,13 +102,13 @@ class GenerationResult:
 
     request_id: str
     context: GenerationContext
-    questions: List[GeneratedQuestionRaw]
+    questions: list[GeneratedQuestionRaw]
     total_generated: int
     total_failed: int
     provider: str
     model_used: str
-    tokens_used: Optional[int] = None
-    error: Optional[str] = None
+    tokens_used: int | None = None
+    error: str | None = None
 
 
 # ─── Prompt Builder ───────────────────────────────────────────────────────────
@@ -229,7 +229,7 @@ def _type_specific_instructions(question_type: str) -> str:
 # ─── Mock Provider ────────────────────────────────────────────────────────────
 
 
-def _call_mock_provider(prompt: str, context: GenerationContext) -> Dict[str, Any]:
+def _call_mock_provider(prompt: str, context: GenerationContext) -> dict[str, Any]:
     """
     Mock AI provider that returns realistic structured question JSON.
 
@@ -252,7 +252,7 @@ def _call_mock_provider(prompt: str, context: GenerationContext) -> Dict[str, An
 
 def _generate_mock_question(
     context: GenerationContext, index: int
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Generate a single realistic mock question for the given context."""
 
     subject = context.subject or "General Knowledge"
@@ -312,7 +312,7 @@ def _generate_mock_question(
             "bloom_level": bloom_level,
         }
 
-    elif qtype == "true_false":
+    if qtype == "true_false":
         is_true = random.choice([True, False])
         statement = (
             f"{topic.capitalize()} in {subject} always requires explicit documentation."
@@ -341,7 +341,7 @@ def _generate_mock_question(
             "bloom_level": bloom_level,
         }
 
-    elif qtype in ("short_answer", "essay", "computational", "case_study"):
+    if qtype in ("short_answer", "essay", "computational", "case_study"):
         question_stems = {
             "short_answer": (
                 f"Question {question_num}: Briefly explain the role of {topic} "
@@ -372,9 +372,9 @@ def _generate_mock_question(
                 f"practical example (2), clarity of expression (1)."
             ),
             "essay": (
-                f"Marking Guidance: Award marks for: clear thesis (5), critical analysis (10), "
-                f"use of examples (10), logical structure (5), conclusion (5). "
-                f"Total: 35 marks. Deduct for unsupported assertions."
+                "Marking Guidance: Award marks for: clear thesis (5), critical analysis (10), "
+                "use of examples (10), logical structure (5), conclusion (5). "
+                "Total: 35 marks. Deduct for unsupported assertions."
             ),
             "computational": (
                 f"Step-by-step solution: [Step 1] Identify variables. "
@@ -382,9 +382,9 @@ def _generate_mock_question(
                 f"[Step 3] Compute and verify. Award partial marks for correct method."
             ),
             "case_study": (
-                f"Model Answer Guidance: (a) Key issues — look for identification of 3+ "
-                f"core problems with justification. (b) Solutions — must be feasible, "
-                f"evidence-based, and linked directly to the identified issues."
+                "Model Answer Guidance: (a) Key issues — look for identification of 3+ "
+                "core problems with justification. (b) Solutions — must be feasible, "
+                "evidence-based, and linked directly to the identified issues."
             ),
         }
         return {
@@ -395,7 +395,7 @@ def _generate_mock_question(
             "bloom_level": bloom_level,
         }
 
-    elif qtype == "ordering":
+    if qtype == "ordering":
         items = [
             f"Step {j+1}: {['Initialize', 'Process', 'Validate', 'Execute', 'Finalize'][j % 5]} the {topic} component"
             for j in range(4)
@@ -411,7 +411,7 @@ def _generate_mock_question(
             "bloom_level": bloom_level,
         }
 
-    elif qtype == "matching":
+    if qtype == "matching":
         pairs = [
             (f"Term {j+1} ({topic})", f"Definition {j+1} of {topic} concept")
             for j in range(4)
@@ -431,7 +431,7 @@ def _generate_mock_question(
             "bloom_level": bloom_level,
         }
 
-    elif qtype == "fill_blank":
+    if qtype == "fill_blank":
         return {
             "question": (
                 f"Question {question_num}: Complete the following statement about {topic} in {subject}:\n"
@@ -463,7 +463,7 @@ def parse_ai_response(
     raw_content: str,
     question_type: str,
     difficulty: str,
-) -> List[GeneratedQuestionRaw]:
+) -> list[GeneratedQuestionRaw]:
     """
     Parse the raw AI provider response into a list of GeneratedQuestionRaw objects.
 
@@ -480,7 +480,7 @@ def parse_ai_response(
     Returns:
         List of GeneratedQuestionRaw (some may have parsed_successfully=False).
     """
-    results: List[GeneratedQuestionRaw] = []
+    results: list[GeneratedQuestionRaw] = []
 
     # Attempt to extract JSON array from response
     try:

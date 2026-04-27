@@ -21,16 +21,18 @@ LIFESPAN:
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator
+from typing import Any
 
-from app.core.config import settings
-from app.core.exceptions import MindexaError
-from app.core.logger import configure_logging, get_logger
 from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+
+from app.core.config import settings
+from app.core.exceptions import MindexaError
+from app.core.logger import configure_logging, get_logger
 
 # Configure structured logging FIRST — before any other imports that log
 configure_logging()
@@ -58,8 +60,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         try:
             import sentry_sdk
             from sentry_sdk.integrations.fastapi import FastApiIntegration
-            from sentry_sdk.integrations.sqlalchemy import \
-                SqlalchemyIntegration
+            from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
             sentry_sdk.init(
                 dsn=settings.SENTRY_DSN,
                 traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
@@ -87,8 +88,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # DB ping
     try:
-        from app.db.session import AsyncSessionLocal
         from sqlalchemy import text
+
+        from app.db.session import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
             await session.execute(text("SELECT 1"))
         logger.info("Database connection established")

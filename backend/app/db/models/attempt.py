@@ -50,28 +50,34 @@ JSONB fields (all use Column(JSONB, ...) — not Field sa_column_kwargs strings)
     submission_grade.score_breakdown
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from app.db.base import AuditedBaseModel, BaseModel, utcnow
-from app.db.enums import (AIGradeDecision, AppealStatus, AttemptStatus,
-                          GradingMode, QuestionType, SubmissionGradingMode,
-                          SubmissionStatus)
-from app.db.mixins import composite_index, unique_composite_index
-from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
+from app.db.base import AuditedBaseModel, BaseModel, utcnow
+from app.db.enums import (
+    AIGradeDecision,
+    AppealStatus,
+    AttemptStatus,
+    GradingMode,
+    SubmissionStatus,
+)
+from app.db.mixins import composite_index, unique_composite_index
+
 if TYPE_CHECKING:
-    from app.db.models.assessment import (Assessment, AssessmentSection,
-                                          RubricCriterion,
-                                          RubricCriterionLevel)
-    from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
-                                         IntegrityWarning, SupervisionSession)
-    from app.db.models.question import AssessmentQuestion, Question
+    from app.db.models.assessment import (
+        Assessment,
+    )
+    from app.db.models.integrity import (
+        IntegrityEvent,
+        IntegrityFlag,
+        IntegrityWarning,
+    )
+    from app.db.models.question import Question
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -171,7 +177,6 @@ class AssessmentAttempt(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     assessment_id: uuid.UUID = Field(
@@ -179,7 +184,6 @@ class AssessmentAttempt(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     group_id: Optional[uuid.UUID] = Field(
@@ -225,13 +229,12 @@ class AssessmentAttempt(BaseModel, table=True):
 
     started_at: Optional[datetime] = Field(
         default=None,
-        nullable=True,
-        index=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
         # Set when status transitions from PENDING → ACTIVE
     )
     submitted_at: Optional[datetime] = Field(
         default=None,
-        nullable=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
         # Set when status transitions to SUBMITTED or AUTO_SUBMITTED
     )
     time_taken_seconds: Optional[int] = Field(
@@ -242,19 +245,17 @@ class AssessmentAttempt(BaseModel, table=True):
     )
     server_deadline: Optional[datetime] = Field(
         default=None,
-        nullable=True,
-        index=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
         # Absolute UTC deadline computed as: started_at + assessment.duration_minutes.
         # The backend auto-submit Celery task queries this field.
     )
     expires_at: Optional[datetime] = Field(
         default=None,
-        nullable=True,
-        index=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
     )
     last_activity_at: Optional[datetime] = Field(
         default=None,
-        nullable=True,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
     # ── Grading results ───────────────────────────────────────────────────────

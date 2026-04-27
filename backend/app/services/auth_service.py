@@ -34,26 +34,45 @@ IMPORT ALIGNMENT:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.config import settings
-from app.core.constants import (SecurityEventSeverity, SecurityEventType,
-                                TokenType, UserRole, UserStatus)
-from app.core.exceptions import (AccountLockedError, AlreadyExistsError,
-                                 AuthenticationError, InvalidTokenError,
-                                 NotFoundError, PermissionDeniedError)
+from app.core.constants import (
+    SecurityEventSeverity,
+    SecurityEventType,
+    TokenType,
+    UserRole,
+    UserStatus,
+)
+from app.core.exceptions import (
+    AccountLockedError,
+    AlreadyExistsError,
+    AuthenticationError,
+    InvalidTokenError,
+    NotFoundError,
+    PermissionDeniedError,
+)
 from app.core.logger import get_logger
 from app.core.redis import cache_revoked_jti, is_jti_revoked_in_cache
-from app.core.security import (TOKEN_TYPE_REFRESH, TokenPayload,
-                               create_access_token, create_refresh_token,
-                               decode_token, generate_secure_token,
-                               hash_password, hash_token, verify_password)
-from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
-                                UserProfile)
-from app.db.repositories.auth import (PasswordResetTokenRepository,
-                                      RefreshTokenRepository, UserRepository)
-from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.security import (
+    TokenPayload,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    generate_secure_token,
+    hash_password,
+    hash_token,
+    verify_password,
+)
+from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
+from app.db.repositories.auth import (
+    PasswordResetTokenRepository,
+    RefreshTokenRepository,
+    UserRepository,
+)
 
 logger = get_logger(__name__)
 
@@ -242,7 +261,7 @@ class AuthService:
         self._enforce_login_status(user)
 
         # Temporary lockout check
-        if user.locked_until and user.locked_until > datetime.now(timezone.utc):
+        if user.locked_until and user.locked_until > datetime.now(UTC):
             await self._record_security_event(
                 event_type=SecurityEventType.LOGIN_LOCKED,
                 user_id=user.id,
@@ -263,7 +282,7 @@ class AuthService:
             new_count = user.failed_login_attempts
 
             if new_count and new_count >= settings.MAX_FAILED_LOGIN_ATTEMPTS:
-                locked_until = datetime.now(timezone.utc) + timedelta(
+                locked_until = datetime.now(UTC) + timedelta(
                     minutes=settings.ACCOUNT_LOCKOUT_MINUTES
                 )
                 user.locked_until = locked_until
@@ -333,7 +352,7 @@ class AuthService:
         return {
             "access_token":  access_token,
             "token_type":    "bearer",
-            "expires_in":    int((access_expires_at - datetime.now(timezone.utc)).total_seconds()),
+            "expires_in":    int((access_expires_at - datetime.now(UTC)).total_seconds()),
             "refresh_token": refresh_token_str,
             "jti":           refresh_jti,
             "user_id":       user.id,
@@ -420,7 +439,7 @@ class AuthService:
         # Step 5: Revoke the old token — DB + Redis blocklist
         await self._refresh_tokens.revoke(db_token)
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         remaining_ttl = max(0, int((db_token.expires_at - now).total_seconds()))
         if remaining_ttl > 0:
             await cache_revoked_jti(jti, remaining_ttl)
@@ -454,7 +473,7 @@ class AuthService:
         return {
             "access_token":  new_access_token,
             "token_type":    "bearer",
-            "expires_in":    int((access_expires_at - datetime.now(timezone.utc)).total_seconds()),
+            "expires_in":    int((access_expires_at - datetime.now(UTC)).total_seconds()),
             "refresh_token": new_refresh_str,
         }
 
@@ -588,7 +607,7 @@ class AuthService:
             return user
 
         user.email_verified = True
-        user.email_verified_at = datetime.now(timezone.utc)
+        user.email_verified_at = datetime.now(UTC)
         user.status = UserStatus.ACTIVE
         await self._users.update(user)
 
@@ -661,7 +680,7 @@ class AuthService:
 
         raw_token = generate_secure_token()
         token_hash = hash_token(raw_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(
+        expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.PASSWORD_RESET_EXPIRE_MINUTES
         )
 
@@ -829,7 +848,7 @@ class AuthService:
         """
         raw_token = generate_secure_token()
         token_hash = hash_token(raw_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(
+        expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES
         )
         await self._reset_tokens.create(PasswordResetToken(
@@ -887,8 +906,7 @@ class AuthService:
         integrated, this silently no-ops.
         """
         try:
-            from app.db.enums import \
-                SecurityEventSeverity as DBSecurityEventSeverity
+            from app.db.enums import SecurityEventSeverity as DBSecurityEventSeverity
             from app.db.enums import SecurityEventType as DBSecurityEventType
             from app.db.models.audit import SecurityEvent
 

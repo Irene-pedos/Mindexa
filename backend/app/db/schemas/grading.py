@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import Field, field_validator
 
-from app.db.enums import AIGradeDecision, AppealStatus, SubmissionGradingMode
+from app.db.enums import AIGradeDecision, SubmissionGradingMode
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -28,10 +28,10 @@ class GradeConfirmRequest(MindexaSchema):
     attempt_id: uuid.UUID
     final_marks: float = Field(ge=0)
     grading_mode: SubmissionGradingMode
-    feedback: Optional[str] = Field(default=None, max_length=5000)
+    feedback: str | None = Field(default=None, max_length=5000)
 
     # Per-question adjustments if the lecturer changed individual scores
-    response_overrides: List["ResponseGradeOverride"] = Field(
+    response_overrides: list[ResponseGradeOverride] = Field(
         default_factory=list
     )
 
@@ -41,7 +41,7 @@ class ResponseGradeOverride(MindexaSchema):
 
     student_response_id: uuid.UUID
     override_score: float = Field(ge=0)
-    override_reason: Optional[str] = Field(default=None, max_length=500)
+    override_reason: str | None = Field(default=None, max_length=500)
     ai_grade_decision: AIGradeDecision = AIGradeDecision.ACCEPTED
 
 
@@ -51,7 +51,7 @@ class GradeReleaseRequest(MindexaSchema):
     Called by the lecturer or admin when ready to make results visible.
     """
 
-    submission_grade_ids: List[uuid.UUID] = Field(min_length=1)
+    submission_grade_ids: list[uuid.UUID] = Field(min_length=1)
     release_feedback: bool = Field(
         default=True,
         description="Whether to release lecturer feedback along with the grade.",
@@ -64,15 +64,15 @@ class SubmissionGradeResponse(BaseAuditedResponse):
     student_id: uuid.UUID
     submission_status: str
     grading_mode: str
-    raw_score: Optional[float]
-    final_marks: Optional[float]
-    percentage: Optional[float]
-    grade_letter: Optional[str]
-    is_passing: Optional[bool]
-    feedback: Optional[str]
-    released_at: Optional[datetime]
+    raw_score: float | None
+    final_marks: float | None
+    percentage: float | None
+    grade_letter: str | None
+    is_passing: bool | None
+    feedback: str | None
+    released_at: datetime | None
     is_current: bool
-    score_breakdown: Optional[Any]
+    score_breakdown: Any | None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -83,28 +83,28 @@ class RubricGradeEntry(MindexaSchema):
     """A single criterion grading entry in a rubric grading session."""
 
     criterion_id: uuid.UUID
-    student_response_id: Optional[uuid.UUID] = None
-    selected_level_id: Optional[uuid.UUID] = None
+    student_response_id: uuid.UUID | None = None
+    selected_level_id: uuid.UUID | None = None
     marks_awarded: float = Field(ge=0)
-    feedback: Optional[str] = Field(default=None, max_length=1000)
+    feedback: str | None = Field(default=None, max_length=1000)
 
 
 class RubricGradingRequest(MindexaSchema):
     """Submit rubric grades for a submission."""
 
     submission_grade_id: uuid.UUID
-    grades: List[RubricGradeEntry] = Field(min_length=1)
+    grades: list[RubricGradeEntry] = Field(min_length=1)
 
 
 class RubricGradeResponse(BaseAuditedResponse):
     submission_grade_id: uuid.UUID
-    student_response_id: Optional[uuid.UUID]
+    student_response_id: uuid.UUID | None
     criterion_id: uuid.UUID
-    selected_level_id: Optional[uuid.UUID]
+    selected_level_id: uuid.UUID | None
     marks_awarded: float
-    feedback: Optional[str]
-    ai_suggested_marks: Optional[float]
-    ai_suggestion_rationale: Optional[str]
+    feedback: str | None
+    ai_suggested_marks: float | None
+    ai_suggestion_rationale: str | None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -116,7 +116,7 @@ class ResultAppealCreate(MindexaSchema):
 
     submission_grade_id: uuid.UUID
     student_statement: str = Field(min_length=20, max_length=3000)
-    supporting_evidence: Optional[str] = Field(
+    supporting_evidence: str | None = Field(
         default=None,
         max_length=1000,
         description="Optional description or references to supporting materials.",
@@ -132,18 +132,18 @@ class AppealReviewDecision(MindexaSchema):
         description="The lecturer's written decision explaining the outcome.",
     )
     grade_changed: bool
-    new_final_marks: Optional[float] = Field(
+    new_final_marks: float | None = Field(
         default=None,
         ge=0,
         description="Required when grade_changed is True.",
     )
-    new_feedback: Optional[str] = Field(default=None, max_length=5000)
+    new_feedback: str | None = Field(default=None, max_length=5000)
 
     @field_validator("new_final_marks")
     @classmethod
     def marks_required_if_changed(
-        cls, v: Optional[float], info: object
-    ) -> Optional[float]:
+        cls, v: float | None, info: object
+    ) -> float | None:
         data = getattr(info, "data", {})
         if data.get("grade_changed") and v is None:
             raise ValueError(
@@ -159,8 +159,8 @@ class ResultAppealResponse(BaseAuditedResponse):
     student_statement: str
     status: str
     submitted_at: datetime
-    reviewer_id: Optional[uuid.UUID]
-    review_started_at: Optional[datetime]
-    review_completed_at: Optional[datetime]
-    reviewer_decision: Optional[str]
-    grade_changed: Optional[bool]
+    reviewer_id: uuid.UUID | None
+    review_started_at: datetime | None
+    review_completed_at: datetime | None
+    reviewer_decision: str | None
+    grade_changed: bool | None

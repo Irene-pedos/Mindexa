@@ -26,8 +26,6 @@ Design decisions:
     - feedback duplicated from submission_grade.feedback for fast read-path.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
@@ -102,7 +100,7 @@ class AssessmentResult(BaseModel, table=True):
         nullable=False,
         description="(total_score / max_score) * 100, rounded to 2dp",
     )
-    letter_grade: Optional[ResultLetterGrade] = Field(
+    letter_grade: ResultLetterGrade | None = Field(
         default=None,
         nullable=True,
         description="Computed from percentage using institution grade bands",
@@ -121,12 +119,12 @@ class AssessmentResult(BaseModel, table=True):
         index=True,
         description="False until lecturer/system triggers result release",
     )
-    released_at: Optional[datetime] = Field(
+    released_at: datetime | None = Field(
         default=None,
         nullable=True,
         description="UTC timestamp of release",
     )
-    released_by_id: Optional[uuid.UUID] = Field(
+    released_by_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         description="UUID of lecturer/admin who triggered release. NULL=auto-release.",
@@ -207,7 +205,7 @@ class ResultBreakdown(BaseModel, table=True):
 
     # -- Scores ---------------------------------------------------------------
 
-    score: Optional[float] = Field(
+    score: float | None = Field(
         default=None,
         nullable=True,
         description="Awarded score. NULL if question was not graded.",
@@ -216,7 +214,7 @@ class ResultBreakdown(BaseModel, table=True):
         nullable=False,
         description="Maximum possible score for this question in this assessment",
     )
-    is_correct: Optional[bool] = Field(
+    is_correct: bool | None = Field(
         default=None,
         nullable=True,
         description=(
@@ -227,7 +225,7 @@ class ResultBreakdown(BaseModel, table=True):
 
     # -- Feedback (denormalised) ----------------------------------------------
 
-    feedback: Optional[str] = Field(
+    feedback: str | None = Field(
         default=None,
         nullable=True,
         description="Copied from submission_grade.feedback at result calculation time",
@@ -235,7 +233,7 @@ class ResultBreakdown(BaseModel, table=True):
 
     # -- Grading metadata -----------------------------------------------------
 
-    grading_mode: Optional[str] = Field(
+    grading_mode: str | None = Field(
         default=None,
         nullable=True,
         description="Grading mode used: auto | ai_assisted | manual",

@@ -39,18 +39,20 @@ Cascade rules:
                       A grade review record cannot be orphaned.
 """
 
-from __future__ import annotations
-
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
-from app.db.base import AppendOnlyModel, BaseModel, utcnow
+from sqlalchemy import Column, ForeignKey
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship
+
+from app.db.base import AppendOnlyModel, BaseModel
 from app.db.enums import AIActionStatus, AIActionType, AIGradeDecision
 from app.db.mixins import composite_index
-from sqlalchemy import Column, ForeignKey, text
-from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlmodel import Field
+
+if TYPE_CHECKING:
+    from app.db.models.attempt import AssessmentAttempt
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AI ACTION LOG
@@ -356,6 +358,9 @@ class AIGradeReview(BaseModel, table=True):
         nullable=False,
         index=True,
     )
+
+    # -- Relationships --------------------------------------------------------
+    attempt: Optional["AssessmentAttempt"] = Relationship()
 
     # ── Scores ────────────────────────────────────────────────────────────────
 

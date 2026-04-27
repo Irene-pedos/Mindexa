@@ -7,8 +7,7 @@ Data access for AssessmentAttempt.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,7 +18,7 @@ from app.db.models.attempt import AssessmentAttempt
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class AttemptRepository:
@@ -39,8 +38,8 @@ class AttemptRepository:
         grading_mode: GradingMode,
         expires_at: datetime,
         access_token: uuid.UUID,
-        ip_address: Optional[str] = None,
-        user_agent: Optional[str] = None,
+        ip_address: str | None = None,
+        user_agent: str | None = None,
     ) -> AssessmentAttempt:
         attempt = AssessmentAttempt(
             assessment_id=assessment_id,
@@ -63,7 +62,7 @@ class AttemptRepository:
     # READS
     # -----------------------------------------------------------------------
 
-    async def get_by_id(self, attempt_id: uuid.UUID) -> Optional[AssessmentAttempt]:
+    async def get_by_id(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
         result = await self.db.execute(
             select(AssessmentAttempt)
             .options(
@@ -78,7 +77,7 @@ class AttemptRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id_simple(self, attempt_id: uuid.UUID) -> Optional[AssessmentAttempt]:
+    async def get_by_id_simple(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
         result = await self.db.execute(
             select(AssessmentAttempt).where(
                 AssessmentAttempt.id == attempt_id,
@@ -89,7 +88,7 @@ class AttemptRepository:
 
     async def get_active_attempt(
         self, student_id: uuid.UUID, assessment_id: uuid.UUID
-    ) -> Optional[AssessmentAttempt]:
+    ) -> AssessmentAttempt | None:
         """Return the single IN_PROGRESS or PAUSED attempt for a student on an assessment."""
         result = await self.db.execute(
             select(AssessmentAttempt).where(
@@ -106,7 +105,7 @@ class AttemptRepository:
 
     async def get_by_access_token(
         self, attempt_id: uuid.UUID, access_token: uuid.UUID
-    ) -> Optional[AssessmentAttempt]:
+    ) -> AssessmentAttempt | None:
         """Validate the access_token for a specific attempt."""
         result = await self.db.execute(
             select(AssessmentAttempt).where(
@@ -133,10 +132,10 @@ class AttemptRepository:
     async def list_by_student(
         self,
         student_id: uuid.UUID,
-        status: Optional[str] = None,
+        status: str | None = None,
         page: int = 1,
         page_size: int = 20,
-    ) -> Tuple[List[AssessmentAttempt], int]:
+    ) -> tuple[list[AssessmentAttempt], int]:
         filters = [
             AssessmentAttempt.student_id == student_id,
             AssessmentAttempt.is_deleted.is_(False),
@@ -161,10 +160,10 @@ class AttemptRepository:
     async def list_by_assessment(
         self,
         assessment_id: uuid.UUID,
-        status: Optional[str] = None,
+        status: str | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> Tuple[List[AssessmentAttempt], int]:
+    ) -> tuple[list[AssessmentAttempt], int]:
         """Supervisor view: all attempts on an assessment."""
         filters = [
             AssessmentAttempt.assessment_id == assessment_id,
@@ -187,7 +186,7 @@ class AttemptRepository:
         )
         return list(result.scalars().all()), total
 
-    async def list_expired_in_progress(self) -> List[AssessmentAttempt]:
+    async def list_expired_in_progress(self) -> list[AssessmentAttempt]:
         """Return all IN_PROGRESS attempts where expires_at < now. Used by auto-submit task."""
         now = _utcnow()
         result = await self.db.execute(

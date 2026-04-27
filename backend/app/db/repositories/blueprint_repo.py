@@ -8,11 +8,12 @@ from __future__ import annotations
 
 import uuid
 
-from app.db.enums import BlueprintRuleType
-from app.db.models.assessment import AssessmentBlueprintRule
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
+
+from app.db.enums import BlueprintRuleType
+from app.db.models.assessment import AssessmentBlueprintRule
 
 
 class BlueprintRepository:

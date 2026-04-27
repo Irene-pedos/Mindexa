@@ -19,22 +19,26 @@ Security:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import UTC, datetime
+
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthorizationError, NotFoundError
 from app.db.enums import AttemptStatus, UserRole
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.session import get_db
-from app.dependencies.auth import (require_active_user,
-                                   require_lecturer_or_admin, require_student)
-from app.schemas.attempt import (AttemptListResponse, AttemptResponse,
-                                 AttemptStartRequest, AttemptStartResponse,
-                                 AttemptSubmitRequest, AttemptSummary,
-                                 AttemptSupervisorView)
+from app.dependencies.auth import require_active_user, require_lecturer_or_admin, require_student
+from app.schemas.attempt import (
+    AttemptListResponse,
+    AttemptResponse,
+    AttemptStartRequest,
+    AttemptStartResponse,
+    AttemptSubmitRequest,
+    AttemptSummary,
+    AttemptSupervisorView,
+)
 from app.services.attempt_service import AttemptService
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/attempts", tags=["Attempts"])
 
@@ -74,7 +78,7 @@ async def start_attempt(
         user_agent=request.headers.get("user-agent"),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     seconds_remaining = 0
     if attempt.expires_at:
         seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
@@ -120,7 +124,7 @@ async def resume_attempt(
         access_token=uuid.UUID(str(access_token)),
     )
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     seconds_remaining = 0
     if attempt.expires_at:
         seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
@@ -203,7 +207,7 @@ async def get_attempt(
     summary="List the current student's attempts",
 )
 async def list_my_attempts(
-    status: Optional[AttemptStatus] = Query(default=None),
+    status: AttemptStatus | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user=Depends(require_student),
@@ -234,7 +238,7 @@ async def list_my_attempts(
 )
 async def list_attempts_for_assessment(
     assessment_id: uuid.UUID,
-    status: Optional[AttemptStatus] = Query(default=None),
+    status: AttemptStatus | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
     current_user=Depends(require_lecturer_or_admin),

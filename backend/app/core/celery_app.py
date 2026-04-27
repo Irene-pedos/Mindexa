@@ -31,10 +31,11 @@ USAGE:
 
 from __future__ import annotations
 
-from app.core.config import settings
 from celery import Celery
 from celery.schedules import crontab
 from kombu import Exchange, Queue
+
+from app.core.config import settings
 
 # ---------------------------------------------------------------------------
 # FACTORY

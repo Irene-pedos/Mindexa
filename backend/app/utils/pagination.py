@@ -84,7 +84,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     meta: PageMeta
 
     @classmethod
-    def from_result(cls, result: object) -> "PaginatedResponse[T]":
+    def from_result(cls, result: object) -> PaginatedResponse[T]:
         """Build from a BaseRepository.PaginatedResult."""
         return cls(
             items=result.items,  # type: ignore[attr-defined]

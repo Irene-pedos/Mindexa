@@ -14,10 +14,10 @@ USAGE:
 """
 
 from functools import lru_cache
-from typing import List, Literal, Optional
+from typing import Literal
 from urllib.parse import quote
 
-from pydantic import AnyHttpUrl, field_validator, model_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,11 +49,11 @@ class Settings(BaseSettings):
     docs_enabled: bool = True
 
     # ─── Security / Secrets ───────────────────────────────────────────────────
-    SECRET_KEY: Optional[str] = None
+    SECRET_KEY: str | None = None
     # For future RS256 support, add PUBLIC_KEY / PRIVATE_KEY here.
 
     # ─── Monitoring ───────────────────────────────────────────────────────────
-    SENTRY_DSN: Optional[str] = None
+    SENTRY_DSN: str | None = None
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
     METRICS_ENABLED: bool = False
     METRICS_API_KEY: str = ""
@@ -83,7 +83,7 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_COOKIE_SECURE: bool = False
 
     # ─── CORS ─────────────────────────────────────────────────────────────────
-    CORS_ORIGINS: List[str] = [
+    CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ]
@@ -136,7 +136,7 @@ class Settings(BaseSettings):
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
     STORAGE_LOCAL_DIR: str = "uploads"
     MAX_UPLOAD_SIZE_MB: int = 25
-    ALLOWED_UPLOAD_EXTENSIONS: List[str] = [
+    ALLOWED_UPLOAD_EXTENSIONS: list[str] = [
         ".pdf",
         ".doc",
         ".docx",
@@ -148,11 +148,11 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "uploads"
 
     # AWS S3 (required only when STORAGE_BACKEND=s3)
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    AWS_ACCESS_KEY_ID: str | None = None
+    AWS_SECRET_ACCESS_KEY: str | None = None
     AWS_REGION: str = "us-east-1"
-    AWS_S3_BUCKET: Optional[str] = None
-    AWS_S3_ENDPOINT_URL: Optional[str] = None
+    AWS_S3_BUCKET: str | None = None
+    AWS_S3_ENDPOINT_URL: str | None = None
 
     # ─── AI / LLM ─────────────────────────────────────────────────────────────
     OPENAI_API_KEY: str = ""
@@ -173,7 +173,7 @@ class Settings(BaseSettings):
 
     @field_validator("SECRET_KEY")
     @classmethod
-    def validate_secret_key(cls, v: Optional[str]) -> Optional[str]:
+    def validate_secret_key(cls, v: str | None) -> str | None:
         if v is None or not v.strip():
             return None
         if len(v) < 32:

@@ -55,46 +55,80 @@ instead of:
     from app.db.models.assessment import Assessment
 """
 
-from __future__ import annotations
+from app.db.models.academic import (
+                                AcademicPeriod,
+                                ClassSection,
+                                Course,
+                                CourseSubject,
+                                Department,
+                                Institution,
+                                LecturerCourseAssignment,
+                                StudentEnrollment,
+                                Subject,
+)
 
-# ── 3. Academic (depends on user) ─────────────────────────────────────────────
-from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
-                                UserProfile)
-from app.db.models.academic import (AcademicPeriod, ClassSection, Course,
-                                    CourseSubject, Department, Institution,
-                                    LecturerCourseAssignment,
-                                    StudentEnrollment, Subject)
 # ── 8. AI traceability (depends on attempt, assessment) ───────────────────────
 from app.db.models.ai import AIActionLog, AIGradeReview
+
 # ── 4. Assessment (depends on user, academic) ─────────────────────────────────
-from app.db.models.assessment import (Assessment, AssessmentAutosave,
-                                      AssessmentBlueprintRule,
-                                      AssessmentDraftProgress,
-                                      AssessmentPublishValidation,
-                                      AssessmentSection, AssessmentSupervisor,
-                                      AssessmentTargetSection, Rubric,
-                                      RubricCriterion, RubricCriterionLevel)
+from app.db.models.assessment import (
+                                Assessment,
+                                AssessmentAutosave,
+                                AssessmentBlueprintRule,
+                                AssessmentDraftProgress,
+                                AssessmentPublishValidation,
+                                AssessmentSection,
+                                AssessmentSupervisor,
+                                AssessmentTargetSection,
+                                Rubric,
+                                RubricCriterion,
+                                RubricCriterionLevel,
+)
+
 # ── 6. Attempt & submission (depends on question, assessment, user) ───────────
-from app.db.models.attempt import (AssessmentAttempt, ResultAppeal,
-                                   RubricGrade, StudentGroup,
-                                   StudentGroupMember, StudentResponse,
-                                   SubmissionGrade)
+from app.db.models.attempt import (
+                                AssessmentAttempt,
+                                ResultAppeal,
+                                RubricGrade,
+                                StudentGroup,
+                                StudentGroupMember,
+                                StudentResponse,
+                                SubmissionGrade,
+)
+
 # ── 1. Audit (no FK deps — always first) ──────────────────────────────────────
 from app.db.models.audit import AuditLog, SecurityEvent
+
+# ── 3. Academic (depends on user) ─────────────────────────────────────────────
+from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
+
 # ── 2. Auth (defines `user` table) ────────────────────────────────────────────
 # ── 7. Integrity (depends on attempt, assessment) ─────────────────────────────
-from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
-                                     IntegrityWarning, SupervisionSession)
+from app.db.models.integrity import (
+                                IntegrityEvent,
+                                IntegrityFlag,
+                                IntegrityWarning,
+                                SupervisionSession,
+)
+
 # ── 9. Notifications (depends on user, assessment) ────────────────────────────
 from app.db.models.notification import Notification, Reminder, ScheduledEvent
+
 # ── 5. Question bank (depends on assessment, academic) ────────────────────────
-from app.db.models.question import (AIGeneratedQuestion, AIGenerationBatch,
-                                    AIQuestionReview, AssessmentQuestion,
-                                    Question, QuestionBankEntry, QuestionBlank,
-                                    QuestionOption)
+from app.db.models.question import (
+                                AIGeneratedQuestion,
+                                AIGenerationBatch,
+                                AIQuestionReview,
+                                AssessmentQuestion,
+                                Question,
+                                QuestionBankEntry,
+                                QuestionBlank,
+                                QuestionOption,
+)
+
 # ── 10. Resources (depends on user, academic, assessment; pgvector last) ──────
-from app.db.models.resource import (LecturerMaterial, ResourceChunk,
-                                    StudentResource)
+from app.db.models.resource import LecturerMaterial, ResourceChunk, StudentResource
+
 # ── 11. Assessment Results (depends on attempt, assessment) ───────────────────
 from app.db.models.result import AssessmentResult, ResultBreakdown
 

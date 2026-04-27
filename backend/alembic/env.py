@@ -15,50 +15,76 @@ USAGE:
 from __future__ import annotations
 
 import asyncio
-from logging.config import fileConfig
-from typing import Any
 
-from alembic import context
-# Import Base FIRST (SQLAlchemy declarative base)
-from app.db.base import Base  # noqa: F401
-# Import all models in the correct dependency order
-# This ensures SQLModel.metadata is fully populated before Alembic inspects it
-from app.db.models import (AcademicPeriod, AIActionLog,  # noqa: F401
-                           AIGeneratedQuestion, AIGenerationBatch,
-                           AIGradeReview, AIQuestionReview, Assessment,
-                           AssessmentAttempt, AssessmentAutosave,
-                           AssessmentBlueprintRule, AssessmentDraftProgress,
-                           AssessmentPublishValidation, AssessmentQuestion,
-                           AssessmentResult, AssessmentSection,
-                           AssessmentSupervisor, AssessmentTargetSection,
-                           AuditLog, ClassSection, Course, CourseSubject,
-                           Department, Institution, IntegrityEvent,
-                           IntegrityFlag, IntegrityWarning,
-                           LecturerCourseAssignment, LecturerMaterial,
-                           Notification, PasswordResetToken, Question,
-                           QuestionBankEntry, QuestionBlank, QuestionOption,
-                           RefreshToken, Reminder, ResourceChunk, ResultAppeal,
-                           ResultBreakdown, Rubric, RubricCriterion,
-                           RubricCriterionLevel, RubricGrade, ScheduledEvent,
-                           SecurityEvent, StudentEnrollment, StudentGroup,
-                           StudentGroupMember, StudentResource,
-                           StudentResponse, Subject, SubmissionGrade,
-                           SupervisionSession, User, UserProfile)
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 
-# Merge both metadata registries so Alembic can see all tables
-# This is necessary because Phase 3 models (User) use Base (SQLAlchemy ORM)
-# while Phase 4+ models use BaseModel (SQLModel)
-merged_metadata = Base.metadata
-for table in list(SQLModel.metadata.tables.values()):
-    if table.name not in merged_metadata.tables:
-        table._set_parent(merged_metadata)
+from alembic import context
 
-# Autogenerate target — unified metadata with all tables
-target_metadata = merged_metadata
+# Import all models in the correct dependency order
+# This ensures SQLModel.metadata is fully populated before Alembic inspects it
+from app.db.models import (  # noqa: F401
+    AcademicPeriod,
+    AIActionLog,
+    AIGeneratedQuestion,
+    AIGenerationBatch,
+    AIGradeReview,
+    AIQuestionReview,
+    Assessment,
+    AssessmentAttempt,
+    AssessmentAutosave,
+    AssessmentBlueprintRule,
+    AssessmentDraftProgress,
+    AssessmentPublishValidation,
+    AssessmentQuestion,
+    AssessmentResult,
+    AssessmentSection,
+    AssessmentSupervisor,
+    AssessmentTargetSection,
+    AuditLog,
+    ClassSection,
+    Course,
+    CourseSubject,
+    Department,
+    Institution,
+    IntegrityEvent,
+    IntegrityFlag,
+    IntegrityWarning,
+    LecturerCourseAssignment,
+    LecturerMaterial,
+    Notification,
+    PasswordResetToken,
+    Question,
+    QuestionBankEntry,
+    QuestionBlank,
+    QuestionOption,
+    RefreshToken,
+    Reminder,
+    ResourceChunk,
+    ResultAppeal,
+    ResultBreakdown,
+    Rubric,
+    RubricCriterion,
+    RubricCriterionLevel,
+    RubricGrade,
+    ScheduledEvent,
+    SecurityEvent,
+    StudentEnrollment,
+    StudentGroup,
+    StudentGroupMember,
+    StudentResource,
+    StudentResponse,
+    Subject,
+    SubmissionGrade,
+    SupervisionSession,
+    User,
+    UserProfile,
+)
+
+# Autogenerate target — SQLModel metadata contains all registered models
+target_metadata = SQLModel.metadata
 
 # ---------------------------------------------------------------------------
 # Database URL — pulled from app settings (never from alembic.ini)
@@ -70,6 +96,7 @@ def get_url() -> str:
 
     # Use the sync URL for Alembic (asyncpg not supported by Alembic directly)
     url = settings.DATABASE_URL
+    print(f"[alembic] Using URL: {url}")
     # Normalize postgres:// → postgresql://
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql://", 1)

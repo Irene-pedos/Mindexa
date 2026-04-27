@@ -2,103 +2,107 @@
 app/db/enums.py
 
 All SQLModel/SQLAlchemy-compatible enum definitions for Mindexa Platform.
+Aligned with database ENUM values (UPPERCASE).
 """
 
 from enum import Enum
 
 
 class UserRole(str, Enum):
-    STUDENT = "student"
-    LECTURER = "lecturer"
-    ADMIN = "admin"
+    STUDENT = "STUDENT"
+    LECTURER = "LECTURER"
+    ADMIN = "ADMIN"
 
 
 class UserStatus(str, Enum):
-    PENDING_VERIFICATION = "pending_verification"
-    ACTIVE = "active"
-    SUSPENDED = "suspended"
-    INACTIVE = "inactive"
+    PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    ACTIVE = "ACTIVE"
+    SUSPENDED = "SUSPENDED"
+    INACTIVE = "INACTIVE"
 
 
 class TokenType(str, Enum):
-    ACCESS = "access"
-    REFRESH = "refresh"
-    EMAIL_VERIFICATION = "email_verification"
-    PASSWORD_RESET = "password_reset"
+    ACCESS = "ACCESS"
+    REFRESH = "REFRESH"
+    EMAIL_VERIFICATION = "EMAIL_VERIFICATION"
+    PASSWORD_RESET = "PASSWORD_RESET"
 
 
 class AcademicPeriodType(str, Enum):
-    SEMESTER = "semester"
-    TRIMESTER = "trimester"
-    QUARTER = "quarter"
-    YEAR = "year"
+    SEMESTER = "SEMESTER"
+    TRIMESTER = "TRIMESTER"
+    QUARTER = "QUARTER"
+    YEAR = "YEAR"
 
 
 class LecturerAssignmentRole(str, Enum):
-    PRIMARY = "primary"
-    ASSISTANT = "assistant"
-    SUPERVISOR = "supervisor"
+    PRIMARY = "PRIMARY"
+    ASSISTANT = "ASSISTANT"
+    SUPERVISOR = "SUPERVISOR"
 
 
 class EnrollmentStatus(str, Enum):
-    ACTIVE = "active"
-    WITHDRAWN = "withdrawn"
-    COMPLETED = "completed"
-    DEFERRED = "deferred"
+    ACTIVE = "ACTIVE"
+    WITHDRAWN = "WITHDRAWN"
+    COMPLETED = "COMPLETED"
+    DEFERRED = "DEFERRED"
 
 
 class AssessmentType(str, Enum):
-    FORMATIVE = "formative"
-    CAT = "cat"
-    SUMMATIVE = "summative"
-    HOMEWORK = "homework"
-    GROUP_WORK = "group_work"
-    REASSESSMENT = "reassessment"
+    FORMATIVE = "FORMATIVE"
+    CAT = "CAT"
+    SUMMATIVE = "SUMMATIVE"
+    HOMEWORK = "HOMEWORK"
+    GROUP_WORK = "GROUP_WORK"
+    REASSESSMENT = "REASSESSMENT"
 
 
 class AssessmentStatus(str, Enum):
-    DRAFT = "draft"
-    SCHEDULED = "scheduled"
-    ACTIVE = "active"
-    COMPLETED = "completed"
-    ARCHIVED = "archived"
-    CANCELLED = "cancelled"
+    DRAFT = "DRAFT"
+    SCHEDULED = "SCHEDULED"
+    ACTIVE = "ACTIVE"
+    COMPLETED = "COMPLETED"
+    ARCHIVED = "ARCHIVED"
+    CANCELLED = "CANCELLED"
 
 
 class GradingMode(str, Enum):
-    AUTO = "auto"
-    SEMI_AUTO = "semi_auto"
-    MANUAL = "manual"
-    AI_ASSISTED = "ai_assisted"
-    HYBRID = "hybrid"
+    AUTO = "AUTO"
+    SEMI_AUTO = "SEMI_AUTO"
+    MANUAL = "MANUAL"
+    RUBRIC = "RUBRIC"
+    AI_ASSISTED = "AI_ASSISTED"
+    SEMI = "SEMI"  # For compatibility
 
 
 class ResultReleaseMode(str, Enum):
-    IMMEDIATE = "immediate"
-    DELAYED = "delayed"
-    SCHEDULED = "scheduled"
+    IMMEDIATE = "IMMEDIATE"
+    DELAYED = "DELAYED"
+    SCHEDULED = "SCHEDULED"
 
 
 class SupervisorRole(str, Enum):
-    PRIMARY = "primary"
-    ASSISTANT = "assistant"
+    PRIMARY = "PRIMARY"
+    ASSISTANT = "ASSISTANT"
 
 
 class BlueprintRuleType(str, Enum):
-    TOTAL_QUESTIONS = "total_questions"
-    EXACT_QUESTIONS = "exact_questions"
-    MARKS_TOTAL = "marks_total"
-    DIFFICULTY_RATIO = "difficulty_ratio"
-    DIFFICULTY_DISTRIBUTION = "difficulty_distribution"
-    QUESTION_TYPE_REQUIRED = "question_type_required"
-    QUESTION_TYPE_EXCLUDED = "question_type_excluded"
-    QUESTION_TYPE_DISTRIBUTION = "question_type_distribution"
-    BLOOM_LEVEL_REQUIRED = "bloom_level_required"
-    BLOOM_DISTRIBUTION = "bloom_distribution"
-    TIME_ESTIMATE = "time_estimate"
-    MARKS_DISTRIBUTION = "marks_distribution"
-    SECTION_MARKS = "section_marks"
-    TOPIC_COVERAGE = "topic_coverage"
+    TOTAL_QUESTIONS = "TOTAL_QUESTIONS"
+    MIN_QUESTIONS = "MIN_QUESTIONS"
+    MAX_QUESTIONS = "MAX_QUESTIONS"
+    EXACT_QUESTIONS = "EXACT_QUESTIONS"
+    MARKS_TOTAL = "MARKS_TOTAL"
+    DIFFICULTY_RATIO = "DIFFICULTY_RATIO"
+    DIFFICULTY_DISTRIBUTION = "DIFFICULTY_DISTRIBUTION"
+    QUESTION_TYPE_REQUIRED = "QUESTION_TYPE_REQUIRED"
+    QUESTION_TYPE_EXCLUDED = "QUESTION_TYPE_EXCLUDED"
+    QUESTION_TYPE_DISTRIBUTION = "QUESTION_TYPE_DISTRIBUTION"
+    BLOOM_LEVEL_REQUIRED = "BLOOM_LEVEL_REQUIRED"
+    BLOOM_DISTRIBUTION = "BLOOM_DISTRIBUTION"
+    TIME_ESTIMATE = "TIME_ESTIMATE"
+    MARKS_DISTRIBUTION = "MARKS_DISTRIBUTION"
+    SECTION_MARKS = "SECTION_MARKS"
+    TOPIC_COVERAGE = "TOPIC_COVERAGE"
 
     @classmethod
     def all_types(cls) -> set[str]:
@@ -106,303 +110,358 @@ class BlueprintRuleType(str, Enum):
 
 
 class QuestionType(str, Enum):
-    MCQ = "mcq"
-    TRUE_FALSE = "true_false"
-    SHORT_ANSWER = "short_answer"
-    ESSAY = "essay"
-    MATCHING = "matching"
-    FILL_BLANK = "fill_blank"
-    COMPUTATIONAL = "computational"
-    CASE_STUDY = "case_study"
-    ORDERING = "ordering"
+    MCQ = "MCQ"
+    TRUE_FALSE = "TRUE_FALSE"
+    SHORT_ANSWER = "SHORT_ANSWER"
+    ESSAY = "ESSAY"
+    MATCHING = "MATCHING"
+    FILL_BLANK = "FILL_BLANK"
+    COMPUTATIONAL = "COMPUTATIONAL"
+    CASE_STUDY = "CASE_STUDY"
+    ORDERING = "ORDERING"
 
 
 class DifficultyLevel(str, Enum):
-    EASY = "easy"
-    MEDIUM = "medium"
-    HARD = "hard"
+    EASY = "EASY"
+    MEDIUM = "MEDIUM"
+    HARD = "HARD"
 
 
 class QuestionSourceType(str, Enum):
-    MANUAL = "manual"
-    AI_GENERATED = "ai_generated"
-    ASSESSMENT_AUTO_SAVED = "assessment_auto_saved"
-    IMPORTED = "imported"
+    MANUAL = "MANUAL"
+    AI_GENERATED = "AI_GENERATED"
+    ASSESSMENT_AUTO_SAVED = "ASSESSMENT_AUTO_SAVED"
+    IMPORTED = "IMPORTED"
 
 
 class QuestionAddedVia(str, Enum):
-    MANUAL_WRITE = "manual_write"
-    BANK_INSERT = "bank_insert"
-    AI_GENERATED_ACCEPTED = "ai_generated_accepted"
-    AI_GENERATED_MODIFIED = "ai_generated_modified"
+    MANUAL_WRITE = "MANUAL_WRITE"
+    BANK_INSERT = "BANK_INSERT"
+    AI_GENERATED_ACCEPTED = "AI_GENERATED_ACCEPTED"
+    AI_GENERATED_MODIFIED = "AI_GENERATED_MODIFIED"
 
 
 class AIActionType(str, Enum):
-    QUESTION_GENERATION = "question_generation"
-    GRADING_SUGGESTION = "grading_suggestion"
-    RUBRIC_SUGGESTION = "rubric_suggestion"
-    STUDY_SUPPORT = "study_support"
-    EMBEDDING = "embedding"
-    INTEGRITY_ANALYSIS = "integrity_analysis"
-    ASSESSMENT_DRAFT = "assessment_draft"
-    FEEDBACK_DRAFT = "feedback_draft"
+    GENERATE_QUESTIONS = "GENERATE_QUESTIONS"
+    GENERATE_RUBRIC = "GENERATE_RUBRIC"
+    GENERATE_ASSESSMENT_DRAFT = "GENERATE_ASSESSMENT_DRAFT"
+    GRADE_RESPONSE = "GRADE_RESPONSE"
+    SUGGEST_FEEDBACK = "SUGGEST_FEEDBACK"
+    ANALYZE_INTEGRITY = "ANALYZE_INTEGRITY"
+    STUDY_SUPPORT = "STUDY_SUPPORT"
+    DOCUMENT_SUMMARY = "DOCUMENT_SUMMARY"
+    ANSWER_KEY_GENERATION = "ANSWER_KEY_GENERATION"
+    # Old names for compatibility if needed
+    QUESTION_GENERATION = "QUESTION_GENERATION"
+    GRADING_SUGGESTION = "GRADING_SUGGESTION"
+    RUBRIC_SUGGESTION = "RUBRIC_SUGGESTION"
+    INTEGRITY_ANALYSIS = "INTEGRITY_ANALYSIS"
+    ASSESSMENT_DRAFT = "ASSESSMENT_DRAFT"
+    FEEDBACK_DRAFT = "FEEDBACK_DRAFT"
+    EMBEDDING = "EMBEDDING"
 
 
 class AIActionStatus(str, Enum):
-    INITIATED = "initiated"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    RATE_LIMITED = "rate_limited"
+    PENDING = "PENDING"
+    INITIATED = "INITIATED"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    RATE_LIMITED = "RATE_LIMITED"
 
 
 class AIBatchStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    PARTIAL_FAILURE = "partial_failure"
-    FAILED = "failed"
+    PENDING = "PENDING"
+    PROCESSING = "PROCESSING"
+    COMPLETED = "COMPLETED"
+    PARTIAL_FAILURE = "PARTIAL_FAILURE"
+    FAILED = "FAILED"
 
 
 class AIQuestionDecision(str, Enum):
-    PENDING = "pending"
-    ACCEPTED = "accepted"
-    MODIFIED = "modified"
-    REJECTED = "rejected"
-    APPROVED = "accepted"
-    EDITED = "modified"
-    NEEDS_REVISION = "needs_revision"
+    PENDING = "PENDING"
+    ACCEPTED = "ACCEPTED"
+    MODIFIED = "MODIFIED"
+    REJECTED = "REJECTED"
+    APPROVED = "ACCEPTED"
+    EDITED = "MODIFIED"
+    NEEDS_REVISION = "NEEDS_REVISION"
 
 
 class AIGradeDecision(str, Enum):
-    PENDING = "pending"
-    SUGGESTED = "suggested"
-    ACCEPTED = "accepted"
-    MODIFIED = "modified"
-    REJECTED = "rejected"
-    NOT_APPLICABLE = "not_applicable"
+    PENDING = "PENDING"
+    SUGGESTED = "SUGGESTED"
+    ACCEPTED = "ACCEPTED"
+    MODIFIED = "MODIFIED"
+    REJECTED = "REJECTED"
+    NOT_APPLICABLE = "NOT_APPLICABLE"
 
 
 class SubmissionStatus(str, Enum):
-    NOT_STARTED = "not_started"
-    IN_PROGRESS = "in_progress"
-    SUBMITTED = "submitted"
-    AUTO_SUBMITTED = "auto_submitted"
-    PENDING_GRADING = "pending_grading"
-    AUTO_GRADED = "auto_graded"
-    AI_SUGGESTED = "ai_suggested"
-    LECTURER_REVIEWED = "lecturer_reviewed"
-    FINAL = "final"
-    GRADED = "graded"
-    UNDER_REVIEW = "under_review"
-    RELEASED = "released"
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUBMITTED = "SUBMITTED"
+    AUTO_SUBMITTED = "AUTO_SUBMITTED"
+    PENDING_GRADING = "PENDING_GRADING"
+    AUTO_GRADED = "AUTO_GRADED"
+    AI_SUGGESTED = "AI_SUGGESTED"
+    LECTURER_REVIEWED = "LECTURER_REVIEWED"
+    FINAL = "FINAL"
+    GRADED = "GRADED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    RELEASED = "RELEASED"
+    REVIEWER_APPROVED = "REVIEWER_APPROVED"
+    FINAL_RELEASED = "FINAL_RELEASED"
+    GRADING_QUEUED = "GRADING_QUEUED"
+    GRADING_FAILED = "GRADING_FAILED"
 
 
 class SubmissionAnswerType(str, Enum):
-    TEXT = "text"
-    SINGLE_OPTION = "single_option"
-    MULTI_OPTION = "multi_option"
-    ORDERED_LIST = "ordered_list"
-    MATCH_PAIRS = "match_pairs"
-    FILL_BLANKS = "fill_blanks"
-    FILE = "file"
+    TEXT = "TEXT"
+    SINGLE_OPTION = "SINGLE_OPTION"
+    MULTI_OPTION = "MULTI_OPTION"
+    ORDERED_LIST = "ORDERED_LIST"
+    MATCH_PAIRS = "MATCH_PAIRS"
+    FILL_BLANKS = "FILL_BLANKS"
+    FILE = "FILE"
 
 
 class AttemptStatus(str, Enum):
-    PENDING = "pending"
-    IN_PROGRESS = "in_progress"
-    PAUSED = "paused"
-    SUBMITTED = "submitted"
-    AUTO_SUBMITTED = "auto_submitted"
-    TIMED_OUT = "timed_out"
-    ABANDONED = "abandoned"
-    FLAGGED = "flagged"
+    NOT_STARTED = "NOT_STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    SUBMITTED = "SUBMITTED"
+    AUTO_SUBMITTED = "AUTO_SUBMITTED"
+    ABANDONED = "ABANDONED"
+    PENDING = "PENDING"
+    PAUSED = "PAUSED"
+    TIMED_OUT = "TIMED_OUT"
+    FLAGGED = "FLAGGED"
 
 
 class SubmissionGradingMode(str, Enum):
-    AUTO = "auto"
-    AI_ASSISTED = "ai_assisted"
-    MANUAL = "manual"
-    HYBRID = "hybrid"
+    AUTO = "AUTO"
+    AI_SUGGESTED = "AI_SUGGESTED"
+    LECTURER_MANUAL = "LECTURER_MANUAL"
+    RUBRIC = "RUBRIC"
+    AI_ASSISTED = "AI_ASSISTED"
+    MANUAL = "MANUAL"
+    HYBRID = "HYBRID"
 
 
 class GradeStatus(str, Enum):
-    PENDING = "pending"
-    AUTO_GRADED = "auto_graded"
-    AI_SUGGESTED = "ai_suggested"
-    AWAITING_REVIEW = "awaiting_review"
-    LECTURER_REVIEWED = "lecturer_reviewed"
-    FINAL = "final"
-    RELEASED = "released"
-    UNDER_APPEAL = "under_appeal"
+    PENDING = "PENDING"
+    AUTO_GRADED = "AUTO_GRADED"
+    AI_SUGGESTED = "AI_SUGGESTED"
+    AWAITING_REVIEW = "AWAITING_REVIEW"
+    LECTURER_REVIEWED = "LECTURER_REVIEWED"
+    FINAL = "FINAL"
+    RELEASED = "RELEASED"
+    UNDER_APPEAL = "UNDER_APPEAL"
 
 
 class GradingQueueStatus(str, Enum):
-    PENDING = "pending"
-    ASSIGNED = "assigned"
-    IN_PROGRESS = "in_progress"
-    COMPLETED = "completed"
-    CANCELLED = "cancelled"
-    FAILED = "failed"
+    PENDING = "PENDING"
+    ASSIGNED = "ASSIGNED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    CANCELLED = "CANCELLED"
+    FAILED = "FAILED"
 
 
 class GradingQueuePriority(str, Enum):
-    LOW = "low"
-    NORMAL = "normal"
-    HIGH = "high"
-    URGENT = "urgent"
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+    URGENT = "URGENT"
 
 
 class AppealStatus(str, Enum):
-    SUBMITTED = "submitted"
-    UNDER_REVIEW = "under_review"
-    RESOLVED_UPHELD = "resolved_upheld"
-    RESOLVED_REJECTED = "resolved_rejected"
-    WITHDRAWN = "withdrawn"
+    PENDING = "PENDING"
+    SUBMITTED = "SUBMITTED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    ACCEPTED = "ACCEPTED"
+    REJECTED = "REJECTED"
+    REVISED = "REVISED"
+    WITHDRAWN = "WITHDRAWN"
+    RESOLVED_UPHELD = "ACCEPTED"
+    RESOLVED_REJECTED = "REJECTED"
 
 
 class IntegrityEventType(str, Enum):
-    FULLSCREEN_EXIT = "fullscreen_exit"
-    TAB_SWITCH = "tab_switch"
-    WINDOW_BLUR = "window_blur"
-    WINDOW_FOCUS = "window_focus"
-    PAGE_HIDDEN = "page_hidden"
-    COPY_ATTEMPT = "copy_attempt"
-    PASTE_ATTEMPT = "paste_attempt"
-    RIGHT_CLICK_ATTEMPT = "right_click_attempt"
-    SUSPICIOUS_INACTIVITY = "suspicious_inactivity"
-    RECONNECT = "reconnect"
-    DEVTOOLS_DETECTED = "devtools_detected"
-    MULTIPLE_MONITORS = "multiple_monitors"
+    FULLSCREEN_EXIT = "FULLSCREEN_EXIT"
+    FULLSCREEN_ENTER = "FULLSCREEN_ENTER"
+    TAB_SWITCH = "TAB_SWITCH"
+    WINDOW_BLUR = "WINDOW_BLUR"
+    WINDOW_FOCUS = "WINDOW_FOCUS"
+    VISIBILITY_HIDDEN = "VISIBILITY_HIDDEN"
+    PAGE_HIDDEN = "PAGE_HIDDEN"
+    COPY_ATTEMPT = "COPY_ATTEMPT"
+    PASTE_ATTEMPT = "PASTE_ATTEMPT"
+    RIGHT_CLICK = "RIGHT_CLICK"
+    RIGHT_CLICK_ATTEMPT = "RIGHT_CLICK"
+    EXTENDED_INACTIVITY = "EXTENDED_INACTIVITY"
+    SUSPICIOUS_INACTIVITY = "EXTENDED_INACTIVITY"
+    RECONNECT = "RECONNECT"
+    UNUSUAL_KEYPRESS = "UNUSUAL_KEYPRESS"
+    DEVTOOLS_DETECTED = "DEVTOOLS_DETECTED"
+    MULTIPLE_MONITORS = "MULTIPLE_MONITORS"
 
 
 class RiskLevel(str, Enum):
-    NONE = "none"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    NONE = "NONE"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
 
 
 IntegrityRiskLevel = RiskLevel
 
 
 class WarningLevel(str, Enum):
-    WARNING_1 = "warning_1"
-    WARNING_2 = "warning_2"
-    WARNING_3 = "warning_3"
+    NONE = "NONE"
+    WARNING_1 = "WARNING_1"
+    WARNING_2 = "WARNING_2"
+    WARNING_3 = "WARNING_3"
 
 
 class SecurityEventType(str, Enum):
-    LOGIN_SUCCESS = "login_success"
-    LOGIN_FAILED = "login_failed"
-    LOGIN_LOCKED = "login_locked"
-    LOGOUT = "logout"
-    LOGOUT_ALL = "logout_all"
-    TOKEN_REFRESHED = "token_refreshed"
-    TOKEN_THEFT_DETECTED = "token_theft_detected"
-    ACCOUNT_CREATED = "account_created"
-    ACCOUNT_SUSPENDED = "account_suspended"
-    ACCOUNT_REACTIVATED = "account_reactivated"
-    EMAIL_VERIFIED = "email_verified"
-    VERIFICATION_EMAIL_RESENT = "verification_email_resent"
-    PASSWORD_CHANGED = "password_changed"
-    PASSWORD_RESET_REQUESTED = "password_reset_requested"
-    PASSWORD_RESET_COMPLETED = "password_reset_completed"
-    SUSPICIOUS_LOGIN = "suspicious_login"
+    FAILED_LOGIN = "FAILED_LOGIN"
+    ACCOUNT_LOCKED = "ACCOUNT_LOCKED"
+    TOKEN_REVOKED = "TOKEN_REVOKED"
+    SUSPICIOUS_IP = "SUSPICIOUS_IP"
+    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
+    ROLE_CHANGED = "ROLE_CHANGED"
+    ACCOUNT_SUSPENDED = "ACCOUNT_SUSPENDED"
+    LOGIN_SUCCESS = "LOGIN_SUCCESS"
+    LOGIN_FAILED = "LOGIN_FAILED"
+    LOGIN_LOCKED = "LOGIN_LOCKED"
+    LOGOUT = "LOGOUT"
+    LOGOUT_ALL = "LOGOUT_ALL"
+    TOKEN_REFRESHED = "TOKEN_REFRESHED"
+    TOKEN_THEFT_DETECTED = "TOKEN_THEFT_DETECTED"
+    ACCOUNT_CREATED = "ACCOUNT_CREATED"
+    ACCOUNT_REACTIVATED = "ACCOUNT_REACTIVATED"
+    EMAIL_VERIFIED = "EMAIL_VERIFIED"
+    VERIFICATION_EMAIL_RESENT = "VERIFICATION_EMAIL_RESENT"
+    PASSWORD_CHANGED = "PASSWORD_CHANGED"
+    PASSWORD_RESET_COMPLETED = "PASSWORD_RESET_COMPLETED"
+    SUSPICIOUS_LOGIN = "SUSPICIOUS_LOGIN"
+    TAB_SWITCH = "TAB_SWITCH"
+    FULLSCREEN_EXIT = "FULLSCREEN_EXIT"
+    COPY_ATTEMPT = "COPY_ATTEMPT"
+    PASTE_ATTEMPT = "PASTE_ATTEMPT"
 
 
 class SecurityEventSeverity(str, Enum):
-    INFO = "info"
-    LOW = "low"
-    MEDIUM = "medium"
-    HIGH = "high"
-    CRITICAL = "critical"
+    INFO = "INFO"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+    CRITICAL = "CRITICAL"
+    WARNING = "WARNING"
 
 
 class NotificationChannel(str, Enum):
-    IN_APP = "in_app"
-    EMAIL = "email"
-    PUSH = "push"
+    IN_APP = "IN_APP"
+    EMAIL = "EMAIL"
+    PUSH = "PUSH"
+    BOTH = "BOTH"
 
 
 class NotificationType(str, Enum):
-    ASSESSMENT_AVAILABLE = "assessment_available"
-    RESULT_RELEASED = "result_released"
-    DEADLINE_REMINDER = "deadline_reminder"
-    SUBMISSION_RECEIVED = "submission_received"
-    GRADING_COMPLETE = "grading_complete"
-    APPEAL_UPDATE = "appeal_update"
-    INTEGRITY_ALERT = "integrity_alert"
-    SYSTEM_ANNOUNCEMENT = "system_announcement"
+    ASSESSMENT_PUBLISHED = "ASSESSMENT_PUBLISHED"
+    ASSESSMENT_REMINDER = "ASSESSMENT_REMINDER"
+    RESULT_RELEASED = "RESULT_RELEASED"
+    FEEDBACK_RELEASED = "FEEDBACK_RELEASED"
+    SUBMISSION_RECEIVED = "SUBMISSION_RECEIVED"
+    GRADING_REQUIRED = "GRADING_REQUIRED"
+    INTEGRITY_ALERT = "INTEGRITY_ALERT"
+    APPEAL_SUBMITTED = "APPEAL_SUBMITTED"
+    APPEAL_RESOLVED = "APPEAL_RESOLVED"
+    DEADLINE_EXTENDED = "DEADLINE_EXTENDED"
+    REASSESSMENT_SCHEDULED = "REASSESSMENT_SCHEDULED"
+    ASSESSMENT_AVAILABLE = "ASSESSMENT_AVAILABLE"
+    DEADLINE_REMINDER = "ASSESSMENT_REMINDER"
+    GRADING_COMPLETE = "GRADING_REQUIRED"
+    APPEAL_UPDATE = "APPEAL_RESOLVED"
+    SYSTEM_ANNOUNCEMENT = "SYSTEM_ANNOUNCEMENT"
 
 
 class ScheduledEventType(str, Enum):
-    ASSESSMENT_WINDOW = "assessment_window"
-    HOMEWORK_DEADLINE = "homework_deadline"
-    RESULT_RELEASE = "result_release"
-    REASSESSMENT_WINDOW = "reassessment_window"
-    REVIEW_WINDOW = "review_window"
+    ASSESSMENT_WINDOW_OPEN = "ASSESSMENT_WINDOW_OPEN"
+    ASSESSMENT_DEADLINE = "ASSESSMENT_DEADLINE"
+    RESULT_RELEASE = "RESULT_RELEASE"
+    REASSESSMENT_WINDOW = "REASSESSMENT_WINDOW"
+    REVIEW_DEADLINE = "REVIEW_DEADLINE"
+    ASSESSMENT_WINDOW = "ASSESSMENT_WINDOW_OPEN"
+    HOMEWORK_DEADLINE = "ASSESSMENT_DEADLINE"
+    REVIEW_WINDOW = "REVIEW_DEADLINE"
 
 
 class AIAgentType(str, Enum):
-    ASSESSMENT_GENERATOR = "assessment_generator"
-    GRADING_ASSISTANT = "grading_assistant"
-    STUDY_SUPPORT = "study_support"
-    INTEGRITY_ANALYZER = "integrity_analyzer"
+    ASSESSMENT_GENERATOR = "ASSESSMENT_GENERATOR"
+    GRADING_ASSISTANT = "GRADING_ASSISTANT"
+    STUDY_SUPPORT = "STUDY_SUPPORT"
+    INTEGRITY_ANALYZER = "INTEGRITY_ANALYZER"
 
 
 class AIOutputStatus(str, Enum):
-    DRAFT = "draft"
-    PENDING_REVIEW = "pending_review"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    EDITED_AND_APPROVED = "edited_and_approved"
+    DRAFT = "DRAFT"
+    PENDING_REVIEW = "PENDING_REVIEW"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EDITED_AND_APPROVED = "EDITED_AND_APPROVED"
 
 
 class ResultLetterGrade(str, Enum):
-    A_PLUS = "A+"
+    A_PLUS = "A_PLUS"
     A = "A"
-    A_MINUS = "A-"
-    B_PLUS = "B+"
+    A_MINUS = "A_MINUS"
+    B_PLUS = "B_PLUS"
     B = "B"
-    B_MINUS = "B-"
-    C_PLUS = "C+"
+    B_MINUS = "B_MINUS"
+    C_PLUS = "C_PLUS"
     C = "C"
-    C_MINUS = "C-"
+    C_MINUS = "C_MINUS"
     D = "D"
     F = "F"
 
 
 class ResourceCategory(str, Enum):
-    LECTURE_NOTES = "lecture_notes"
-    PAST_PAPER = "past_paper"
-    TEXTBOOK_EXCERPT = "textbook_excerpt"
-    ASSIGNMENT = "assignment"
-    GENERAL = "general"
+    LECTURE_NOTES = "LECTURE_NOTES"
+    PAST_PAPER = "PAST_PAPER"
+    PERSONAL_NOTES = "PERSONAL_NOTES"
+    OTHER = "OTHER"
+    GENERAL = "GENERAL"
+    TEXTBOOK_EXCERPT = "LECTURE_NOTES"
+    ASSIGNMENT = "PAST_PAPER"
 
 
 class ResourceProcessingStatus(str, Enum):
-    PENDING = "pending"
-    PROCESSING = "processing"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    SKIPPED = "skipped"
+    PENDING = "PENDING"
+    PROCESSED = "PROCESSED"
+    FAILED = "FAILED"
+    PROCESSING = "PENDING"
+    COMPLETED = "PROCESSED"
+    SKIPPED = "FAILED"
 
 
 class IntegrityFlagStatus(str, Enum):
-    OPEN = "open"
-    UNDER_REVIEW = "under_review"
-    CONFIRMED = "confirmed"
-    DISMISSED = "dismissed"
-    ESCALATED = "escalated"
+    OPEN = "OPEN"
+    REVIEWED = "REVIEWED"
+    DISMISSED = "DISMISSED"
+    ESCALATED = "ESCALATED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    CONFIRMED = "CONFIRMED"
 
 
 class IntegrityFlagRaisedBy(str, Enum):
-    SYSTEM = "system"
-    SUPERVISOR = "supervisor"
-    ADMIN = "admin"
+    SYSTEM = "SYSTEM"
+    SUPERVISOR = "SUPERVISOR"
+    AI_AGENT = "AI_AGENT"
+    ADMIN = "SUPERVISOR"
 
 
 class SupervisionSessionStatus(str, Enum):
-    ACTIVE = "active"
-    ENDED = "ended"
+    ACTIVE = "ACTIVE"
+    ENDED = "ENDED"

@@ -34,13 +34,12 @@ DESIGN RULES:
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from typing import List, Optional
+from datetime import UTC, datetime
 
-from app.db.models.auth import (PasswordResetToken, RefreshToken, User,
-                                UserProfile)
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
+
+from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
 
 # ─────────────────────────────────────────────────────────────────────────────
 # USER REPOSITORY
@@ -59,7 +58,7 @@ class UserRepository:
 
     # ── Lookups ───────────────────────────────────────────────────────────────
 
-    async def get_by_id(self, user_id: uuid.UUID) -> Optional[User]:
+    async def get_by_id(self, user_id: uuid.UUID) -> User | None:
         """
         Fetch an active (non-deleted) user by primary key.
         Returns None if not found or soft-deleted.
@@ -72,7 +71,7 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id_include_deleted(self, user_id: uuid.UUID) -> Optional[User]:
+    async def get_by_id_include_deleted(self, user_id: uuid.UUID) -> User | None:
         """
         Fetch a user by primary key regardless of soft-delete status.
         Used by admin endpoints that need to inspect deleted accounts.
@@ -82,7 +81,7 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_email(self, email: str) -> Optional[User]:
+    async def get_by_email(self, email: str) -> User | None:
         """
         Fetch an active user by email address (case-insensitive).
         Email must already be normalised (lowercased) before calling this.
@@ -96,7 +95,7 @@ class UserRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_email_include_deleted(self, email: str) -> Optional[User]:
+    async def get_by_email_include_deleted(self, email: str) -> User | None:
         """
         Fetch a user by email regardless of soft-delete status.
         Used during registration to prevent re-use of a deleted account's email.
@@ -164,14 +163,14 @@ class UserRepository:
 
     async def set_last_login(self, user: User) -> None:
         """Update last_login_at to now (UTC). Called on token issuance."""
-        user.last_login_at = datetime.now(timezone.utc)
+        user.last_login_at = datetime.now(UTC)
         self.db.add(user)
         await self.db.flush()
 
     async def soft_delete(self, user: User) -> None:
         """Soft-delete a user account (preserves academic records)."""
         user.is_deleted = True
-        user.deleted_at = datetime.now(timezone.utc)
+        user.deleted_at = datetime.now(UTC)
         self.db.add(user)
         await self.db.flush()
 
@@ -195,12 +194,12 @@ class RefreshTokenRepository:
 
     # ── Lookups ───────────────────────────────────────────────────────────────
 
-    async def get_by_jti(self, jti: str) -> Optional[RefreshToken]:
+    async def get_by_jti(self, jti: str) -> RefreshToken | None:
         """
         Fetch an active (non-revoked, non-deleted) refresh token by JTI.
         Returns None if the JTI is not found or has been revoked.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.jti == jti,
@@ -210,12 +209,12 @@ class RefreshTokenRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_active_by_user(self, user_id: uuid.UUID) -> List[RefreshToken]:
+    async def get_active_by_user(self, user_id: uuid.UUID) -> list[RefreshToken]:
         """
         Fetch all active (non-revoked, non-expired) refresh tokens for a user.
         Used for the "active sessions" list and logout-all operations.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.user_id == user_id,
@@ -252,14 +251,14 @@ class RefreshTokenRepository:
         window between the DB update and the Redis update.
         """
         token.revoked = True
-        token.revoked_at = datetime.now(timezone.utc)
+        token.revoked_at = datetime.now(UTC)
         self.db.add(token)
         await self.db.flush()
         # Hard-delete after marking — the Redis blocklist is the authoritative store
         await self.db.delete(token)
         await self.db.flush()
 
-    async def revoke_all_for_user(self, user_id: uuid.UUID) -> List[str]:
+    async def revoke_all_for_user(self, user_id: uuid.UUID) -> list[str]:
         """
         Hard-delete all active refresh tokens for a user.
         Returns the list of revoked JTIs so the caller can push them to Redis.
@@ -270,7 +269,7 @@ class RefreshTokenRepository:
             - password change (invalidate all existing sessions)
         """
         tokens = await self.get_active_by_user(user_id)
-        jtis: List[str] = []
+        jtis: list[str] = []
         for token in tokens:
             jtis.append(token.jti)
             await self.db.delete(token)
@@ -288,7 +287,7 @@ class RefreshTokenRepository:
         Called opportunistically to keep the table lean.
         Returns the count of deleted rows.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(RefreshToken).where(
                 RefreshToken.user_id == user_id,
@@ -324,14 +323,14 @@ class PasswordResetTokenRepository:
         self,
         token_hash: str,
         token_purpose: str,
-    ) -> Optional[PasswordResetToken]:
+    ) -> PasswordResetToken | None:
         """
         Fetch an unused, non-expired token by its SHA-256 hash and type.
 
         The caller hashes the raw submitted token with security.hash_token()
         before calling this. Returns None if not found, expired, or already used.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.token_hash == token_hash,
@@ -346,12 +345,12 @@ class PasswordResetTokenRepository:
         self,
         user_id: uuid.UUID,
         token_purpose: str,
-    ) -> Optional[PasswordResetToken]:
+    ) -> PasswordResetToken | None:
         """
         Fetch the most recent unused, non-expired token of a given type for a user.
         Used to invalidate existing tokens before issuing a new one.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user_id,
@@ -378,7 +377,7 @@ class PasswordResetTokenRepository:
         the used.is_(False) check.
         """
         token.used = True
-        token.used_at = datetime.now(timezone.utc)
+        token.used_at = datetime.now(UTC)
         self.db.add(token)
         await self.db.flush()
 
@@ -416,7 +415,7 @@ class PasswordResetTokenRepository:
         Called opportunistically on each new token issuance.
         Returns the count of deleted rows.
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         result = await self.db.execute(
             select(PasswordResetToken).where(
                 PasswordResetToken.user_id == user_id,
@@ -447,7 +446,7 @@ class UserProfileRepository:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
 
-    async def get_by_user_id(self, user_id: uuid.UUID) -> Optional[UserProfile]:
+    async def get_by_user_id(self, user_id: uuid.UUID) -> UserProfile | None:
         """Fetch the profile for a given user_id."""
         result = await self.db.execute(
             select(UserProfile).where(

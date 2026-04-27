@@ -17,11 +17,11 @@ from __future__ import annotations
 import time
 import uuid
 
-from app.core.logger import get_logger, set_request_context
 from fastapi import Request, Response
-from starlette.middleware.base import (BaseHTTPMiddleware,
-                                       RequestResponseEndpoint)
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
+
+from app.core.logger import get_logger, set_request_context
 
 logger = get_logger("mindexa.http")
 
