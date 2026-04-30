@@ -28,6 +28,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar"
 import { NavUser } from "@/components/nav-user"
+import { useAuth } from "@/hooks/use-auth"
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
@@ -44,6 +45,16 @@ const toolsNav = [
 
 export function StudentSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname()
+  const { user } = useAuth()
+
+  const displayName = (user?.profile as any)?.display_name || 
+    ((user?.profile as any)?.first_name ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}` : "Student")
+
+  const userData = {
+    name: displayName,
+    email: (user as any)?.email || "",
+    avatar: (user?.profile as any)?.profile_picture_url || "/avatars/student.jpg"
+  }
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -120,7 +131,7 @@ export function StudentSidebar({ ...props }: React.ComponentProps<typeof Sidebar
       </SidebarContent>
 
       <SidebarFooter>
-        <NavUser user={{ name: "Alex Rivera", email: "alex.rivera@university.edu", avatar: "/avatars/student.jpg" }} />
+        <NavUser user={userData} />
       </SidebarFooter>
 
       <SidebarRail />

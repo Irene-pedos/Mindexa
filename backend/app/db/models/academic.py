@@ -307,7 +307,11 @@ class LecturerCourseAssignment(AuditedBaseModel, table=True):
         )
     )
     assignment_role: LecturerAssignmentRole = Field(nullable=False)
-    assigned_at: datetime = Field(default_factory=utcnow, nullable=False)
+    assigned_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
     is_active: bool = Field(default=True, nullable=False, index=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────
@@ -350,7 +354,11 @@ class StudentEnrollment(AuditedBaseModel, table=True):
         nullable=False,
         index=True,
     )
-    enrolled_at: datetime = Field(default_factory=utcnow, nullable=False)
+    enrolled_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
     withdrawn_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

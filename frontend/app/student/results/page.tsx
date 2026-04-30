@@ -1,63 +1,51 @@
 // app/(student)/results/page.tsx
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { Trophy, Calendar, Award, Eye } from "lucide-react"
 import Link from "next/link"
-
-const results = [
-  {
-    id: "db-cat-301",
-    title: "Mid-Semester CAT – Database Systems",
-    type: "CAT",
-    date: "March 27, 2026",
-    score: 92,
-    total: 100,
-    status: "Graded",
-    feedbackReleased: true,
-    grade: "A-",
-  },
-  {
-    id: "algo-quiz-201",
-    title: "Formative Quiz – Algorithms",
-    type: "Formative",
-    date: "March 20, 2026",
-    score: 28,
-    total: 30,
-    status: "Graded",
-    feedbackReleased: true,
-    grade: "A",
-  },
-  {
-    id: "hw-networks-4",
-    title: "Homework 4 – Computer Networks",
-    type: "Homework",
-    date: "March 25, 2026",
-    score: 22,
-    total: 25,
-    status: "Graded",
-    feedbackReleased: false,
-    grade: "B+",
-  },
-  {
-    id: "os-summative-202",
-    title: "Summative Exam – Operating Systems",
-    type: "Summative",
-    date: "Pending",
-    score: null,
-    total: 100,
-    status: "Submitted",
-    feedbackReleased: false,
-    grade: "Pending",
-  },
-]
+import { studentApi, StudentRecentResult } from "@/lib/api/student"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function StudentResultsPage() {
-  const overallGPA = 3.78
-  const semesterProgress = 87
+  const [results, setResults] = useState<StudentRecentResult[]>([])
+  const [loading, setLoading] = useState(true)
+  const [overallGPA, setOverallGPA] = useState(0)
+
+  useEffect(() => {
+    async function loadResults() {
+      try {
+        const data = await studentApi.getDashboard()
+        setResults(data.recent_results)
+        setOverallGPA(data.summary.cgpa)
+      } catch (err) {
+        console.error("Failed to load results", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadResults()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="space-y-8">
+        <Skeleton className="h-10 w-64" />
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          {[1, 2, 3].map(i => <Skeleton key={i} className="h-32 w-full" />)}
+        </div>
+        <Skeleton className="h-96 w-full" />
+      </div>
+    )
+  }
+
+  const bestPerformance = results.length > 0 
+    ? results.reduce((prev, current) => (prev.percentage > current.percentage) ? prev : current)
+    : null
 
   return (
     <div className="space-y-8">
@@ -71,11 +59,11 @@ export default function StudentResultsPage() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-muted-foreground">Current Semester GPA</CardTitle>
-            <div className="text-5xl font-semibold tabular-nums tracking-tighter mt-2">{overallGPA}</div>
+            <div className="text-5xl font-semibold tabular-nums tracking-tighter mt-2">{overallGPA.toFixed(2)}</div>
           </CardHeader>
           <CardContent>
-            <Progress value={semesterProgress} className="h-2" />
-            <p className="text-xs text-muted-foreground mt-2">87% toward target</p>
+            <Progress value={(overallGPA / 4.0) * 100} className="h-2" />
+            <p className="text-xs text-muted-foreground mt-2">Target: 4.0</p>
           </CardContent>
         </Card>
 
@@ -86,18 +74,24 @@ export default function StudentResultsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="font-medium">Database Systems CAT</p>
-            <p className="text-2xl font-semibold text-emerald-600">92%</p>
+            {bestPerformance ? (
+              <>
+                <p className="font-medium truncate">{bestPerformance.assessment_title}</p>
+                <p className="text-2xl font-semibold text-emerald-600">{bestPerformance.percentage}%</p>
+              </>
+            ) : (
+              <p className="text-muted-foreground">No results yet</p>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Pending Feedback</CardTitle>
+            <CardTitle>Total Assessments</CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-3xl font-semibold">2</p>
-            <p className="text-sm text-muted-foreground">Assessments awaiting lecturer review</p>
+            <p className="text-4xl font-semibold">{results.length}</p>
+            <p className="text-sm text-muted-foreground">Released results</p>
           </CardContent>
         </Card>
       </div>
@@ -110,47 +104,38 @@ export default function StudentResultsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            {results.map((result) => (
-              <div key={result.id} className="flex flex-col md:flex-row md:items-center gap-6 border-b last:border-0 pb-6 last:pb-0">
-                <div className="flex-1">
-                  <div className="font-medium text-lg">{result.title}</div>
-                  <div className="text-sm text-muted-foreground flex items-center gap-4 mt-1">
-                    <span>{result.type}</span>
-                    <span>•</span>
-                    <span className="flex items-center gap-1">
-                      <Calendar className="size-4" /> {result.date}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-8">
-                  <div className="text-right">
-                    {result.score !== null ? (
-                      <>
-                        <div className="text-3xl font-semibold tabular-nums">{result.score}<span className="text-base font-normal text-muted-foreground">/{result.total}</span></div>
-                        <div className="text-sm text-emerald-600 font-medium">{result.grade}</div>
-                      </>
-                    ) : (
-                      <Badge variant="outline">Pending</Badge>
-                    )}
+            {results.length === 0 ? (
+              <p className="text-center py-10 text-muted-foreground">No released results found.</p>
+            ) : (
+              results.map((result) => (
+                <div key={result.id} className="flex flex-col md:flex-row md:items-center gap-6 border-b last:border-0 pb-6 last:pb-0">
+                  <div className="flex-1">
+                    <div className="font-medium text-lg">{result.assessment_title}</div>
+                    <div className="text-sm text-muted-foreground flex items-center gap-4 mt-1">
+                      <Badge variant="outline" className="uppercase text-[10px]">{result.assessment_type}</Badge>
+                      <span className="flex items-center gap-1">
+                        <Calendar className="size-4" /> {new Date(result.released_at).toLocaleDateString()}
+                      </span>
+                    </div>
                   </div>
 
-                  <div>
-                    {result.feedbackReleased ? (
+                  <div className="flex items-center gap-8">
+                    <div className="text-right">
+                      <div className="text-3xl font-semibold tabular-nums">{result.score}<span className="text-base font-normal text-muted-foreground">/{result.total_marks}</span></div>
+                      <div className="text-sm text-emerald-600 font-medium">{result.letter_grade || "RELEASED"}</div>
+                    </div>
+
+                    <div>
                       <Button asChild variant="default">
-                        <Link href={`/student/results/${result.id}`}>
+                        <Link href={`/student/assessments/${result.id}/results`}>
                           View Detailed Feedback
                         </Link>
                       </Button>
-                    ) : result.status === "Submitted" ? (
-                      <Badge variant="secondary">Awaiting Review</Badge>
-                    ) : (
-                      <Button variant="outline" disabled>Feedback Pending</Button>
-                    )}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

@@ -35,7 +35,6 @@ class User(BaseModel, table=True):
             String(255),
             unique=True,
             nullable=False,
-            index=True,
             comment="Normalized (lowercase) email address",
         )
     )
@@ -51,7 +50,6 @@ class User(BaseModel, table=True):
         sa_column=Column(
             String(20),
             nullable=False,
-            index=True,
             comment="User role: STUDENT | LECTURER | ADMIN",
         )
     )
@@ -60,7 +58,6 @@ class User(BaseModel, table=True):
         sa_column=Column(
             String(30),
             nullable=False,
-            index=True,
             comment="Account status",
         )
     )
@@ -116,7 +113,6 @@ class UserProfile(BaseModel, table=True):
             ForeignKey("user.id", ondelete="CASCADE"),
             nullable=False,
             unique=True,
-            index=True,
         )
     )
     first_name: Optional[str] = Field(default=None, max_length=100)
@@ -125,9 +121,13 @@ class UserProfile(BaseModel, table=True):
     phone_number: Optional[str] = Field(default=None, max_length=30)
     bio: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     avatar_url: Optional[str] = Field(default=None, max_length=500)
-    student_id: Optional[str] = Field(default=None, max_length=50, index=True)
+    student_id: Optional[str] = Field(default=None, max_length=50, index=True, unique=True)
     staff_id: Optional[str] = Field(default=None, max_length=50, index=True)
+    college: Optional[str] = Field(default=None, max_length=150)
     department: Optional[str] = Field(default=None, max_length=150)
+    option: Optional[str] = Field(default=None, max_length=150)
+    level: Optional[str] = Field(default=None, max_length=20)
+    year: Optional[str] = Field(default=None, max_length=20)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     user: Optional["User"] = Relationship(back_populates="profile")
@@ -148,7 +148,6 @@ class RefreshToken(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     jti: str = Field(
@@ -189,7 +188,6 @@ class PasswordResetToken(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     token_hash: str = Field(

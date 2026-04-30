@@ -327,3 +327,58 @@ class FinalizeAssessmentResponse(BaseModel):
     warnings: list[str] = []
 
     model_config = {"from_attributes": True}
+
+
+# ─── Bulk Assessment Schemas (Frontend Alignment) ──────────────────────────────
+
+
+class BulkAssessmentSection(BaseModel):
+    id: str
+    section: str
+    topics: str | None = None
+    marks: int = Field(..., ge=0)
+    questions: int = Field(..., ge=0)
+    difficulty: str = "Medium"
+    allowedTypes: list[str] = []
+
+
+class BulkAssessmentQuestion(BaseModel):
+    id: str
+    sectionId: str
+    text: str
+    type: str
+    marks: int = Field(..., ge=0)
+    options: list[str] | None = None
+    correctAnswer: str | None = None
+    aiGenerated: bool = False
+
+
+class BulkAssessmentMetadata(BaseModel):
+    title: str = Field(..., min_length=2, max_length=300)
+    mode: str
+    course: str
+    targetClass: str
+    date: datetime | None = None
+    startTime: str
+    endTime: str
+    durationMinutes: int = Field(..., ge=1)
+    selectedInstructions: list[str] = []
+    customInstructions: str | None = None
+
+
+class BulkAssessmentRules(BaseModel):
+    openBook: bool = False
+    supervised: bool = True
+    aiAllowed: bool = False
+    browserRestricted: bool = True
+    shuffleQuestions: bool = True
+    shuffleOptions: bool = True
+    resultRelease: str = "delayed"
+    attempts: int = Field(default=1, ge=1)
+
+
+class BulkAssessmentPublishRequest(BaseModel):
+    metadata: BulkAssessmentMetadata
+    blueprint: list[BulkAssessmentSection]
+    questions: list[BulkAssessmentQuestion]
+    rules: BulkAssessmentRules

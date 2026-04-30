@@ -249,3 +249,33 @@ class AttemptRepository:
             .where(AssessmentAttempt.id == attempt_id)
             .values(is_flagged=flagged)
         )
+
+    async def list_recent_submissions_by_lecturer(
+        self, lecturer_id: uuid.UUID, limit: int = 10
+    ) -> list[AssessmentAttempt]:
+        """
+        Return the most recent SUBMITTED or AUTO_SUBMITTED attempts 
+        for all assessments created by this lecturer.
+        """
+        from app.db.models.assessment import Assessment
+        from app.db.models.auth import User
+
+        result = await self.db.execute(
+            select(AssessmentAttempt)
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .options(
+                selectinload(AssessmentAttempt.assessment),
+                selectinload(AssessmentAttempt.student).selectinload(User.profile)
+            )
+            .where(
+                Assessment.created_by_id == lecturer_id,
+                AssessmentAttempt.status.in_([
+                    AttemptStatus.SUBMITTED,
+                    AttemptStatus.AUTO_SUBMITTED
+                ]),
+                AssessmentAttempt.is_deleted.is_(False)
+            )
+            .order_by(AssessmentAttempt.submitted_at.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())

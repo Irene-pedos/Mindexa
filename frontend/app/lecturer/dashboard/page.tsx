@@ -1,33 +1,56 @@
 // app/lecturer/dashboard/page.tsx
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { AlertTriangle, Users, Clock, CheckCircle, Eye, Plus } from "lucide-react"
 import Link from "next/link"
 import { ChartAreaInteractive } from "@/components/chart-area-interactive"
-
-const metrics = [
-  { label: "Active Classes", value: "4", change: "+1 this week", icon: Users, color: "text-blue-600" },
-  { label: "Upcoming Assessments", value: "7", change: "3 this week", icon: Clock, color: "text-amber-600" },
-  { label: "Pending Grading", value: "23", change: "12 AI suggestions", icon: CheckCircle, color: "text-emerald-600" },
-  { label: "Flagged Integrity Events", value: "3", change: "Today", icon: AlertTriangle, color: "text-red-600" },
-]
-
-const pendingQueue = [
-  { title: "Database Systems CAT – 18 submissions awaiting review", type: "Manual Grading", count: 18, urgency: "high" },
-  { title: "AI Suggested Grades – Algorithms Quiz (12 students)", type: "AI Review", count: 12, urgency: "medium" },
-  { title: "Suspicious Activity Reports – 2 students", type: "Integrity Flag", count: 2, urgency: "high" },
-  { title: "Reassessment Requests", type: "Appeal Review", count: 3, urgency: "low" },
-]
-
-const recentSubmissions = [
-  { student: "Jordan Lee", assessment: "Database Systems CAT", time: "14 min ago", status: "Submitted" },
-  { student: "Taylor Kim", assessment: "Algorithms Quiz", time: "47 min ago", status: "Submitted" },
-]
+import { lecturerApi, LecturerDashboardResponse } from "@/lib/api/lecturer"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function LecturerDashboard() {
+  const [data, setData] = useState<LecturerDashboardResponse | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function loadDashboard() {
+      try {
+        const dashboardData = await lecturerApi.getDashboard()
+        setData(dashboardData)
+      } catch (err) {
+        console.error("Failed to load lecturer dashboard", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadDashboard()
+  }, [])
+
+  const metrics = [
+    { label: "Active Classes", value: data?.summary.active_classes_count ?? 0, change: "", icon: Users, color: "text-blue-600" },
+    { label: "Upcoming Assessments", value: data?.summary.upcoming_assessments_count ?? 0, change: "", icon: Clock, color: "text-amber-600" },
+    { label: "Pending Grading", value: data?.summary.pending_grading_count ?? 0, change: "", icon: CheckCircle, color: "text-emerald-600" },
+    { label: "Flagged Integrity Events", value: data?.summary.flagged_events_count ?? 0, change: "", icon: AlertTriangle, color: "text-red-600" },
+  ]
+
+  if (loading) {
+    return (
+      <div className="space-y-10">
+        <div className="space-y-2">
+          <Skeleton className="h-10 w-64" />
+          <Skeleton className="h-4 w-96" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-32 w-full" />)}
+        </div>
+        <Skeleton className="h-96 w-full" />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-10">
       <div>
@@ -45,7 +68,7 @@ export default function LecturerDashboard() {
             </CardHeader>
             <CardContent>
               <div className="text-4xl font-semibold tabular-nums tracking-tighter">{m.value}</div>
-              <p className="text-xs text-muted-foreground mt-1">{m.change}</p>
+              {m.change && <p className="text-xs text-muted-foreground mt-1">{m.change}</p>}
             </CardContent>
           </Card>
         ))}
@@ -101,20 +124,26 @@ export default function LecturerDashboard() {
             </Button>
           </CardHeader>
           <CardContent className="space-y-4">
-            {pendingQueue.map((item, i) => (
-              <div key={i} className="flex items-center justify-between rounded-xl border p-5 hover:bg-muted/50 transition-all">
-                <div className="flex-1">
-                  <div className="font-medium">{item.title}</div>
-                  <div className="text-sm text-muted-foreground">{item.type}</div>
+            {data?.pending_queue.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center border rounded-xl border-dashed">No items in the grading queue.</p>
+            ) : (
+              data?.pending_queue.map((item, i) => (
+                <div key={i} className="flex items-center justify-between rounded-xl border p-5 hover:bg-muted/50 transition-all">
+                  <div className="flex-1">
+                    <div className="font-medium">{item.assessment_title}</div>
+                    <div className="text-sm text-muted-foreground">{item.type}</div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <Badge variant={item.urgency === "high" ? "destructive" : item.urgency === "medium" ? "default" : "secondary"}>
+                      {item.count}
+                    </Badge>
+                    <Button size="sm" asChild>
+                       <Link href="/lecturer/grading">Review Now</Link>
+                    </Button>
+                  </div>
                 </div>
-                <div className="flex items-center gap-4">
-                  <Badge variant={item.urgency === "high" ? "destructive" : item.urgency === "medium" ? "default" : "secondary"}>
-                    {item.count}
-                  </Badge>
-                  <Button size="sm">Review Now</Button>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -127,6 +156,7 @@ export default function LecturerDashboard() {
             <CardDescription>Real-time suspicious behavior (last 30 minutes)</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            {/* Keeping the mocked alerts for now as requested for rich visuals */}
             <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 p-5">
               <div className="flex items-start gap-4">
                 <AlertTriangle className="size-6 text-red-600 mt-0.5" />
@@ -158,22 +188,26 @@ export default function LecturerDashboard() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Submissions</CardTitle>
-          <CardDescription>Last hour across all active assessments</CardDescription>
+          <CardDescription>Last active assessments submissions</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
-            {recentSubmissions.map((sub, i) => (
-              <div key={i} className="flex items-center justify-between border-b last:border-0 pb-4">
-                <div>
-                  <div className="font-medium">{sub.student}</div>
-                  <div className="text-sm text-muted-foreground">{sub.assessment}</div>
+            {data?.recent_submissions.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-4">No recent submissions found.</p>
+            ) : (
+              data?.recent_submissions.map((sub, i) => (
+                <div key={i} className="flex items-center justify-between border-b last:border-0 pb-4">
+                  <div>
+                    <div className="font-medium">{sub.student_name}</div>
+                    <div className="text-sm text-muted-foreground">{sub.assessment_title}</div>
+                  </div>
+                  <div className="text-right">
+                    <Badge variant="outline">{sub.status}</Badge>
+                    <div className="text-xs text-muted-foreground mt-1">{new Date(sub.submitted_at).toLocaleString()}</div>
+                  </div>
                 </div>
-                <div className="text-right">
-                  <Badge variant="outline">{sub.status}</Badge>
-                  <div className="text-xs text-muted-foreground mt-1">{sub.time}</div>
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

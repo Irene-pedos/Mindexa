@@ -271,6 +271,23 @@ class ResultService:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
         return result
 
+    async def list_results_for_student(
+        self,
+        *,
+        student_id: uuid.UUID,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[AssessmentResult], int]:
+        """
+        Return a list of released results for a student.
+        """
+        return await self.result_repo.list_by_student(
+            student_id=student_id,
+            is_released=True,
+            page=page,
+            page_size=page_size,
+        )
+
     # -----------------------------------------------------------------------
     # CLEAR INTEGRITY HOLD
     # -----------------------------------------------------------------------

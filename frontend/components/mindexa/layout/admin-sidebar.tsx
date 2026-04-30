@@ -26,7 +26,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { NavUser } from "@/components/nav-user";
+import { NavUser } from "@/components/nav-user"
+import { useAuth } from "@/hooks/use-auth";
 
 const mainNav = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
@@ -44,6 +45,16 @@ export function AdminSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
+  const { user } = useAuth();
+
+  const displayName = (user?.profile as any)?.display_name || 
+    ((user?.profile as any)?.first_name ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}` : "Administrator")
+
+  const userData = {
+    name: displayName,
+    email: (user as any)?.email || "",
+    avatar: (user?.profile as any)?.profile_picture_url || "/avatars/admin.jpg"
+  }
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -132,13 +143,7 @@ export function AdminSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <NavUser
-          user={{
-            name: "Dr. Michael Chen",
-            email: "admin@university.edu",
-            avatar: "/avatars/admin.jpg",
-          }}
-        />
+        <NavUser user={userData} />
       </SidebarFooter>
 
       <SidebarRail />

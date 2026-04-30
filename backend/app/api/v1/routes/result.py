@@ -61,6 +61,34 @@ async def get_my_result(
     return AssessmentResultResponse.model_validate(result)
 
 
+@router.get(
+    "/me",
+    response_model=ResultListResponse,
+    summary="List your own released results (student)",
+)
+async def list_my_results(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> ResultListResponse:
+    """
+    Returns a paginated list of released results for the current student.
+    """
+    service = ResultService(db)
+    items, total = await service.list_results_for_student(
+        student_id=current_user.id,
+        page=page,
+        page_size=page_size,
+    )
+    return ResultListResponse(
+        items=[ResultSummary.model_validate(r) for r in items],
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 # ── LECTURER: GET RESULT (NO RELEASE CHECK) ───────────────────────────────────
 
 

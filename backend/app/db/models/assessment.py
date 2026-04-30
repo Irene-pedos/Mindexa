@@ -401,7 +401,11 @@ class AssessmentSupervisor(BaseModel, table=True):
         default=SupervisorRole.ASSISTANT,
         nullable=False,
     )
-    assigned_at: datetime = Field(default_factory=utcnow, nullable=False)
+    assigned_at: datetime = Field(
+        default_factory=utcnow,
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
     # Plain UUID — validated at service layer
     assigned_by_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
 
@@ -907,7 +911,6 @@ class RubricCriterionLevel(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("rubric_criterion.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     label: str = Field(nullable=False, max_length=100)

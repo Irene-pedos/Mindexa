@@ -432,7 +432,6 @@ class StudentGroupMember(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_group.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     student_id: uuid.UUID = Field(
@@ -440,7 +439,6 @@ class StudentGroupMember(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     group_role: Optional[str] = Field(
@@ -620,7 +618,10 @@ class StudentResponse(BaseModel, table=True):
     )
     file_url: Optional[str] = Field(default=None, nullable=True)
     is_skipped: bool = Field(default=False, nullable=False)
-    saved_at: Optional[datetime] = Field(default=None, nullable=True)
+    saved_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     is_final: bool = Field(default=False, nullable=False, index=True)
 
     # ── Timing analytics ──────────────────────────────────────────────────────
@@ -718,7 +719,10 @@ class StudentResponseLog(BaseModel, table=True):
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -858,7 +862,6 @@ class SubmissionGrade(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -1139,9 +1142,18 @@ class GradingQueueItem(BaseModel, table=True):
             index=True,
         )
     )
-    assigned_at: Optional[datetime] = Field(default=None, nullable=True)
-    completed_at: Optional[datetime] = Field(default=None, nullable=True)
-    created_at: datetime = Field(default_factory=utcnow, nullable=False)
+    assigned_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    completed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    created_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1205,7 +1217,6 @@ class ResultAppeal(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     submission_grade_id: uuid.UUID = Field(
@@ -1260,8 +1271,14 @@ class ResultAppeal(BaseModel, table=True):
             index=True,
         )
     )
-    review_started_at: Optional[datetime] = Field(default=None, nullable=True)
-    review_completed_at: Optional[datetime] = Field(default=None, nullable=True)
+    review_started_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    review_completed_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     reviewer_decision: Optional[str] = Field(
         default=None,
         nullable=True,

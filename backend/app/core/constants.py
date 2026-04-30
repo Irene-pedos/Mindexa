@@ -31,9 +31,11 @@ class UserRole(str, Enum):
 class UserStatus(str, Enum):
     """Account lifecycle status."""
     PENDING_VERIFICATION = "PENDING_VERIFICATION"
+    PENDING_APPROVAL = "PENDING_APPROVAL"
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     INACTIVE = "INACTIVE"
+    GRADUATED = "GRADUATED"
 
 
 class TokenType(str, Enum):

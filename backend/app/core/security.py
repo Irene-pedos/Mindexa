@@ -52,6 +52,7 @@ from jose import JWTError, jwt
 
 from app.core.config import settings
 from app.core.exceptions import InvalidTokenError, TokenExpiredError
+from app.core.redis import get_redis
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CONSTANTS
@@ -88,10 +89,10 @@ class TokenPayload:
         email      — user email (DISPLAY ONLY — never trusted for auth decisions)
     """
 
-    sub: str         # user_id as string
-    jti: str         # unique token id
+    sub: str  # user_id as string
+    jti: str  # unique token id
     token_type: str  # "access" or "refresh"
-    role: str = ""   # present on access tokens; empty string on refresh tokens
+    role: str = ""  # present on access tokens; empty string on refresh tokens
     email: str = ""  # present on access tokens; empty string on refresh tokens
 
     @property
@@ -212,10 +213,7 @@ def _dummy_bcrypt_verify() -> None:
     The hash is a pre-computed bcrypt of a dummy password — it never matches
     any real password, so this operation is purely for timing parity.
     """
-    _DUMMY_HASH = (
-        "$2b$12$KIX/aP4.6/oA8DcFiALZKe"
-        "Q2qW9.3VFkYT1b7PxB3Zq8X5mN1dAp2"
-    )
+    _DUMMY_HASH = "$2b$12$KIX/aP4.6/oA8DcFiALZKeQ2qW9.3VFkYT1b7PxB3Zq8X5mN1dAp2"
     try:
         bcrypt.checkpw(b"dummy_timing_password", _DUMMY_HASH.encode("utf-8"))
     except Exception:
@@ -338,7 +336,7 @@ def create_access_token(
 
     now = datetime.now(UTC)
     expires_at = now + expires_delta
-    role_value = role.value if hasattr(role, "value") else str(role)
+    role_value = str(role)
     jti = str(uuid.uuid4())
 
     payload: dict[str, Any] = {
@@ -353,7 +351,7 @@ def create_access_token(
 
     encoded = jwt.encode(
         payload,
-        settings.SECRET_KEY,
+        settings.SECRET_KEY or "",
         algorithm=settings.JWT_ALGORITHM,
     )
     if return_expires:
@@ -420,7 +418,7 @@ def create_refresh_token(
 
     encoded = jwt.encode(
         payload,
-        settings.SECRET_KEY,
+        settings.SECRET_KEY or "",
         algorithm=settings.JWT_ALGORITHM,
     )
     if return_expires:
@@ -428,7 +426,7 @@ def create_refresh_token(
     return encoded, jti
 
 
-def decode_token(token: str, expected_type: str | Any) -> TokenPayload:
+def decode_token(token: str, expected_type: str) -> TokenPayload:
     """
     Decode and validate a JWT token (access or refresh).
 
@@ -455,7 +453,7 @@ def decode_token(token: str, expected_type: str | Any) -> TokenPayload:
     try:
         raw = jwt.decode(
             token,
-            settings.SECRET_KEY,
+            settings.SECRET_KEY or "",
             algorithms=[settings.JWT_ALGORITHM],
             options={"require": ["sub", "exp", "iat", "jti", "type"]},
         )
@@ -466,9 +464,7 @@ def decode_token(token: str, expected_type: str | Any) -> TokenPayload:
         raise InvalidTokenError() from exc
 
     # Enforce token type — prevents refresh tokens being used as access tokens
-    expected_type_value = (
-        expected_type.value if hasattr(expected_type, "value") else str(expected_type)
-    )
+    expected_type_value = str(expected_type)
     if raw.get("type") != expected_type_value:
         raise InvalidTokenError(
             detail=f"Invalid token type. '{expected_type_value}' token required."
@@ -515,9 +511,7 @@ def create_refresh_token_payload(
     Alias for create_refresh_token().
     Kept for backward compatibility with any code using the older name.
     """
-    return create_refresh_token(
-        user_id, expires_delta=expires_delta, return_expires=True
-    )
+    return create_refresh_token(user_id, expires_delta=expires_delta, return_expires=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -536,8 +530,6 @@ async def cache_revoked_jti(jti: str, expires_in_seconds: int) -> None:
     the hot token validation path. The DB (refresh_token.revoked column)
     is the authoritative source.
     """
-    from app.core.redis import get_redis
-
     redis = await get_redis()
     key = f"{_REVOKED_JTI_PREFIX}{jti}"
     await redis.setex(key, expires_in_seconds, "1")
@@ -551,8 +543,6 @@ async def is_jti_revoked_in_cache(jti: str) -> bool:
     Returns False → JTI not in revocation cache
                     (caller must still check DB for the authoritative answer)
     """
-    from app.core.redis import get_redis
-
     redis = await get_redis()
     key = f"{_REVOKED_JTI_PREFIX}{jti}"
     result = await redis.exists(key)

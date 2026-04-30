@@ -128,6 +128,18 @@ ASSESSMENT_TITLE = "Intro to Programming CAT"
 
 
 # ---------------------------------------------------------------------------
+# EXCEPTIONS
+# ---------------------------------------------------------------------------
+
+
+class SeedEnvironmentError(Exception):
+    """Raised when seed is attempted outside development environment."""
+
+    def __init__(self) -> None:
+        super().__init__("Seed requires development environment")
+
+
+# ---------------------------------------------------------------------------
 # ENVIRONMENT GUARD (called first — aborts if not development)
 # ---------------------------------------------------------------------------
 
@@ -135,7 +147,7 @@ ASSESSMENT_TITLE = "Intro to Programming CAT"
 def _assert_development() -> None:
     """Hard abort if not in development environment."""
     if settings.ENVIRONMENT != "development":
-        raise RuntimeError("Seed requires development environment")
+        raise SeedEnvironmentError()
 
 
 # ---------------------------------------------------------------------------
@@ -328,7 +340,11 @@ async def seed_academic_structure(
 
 async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
     """Upsert the seed institution."""
-    result = await session.execute(select(Institution).where(Institution.code == INSTITUTION_CODE))
+    result = await session.execute(
+        select(Institution).where(
+            Institution.code == INSTITUTION_CODE  # type: ignore[misc]
+        )
+    )
     inst = result.scalar_one_or_none()
     if inst:
         logger.info("  ⟳  Institution already exists (%s)", INSTITUTION_CODE)
@@ -347,11 +363,10 @@ async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
 
 async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed department."""
-    result = await session.execute(
-        select(Department)
-        .where(Department.code == DEPT_CODE)
-        .where(Department.institution_id == institution_id)
-    )
+    stmt = select(Department)
+    stmt = stmt.where(Department.code == DEPT_CODE)  # type: ignore[misc]
+    stmt = stmt.where(Department.institution_id == institution_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     dept = result.scalar_one_or_none()
     if dept:
         logger.info("  ⟳  Department already exists (%s)", DEPT_CODE)
@@ -371,11 +386,10 @@ async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -
 
 async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
     """Upsert the seed academic period."""
-    result = await session.execute(
-        select(AcademicPeriod)
-        .where(AcademicPeriod.name == PERIOD_NAME)
-        .where(AcademicPeriod.institution_id == institution_id)
-    )
+    stmt = select(AcademicPeriod)
+    stmt = stmt.where(AcademicPeriod.name == PERIOD_NAME)  # type: ignore[misc]
+    stmt = stmt.where(AcademicPeriod.institution_id == institution_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     period = result.scalar_one_or_none()
     if period:
         logger.info("  ⟳  AcademicPeriod already exists (%s)", PERIOD_NAME)
@@ -403,12 +417,11 @@ async def _ensure_course(
     period_id: uuid.UUID,
 ) -> uuid.UUID:
     """Upsert the seed course."""
-    result = await session.execute(
-        select(Course)
-        .where(Course.code == COURSE_CODE)
-        .where(Course.institution_id == institution_id)
-        .where(Course.academic_period_id == period_id)
-    )
+    stmt = select(Course)
+    stmt = stmt.where(Course.code == COURSE_CODE)  # type: ignore[misc]
+    stmt = stmt.where(Course.institution_id == institution_id)  # type: ignore[misc]
+    stmt = stmt.where(Course.academic_period_id == period_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     course = result.scalar_one_or_none()
     if course:
         logger.info("  ⟳  Course already exists (%s)", COURSE_CODE)
@@ -435,22 +448,20 @@ async def _ensure_subject(
     course_id: uuid.UUID,
 ) -> uuid.UUID:
     """Upsert the seed subject."""
-    result = await session.execute(
-        select(Subject)
-        .where(Subject.title == SUBJECT_TITLE)
-        .where(Subject.institution_id == institution_id)
-    )
+    stmt = select(Subject)
+    stmt = stmt.where(Subject.title == SUBJECT_TITLE)  # type: ignore[misc]
+    stmt = stmt.where(Subject.institution_id == institution_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     row = result.fetchone()
     if row:
         logger.info("  ⟳  Subject already exists (%s)", SUBJECT_TITLE)
         subject = row[0]
         subject_id = subject.id
         # Ensure CourseSubject link exists
-        cs_result = await session.execute(
-            select(CourseSubject)
-            .where(CourseSubject.course_id == course_id)
-            .where(CourseSubject.subject_id == subject_id)
-        )
+        cs_stmt = select(CourseSubject)
+        cs_stmt = cs_stmt.where(CourseSubject.course_id == course_id)  # type: ignore[misc]
+        cs_stmt = cs_stmt.where(CourseSubject.subject_id == subject_id)  # type: ignore[misc]
+        cs_result = await session.execute(cs_stmt)
         if not cs_result.fetchone():
             cs = CourseSubject(course_id=course_id, subject_id=subject_id)
             session.add(cs)
@@ -480,11 +491,10 @@ async def _ensure_class_section(
     course_id: uuid.UUID,
 ) -> uuid.UUID:
     """Upsert the seed class section."""
-    result = await session.execute(
-        select(ClassSection)
-        .where(ClassSection.name == SECTION_NAME)
-        .where(ClassSection.course_id == course_id)
-    )
+    stmt = select(ClassSection)
+    stmt = stmt.where(ClassSection.name == SECTION_NAME)  # type: ignore[misc]
+    stmt = stmt.where(ClassSection.course_id == course_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     section = result.scalar_one_or_none()
     if section:
         logger.info("  ⟳  ClassSection already exists (%s)", SECTION_NAME)
@@ -508,11 +518,10 @@ async def _ensure_lecturer_assignment(
     course_id: uuid.UUID,
 ) -> None:
     """Assign lecturer to course."""
-    result = await session.execute(
-        select(LecturerCourseAssignment)
-        .where(LecturerCourseAssignment.lecturer_id == lecturer_id)
-        .where(LecturerCourseAssignment.course_id == course_id)
-    )
+    stmt = select(LecturerCourseAssignment)
+    stmt = stmt.where(LecturerCourseAssignment.lecturer_id == lecturer_id)  # type: ignore[misc]
+    stmt = stmt.where(LecturerCourseAssignment.course_id == course_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     if result.scalar_one_or_none():
         logger.info("  ⟳  Lecturer assignment already exists")
         return
@@ -534,11 +543,10 @@ async def _ensure_enrollment(
     section_id: uuid.UUID,
 ) -> None:
     """Enroll the student in the class section."""
-    result = await session.execute(
-        select(StudentEnrollment)
-        .where(StudentEnrollment.student_id == student_id)
-        .where(StudentEnrollment.class_section_id == section_id)
-    )
+    stmt = select(StudentEnrollment)
+    stmt = stmt.where(StudentEnrollment.student_id == student_id)  # type: ignore[misc]
+    stmt = stmt.where(StudentEnrollment.class_section_id == section_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
     if result.scalar_one_or_none():
         logger.info("  ⟳  Student enrollment already exists")
         return

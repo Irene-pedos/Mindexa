@@ -5,6 +5,9 @@ import { cn } from "@/lib/utils";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { AuthProvider } from "@/components/providers/auth-provider";
+import { RoleGuard } from "@/components/mindexa/layout/role-guard";
+import { Toaster } from "@/components/ui/sonner";
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -52,7 +55,12 @@ export default function RootLayout({
           enableSystem={false}
           disableTransitionOnChange
         >
-          <TooltipProvider>{children}</TooltipProvider>
+          <AuthProvider>
+            <TooltipProvider>
+              <RoleGuard>{children}</RoleGuard>
+            </TooltipProvider>
+          </AuthProvider>
+          <Toaster position="top-center" />
         </ThemeProvider>
       </body>
     </html>

@@ -188,7 +188,6 @@ class Notification(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -333,7 +332,6 @@ class ScheduledEvent(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -489,7 +487,6 @@ class Reminder(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 

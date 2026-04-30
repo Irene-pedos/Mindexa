@@ -163,7 +163,6 @@ class StudentResource(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -213,6 +212,7 @@ class StudentResource(BaseModel, table=True):
         default=ResourceProcessingStatus.PENDING,
         nullable=False,
     )
+
     processing_started_at: datetime | None = Field(default=None, nullable=True)
     processing_completed_at: datetime | None = Field(default=None, nullable=True)
     processing_error: str | None = Field(
@@ -301,7 +301,6 @@ class ResourceChunk(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_resource.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     chunk_index: int = Field(nullable=False)
@@ -402,7 +401,6 @@ class LecturerMaterial(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     course_id: uuid.UUID | None = Field(
@@ -411,7 +409,6 @@ class LecturerMaterial(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("course.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
     assessment_id: uuid.UUID | None = Field(
@@ -420,7 +417,6 @@ class LecturerMaterial(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
 

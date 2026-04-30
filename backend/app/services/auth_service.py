@@ -135,6 +135,12 @@ class AuthService:
         first_name: str,
         last_name: str,
         role: UserRole = UserRole.STUDENT,
+        reg_number: str | None = None,
+        college: str | None = None,
+        department: str | None = None,
+        option: str | None = None,
+        level: str | None = None,
+        year: str | None = None,
         ip_address: str | None = None,
     ) -> tuple:
         """
@@ -142,39 +148,58 @@ class AuthService:
 
         FLOW:
             1. Check for duplicate email
-            2. Hash password
-            3. Create User row (status=PENDING_VERIFICATION)
-            4. Create UserProfile row
-            5. Generate email verification token
-            6. Record security event (best-effort)
+            2. If student, check for duplicate registration number
+            3. Hash password
+            4. Create User row (status based on role)
+            5. Create UserProfile row with new academic fields
+            6. If student, generate email verification token
+            7. Record security event (best-effort)
 
         Returns:
-            (User, raw_verification_token)
-
-            The raw_verification_token must be included in the verification
-            email URL. It is NEVER stored in the database — only its hash is.
-
-        Raises:
-            AlreadyExistsError — if email is already registered
+            (User, raw_verification_token or None)
         """
-        # email is already normalised by the route validator (EmailStr lowercases)
+        # email is already normalised by the route validator
         if await self._users.email_exists(email):
             raise AlreadyExistsError("User")
 
+        # Registration Number Uniqueness (if provided)
+        if reg_number:
+            from sqlalchemy import select
+            from app.db.models.auth import UserProfile
+            stmt = select(UserProfile).where(UserProfile.student_id == reg_number)
+            result = await self.db.execute(stmt)
+            if result.scalar_one_or_none():
+                raise AlreadyExistsError("Registration Number", code="REG_NUMBER_TAKEN")
+
         hashed = hash_password(password)
+
+        # Role-specific status logic
+        if role == UserRole.LECTURER:
+            status = UserStatus.PENDING_APPROVAL
+            email_verified = False # Usually True if admin created, but here it's signup
+        else:
+            status = UserStatus.PENDING_VERIFICATION
+            email_verified = False
 
         user = User(
             email=email,
             hashed_password=hashed,
             role=role,
-            status=UserStatus.PENDING_VERIFICATION,
-            email_verified=False,
+            status=status,
+            email_verified=email_verified,
             failed_login_attempts=0,
         )
         user_profile = UserProfile(
             user_id=user.id,
             first_name=first_name,
             last_name=last_name,
+            student_id=reg_number if role == UserRole.STUDENT else None,
+            staff_id=reg_number if role == UserRole.LECTURER else None,
+            college=college,
+            department=department,
+            option=option,
+            level=level,
+            year=year,
         )
 
         await self._users.create(user)
@@ -182,7 +207,9 @@ class AuthService:
         self.db.add(user_profile)
         await self.db.flush()
 
-        raw_token = await self._create_verification_token(user.id)
+        raw_token = None
+        if role == UserRole.STUDENT:
+            raw_token = await self._create_verification_token(user.id)
 
         await self._record_security_event(
             event_type=SecurityEventType.ACCOUNT_CREATED,
@@ -196,7 +223,7 @@ class AuthService:
             extra={
                 "user_id": str(user.id),
                 "email": email,
-                "role": role.value,
+                "role": role.value if hasattr(role, "value") else str(role),
             },
         )
 

@@ -213,14 +213,28 @@ def create_application() -> FastAPI:
     from app.api.v1.routes.auth import router as auth_router
     app.include_router(auth_router, prefix=API_V1)
 
+    from app.api.v1.routes.student import router as student_router
+    app.include_router(student_router, prefix=API_V1)
+
+    from app.api.v1.routes.lecturer import router as lecturer_router
+    app.include_router(lecturer_router, prefix=API_V1)
+
+    from app.api.v1.routes.notification import router as notification_router
+    app.include_router(notification_router, prefix=API_V1)
+
+    from app.api.v1.routes.admin import router as admin_router
+    app.include_router(admin_router, prefix=API_V1)
+
     from app.api.v1.routes.ai_generation import router as ai_router
     from app.api.v1.routes.assessment import router as assessment_router
     from app.api.v1.routes.blueprint import router as blueprint_router
+    from app.api.v1.routes.gemini import router as gemini_router
     from app.api.v1.routes.question import router as question_router
     app.include_router(assessment_router, prefix=API_V1)
     app.include_router(question_router, prefix=API_V1)
     app.include_router(ai_router, prefix=API_V1)
     app.include_router(blueprint_router, prefix=API_V1)
+    app.include_router(gemini_router, prefix=API_V1)
 
     from app.api.v1.routes.attempt import router as attempt_router
     from app.api.v1.routes.grading import router as grading_router

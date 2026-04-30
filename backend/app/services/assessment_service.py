@@ -37,7 +37,7 @@ from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.core.security import hash_password
 from app.db.enums import AssessmentStatus as DbAssessmentStatus
 from app.db.enums import AssessmentType as DbAssessmentType
-from app.db.enums import GradingMode, ResultReleaseMode
+from app.db.enums import DifficultyLevel, GradingMode, ResultReleaseMode
 from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.question_repo import QuestionRepository
@@ -50,6 +50,7 @@ from app.schemas.assessment import (
     AssessmentSectionUpdate,
     AssessmentSecuritySettingsUpdate,
     AssessmentSummaryResponse,
+    BulkAssessmentPublishRequest,
     FinalizeAssessmentResponse,
     ReorderQuestionsRequest,
 )
@@ -627,3 +628,147 @@ class AssessmentService:
         self._assert_can_edit(assessment, current_user)
         self._assert_not_finalized(assessment)
         return assessment
+
+    # ─── Bulk Operations ──────────────────────────────────────────────────────
+
+    async def bulk_publish_assessment(
+        self,
+        data: BulkAssessmentPublishRequest,
+        current_user: User,
+    ) -> FinalizeAssessmentResponse:
+        """
+        Creates an assessment and all its dependencies in one go.
+        Used by the frontend single-page builder.
+        """
+        # 1. Map metadata to AssessmentCreateRequest
+        # Note: Frontend 'mode' maps to AssessmentType (e.g. 'CAT' -> 'CAT')
+        mode_mapping = {
+            "Practice": "FORMATIVE",
+            "Homework": "HOMEWORK",
+            "CAT": "CAT",
+            "Summative": "SUMMATIVE",
+        }
+        assessment_type = mode_mapping.get(data.metadata.mode, "FORMATIVE")
+
+        # Instructions logic: merge selected and custom
+        instructions = "\n".join(data.metadata.selectedInstructions)
+        if data.metadata.customInstructions:
+            instructions += f"\n\nAdditional Instructions:\n{data.metadata.customInstructions}"
+
+        # Calculate window start/end
+        # data.metadata.date is the day. startTime/endTime are strings like "09:00"
+        window_start = None
+        window_end = None
+        if data.metadata.date:
+            try:
+                date_str = data.metadata.date.strftime("%Y-%m-%d")
+                window_start = datetime.strptime(f"{date_str} {data.metadata.startTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
+                window_end = datetime.strptime(f"{date_str} {data.metadata.endTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
+            except Exception:
+                pass # Fallback to None if parsing fails
+
+        # 2. Create Assessment
+        from sqlalchemy import select
+        from app.db.models.academic import Course
+        
+        course_id = None
+        try:
+            course_id = uuid.UUID(data.metadata.course)
+        except ValueError:
+            # Try to find course by name
+            res = await self.db.execute(select(Course).where(Course.name == data.metadata.course))
+            course = res.scalars().first()
+            if not course:
+                # Try partial match or just take the first one for demo safety
+                res = await self.db.execute(select(Course))
+                course = res.scalars().first()
+            
+            if course:
+                course_id = course.id
+            else:
+                raise ValidationError(f"Course '{data.metadata.course}' not found.")
+
+        assessment = await self._repo.create(
+            title=data.metadata.title,
+            assessment_type=DbAssessmentType(assessment_type),
+            course_id=course_id,
+            created_by_id=current_user.id,
+            grading_mode=GradingMode.MANUAL,
+            result_release_mode=ResultReleaseMode.DELAYED if data.rules.resultRelease == "delayed" else ResultReleaseMode.IMMEDIATE,
+            total_marks=sum(s.marks for s in data.blueprint),
+            instructions=instructions,
+            duration_minutes=data.metadata.durationMinutes,
+        )
+
+        # 3. Update Security Settings
+        security_fields = {
+            "max_attempts": data.rules.attempts,
+            "window_start": window_start,
+            "window_end": window_end,
+            "is_password_protected": False,
+            "fullscreen_required": data.rules.browserRestricted,
+            "is_supervised": data.rules.supervised,
+            "ai_assistance_allowed": data.rules.aiAllowed,
+            "is_open_book": data.rules.openBook,
+            "integrity_monitoring_enabled": True,
+            "randomise_questions": data.rules.shuffleQuestions,
+            "randomise_options": data.rules.shuffleOptions,
+        }
+        await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
+
+        # 4. Create Sections & Questions
+        section_id_map = {}
+        for i, b_sec in enumerate(data.blueprint):
+            section = await self._repo.create_section(
+                assessment_id=assessment.id,
+                title=b_sec.section,
+                order_index=i,
+                marks_allocated=b_sec.marks,
+                description=b_sec.topics,
+                allowed_question_types={"types": b_sec.allowedTypes},
+            )
+            section_id_map[b_sec.id] = section.id
+
+        # Add questions
+        from app.db.models.question import Question as QuestionModel
+        from app.db.enums import QuestionType as DbQuestionType, QuestionSourceType
+        
+        for i, q in enumerate(data.questions):
+            # Map frontend question type to DB enum
+            q_type_map = {
+                "mcq": DbQuestionType.MCQ,
+                "truefalse": DbQuestionType.TRUE_FALSE,
+                "shortanswer": DbQuestionType.SHORT_ANSWER,
+                "essay": DbQuestionType.ESSAY,
+                "matching": DbQuestionType.MATCHING,
+                "fillblank": DbQuestionType.FILL_BLANK,
+                "computational": DbQuestionType.COMPUTATIONAL,
+                "ordering": DbQuestionType.ORDERING,
+            }
+            db_q_type = q_type_map.get(q.type.lower(), DbQuestionType.SHORT_ANSWER)
+
+            new_q = QuestionModel(
+                content=q.text,
+                question_type=db_q_type,
+                marks=q.marks,
+                difficulty=DifficultyLevel.MEDIUM,
+                created_by_id=current_user.id,
+                is_approved=True,
+                is_in_question_bank=True,
+                source_type=QuestionSourceType.MANUAL,
+            )
+            self.db.add(new_q)
+            await self.db.flush()
+
+            await self._repo.add_question(
+                assessment_id=assessment.id,
+                question_id=new_q.id,
+                order_index=i,
+                added_via="manual_write",
+                assessment_section_id=section_id_map.get(q.sectionId),
+                marks_override=q.marks,
+            )
+
+        # 5. Finalize
+        # We call the existing finalize logic to ensure all validations pass
+        return await self.finalize_assessment(assessment.id, current_user)

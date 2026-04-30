@@ -1125,3 +1125,41 @@ class AssessmentRepository:
             )
         )
         return result.scalar_one_or_none() is not None
+
+    async def list_available_for_student(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Assessment], int]:
+        """
+        List all assessments that a student can currently see or take.
+        
+        Filters:
+            - status NOT IN (DRAFT, ARCHIVED)
+            - is_deleted = False
+        
+        Future: will filter by student's class_section_id / course enrollment.
+        """
+        filters = [
+            col(Assessment.status).in_([
+                AssessmentStatus.PUBLISHED,
+                AssessmentStatus.SCHEDULED,
+                AssessmentStatus.ACTIVE,
+            ]),
+            col(Assessment.is_deleted) == False,  # noqa: E712
+        ]
+
+        count_result = await self.db.execute(
+            select(func.count(col(Assessment.id))).where(*filters)
+        )
+        total = count_result.scalar_one()
+
+        result = await self.db.execute(
+            select(Assessment)
+            .where(*filters)
+            .order_by(col(Assessment.published_at).desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(result.scalars().all()), total

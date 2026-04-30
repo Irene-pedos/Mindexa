@@ -161,6 +161,10 @@ class Settings(BaseSettings):
     DEFAULT_EMBEDDING_MODEL: str = "text-embedding-3-small"
     DEFAULT_LLM_MODEL: str = "gpt-4o-mini"
 
+    # ─── Google Gemini ────────────────────────────────────────────────────────
+    GEMINI_API_KEY: str = ""
+    GEMINI_DEFAULT_MODEL: str = "gemini-1.5-flash"
+
     # ─── Vector Store ─────────────────────────────────────────────────────────
     VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"
     PGVECTOR_DIMENSION: int = 1536  # text-embedding-3-small

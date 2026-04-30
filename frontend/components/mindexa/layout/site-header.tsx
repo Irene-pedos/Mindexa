@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Separator } from "@/components/ui/separator"
 import React from "react"
+import { useAuth } from "@/hooks/use-auth"
 
 const notifications = [
   { id: 1, message: "Database Systems CAT result released (92%)", time: "2h ago", read: false },
@@ -35,17 +36,11 @@ const notifications = [
 
 export function SiteHeader() {
   const pathname = usePathname()
+  const { logout, user } = useAuth()
   const unread = notifications.filter(n => !n.read).length
 
-  // Determine role from pathname
-  const getRole = () => {
-    if (pathname.startsWith("/admin")) return "Admin"
-    if (pathname.startsWith("/lecturer")) return "Lecturer"
-    if (pathname.startsWith("/student")) return "Student"
-    return "User"
-  }
-
-  const role = getRole()
+  // Determine role from user or pathname
+  const role = user?.role || (pathname.startsWith("/admin") ? "Admin" : pathname.startsWith("/lecturer") ? "Lecturer" : pathname.startsWith("/student") ? "Student" : "Guest");
 
   // Improved breadcrumb generator with role prefixes
   const getBreadcrumbs = () => {
@@ -140,7 +135,10 @@ export function SiteHeader() {
               <Link href="/academic-record">Academic Record</Link>
             </DropdownMenuItem>
             <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">
+            <DropdownMenuItem 
+              className="text-destructive cursor-pointer"
+              onClick={() => logout()}
+            >
               <LogOut className="mr-2 size-4" />
               Log out
             </DropdownMenuItem>

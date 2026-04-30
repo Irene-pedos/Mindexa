@@ -174,6 +174,44 @@ class UserRepository:
         self.db.add(user)
         await self.db.flush()
 
+    async def list_all(
+        self,
+        *,
+        role: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[User], int]:
+        filters = [User.is_deleted == False]
+        if role:
+            filters.append(User.role == role)
+        if status:
+            filters.append(User.status == status)
+
+        count_result = await self.db.execute(
+            select(func.count(User.id)).where(*filters)
+        )
+        total = count_result.scalar_one()
+
+        result = await self.db.execute(
+            select(User)
+            .options(selectinload(User.profile))
+            .where(*filters)
+            .order_by(User.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(result.scalars().all()), total
+
+    async def count_by_role(self, role: str) -> int:
+        result = await self.db.execute(
+            select(func.count(User.id)).where(
+                User.role == role,
+                User.is_deleted == False,
+            )
+        )
+        return result.scalar_one()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REFRESH TOKEN REPOSITORY

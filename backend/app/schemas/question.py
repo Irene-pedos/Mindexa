@@ -186,12 +186,12 @@ class QuestionSummaryResponse(BaseModel):
     grading_mode: str
     status: str
     subject: str | None
-    topic: str | None
+    topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None
-    suggested_marks: int | None
+    suggested_marks: int | None = Field(None, validation_alias="marks")
     is_active: bool
     source_type: str
-    version_number: int
+    version_number: int = Field(1, validation_alias="version")
     parent_question_id: uuid.UUID | None
     created_by_id: uuid.UUID
     created_at: datetime
@@ -212,14 +212,14 @@ class QuestionDetailResponse(BaseModel):
     status: str
     source_type: str
     subject: str | None
-    topic: str | None
+    topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None
-    suggested_marks: int | None
+    suggested_marks: int | None = Field(None, validation_alias="marks")
     estimated_time_minutes: int | None
     fill_blank_template: str | None
     correct_order_json: str | None
     is_active: bool
-    version_number: int
+    version_number: int = Field(1, validation_alias="version")
     parent_question_id: uuid.UUID | None
     created_by_id: uuid.UUID
     created_at: datetime

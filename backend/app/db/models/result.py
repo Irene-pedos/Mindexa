@@ -79,12 +79,11 @@ class AssessmentResult(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     # Denormalised — avoids joins on every student dashboard read
-    student_id: uuid.UUID = Field(nullable=False, index=True)
-    assessment_id: uuid.UUID = Field(nullable=False, index=True)
+    student_id: uuid.UUID = Field(nullable=False)
+    assessment_id: uuid.UUID = Field(nullable=False)
 
     # -- Score ----------------------------------------------------------------
 
@@ -116,7 +115,6 @@ class AssessmentResult(BaseModel, table=True):
     is_released: bool = Field(
         default=False,
         nullable=False,
-        index=True,
         description="False until lecturer/system triggers result release",
     )
     released_at: datetime | None = Field(
@@ -135,7 +133,6 @@ class AssessmentResult(BaseModel, table=True):
     integrity_hold: bool = Field(
         default=False,
         nullable=False,
-        index=True,
         description=(
             "True if CONFIRMED integrity flags block this result from release. "
             "Must be manually cleared by a lecturer or admin."
@@ -196,12 +193,11 @@ class ResultBreakdown(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_result.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     question_id: uuid.UUID = Field(nullable=False, index=True)
     # Denormalised for fast display
-    attempt_id: uuid.UUID = Field(nullable=False, index=True)
+    attempt_id: uuid.UUID = Field(nullable=False)
 
     # -- Scores ---------------------------------------------------------------
 

@@ -308,7 +308,6 @@ class SupervisionSession(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     supervisor_id: uuid.UUID = Field(

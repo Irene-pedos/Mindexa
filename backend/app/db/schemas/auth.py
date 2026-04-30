@@ -78,24 +78,39 @@ class UserRegisterRequest(MindexaSchema):
             "LECTURER and ADMIN roles are assigned by system administrators."
         ),
     )
+    reg_number: str | None = Field(default=None, max_length=50)
+    college: str | None = Field(default=None, max_length=150)
+    department: str | None = Field(default=None, max_length=150)
+    option: str | None = Field(default=None, max_length=150)
+    level: str | None = Field(default=None, max_length=20)
+    year: str | None = Field(default=None, max_length=20)
 
     @field_validator("role")
     @classmethod
     def restrict_self_registration_roles(cls, v: UserRole) -> UserRole:
         """
-        Prevent self-registration as LECTURER or ADMIN.
+        Prevent self-registration as ADMIN.
 
-        A user cannot register themselves as a lecturer or admin via the
-        public API. These roles are assigned by administrators through
-        the admin management API, not through registration.
-
-        This validator enforces a hard security boundary: even if someone
-        sends role=admin in the JSON body, it is silently corrected to STUDENT.
-        We do not raise an error here (better UX) — the admin must assign the role.
+        A user cannot register themselves as an admin via the
+        public API. This role is assigned by administrators.
+        LECTURER is allowed but requires admin approval.
         """
-        if v in (UserRole.LECTURER, UserRole.ADMIN):
+        if v == UserRole.ADMIN:
             return UserRole.STUDENT
         return v
+
+    @model_validator(mode="after")
+    def validate_student_fields(self) -> UserRegisterRequest:
+        """
+        Enforce required fields for students per Section 4.2.
+        Students MUST provide a registration number and college.
+        """
+        if self.role == UserRole.STUDENT:
+            if not self.reg_number:
+                raise ValueError("Registration Number is required for students.")
+            if not self.college:
+                raise ValueError("College is required for students.")
+        return self
 
     @field_validator("first_name", "last_name")
     @classmethod
@@ -151,6 +166,13 @@ class ForgotPasswordRequest(MindexaSchema):
     """Forgot password — request a reset email."""
 
     email: EmailStr = Field(description="Email address of the account to reset.")
+
+
+class UserApproveRequest(MindexaSchema):
+    """Admin request to approve a user (e.g. Lecturer)."""
+
+    status: UserStatus = Field(default=UserStatus.ACTIVE)
+    admin_notes: str | None = Field(default=None, max_length=500)
 
 
 PasswordResetRequestBody = ForgotPasswordRequest
@@ -331,6 +353,14 @@ class UserProfileResponse(MindexaSchema):
     profile_picture_url: str | None = None
     student_id: str | None = None
     staff_id: str | None = None
+    college: str | None = None
+    department: str | None = None
+    option: str | None = None
+    level: str | None = None
+    year: str | None = None
+    
+    # Lecturer specific (populated when role is LECTURER)
+    assigned_courses: list[str] = Field(default_factory=list, description="List of course codes assigned to the lecturer.")
 
 
 class UserResponse(BaseAuditedResponse):
@@ -375,6 +405,7 @@ class UserSummaryResponse(MindexaSchema):
     role: UserRole
     first_name: str | None = None
     last_name: str | None = None
+    student_id: str | None = None
 
     @property
     def display_name(self) -> str:

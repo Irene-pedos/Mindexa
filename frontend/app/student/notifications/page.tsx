@@ -1,47 +1,64 @@
 // app/(student)/notifications/page.tsx
 "use client"
 
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Bell, Calendar, Award, AlertTriangle } from "lucide-react"
-
-const notifications = [
-  {
-    id: 1,
-    type: "result",
-    title: "Database Systems CAT Result Released",
-    message: "You scored 92% (A-). Detailed feedback is now available.",
-    time: "2 hours ago",
-    read: false,
-  },
-  {
-    id: 2,
-    type: "deadline",
-    title: "Group Project Deadline Extended",
-    message: "Submission window extended by 24 hours due to technical issues.",
-    time: "Yesterday",
-    read: true,
-  },
-  {
-    id: 3,
-    type: "assessment",
-    title: "New Formative Quiz Available",
-    message: "Algorithms formative quiz is now open until April 2.",
-    time: "Mar 26",
-    read: false,
-  },
-  {
-    id: 4,
-    type: "appeal",
-    title: "Appeal Decision",
-    message: "Your appeal for Operating Systems exam has been approved.",
-    time: "Mar 25",
-    read: true,
-  },
-]
+import { Bell, Calendar, Award, AlertTriangle, CheckCheck } from "lucide-react"
+import { notificationApi, NotificationResponse } from "@/lib/api/notification"
+import { Skeleton } from "@/components/ui/skeleton"
+import { toast } from "sonner"
+import { formatDistanceToNow } from "date-fns"
 
 export default function NotificationsPage() {
+  const [notifications, setNotifications] = useState<NotificationResponse[]>([])
+  const [loading, setLoading] = useState(true)
+
+  async function loadNotifications() {
+    try {
+      const data = await notificationApi.getNotifications()
+      setNotifications(data.items)
+    } catch (err) {
+      console.error("Failed to load notifications", err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    loadNotifications()
+  }, [])
+
+  const handleMarkAllRead = async () => {
+    try {
+      await notificationApi.markAllAsRead()
+      toast.success("All notifications marked as read")
+      loadNotifications()
+    } catch (err) {
+      toast.error("Failed to mark all as read")
+    }
+  }
+
+  const handleMarkRead = async (id: string) => {
+    try {
+      await notificationApi.markAsRead(id)
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
+    } catch (err) {
+      console.error("Failed to mark read", err)
+    }
+  }
+
+  const getIcon = (type: string) => {
+    switch (type) {
+      case "RESULT_RELEASED": return <Award className="size-6 text-emerald-600" />
+      case "DEADLINE_EXTENDED": return <Calendar className="size-6 text-amber-600" />
+      case "ASSESSMENT_PUBLISHED": return <Bell className="size-6 text-blue-600" />
+      case "APPEAL_DECISION": return <AlertTriangle className="size-6 text-violet-600" />
+      default: return <Bell className="size-6 text-muted-foreground" />
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
@@ -51,7 +68,9 @@ export default function NotificationsPage() {
           </h1>
           <p className="text-muted-foreground mt-1">Stay updated with all academic activities</p>
         </div>
-        <Button variant="outline">Mark all as read</Button>
+        <Button variant="outline" onClick={handleMarkAllRead} disabled={notifications.every(n => n.is_read)}>
+          <CheckCheck className="mr-2 size-4" /> Mark all as read
+        </Button>
       </div>
 
       <Card>
@@ -60,26 +79,38 @@ export default function NotificationsPage() {
         </CardHeader>
         <CardContent>
           <div className="space-y-6">
-            {notifications.map((notif) => (
-              <div key={notif.id} className={`flex gap-5 p-5 rounded-2xl border ${notif.read ? "bg-muted/30" : "border-primary/30 bg-primary/5"}`}>
-                <div className="mt-1">
-                  {notif.type === "result" && <Award className="size-6 text-emerald-600" />}
-                  {notif.type === "deadline" && <Calendar className="size-6 text-amber-600" />}
-                  {notif.type === "assessment" && <Bell className="size-6 text-blue-600" />}
-                  {notif.type === "appeal" && <AlertTriangle className="size-6 text-violet-600" />}
-                </div>
-
-                <div className="flex-1">
-                  <div className="font-semibold">{notif.title}</div>
-                  <div className="text-muted-foreground mt-1">{notif.message}</div>
-                  <div className="text-xs text-muted-foreground mt-3">{notif.time}</div>
-                </div>
-
-                {!notif.read && (
-                  <Badge className="self-start bg-primary text-primary-foreground">New</Badge>
-                )}
+            {loading ? (
+              [1, 2, 3].map(i => <Skeleton key={i} className="h-24 w-full" />)
+            ) : notifications.length === 0 ? (
+              <div className="py-20 text-center text-muted-foreground">
+                <Bell className="mx-auto size-12 opacity-20 mb-4" />
+                <p>No notifications yet.</p>
               </div>
-            ))}
+            ) : (
+              notifications.map((notif) => (
+                <div 
+                  key={notif.id} 
+                  className={`flex gap-5 p-5 rounded-2xl border transition-all cursor-pointer hover:shadow-sm ${notif.is_read ? "bg-muted/30" : "border-primary/30 bg-primary/5 shadow-sm"}`}
+                  onClick={() => !notif.is_read && handleMarkRead(notif.id)}
+                >
+                  <div className="mt-1">
+                    {getIcon(notif.notification_type)}
+                  </div>
+
+                  <div className="flex-1">
+                    <div className="font-semibold">{notif.title}</div>
+                    <div className="text-muted-foreground mt-1 text-sm">{notif.body}</div>
+                    <div className="text-xs text-muted-foreground mt-3 flex items-center gap-2">
+                       {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true })}
+                    </div>
+                  </div>
+
+                  {!notif.is_read && (
+                    <Badge className="self-start bg-primary text-primary-foreground">New</Badge>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </CardContent>
       </Card>

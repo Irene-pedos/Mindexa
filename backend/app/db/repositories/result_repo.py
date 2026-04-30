@@ -169,6 +169,35 @@ class ResultRepository:
         )
         return list(result.scalars().all())
 
+    async def list_by_student(
+        self,
+        student_id: uuid.UUID,
+        is_released: bool | None = True,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[AssessmentResult], int]:
+        filters = [
+            AssessmentResult.student_id == student_id,
+            AssessmentResult.is_deleted == False,  # noqa: E712
+        ]
+        if is_released is not None:
+            filters.append(AssessmentResult.is_released == is_released)
+
+        count_result = await self.db.execute(
+            select(func.count(AssessmentResult.id)).where(*filters)
+        )
+        total = count_result.scalar_one()
+
+        result = await self.db.execute(
+            select(AssessmentResult)
+            .where(*filters)
+            .options(selectinload(AssessmentResult.assessment))
+            .order_by(AssessmentResult.released_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(result.scalars().all()), total
+
     # -----------------------------------------------------------------------
     # AssessmentResult — UPDATES
     # -----------------------------------------------------------------------

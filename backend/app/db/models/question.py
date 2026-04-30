@@ -16,9 +16,9 @@ Tables defined here:
 
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey, UniqueConstraint, text
+from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -42,6 +42,7 @@ if TYPE_CHECKING:
 # ─────────────────────────────────────────────────────────────────────────────
 # QUESTION
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class Question(BaseModel, table=True):
     """
@@ -68,7 +69,12 @@ class Question(BaseModel, table=True):
 
     subject_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("subject.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
     question_type: QuestionType = Field(nullable=False, index=True)
@@ -82,56 +88,79 @@ class Question(BaseModel, table=True):
 
     rubric_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("rubric.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("rubric.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
-    source_type: QuestionSourceType = Field(default=QuestionSourceType.MANUAL, nullable=False, index=True)
+    source_type: QuestionSourceType = Field(
+        default=QuestionSourceType.MANUAL, nullable=False, index=True
+    )
     source_assessment_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
-    source_ai_batch_id: uuid.UUID | None = Field(default=None, nullable=True, index=True)
+    source_ai_batch_id: uuid.UUID | None = Field(default=None, nullable=True)
     ai_action_log_id: uuid.UUID | None = Field(default=None, nullable=True, index=True)
 
     is_approved: bool = Field(default=False, nullable=False, index=True)
     approved_by_id: uuid.UUID | None = Field(default=None, nullable=True)
     approved_at: datetime | None = Field(default=None, nullable=True)
     is_shared: bool = Field(default=False, nullable=False, index=True)
-    is_active: bool = Field(default=True, nullable=False, index=True)
+    is_active: bool = Field(default=True, nullable=False)
 
-    is_in_question_bank: bool = Field(default=False, nullable=False, index=True)
+    is_in_question_bank: bool = Field(default=False, nullable=False)
     bank_added_at: datetime | None = Field(default=None, nullable=True)
     bank_added_by_id: uuid.UUID | None = Field(default=None, nullable=True)
 
     version: int = Field(default=1, nullable=False)
     parent_question_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
     rubric: Optional["Rubric"] = Relationship()
 
-    options: List["QuestionOption"] = Relationship(
+    options: list["QuestionOption"] = Relationship(
         back_populates="question",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "QuestionOption.order_index"},
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "order_by": "QuestionOption.order_index",
+        },
     )
-    blanks: List["QuestionBlank"] = Relationship(
+    blanks: list["QuestionBlank"] = Relationship(
         back_populates="question",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "order_by": "QuestionBlank.blank_index"},
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "order_by": "QuestionBlank.blank_index",
+        },
     )
-    assessment_questions: List["AssessmentQuestion"] = Relationship(back_populates="question")
+    assessment_questions: list["AssessmentQuestion"] = Relationship(back_populates="question")
     bank_entry: Optional["QuestionBankEntry"] = Relationship(
         back_populates="question",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
-    responses: List["StudentResponse"] = Relationship(back_populates="question")
+    responses: list["StudentResponse"] = Relationship(back_populates="question")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # QUESTION OPTION
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class QuestionOption(BaseModel, table=True):
     __tablename__ = "question_option"
@@ -142,7 +171,9 @@ class QuestionOption(BaseModel, table=True):
     )
 
     question_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False
+        )
     )
     content: str = Field(nullable=False)
     is_correct: bool | None = Field(default=None, nullable=True)
@@ -157,16 +188,21 @@ class QuestionOption(BaseModel, table=True):
 # QUESTION BLANK
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class QuestionBlank(BaseModel, table=True):
     __tablename__ = "question_blank"
 
     __table_args__ = (
-        UniqueConstraint("question_id", "blank_index", name="uq_question_blank_question_blank_index"),
+        UniqueConstraint(
+            "question_id", "blank_index", name="uq_question_blank_question_blank_index"
+        ),
         composite_index("question_blank", "question_id"),
     )
 
     question_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("question.id", ondelete="CASCADE"), nullable=False
+        )
     )
     blank_index: int = Field(nullable=False)
     accepted_answers: list[str] = Field(
@@ -182,44 +218,73 @@ class QuestionBlank(BaseModel, table=True):
 # ASSESSMENT QUESTION (junction)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class AssessmentQuestion(BaseModel, table=True):
     __tablename__ = "assessment_question"
 
     __table_args__ = (
-        UniqueConstraint("assessment_id", "question_id", name="uq_assessment_question_assessment_question"),
-        UniqueConstraint("assessment_id", "assessment_section_id", "order_index", name="uq_assessment_question_assessment_section_order"),
+        UniqueConstraint(
+            "assessment_id", "question_id", name="uq_assessment_question_assessment_question"
+        ),
+        UniqueConstraint(
+            "assessment_id",
+            "assessment_section_id",
+            "order_index",
+            name="uq_assessment_question_assessment_section_order",
+        ),
         composite_index("assessment_question", "assessment_id", "order_index"),
         composite_index("assessment_question", "assessment_id", "added_via"),
         composite_index("assessment_question", "question_id"),
     )
 
     assessment_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="CASCADE"), nullable=False
+        )
     )
     question_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="RESTRICT"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("question.id", ondelete="RESTRICT"), nullable=False
+        )
     )
     assessment_section_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment_section.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     order_index: int = Field(nullable=False)
     marks_override: int | None = Field(default=None, nullable=True)
     is_required: bool = Field(default=True, nullable=False)
 
-    added_via: QuestionAddedVia = Field(default=QuestionAddedVia.MANUAL_WRITE, nullable=False, index=True)
+    added_via: QuestionAddedVia = Field(default=QuestionAddedVia.MANUAL_WRITE, nullable=False)
     ai_review_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("ai_question_review.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("ai_question_review.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     bank_entry_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question_bank_entry.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question_bank_entry.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
     question: Optional["Question"] = Relationship(back_populates="assessment_questions")
     assessment: Optional["Assessment"] = Relationship(back_populates="assessment_questions")
-    assessment_section: Optional["AssessmentSection"] = Relationship(back_populates="assessment_questions")
+    assessment_section: Optional["AssessmentSection"] = Relationship(
+        back_populates="assessment_questions"
+    )
     ai_review: Optional["AIQuestionReview"] = Relationship(back_populates="assessment_question")
     bank_entry: Optional["QuestionBankEntry"] = Relationship(back_populates="assessment_questions")
 
@@ -228,15 +293,26 @@ class AssessmentQuestion(BaseModel, table=True):
 # AI GENERATION BATCH
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class AIGenerationBatch(BaseModel, table=True):
     __tablename__ = "ai_generation_batch"
 
     created_by_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     assessment_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="CASCADE"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        ),
     )
     question_type: str = Field(nullable=False)
     difficulty: str = Field(nullable=False)
@@ -258,7 +334,7 @@ class AIGenerationBatch(BaseModel, table=True):
     total_tokens_used: int | None = Field(default=None, nullable=True)
 
     assessment: Optional["Assessment"] = Relationship(back_populates="ai_generation_batches")
-    generated_questions: List["AIGeneratedQuestion"] = Relationship(
+    generated_questions: list["AIGeneratedQuestion"] = Relationship(
         back_populates="batch",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
@@ -268,11 +344,17 @@ class AIGenerationBatch(BaseModel, table=True):
 # AI GENERATED QUESTION
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class AIGeneratedQuestion(BaseModel, table=True):
     __tablename__ = "ai_generated_question"
 
     batch_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("ai_generation_batch.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("ai_generation_batch.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     generated_content: str = Field(nullable=False)
     question_type: str = Field(nullable=False)
@@ -283,7 +365,9 @@ class AIGeneratedQuestion(BaseModel, table=True):
     parsed_options_json: str | None = Field(default=None, nullable=True)
     parsed_explanation: str | None = Field(default=None, nullable=True)
     parse_error: str | None = Field(default=None, nullable=True)
-    review_status: AIQuestionDecision = Field(default=AIQuestionDecision.PENDING, nullable=False, index=True)
+    review_status: AIQuestionDecision = Field(
+        default=AIQuestionDecision.PENDING, nullable=False, index=True
+    )
 
     batch: Optional["AIGenerationBatch"] = Relationship(back_populates="generated_questions")
     review: Optional["AIQuestionReview"] = Relationship(
@@ -296,14 +380,25 @@ class AIGeneratedQuestion(BaseModel, table=True):
 # AI QUESTION REVIEW
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class AIQuestionReview(BaseModel, table=True):
     __tablename__ = "ai_question_review"
 
     ai_question_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("ai_generated_question.id", ondelete="CASCADE"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("ai_generated_question.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
     )
     reviewer_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id", ondelete="RESTRICT"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
     )
     decision: str = Field(nullable=False, index=True)
     modified_question_text: str | None = Field(default=None, nullable=True)
@@ -320,11 +415,15 @@ class AIQuestionReview(BaseModel, table=True):
 # QUESTION BANK ENTRY
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class QuestionBankEntry(BaseModel, table=True):
     __tablename__ = "question_bank_entry"
 
     __table_args__ = (
-        UniqueConstraint("question_id", "added_by_id", name="uq_question_bank_entry_question_lecturer"),
+        UniqueConstraint(
+            "question_id", "added_by_id", name="uq_question_bank_entry_question_lecturer"
+        ),
+        Index("ix_question_bank_entry_question_id", "question_id"),
         composite_index("question_bank_entry", "added_by_id", "subject_id", "is_active"),
         composite_index("question_bank_entry", "added_by_id", "source_type", "is_active"),
         composite_index("question_bank_entry", "added_by_id", "difficulty", "is_active"),
@@ -332,27 +431,36 @@ class QuestionBankEntry(BaseModel, table=True):
     )
 
     question_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("question.id", ondelete="RESTRICT"), nullable=False, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("question.id", ondelete="RESTRICT"), nullable=False
+        )
     )
-    added_by_id: uuid.UUID = Field(nullable=False, index=True)
+    added_by_id: uuid.UUID = Field(nullable=False)
 
     subject_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True), ForeignKey("subject.id", ondelete="SET NULL"), nullable=True
+        ),
     )
-    difficulty: DifficultyLevel | None = Field(default=None, nullable=True, index=True)
-    source_type: QuestionSourceType = Field(default=QuestionSourceType.MANUAL, nullable=False, index=True)
+    difficulty: DifficultyLevel | None = Field(default=None, nullable=True)
+    source_type: QuestionSourceType = Field(default=QuestionSourceType.MANUAL, nullable=False)
     source_assessment_id: uuid.UUID | None = Field(
         default=None,
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("assessment.id", ondelete="SET NULL"), nullable=True, index=True)
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
 
     times_used: int = Field(default=0, nullable=False)
     last_used_at: datetime | None = Field(default=None, nullable=True)
-    is_active: bool = Field(default=True, nullable=False, index=True)
+    is_active: bool = Field(default=True, nullable=False)
 
     question: Optional["Question"] = Relationship(back_populates="bank_entry")
-    assessment_questions: List["AssessmentQuestion"] = Relationship(back_populates="bank_entry")
+    assessment_questions: list["AssessmentQuestion"] = Relationship(back_populates="bank_entry")
 
 
 # Backward-compatible alias used by the model registry and older repositories.

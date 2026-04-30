@@ -141,7 +141,6 @@ class AuditLog(AppendOnlyModel, table=True):
     actor_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
     actor_role: Optional[str] = Field(
         default=None,
@@ -151,16 +150,15 @@ class AuditLog(AppendOnlyModel, table=True):
 
     # ── Subject ───────────────────────────────────────────────────────────────
 
-    entity_type: str = Field(nullable=False, max_length=50, index=True)
+    entity_type: str = Field(nullable=False, max_length=50)
     entity_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
 
     # ── Action ────────────────────────────────────────────────────────────────
 
-    action: str = Field(nullable=False, max_length=50, index=True)
+    action: str = Field(nullable=False, max_length=50)
     description: Optional[str] = Field(
         default=None,
         nullable=True,
@@ -273,8 +271,8 @@ class SecurityEvent(AppendOnlyModel, table=True):
 
     # ── Event identity ────────────────────────────────────────────────────────
 
-    event_type: SecurityEventType = Field(nullable=False, index=True)
-    severity: SecurityEventSeverity = Field(nullable=False, index=True)
+    event_type: SecurityEventType = Field(nullable=False)
+    severity: SecurityEventSeverity = Field(nullable=False)
 
     # ── Subject ───────────────────────────────────────────────────────────────
 
@@ -282,7 +280,6 @@ class SecurityEvent(AppendOnlyModel, table=True):
     user_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
-        index=True,
     )
 
     # ── Request context ───────────────────────────────────────────────────────
@@ -291,7 +288,6 @@ class SecurityEvent(AppendOnlyModel, table=True):
         default=None,
         nullable=True,
         max_length=45,
-        index=True,
     )
     user_agent: Optional[str] = Field(
         default=None,

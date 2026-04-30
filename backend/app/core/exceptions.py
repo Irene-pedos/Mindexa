@@ -432,3 +432,19 @@ class InternalError(MindexaError):
     status_code = 500
     default_message = "An internal server error occurred. Please try again."
     default_code = "internal_error"
+
+
+class ServiceUnavailableError(MindexaError):
+    """
+    Raised when an external service dependency (e.g. Gemini, OpenAI) is
+    unreachable, misconfigured, or returns an unexpected error.
+    Maps to HTTP 503 Service Unavailable.
+
+    Usage:
+        raise ServiceUnavailableError("Gemini API key is not configured.")
+    """
+
+    status_code = 503
+    default_message = "An external service is currently unavailable. Please try again later."
+    default_code = "service_unavailable"
+

@@ -130,7 +130,13 @@ def _build_user_response(user) -> UserResponse:
             profile_picture_url=getattr(user.profile, "profile_picture_url", None),
             student_id=getattr(user.profile, "student_id", None),
             staff_id=getattr(user.profile, "staff_id", None),
+            college=getattr(user.profile, "college", None),
+            department=getattr(user.profile, "department", None),
+            option=getattr(user.profile, "option", None),
+            level=getattr(user.profile, "level", None),
+            year=getattr(user.profile, "year", None),
         )
+
 
     return UserResponse(
         id=user.id,
@@ -240,23 +246,30 @@ async def register(
         first_name=body.first_name,
         last_name=body.last_name,
         role=CoreUserRole(body.role.value) if hasattr(body.role, "value") else CoreUserRole(str(body.role)),
+        reg_number=body.reg_number,
+        college=body.college,
+        department=body.department,
+        option=body.option,
+        level=body.level,
+        year=body.year,
         ip_address=ip,
     )
 
     # ── EMAIL SENDING HOOK ────────────────────────────────────────────────────
-    # Dispatch verification email via Celery
-    verification_url = settings.build_verification_url(raw_verification_token)
-    send_email_notification.delay(
-        to_email=user.email,
-        subject="Verify your Mindexa account",
-        template_name="verification",
-        context={
-            "first_name": body.first_name,
-            "verification_url": verification_url,
-            "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
-            "app_name": settings.APP_NAME,
-        },
-    )
+    # Dispatch verification email via Celery (only for students who get a token)
+    if raw_verification_token:
+        verification_url = settings.build_verification_url(raw_verification_token)
+        send_email_notification.delay(
+            to_email=user.email,
+            subject="Verify your Mindexa account",
+            template_name="verification",
+            context={
+                "first_name": body.first_name,
+                "verification_url": verification_url,
+                "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
+                "app_name": settings.APP_NAME,
+            },
+        )
 
     if settings.is_development:
         logger.debug(

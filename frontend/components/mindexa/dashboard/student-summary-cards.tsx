@@ -1,45 +1,57 @@
 // components/mindexa/dashboard/student-summary-cards.tsx
-"use client"
+"use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Calendar, Clock, Award, BookOpen } from "lucide-react"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Calendar, Clock, Award, BookOpen } from "lucide-react";
 
-const stats = [
-  {
-    title: "Upcoming Assessments",
-    value: "4",
-    description: "Next 14 days",
-    icon: Calendar,
-    trend: "+1 this week",
-    color: "text-blue-600",
-  },
-  {
-    title: "Due This Week",
-    value: "2",
-    description: "Assignments & Homework",
-    icon: Clock,
-    trend: "1 overdue",
-    color: "text-amber-600",
-  },
-  {
-    title: "Current GPA",
-    value: "3.78",
-    description: "Semester average",
-    icon: Award,
-    trend: "+0.12",
-    color: "text-emerald-600",
-  },
-  {
-    title: "Study Resources",
-    value: "18",
-    description: "Uploaded & linked",
-    icon: BookOpen,
-    trend: "3 new",
-    color: "text-violet-600",
-  },
-]
+import { StudentDashboardSummary } from "@/lib/api/student";
 
-export function StudentSummaryCards() {
+export function StudentSummaryCards({
+  summary,
+}: {
+  summary?: StudentDashboardSummary;
+}) {
+  const stats = [
+    {
+      title: "Upcoming Assessments",
+      value: summary?.active_assessments_count ?? "0",
+      description: "Available now",
+      icon: Calendar,
+      trend: "",
+      color: "text-blue-600",
+    },
+    {
+      title: "Pending Results",
+      value: summary?.pending_results_count ?? "0",
+      description: "Assessments taken",
+      icon: Clock,
+      trend: "",
+      color: "text-amber-600",
+    },
+    {
+      title: "Current GPA",
+      value: summary?.cgpa?.toFixed(2) ?? "0.00",
+      description: "Semester average",
+      icon: Award,
+      trend: "",
+      color: "text-emerald-600",
+    },
+    {
+      title: "Credits Earned",
+      value: summary?.total_credits ?? "0",
+      description: "Total progress",
+      icon: BookOpen,
+      trend: "",
+      color: "text-violet-600",
+    },
+  ];
+
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
       {stats.map((stat, i) => (
@@ -49,14 +61,20 @@ export function StudentSummaryCards() {
             <stat.icon className={`size-5 ${stat.color}`} />
           </CardHeader>
           <CardContent>
-            <div className="text-4xl font-semibold tabular-nums tracking-tighter">{stat.value}</div>
+            <div className="text-4xl font-semibold tabular-nums tracking-tighter">
+              {stat.value}
+            </div>
             <div className="mt-1 flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">{stat.description}</span>
-              <span className="text-xs text-emerald-600 font-medium">{stat.trend}</span>
+              {stat.trend && (
+                <span className="text-xs text-emerald-600 font-medium">
+                  {stat.trend}
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>
       ))}
     </div>
-  )
+  );
 }

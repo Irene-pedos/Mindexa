@@ -1,23 +1,29 @@
 // app/(student)/study/page.tsx
-"use client"
+"use client";
 
-import React, { useState } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Textarea } from "@/components/ui/textarea"
-import { Badge } from "@/components/ui/badge"
-import { Input } from "@/components/ui/input"
-import { 
-  Brain, 
-  Upload, 
-  FileText, 
-  Lightbulb, 
-  Target, 
-  BookOpen, 
-  ArrowRight, 
-  ShieldCheck 
-} from "lucide-react"
-import { cn } from "@/lib/utils"
+import React, { useState } from "react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import {
+  Brain,
+  Upload,
+  FileText,
+  Lightbulb,
+  Target,
+  BookOpen,
+  ArrowRight,
+  ShieldCheck,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const recentTopics = [
   "ACID Properties in Databases",
@@ -25,40 +31,44 @@ const recentTopics = [
   "Normalization Techniques",
   "OSI Model Layers",
   "Query Optimization Strategies",
-]
+];
 
 const uploadedResources = [
   { name: "Lecture Notes - Week 7.pdf", size: "2.4 MB", date: "Mar 25" },
   { name: "Past Papers - Algorithms 2025.pdf", size: "1.8 MB", date: "Mar 20" },
   { name: "Summary - Operating Systems.pdf", size: "890 KB", date: "Mar 18" },
-  { name: "Weak Topics Analysis - Mar 2026.docx", size: "340 KB", date: "Mar 26" },
-]
+  {
+    name: "Weak Topics Analysis - Mar 2026.docx",
+    size: "340 KB",
+    date: "Mar 26",
+  },
+];
 
 export default function StudentStudySupportPage() {
-  const [prompt, setPrompt] = useState("")
-  const [isThinking, setIsThinking] = useState(false)
-  const [response, setResponse] = useState("")
-  const [selectedResource, setSelectedResource] = useState<string | null>(null)
+  const [prompt, setPrompt] = useState("");
+  const [isThinking, setIsThinking] = useState(false);
+  const [response, setResponse] = useState("");
+  const [selectedResource, setSelectedResource] = useState<string | null>(null);
 
   const handleAskAI = async () => {
-    if (!prompt.trim()) return
-    setIsThinking(true)
+    if (!prompt.trim()) return;
+    setIsThinking(true);
 
     // TODO: Replace with real LangChain + FastAPI call (Student Study Support AI)
     setTimeout(() => {
       setResponse(
         `Based on your query "${prompt}":\n\n` +
-        `• Core concept: ... (clear explanation)\n` +
-        `• Common pitfalls: ...\n` +
-        `• Revision priority: High – this appears frequently in CATs and summative exams.\n\n` +
-        `Would you like me to:\n` +
-        `• Generate 5 practice questions\n` +
-        `• Create a mind map / summary\n` +
-        `• Identify related weak topics from your uploaded resources?`
-      )
-      setIsThinking(false)
-    }, 1350)
-  }
+          `• Core concept: ... (clear explanation)\n` +
+          `• Common pitfalls: ...\n` +
+          `• Revision priority: High – this appears frequently in CATs and summative exams.\n\n` +
+          `Would you like me to:\n` +
+          `• Generate 5 practice questions\n` +
+          `• Create a mind map / summary\n` +
+          `• Identify related weak topics from your uploaded resources?`,
+      );
+      setIsThinking(false);
+    }, 1350);
+  };
 
   return (
     <div className="space-y-8">
@@ -67,10 +77,13 @@ export default function StudentStudySupportPage() {
           <Brain className="size-8 text-violet-600" />
           Study Support AI
         </h1>
-        <p className="text-muted-foreground mt-1 max-w-3xl">
-          Personalized revision guidance, concept explanations, learning gap analysis, 
-          and active recall support. 
-          <span className="text-emerald-600 font-medium"> This tool is strictly for revision and homework only.</span>
+        <p className="text-muted-foreground mt-1 max-w-2xl">
+          Personalized revision guidance, concept explanations, learning gap
+          analysis, and active recall support.
+          <span className="text-emerald-600 font-small">
+            {" "}
+            This tool is strictly for revision and homework only.
+          </span>
         </p>
       </div>
 
@@ -79,9 +92,12 @@ export default function StudentStudySupportPage() {
         <div className="lg:col-span-7">
           <Card className="h-full">
             <CardHeader>
-              <CardTitle className="text-lg">Ask Your Personal Study Assistant</CardTitle>
+              <CardTitle className="text-lg">
+                Ask Your Personal Study Assistant
+              </CardTitle>
               <CardDescription>
-                Explain concepts • Identify weak areas • Suggest revision priorities • Generate practice questions
+                Explain concepts • Identify weak areas • Suggest revision
+                priorities • Generate practice questions
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
@@ -92,9 +108,9 @@ export default function StudentStudySupportPage() {
                 className="min-h-[120px] resize-y text-sm"
               />
 
-              <Button 
-                onClick={handleAskAI} 
-                disabled={isThinking || !prompt.trim()} 
+              <Button
+                onClick={handleAskAI}
+                disabled={isThinking || !prompt.trim()}
                 className="w-full"
                 size="lg"
               >
@@ -112,14 +128,18 @@ export default function StudentStudySupportPage() {
 
               {/* Quick Prompts */}
               <div>
-                <p className="text-sm font-medium text-muted-foreground mb-3">Quick starters:</p>
+                <p className="text-sm font-medium text-muted-foreground mb-3">
+                  Quick starters:
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {recentTopics.map((topic, i) => (
-                    <Button 
-                      key={i} 
-                      variant="outline" 
+                    <Button
+                      key={i}
+                      variant="outline"
                       size="sm"
-                      onClick={() => setPrompt(`Help me revise and understand ${topic}`)}
+                      onClick={() =>
+                        setPrompt(`Help me revise and understand ${topic}`)
+                      }
                     >
                       {topic}
                     </Button>
@@ -146,18 +166,23 @@ export default function StudentStudySupportPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               {uploadedResources.map((file, i) => (
-                <div 
-                  key={i} 
+                <div
+                  key={i}
                   className={cn(
                     "flex items-center gap-3 rounded-xl border p-4 hover:bg-muted/50 cursor-pointer transition-colors",
-                    selectedResource === file.name && "border-violet-500 bg-violet-950/30"
+                    selectedResource === file.name &&
+                      "border-violet-500 bg-violet-950/30",
                   )}
                   onClick={() => setSelectedResource(file.name)}
                 >
                   <FileText className="size-5 text-muted-foreground" />
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">{file.name}</div>
-                    <div className="text-xs text-muted-foreground mt-0.5">{file.size} • {file.date}</div>
+                    <div className="text-sm font-medium truncate">
+                      {file.name}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-0.5">
+                      {file.size} • {file.date}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -168,17 +193,24 @@ export default function StudentStudySupportPage() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg">
-                <Lightbulb className="size-5 text-amber-500" /> AI-Powered Study Tips
+                <Lightbulb className="size-5 text-amber-500" /> AI-Powered Study
+                Tips
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-5 text-sm">
               <div className="flex gap-3">
                 <Target className="size-5 text-emerald-500 mt-0.5 flex-shrink-0" />
-                <div>Normalization shows as a recurring weak area. Focus here before the next CAT.</div>
+                <div>
+                  Normalization shows as a recurring weak area. Focus here
+                  before the next CAT.
+                </div>
               </div>
               <div className="flex gap-3">
                 <BookOpen className="size-5 text-violet-500 mt-0.5 flex-shrink-0" />
-                <div>Use active recall: explain concepts out loud before checking your notes.</div>
+                <div>
+                  Use active recall: explain concepts out loud before checking
+                  your notes.
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -188,10 +220,12 @@ export default function StudentStudySupportPage() {
             <CardContent className="p-6 flex items-start gap-4">
               <ShieldCheck className="size-6 text-amber-600 mt-0.5 flex-shrink-0" />
               <div>
-                <p className="font-medium">This AI is for revision and learning only.</p>
+                <p className="font-medium">
+                  This AI is for revision and learning only.
+                </p>
                 <p className="text-sm text-muted-foreground mt-1">
-                  It is disabled during all CATs, summative exams, 
-                  and any supervised or restricted assessments.
+                  It is disabled during all CATs, summative exams, and any
+                  supervised or restricted assessments.
                 </p>
               </div>
             </CardContent>
@@ -199,5 +233,5 @@ export default function StudentStudySupportPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

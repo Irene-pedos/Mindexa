@@ -1,19 +1,71 @@
 // app/(student)/profile/page.tsx
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Switch } from "@/components/ui/switch"
 import { Separator } from "@/components/ui/separator"
-import { User, Mail, Phone, Shield, Bell } from "lucide-react"
+import { User, Mail, Phone, Shield, Bell, Loader2 } from "lucide-react"
+import { useAuth } from "@/hooks/use-auth"
+import { authApi } from "@/lib/api/auth"
+import { toast } from "sonner"
+import { Skeleton } from "@/components/ui/skeleton"
 
 export default function ProfileSettingsPage() {
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true)
-  const [emailNotifications, setEmailNotifications] = useState(true)
+  const { user, checkAuth } = useAuth()
+  const [loading, setLoading] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
+  
+  const [formData, setFormData] = useState({
+    first_name: "",
+    last_name: "",
+    phone_number: "",
+  })
+
+  useEffect(() => {
+    if (user) {
+      setFormData({
+        first_name: user.profile?.first_name || "",
+        last_name: user.profile?.last_name || "",
+        phone_number: user.profile?.phone_number || "",
+      })
+      setInitialLoading(false)
+    }
+  }, [user])
+
+  const handleSave = async () => {
+    setLoading(true)
+    try {
+      const updatedUser = await authApi.updateProfile(formData)
+      localStorage.setItem("user", JSON.stringify(updatedUser))
+      checkAuth() // Refresh global auth state
+      toast.success("Profile updated successfully")
+    } catch (err) {
+      toast.error("Failed to update profile")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (initialLoading) {
+    return (
+      <div className="max-w-2xl mx-auto space-y-8">
+        <Skeleton className="h-10 w-64" />
+        <Card>
+          <CardContent className="p-10 space-y-4">
+             <Skeleton className="h-24 w-24 rounded-full" />
+             <Skeleton className="h-10 w-full" />
+             <Skeleton className="h-10 w-full" />
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-2xl mx-auto space-y-8">
@@ -30,8 +82,10 @@ export default function ProfileSettingsPage() {
         <CardContent className="space-y-6">
           <div className="flex items-center gap-6">
             <Avatar className="h-24 w-24">
-              <AvatarImage src="/avatars/student.jpg" />
-              <AvatarFallback className="text-3xl">AR</AvatarFallback>
+              <AvatarImage src={user?.profile?.profile_picture_url || "/avatars/student.jpg"} />
+              <AvatarFallback className="text-3xl uppercase">
+                {user?.profile?.first_name?.[0]}{user?.profile?.last_name?.[0] || user?.email?.[0]}
+              </AvatarFallback>
             </Avatar>
             <div>
               <Button variant="outline">Change Photo</Button>
@@ -41,12 +95,20 @@ export default function ProfileSettingsPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
-              <Input id="fullName" defaultValue="Alex Rivera" />
+              <Label htmlFor="firstName">First Name</Label>
+              <Input 
+                id="firstName" 
+                value={formData.first_name} 
+                onChange={(e) => setFormData({ ...formData, first_name: e.target.value })}
+              />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="studentId">Student ID</Label>
-              <Input id="studentId" defaultValue="U20230047" readOnly />
+              <Label htmlFor="lastName">Last Name</Label>
+              <Input 
+                id="lastName" 
+                value={formData.last_name} 
+                onChange={(e) => setFormData({ ...formData, last_name: e.target.value })}
+              />
             </div>
           </div>
 
@@ -54,18 +116,22 @@ export default function ProfileSettingsPage() {
             <Label htmlFor="email">University Email</Label>
             <div className="relative">
               <Mail className="absolute left-3 top-3 size-4 text-muted-foreground" />
-              <Input id="email" defaultValue="alex.rivera@university.edu" className="pl-10" />
+              <Input id="email" value={user?.email || ""} readOnly className="pl-10 bg-muted" />
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label htmlFor="phone">Phone Number</Label>
-              <Input id="phone" defaultValue="+1 (555) 123-4567" />
+              <Input 
+                id="phone" 
+                value={formData.phone_number} 
+                onChange={(e) => setFormData({ ...formData, phone_number: e.target.value })}
+              />
             </div>
             <div className="space-y-2">
-              <Label>Program</Label>
-              <Input defaultValue="B.Sc. Computer Science" readOnly />
+              <Label>Student ID</Label>
+              <Input value={user?.profile?.student_id || user?.profile?.staff_id || "N/A"} readOnly className="bg-muted" />
             </div>
           </div>
         </CardContent>
@@ -84,7 +150,7 @@ export default function ProfileSettingsPage() {
               <div className="font-medium">Enable Browser Notifications</div>
               <div className="text-sm text-muted-foreground">Receive reminders for upcoming assessments</div>
             </div>
-            <Switch checked={notificationsEnabled} onCheckedChange={setNotificationsEnabled} />
+            <Switch defaultChecked />
           </div>
 
           <Separator />
@@ -94,7 +160,7 @@ export default function ProfileSettingsPage() {
               <div className="font-medium">Email Notifications</div>
               <div className="text-sm text-muted-foreground">Result releases, deadline changes, and appeals</div>
             </div>
-            <Switch checked={emailNotifications} onCheckedChange={setEmailNotifications} />
+            <Switch defaultChecked />
           </div>
 
           <Separator />
@@ -104,7 +170,10 @@ export default function ProfileSettingsPage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button size="lg">Save Changes</Button>
+        <Button size="lg" onClick={handleSave} disabled={loading}>
+          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Save Changes
+        </Button>
       </div>
     </div>
   )
