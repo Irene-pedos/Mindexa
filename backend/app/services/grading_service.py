@@ -292,7 +292,7 @@ class GradingService:
         await self.grading_repo.update_grade(
             grade_id=existing.id,
             updated_by_id=graded_by_ai_id or uuid.UUID(int=0),
-            grading_mode=GradingMode.AI_ASSISTED,
+            grading_mode=GradingMode.SEMI,
             ai_suggested_score=ai_suggested_score,
             ai_rationale=ai_rationale,
             ai_confidence=ai_confidence,
@@ -364,8 +364,8 @@ class GradingService:
         )
 
         grading_mode = (
-            GradingMode.AI_ASSISTED
-            if existing.grading_mode == GradingMode.AI_ASSISTED
+            GradingMode.SEMI
+            if existing.grading_mode == GradingMode.SEMI
             else GradingMode.MANUAL
         )
 

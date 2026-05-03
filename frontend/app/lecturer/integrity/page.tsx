@@ -1,43 +1,52 @@
-// app/lecturer/integrity/page.tsx
-"use client"
+"use client";
 
+import { integrityApi, IntegrityFlag } from "@/lib/api/integrity"
+import { toast } from "sonner"
+import { Loader2, AlertTriangle, Clock, User } from "lucide-react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { AlertTriangle, Clock, User } from "lucide-react"
-
-const integrityLogs = [
-  {
-    id: 1,
-    student: "Jordan Lee (S3921)",
-    assessment: "Database Systems CAT",
-    event: "Multiple tab switches (5 times)",
-    time: "14:32",
-    risk: "High",
-    actionTaken: "Warning issued",
-  },
-  {
-    id: 2,
-    student: "Taylor Kim (S2847)",
-    assessment: "Algorithms Quiz",
-    event: "Browser minimized for 3 minutes",
-    time: "13:45",
-    risk: "Medium",
-    actionTaken: "Logged only",
-  },
-  {
-    id: 3,
-    student: "Sam Rivera (S1759)",
-    assessment: "Database Systems CAT",
-    event: "Copy-paste attempt detected",
-    time: "11:20",
-    risk: "High",
-    actionTaken: "Flag raised",
-  },
-]
 
 export default function LecturerIntegrityPage() {
+  const [flags, setFlags] = useState<IntegrityFlag[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchFlags()
+  }, [])
+
+  const fetchFlags = async () => {
+    setLoading(true)
+    try {
+      const response = await integrityApi.getFlags()
+      // API returns { total, page, flags: [...] }
+      setFlags(response.flags || [])
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load integrity flags")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResolve = async (id: string) => {
+    const notes = prompt("Enter resolution notes (min 5 characters):")
+    if (notes === null) return
+    if (notes.length < 5) {
+        toast.error("Resolution notes are too short")
+        return
+    }
+
+    try {
+      await integrityApi.resolveFlag(id, { status: "CONFIRMED", resolution_notes: notes })
+      toast.success("Flag resolved")
+      fetchFlags()
+    } catch (e: any) {
+      toast.error(e.message || "Failed to resolve flag")
+    }
+  }
+
   return (
     <div className="space-y-8">
       <div>
@@ -50,34 +59,53 @@ export default function LecturerIntegrityPage() {
       <Card>
         <CardHeader>
           <CardTitle>Recent Integrity Events</CardTitle>
-          <CardDescription>Last 24 hours • All supervised assessments</CardDescription>
+          <CardDescription>All flagged attempts requiring review</CardDescription>
         </CardHeader>
         <CardContent>
           <ScrollArea className="h-[620px]">
             <div className="space-y-5">
-              {integrityLogs.map((log) => (
-                <div key={log.id} className="border rounded-2xl p-6 hover:bg-muted/50">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-4">
-                      <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center">
-                        <User className="size-5 text-red-600" />
-                      </div>
-                      <div>
-                        <div className="font-semibold">{log.student}</div>
-                        <div className="text-sm text-muted-foreground">{log.assessment}</div>
-                      </div>
-                    </div>
-                    <Badge variant={log.risk === "High" ? "destructive" : "default"}>{log.risk} Risk</Badge>
-                  </div>
-
-                  <div className="mt-5 pl-14">
-                    <div className="font-medium text-red-600">{log.event}</div>
-                    <div className="text-xs text-muted-foreground flex items-center gap-2 mt-2">
-                      <Clock className="size-4" /> {log.time} • Action: {log.actionTaken}
-                    </div>
-                  </div>
+              {loading ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-3">
+                  <Loader2 className="size-8 animate-spin text-muted-foreground" />
+                  <p className="text-sm text-muted-foreground">Loading logs...</p>
                 </div>
-              ))}
+              ) : flags.length === 0 ? (
+                <div className="text-center py-20 text-muted-foreground">No integrity flags found.</div>
+              ) : (
+                flags.map((log) => (
+                  <div key={log.id} className="border rounded-2xl p-6 hover:bg-muted/50 transition-all">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-center gap-4">
+                        <div className="h-10 w-10 rounded-full bg-red-100 dark:bg-red-950 flex items-center justify-center">
+                          <User className="size-5 text-red-600" />
+                        </div>
+                        <div>
+                          <div className="font-semibold">{log.student_name || "Unknown Student"}</div>
+                          <div className="text-sm text-muted-foreground">{log.assessment_name || "Unknown Assessment"}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge variant={log.risk_level === "HIGH" || log.risk_level === "CRITICAL" ? "destructive" : "default"}>
+                          {log.risk_level} Risk
+                        </Badge>
+                        <Badge variant="outline">{log.status}</Badge>
+                      </div>
+                    </div>
+
+                    <div className="mt-5 pl-14">
+                      <div className="font-medium text-red-600">{log.description}</div>
+                      <div className="text-xs text-muted-foreground flex items-center justify-between mt-4">
+                        <div className="flex items-center gap-2">
+                          <Clock className="size-4" /> {new Date(log.created_at).toLocaleString()}
+                        </div>
+                        {log.status === "OPEN" && (
+                          <Button size="sm" variant="outline" onClick={() => handleResolve(log.id)}>Resolve Flag</Button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </ScrollArea>
         </CardContent>
@@ -89,3 +117,4 @@ export default function LecturerIntegrityPage() {
     </div>
   )
 }
+

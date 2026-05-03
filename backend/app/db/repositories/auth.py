@@ -36,7 +36,9 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
 from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
@@ -64,7 +66,9 @@ class UserRepository:
         Returns None if not found or soft-deleted.
         """
         result = await self.db.execute(
-            select(User).where(
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
                 User.id == user_id,
                 User.is_deleted == False,
             )
@@ -77,7 +81,9 @@ class UserRepository:
         Used by admin endpoints that need to inspect deleted accounts.
         """
         result = await self.db.execute(
-            select(User).where(User.id == user_id)
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == user_id)
         )
         return result.scalar_one_or_none()
 
@@ -88,7 +94,9 @@ class UserRepository:
         Returns None if not found or soft-deleted.
         """
         result = await self.db.execute(
-            select(User).where(
+            select(User)
+            .options(selectinload(User.profile))
+            .where(
                 User.email == email,
                 User.is_deleted == False,
             )

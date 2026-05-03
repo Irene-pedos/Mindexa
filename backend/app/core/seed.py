@@ -648,7 +648,7 @@ async def seed_assessment(
         assessment_id=assessment.id,
         title="Section A — Closed Questions",
         order_index=1,
-        marks_allocated=17,
+        allocated_marks=17,
         question_count_target=7,
         instructions="Answer ALL questions. Each MCQ is worth 2 marks. True/False: 1 mark each.",
     )
@@ -656,7 +656,7 @@ async def seed_assessment(
         assessment_id=assessment.id,
         title="Section B — Short Answer",
         order_index=2,
-        marks_allocated=8,
+        allocated_marks=8,
         question_count_target=2,
         instructions="Answer in 2-4 sentences. Each question is worth 4 marks.",
     )

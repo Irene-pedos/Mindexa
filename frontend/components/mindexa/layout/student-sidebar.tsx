@@ -1,19 +1,19 @@
 // components/mindexa/layout/student-sidebar.tsx
-"use client"
+"use client";
 
-import * as React from "react"
-import Link from "next/link"
-import { usePathname } from "next/navigation"
-import Image from "next/image"
-import { 
-  LayoutDashboard, 
-  BookOpen, 
-  FileText, 
-  Calendar, 
-  Trophy, 
-  Brain, 
-  Upload 
-} from "lucide-react"
+import * as React from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import Image from "next/image";
+import {
+  LayoutDashboard,
+  BookOpen,
+  FileText,
+  Calendar,
+  Trophy,
+  Brain,
+  Upload,
+} from "lucide-react";
 
 import {
   Sidebar,
@@ -26,35 +26,41 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-} from "@/components/ui/sidebar"
-import { NavUser } from "@/components/nav-user"
-import { useAuth } from "@/hooks/use-auth"
+} from "@/components/ui/sidebar";
+import { NavUser } from "@/components/nav-user";
+import { useAuth } from "@/hooks/use-auth";
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
   { title: "My Courses", url: "/student/courses", icon: BookOpen },
   { title: "Assessments", url: "/student/assessments", icon: FileText },
   { title: "Schedule", url: "/student/schedule", icon: Calendar },
-]
+];
 
 const toolsNav = [
   { title: "Results & Feedback", url: "/student/results", icon: Trophy },
   { title: "Study Support", url: "/student/study", icon: Brain },
   { title: "Upload Resources", url: "/student/resources", icon: Upload },
-]
+];
 
-export function StudentSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
-  const pathname = usePathname()
-  const { user } = useAuth()
+export function StudentSidebar({
+  ...props
+}: React.ComponentProps<typeof Sidebar>) {
+  const pathname = usePathname();
+  const { user } = useAuth();
 
-  const displayName = (user?.profile as any)?.display_name || 
-    ((user?.profile as any)?.first_name ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}` : "Student")
+  const displayName =
+    (user?.profile as any)?.display_name ||
+    ((user?.profile as any)?.first_name
+      ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}`
+      : "Student");
 
   const userData = {
     name: displayName,
     email: (user as any)?.email || "",
-    avatar: (user?.profile as any)?.profile_picture_url || "/avatars/student.jpg"
-  }
+    avatar:
+      (user?.profile as any)?.profile_picture_url || "/avatars/user avatar.png",
+  };
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -91,40 +97,54 @@ export function StudentSidebar({ ...props }: React.ComponentProps<typeof Sidebar
       <SidebarContent>
         {/* Main Academic Navigation */}
         <SidebarGroup>
-          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">Core</SidebarGroupLabel>
+          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+            Core
+          </SidebarGroupLabel>
           <SidebarMenu>
             {mainNav.map((item) => {
-              const isActive = pathname === item.url || pathname.startsWith(item.url + "/")
+              const isActive =
+                pathname === item.url || pathname.startsWith(item.url + "/");
               return (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild tooltip={item.title} isActive={isActive}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={isActive}
+                  >
                     <Link href={item.url}>
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              )
+              );
             })}
           </SidebarMenu>
         </SidebarGroup>
 
         {/* Tools & Support */}
         <SidebarGroup>
-          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">Tools</SidebarGroupLabel>
+          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+            Tools
+          </SidebarGroupLabel>
           <SidebarMenu>
             {toolsNav.map((item) => {
-              const isActive = pathname === item.url || pathname.startsWith(item.url + "/")
+              const isActive =
+                pathname === item.url || pathname.startsWith(item.url + "/");
               return (
                 <SidebarMenuItem key={item.title}>
-                  <SidebarMenuButton asChild tooltip={item.title} isActive={isActive}>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip={item.title}
+                    isActive={isActive}
+                  >
                     <Link href={item.url}>
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-              )
+              );
             })}
           </SidebarMenu>
         </SidebarGroup>
@@ -136,5 +156,5 @@ export function StudentSidebar({ ...props }: React.ComponentProps<typeof Sidebar
 
       <SidebarRail />
     </Sidebar>
-  )
+  );
 }

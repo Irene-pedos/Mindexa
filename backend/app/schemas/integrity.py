@@ -83,7 +83,10 @@ class IntegrityEventResponse(BaseModel):
     attempt_id: uuid.UUID
     assessment_id: uuid.UUID
     student_id: uuid.UUID
+    student_name: str | None = None
     event_type: IntegrityEventType
+    severity: str = "low"
+    risk_score: int = 0
     metadata_json: dict[str, Any] | None
     created_at: datetime
 
@@ -96,6 +99,8 @@ class IntegrityFlagResponse(BaseModel):
     attempt_id: uuid.UUID
     assessment_id: uuid.UUID
     student_id: uuid.UUID
+    student_name: str | None = None
+    assessment_name: str | None = None
     status: IntegrityFlagStatus
     risk_level: RiskLevel
     raised_by: IntegrityFlagRaisedBy
@@ -107,6 +112,7 @@ class IntegrityFlagResponse(BaseModel):
     resolution_notes: str | None
     created_at: datetime
     updated_at: datetime
+
 
 
 class IntegrityWarningResponse(BaseModel):
@@ -149,3 +155,10 @@ class SupervisionSessionResponse(BaseModel):
     started_at: datetime
     ended_at: datetime | None
     created_at: datetime
+
+
+class SupervisionStatsResponse(BaseModel):
+    """Aggregated stats for the live supervision panel."""
+    online_count: int = 0
+    warning_count: int = 0
+    high_risk_count: int = 0

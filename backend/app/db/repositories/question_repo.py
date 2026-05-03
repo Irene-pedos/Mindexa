@@ -190,17 +190,20 @@ class QuestionRepository:
 
     async def get_by_id(self, question_id: uuid.UUID) -> Question | None:
         """
-        Load a Question.
+        Load a Question with its options.
 
         Excludes soft-deleted questions. Does NOT filter by is_approved
         (service layer applies that check).
         """
+        from sqlalchemy.orm import selectinload
+
         result = await self.db.execute(
             select(Question)
             .where(
                 col(Question.id) == question_id,
                 col(Question.is_deleted) == False,  # noqa: E712
             )
+            .options(selectinload(Question.options))
         )
         return result.scalar_one_or_none()
 

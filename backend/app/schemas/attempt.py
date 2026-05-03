@@ -27,8 +27,10 @@ class AttemptStartRequest(BaseModel):
     assessment_id: uuid.UUID
     access_password: str | None = Field(
         default=None,
+        alias="password", # Support frontend field name
         description="Required only if the assessment is password-protected",
     )
+    model_config = {"populate_by_name": True}
 
 
 class AttemptResumeRequest(BaseModel):
@@ -62,6 +64,20 @@ class AttemptSubmitRequest(BaseModel):
 # RESPONSE SCHEMAS
 # ---------------------------------------------------------------------------
 
+class AttemptQuestionOption(BaseModel):
+    """Option for a multiple choice question in an attempt."""
+    text: str
+    order_index: int
+
+class AttemptQuestionResponse(BaseModel):
+    """Question detail within an attempt."""
+    id: uuid.UUID
+    type: str
+    content: str
+    text: str | None = None
+    marks: int
+    order_index: int
+    options: list[AttemptQuestionOption] | None = None
 
 class AttemptResponse(BaseModel):
     """Full attempt detail — returned to student during active attempt."""
@@ -72,15 +88,18 @@ class AttemptResponse(BaseModel):
     student_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime
-    submitted_at: datetime | None
-    expires_at: datetime
-    last_activity_at: datetime | None
-    access_token: uuid.UUID
-    total_score: float | None
-    total_integrity_warnings: int
-    is_flagged: bool
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+    expires_at: datetime | None = None
+    last_activity_at: datetime | None = None
+    access_token: uuid.UUID | None = None
+    total_score: float | None = None
+    total_integrity_warnings: int = 0
+    is_flagged: bool = False
     created_at: datetime
+    
+    # Nested data for the UI
+    questions: list[AttemptQuestionResponse] = []
 
 
 class AttemptStartResponse(BaseModel):
@@ -94,9 +113,9 @@ class AttemptStartResponse(BaseModel):
     assessment_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime
-    expires_at: datetime
-    access_token: uuid.UUID
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    access_token: uuid.UUID | None = None
     # Seconds remaining (computed, not stored)
     seconds_remaining: int | None = None
 
@@ -109,11 +128,11 @@ class AttemptSummary(BaseModel):
     assessment_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime
-    submitted_at: datetime | None
-    expires_at: datetime
-    total_score: float | None
-    is_flagged: bool
+    started_at: datetime | None = None
+    submitted_at: datetime | None = None
+    expires_at: datetime | None = None
+    total_score: float | None = None
+    is_flagged: bool = False
 
 
 class AttemptListResponse(BaseModel):
@@ -140,9 +159,18 @@ class AttemptSupervisorView(BaseModel):
     student_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime
-    expires_at: datetime
-    last_activity_at: datetime | None
-    total_integrity_warnings: int
-    is_flagged: bool
-    ip_address: str | None
+    started_at: datetime | None = None
+    expires_at: datetime | None = None
+    last_activity_at: datetime | None = None
+    total_integrity_warnings: int = 0
+    is_flagged: bool = False
+    ip_address: str | None = None
+
+# Rebuild models to resolve deferred type evaluation
+AttemptQuestionResponse.model_rebuild()
+AttemptResponse.model_rebuild()
+AttemptListResponse.model_rebuild()
+AttemptStartResponse.model_rebuild()
+AttemptSummary.model_rebuild()
+AttemptSupervisorView.model_rebuild()
+

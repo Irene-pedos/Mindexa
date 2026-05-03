@@ -41,23 +41,40 @@ export default function StudentAssessmentsPage() {
     .filter((ass) => {
       const matchesSearch = ass.title?.toLowerCase().includes(searchTerm.toLowerCase()) || false
       const matchesType = filterType === "all" || ass.type === filterType
+      
+      // Hide if window has ended (and not completed)
+      const now = new Date();
+      const hasEnded = ass.window_end && new Date(ass.window_end) < now;
+      if (hasEnded && ass.status !== "completed") return false;
+
       const matchesStatus = filterStatus === "all" || ass.status === filterStatus
       return matchesSearch && matchesType && matchesStatus
     })
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "published":
-      case "available":
-        return <Badge className="bg-emerald-600 hover:bg-emerald-700">Available Now</Badge>
-      case "draft":
-        return <Badge variant="secondary">Draft</Badge>
-      case "completed":
-        return <Badge variant="outline" className="border-blue-500 text-blue-500">Completed</Badge>
-      default:
-        return <Badge variant="outline">{status}</Badge>
+  const getStatusInfo = (assessment: any) => {
+    const now = new Date();
+    const start = assessment.window_start ? new Date(assessment.window_start) : null;
+    const end = assessment.window_end ? new Date(assessment.window_end) : null;
+
+    if (assessment.status === "completed") {
+      return { label: "Completed", variant: "outline" as const, color: "border-blue-500 text-blue-500", available: false };
     }
-  }
+
+    if (start && now < start) {
+      return { 
+        label: `Opens ${start.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`, 
+        variant: "secondary" as const, 
+        color: "bg-amber-100 text-amber-700", 
+        available: false 
+      };
+    }
+
+    if (end && now > end) {
+      return { label: "Closed", variant: "destructive" as const, color: "", available: false };
+    }
+
+    return { label: "Available Now", variant: "default" as const, color: "bg-emerald-600 hover:bg-emerald-700", available: true };
+  };
 
   const getTypeColor = (type: string) => {
     if (type === "CAT" || type === "summative") return "text-red-500"
@@ -65,59 +82,78 @@ export default function StudentAssessmentsPage() {
     return "text-amber-500"
   }
 
-  const renderAssessmentCard = (assessment: any) => (
-    <Card key={assessment.id} className="hover:shadow-md transition-all duration-200 group">
-      <CardHeader>
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <CardTitle className="text-xl">{assessment.title}</CardTitle>
-            <CardDescription className="flex items-center gap-2">
-              <BookOpen className="size-4" />
-              {assessment.id.slice(0, 8)}
-            </CardDescription>
-          </div>
-          {getStatusBadge(assessment.status || "available")}
-        </div>
-      </CardHeader>
-
-      <CardContent className="pt-0">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-          <div className="flex items-center gap-3">
-            <Calendar className="size-5 text-muted-foreground" />
-            <div>
-              <div className="font-medium">{new Date(assessment.created_at || Date.now()).toLocaleDateString()}</div>
-              <div className="text-muted-foreground">Anytime</div>
+  const renderAssessmentCard = (assessment: any) => {
+    const status = getStatusInfo(assessment);
+    
+    return (
+      <Card key={assessment.id} className={cn(
+        "hover:shadow-md transition-all duration-200 group",
+        !status.available && "opacity-80"
+      )}>
+        <CardHeader>
+          <div className="flex items-start justify-between">
+            <div className="space-y-1">
+              <CardTitle className="text-xl">{assessment.title}</CardTitle>
+              <CardDescription className="flex items-center gap-2">
+                <BookOpen className="size-4" />
+                {assessment.id.slice(0, 8)}
+              </CardDescription>
             </div>
+            <Badge variant={status.variant} className={status.color}>
+              {status.label}
+            </Badge>
           </div>
+        </CardHeader>
 
-          <div className="flex items-center gap-3">
-            <Clock className="size-5 text-muted-foreground" />
-            <div>
-              <div className="font-medium">{assessment.duration_minutes || 90} min</div>
-              <div className="text-muted-foreground">
-                {assessment.is_closed_book ? "Closed Book" : "Open Book"} • {assessment.is_supervised ? "Supervised" : "Unsupervised"}
+        <CardContent className="pt-0">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
+            <div className="flex items-center gap-3">
+              <Calendar className="size-5 text-muted-foreground" />
+              <div>
+                <div className="font-medium">
+                  {assessment.window_start 
+                    ? new Date(assessment.window_start).toLocaleDateString() 
+                    : "Anytime"}
+                </div>
+                <div className="text-muted-foreground">
+                  {assessment.window_end ? `Until ${new Date(assessment.window_end).toLocaleDateString()}` : "No deadline"}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center justify-between md:justify-end gap-4">
-            <div className="text-right">
-              <div className={cn("font-semibold uppercase", getTypeColor(assessment.type))}>
-                {assessment.type}
+            <div className="flex items-center gap-3">
+              <Clock className="size-5 text-muted-foreground" />
+              <div>
+                <div className="font-medium">{assessment.duration_minutes || 90} min</div>
+                <div className="text-muted-foreground">
+                  {assessment.is_closed_book ? "Closed Book" : "Open Book"} • {assessment.is_supervised ? "Supervised" : "Unsupervised"}
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">{assessment.total_marks || 100} marks</div>
             </div>
 
-            <Button asChild size="lg" className="font-medium">
-              <Link href={`/student/assessments/${assessment.id}/take`}>
-                Start Assessment
-              </Link>
-            </Button>
+            <div className="flex items-center justify-between md:justify-end gap-4">
+              <div className="text-right">
+                <div className={cn("font-semibold uppercase", getTypeColor(assessment.type))}>
+                  {assessment.type}
+                </div>
+                <div className="text-xs text-muted-foreground">{assessment.total_marks || 100} marks</div>
+              </div>
+
+              <Button asChild={status.available} size="lg" className="font-medium" disabled={!status.available}>
+                {status.available ? (
+                  <Link href={`/student/assessments/${assessment.id}/take`}>
+                    Start Assessment
+                  </Link>
+                ) : (
+                  <span>Locked</span>
+                )}
+              </Button>
+            </div>
           </div>
-        </div>
-      </CardContent>
-    </Card>
-  )
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
     <div className="space-y-8">

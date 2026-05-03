@@ -50,7 +50,7 @@ export default function HeroSection() {
             <div className="max-w-3xl">
               <AnimatedGroup variants={transitionVariants}>
                 <Link
-                  href="#"
+                  href="#about"
                   className=" flex w-fit items-center gap-3 rounded-full border bg-white/80 backdrop-blur-sm px-5 py-2 text-sm shadow-sm hover:shadow transition-all duration-300"
                 >
                   <span className="text-slate-600">
@@ -109,7 +109,7 @@ export default function HeroSection() {
                   size="lg"
                   className="rounded-full px-8 text-base font-medium"
                 >
-                  <Link href="#get-started">Get Started</Link>
+                  <Link href="/signup">Get Started</Link>
                 </Button>
 
                 <Button

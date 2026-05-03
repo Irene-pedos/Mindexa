@@ -13,7 +13,9 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import GradingQueuePriority, GradingQueueStatus
+from app.db.models.assessment import Assessment
 from app.db.models.attempt import GradingQueueItem, SubmissionGrade
+from app.db.models.auth import User, UserProfile
 
 
 def _utcnow() -> datetime:
@@ -278,13 +280,37 @@ class GradingRepository:
         total = count_result.scalar_one()
 
         result = await self.db.execute(
-            select(GradingQueueItem)
+            select(
+                GradingQueueItem,
+                UserProfile.first_name.label("student_first_name"),
+                UserProfile.last_name.label("student_last_name"),
+                UserProfile.display_name.label("student_display_name"),
+                Assessment.title.label("assessment_title"),
+            )
+            .join(User, GradingQueueItem.student_id == User.id)
+            .outerjoin(UserProfile, User.profile)
+            .join(Assessment, GradingQueueItem.assessment_id == Assessment.id)
             .where(*filters)
             .order_by(GradingQueueItem.created_at.asc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return list(result.scalars().all()), total
+        
+        items = []
+        for row in result.all():
+            item = row[0]
+            first_name = row[1]
+            last_name = row[2]
+            display_name = row[3]
+            item.student_name = (
+                " ".join(part for part in [first_name, last_name] if part).strip()
+                or display_name
+                or "Student"
+            )
+            item.assessment_title = row[4]
+            items.append(item)
+            
+        return items, total
 
     # -----------------------------------------------------------------------
     # GradingQueueItem — UPDATES

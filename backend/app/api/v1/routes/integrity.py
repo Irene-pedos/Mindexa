@@ -35,6 +35,7 @@ from app.schemas.integrity import (
     RaiseFlagRequest,
     RecordEventRequest,
     ResolveFlagRequest,
+    SupervisionStatsResponse,
 )
 from app.services.integrity_service import IntegrityService
 
@@ -148,7 +149,9 @@ async def raise_flag(
         raised_by_id=current_user.id,
         description=body.description,
         risk_level=body.risk_level,
-        evidence_event_ids=[str(e) for e in body.evidence_event_ids] if body.evidence_event_ids else None,
+        evidence_event_ids=[str(e) for e in body.evidence_event_ids]
+        if body.evidence_event_ids
+        else None,
     )
     return IntegrityFlagResponse.model_validate(flag)
 
@@ -186,42 +189,24 @@ async def resolve_flag(
     }
 
 
-# ── GET FULL INTEGRITY REPORT (Supervisor) ────────────────────────────────────
-
-
-@router.get(
-    "/{attempt_id}",
-    response_model=AttemptIntegrityReport,
-    summary="Get full integrity report for an attempt (supervisor)",
-)
-async def get_integrity_report(
-    attempt_id: uuid.UUID,
-    current_user=Depends(require_lecturer_or_admin),
-    db: AsyncSession = Depends(get_db),
-) -> AttemptIntegrityReport:
-    """
-    Returns a comprehensive integrity report for one attempt:
-        - All integrity events (ordered by time)
-        - All flags (with status and resolution)
-        - All warnings issued
-        - Event type counts
-    """
-    service = IntegrityService(db)
-    report = await service.get_attempt_integrity_report(attempt_id)
-
-    return AttemptIntegrityReport(
-        attempt_id=report["attempt_id"],
-        student_id=report["student_id"],
-        is_flagged=report["is_flagged"],
-        total_warnings=report["total_warnings"],
-        event_counts=report["event_counts"],
-        events=[IntegrityEventResponse.model_validate(e) for e in report["events"]],
-        flags=[IntegrityFlagResponse.model_validate(f) for f in report["flags"]],
-        warnings=[IntegrityWarningResponse.model_validate(w) for w in report["warnings"]],
-    )
 
 
 # ── LIVE EVENT FEED FOR ASSESSMENT (Supervisor) ───────────────────────────────
+
+
+@router.get(
+    "/supervision/stats/{assessment_id}",
+    response_model=SupervisionStatsResponse,
+    summary="Fetch live aggregated stats for an assessment",
+)
+async def get_supervision_stats(
+    assessment_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SupervisionStatsResponse:
+    svc = IntegrityService(db)
+    stats = await svc.get_supervision_stats(assessment_id)
+    return SupervisionStatsResponse.model_validate(stats)
 
 
 @router.get(
@@ -279,6 +264,68 @@ async def get_assessment_flags(
         "page": page,
         "flags": [IntegrityFlagResponse.model_validate(f) for f in flags],
     }
+
+
+@router.get(
+    "/flags",
+    response_model=dict,
+    summary="List all integrity flags (for all assessments)",
+)
+async def list_all_flags(
+    status: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=1, le=200),
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    repo = IntegrityRepository(db)
+    # Filter by lecturer's assessments if not admin
+    # For now we'll just list all as a placeholder
+    flags, total = await repo.list_all_flags(
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    return {
+        "total": total,
+        "page": page,
+        "flags": [IntegrityFlagResponse.model_validate(f) for f in flags],
+    }
+
+
+# ── GET FULL INTEGRITY REPORT (Supervisor) ────────────────────────────────────
+
+
+@router.get(
+    "/{attempt_id}",
+    response_model=AttemptIntegrityReport,
+    summary="Get full integrity report for an attempt (supervisor)",
+)
+async def get_integrity_report(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptIntegrityReport:
+    """
+    Returns a comprehensive integrity report for one attempt:
+    - All integrity events (ordered by time)
+    - All flags (with status and resolution)
+    - All warnings issued
+    - Event type counts
+    """
+    service = IntegrityService(db)
+    report = await service.get_attempt_integrity_report(attempt_id)
+
+    return AttemptIntegrityReport(
+        attempt_id=report["attempt_id"],
+        student_id=report["student_id"],
+        is_flagged=report["is_flagged"],
+        total_warnings=report["total_warnings"],
+        event_counts=report["event_counts"],
+        events=[IntegrityEventResponse.model_validate(e) for e in report["events"]],
+        flags=[IntegrityFlagResponse.model_validate(f) for f in report["flags"]],
+        warnings=[IntegrityWarningResponse.model_validate(w) for w in report["warnings"]],
+    )
 
 
 # ── SUPERVISION SESSION ───────────────────────────────────────────────────────

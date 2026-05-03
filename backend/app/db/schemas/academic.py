@@ -117,7 +117,7 @@ class CourseResponse(BaseAuditedResponse):
     department_id: uuid.UUID | None
     academic_period_id: uuid.UUID
     code: str
-    title: str
+    title: str = Field(validation_alias="name")
     description: str | None
     credit_hours: int | None
     is_active: bool
@@ -128,7 +128,7 @@ class CourseSummaryResponse(MindexaSchema):
 
     id: uuid.UUID
     code: str
-    title: str
+    title: str = Field(validation_alias="name")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

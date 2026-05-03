@@ -129,6 +129,8 @@ class GradingQueueItemResponse(BaseModel):
     assessment_id: uuid.UUID
     question_id: uuid.UUID
     student_id: uuid.UUID
+    student_name: str | None = None
+    assessment_title: str | None = None
     status: GradingQueueStatus
     priority: GradingQueuePriority
     grading_mode: GradingMode

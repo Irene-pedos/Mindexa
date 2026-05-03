@@ -40,11 +40,18 @@ export interface StudentUpcomingAssessment {
   total_marks?: number;
 }
 
+export interface PerformanceTrendItem {
+  month: string;
+  score: number;
+  average: number;
+}
+
 export interface StudentDashboardResponse {
   summary: StudentDashboardSummary;
   active_attempts: StudentActiveAttempt[];
   recent_results: StudentRecentResult[];
   upcoming_assessments: StudentUpcomingAssessment[];
+  performance_trend: PerformanceTrendItem[];
 }
 
 export interface StudentCourseDetail {
@@ -69,6 +76,9 @@ export interface StudentScheduleEvent {
   description?: string;
   location?: string;
   color_hint?: string;
+  course_code?: string;
+  course_name?: string;
+  duration_minutes?: number;
 }
 
 export interface StudentScheduleResponse {

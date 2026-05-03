@@ -13,6 +13,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.db.models.attempt import AssessmentAttempt
 from app.db.models.result import AssessmentResult, ResultBreakdown
 
 
@@ -191,7 +192,7 @@ class ResultRepository:
         result = await self.db.execute(
             select(AssessmentResult)
             .where(*filters)
-            .options(selectinload(AssessmentResult.assessment))
+            .options(selectinload(AssessmentResult.attempt).selectinload(AssessmentAttempt.assessment))
             .order_by(AssessmentResult.released_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
@@ -291,3 +292,32 @@ class ResultRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def count_pending_by_student(self, student_id: uuid.UUID) -> int:
+        """
+        Count attempts submitted by the student that do not yet have a released result.
+        """
+        from app.db.enums import AttemptStatus
+        from sqlalchemy import and_, exists, not_
+
+        released_exists = exists().where(
+            and_(
+                AssessmentResult.attempt_id == AssessmentAttempt.id,
+                AssessmentResult.is_released == True,
+                AssessmentResult.is_deleted == False,  # noqa: E712
+            )
+        )
+
+        stmt = select(func.count(AssessmentAttempt.id)).where(
+            and_(
+                AssessmentAttempt.student_id == student_id,
+                AssessmentAttempt.status.in_(
+                    [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]
+                ),
+                AssessmentAttempt.is_deleted == False,  # noqa: E712
+                not_(released_exists),
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one()
+

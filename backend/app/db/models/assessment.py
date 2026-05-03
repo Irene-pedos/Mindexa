@@ -130,6 +130,18 @@ class Assessment(AuditedBaseModel, table=True):
         composite_index("assessment", "draft_is_complete", "status"),
     )
 
+    # -- Properties for schema alignment ----------------------------------------
+
+    @property
+    def is_finalized(self) -> bool:
+        """Alias for draft_is_complete for API schema alignment."""
+        return self.draft_is_complete
+
+    @property
+    def finalized_at(self) -> datetime | None:
+        """Alias for published_at for API schema alignment."""
+        return self.published_at
+
     # ── Core references ───────────────────────────────────────────────────────
 
     course_id: Optional[uuid.UUID] = Field(
@@ -220,6 +232,7 @@ class Assessment(AuditedBaseModel, table=True):
     ai_assistance_allowed: bool = Field(default=False, nullable=False)
     is_open_book: bool = Field(default=False, nullable=False)
     fullscreen_required: bool = Field(default=True, nullable=False)
+    is_supervised: bool = Field(default=False, nullable=False)
     integrity_monitoring_enabled: bool = Field(default=True, nullable=False)
     randomize_questions: bool = Field(default=False, nullable=False)
     randomize_options: bool = Field(default=False, nullable=False)
@@ -257,6 +270,16 @@ class Assessment(AuditedBaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
+
+    @property
+    def is_finalized(self) -> bool:
+        """Alias for draft_is_complete for schema alignment."""
+        return self.draft_is_complete
+
+    @property
+    def finalized_at(self) -> datetime | None:
+        """Alias for published_at for schema alignment."""
+        return self.published_at
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
@@ -467,9 +490,10 @@ class AssessmentSection(BaseModel, table=True):
         )
     )
     title: str = Field(nullable=False, max_length=255)
+    description: Optional[str] = Field(default=None, nullable=True)
     instructions: Optional[str] = Field(default=None, nullable=True)
     order_index: int = Field(nullable=False)
-    marks_allocated: int = Field(default=0, nullable=False)
+    allocated_marks: int = Field(default=0, nullable=False)
 
     # Blueprint distribution fields
     question_count_target: Optional[int] = Field(default=None, nullable=True)

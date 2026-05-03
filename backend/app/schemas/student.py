@@ -23,7 +23,7 @@ class StudentActiveAttempt(BaseModel):
     assessment_id: uuid.UUID
     assessment_title: str
     status: AttemptStatus
-    started_at: datetime
+    started_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
 
 class StudentRecentResult(BaseModel):
@@ -35,7 +35,7 @@ class StudentRecentResult(BaseModel):
     total_marks: float
     percentage: float
     letter_grade: Optional[ResultLetterGrade] = None
-    released_at: datetime
+    released_at: Optional[datetime] = None
 
 class StudentUpcomingAssessment(BaseModel):
     """Brief info about a scheduled assessment that hasn't started yet."""
@@ -45,6 +45,12 @@ class StudentUpcomingAssessment(BaseModel):
     window_start: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     total_marks: Optional[int] = None
+
+class PerformanceTrendItem(BaseModel):
+    """Monthly performance tracking."""
+    month: str
+    score: float
+    average: float
 
 class StudentScheduleEvent(BaseModel):
     """General academic event for the calendar/schedule."""
@@ -56,14 +62,29 @@ class StudentScheduleEvent(BaseModel):
     description: Optional[str] = None
     location: Optional[str] = None
     color_hint: Optional[str] = None
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
+    duration_minutes: Optional[int] = None
 
 class StudentScheduleResponse(BaseModel):
     """Aggregated schedule data."""
-    events: List[StudentScheduleEvent] = []
+    events: list[StudentScheduleEvent] = []
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""
     summary: StudentDashboardSummary
-    active_attempts: List[StudentActiveAttempt] = []
-    recent_results: List[StudentRecentResult] = []
-    upcoming_assessments: List[StudentUpcomingAssessment] = []
+    active_attempts: list[StudentActiveAttempt] = []
+    recent_results: list[StudentRecentResult] = []
+    upcoming_assessments: list[StudentUpcomingAssessment] = []
+    performance_trend: list[PerformanceTrendItem] = []
+
+# Rebuild models to resolve deferred type evaluation
+StudentDashboardSummary.model_rebuild()
+StudentActiveAttempt.model_rebuild()
+StudentRecentResult.model_rebuild()
+StudentUpcomingAssessment.model_rebuild()
+PerformanceTrendItem.model_rebuild()
+StudentDashboardResponse.model_rebuild()
+StudentScheduleEvent.model_rebuild()
+StudentScheduleResponse.model_rebuild()
+

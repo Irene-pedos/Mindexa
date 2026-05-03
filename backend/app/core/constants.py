@@ -98,11 +98,10 @@ class AssessmentType(str, Enum):
 class AssessmentStatus(str, Enum):
     """Assessment lifecycle status."""
     DRAFT = "DRAFT"
-    SCHEDULED = "SCHEDULED"
+    PUBLISHED = "PUBLISHED"
     ACTIVE = "ACTIVE"
-    COMPLETED = "COMPLETED"
+    CLOSED = "CLOSED"
     ARCHIVED = "ARCHIVED"
-    CANCELLED = "CANCELLED"
 
 
 class QuestionType(str, Enum):

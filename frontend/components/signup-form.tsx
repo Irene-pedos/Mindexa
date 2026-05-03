@@ -34,6 +34,8 @@ export function SignupForm({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [role, setRole] = useState<"STUDENT" | "LECTURER">("STUDENT");
+  const [customCollege, setCustomCollege] = useState(false);
+  const [customDepartment, setCustomDepartment] = useState(false);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -101,7 +103,9 @@ export function SignupForm({
       });
 
       toast.success(
-        "Account created! Please check your email to verify your account.",
+        role === "LECTURER"
+          ? "Account created. Your lecturer account is pending approval."
+          : "Account created! Please check your email to verify your account.",
       );
 
       setTimeout(() => {
@@ -235,20 +239,61 @@ export function SignupForm({
                   <FieldLabel htmlFor="college">
                     College <span className="text-red-500">*</span>
                   </FieldLabel>
-                  <Select
-                    value={formData.college}
-                    onValueChange={(v) => handleSelectChange("college", v)}
-                    required
-                  >
-                    <SelectTrigger id="college">
-                      <SelectValue placeholder="Select College" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CST">Science & Technology</SelectItem>
-                      <SelectItem value="CBE">Business & Economics</SelectItem>
-                      <SelectItem value="CASS">Arts & Social Sciences</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {customCollege ? (
+                    <div className="flex gap-2">
+                      <Input
+                        id="college"
+                        name="college"
+                        placeholder="Type college name"
+                        value={formData.college}
+                        onChange={handleChange}
+                        required
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="px-2 text-xs"
+                        onClick={() => {
+                          setCustomCollege(false);
+                          setFormData((p) => ({ ...p, college: "" }));
+                        }}
+                      >
+                        List
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={formData.college}
+                      onValueChange={(v) => {
+                        if (v === "other") {
+                          setCustomCollege(true);
+                          setFormData((p) => ({ ...p, college: "" }));
+                        } else {
+                          handleSelectChange("college", v);
+                        }
+                      }}
+                      required
+                    >
+                      <SelectTrigger id="college">
+                        <SelectValue placeholder="Select College" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CST">
+                          Science & Technology
+                        </SelectItem>
+                        <SelectItem value="CBE">
+                          Business & Economics
+                        </SelectItem>
+                        <SelectItem value="CASS">
+                          Arts & Social Sciences
+                        </SelectItem>
+                        <SelectItem value="other">
+                          Other (Type manually)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                   {errors.college && (
                     <FieldDescription className="text-red-500 text-xs mt-1">
                       {errors.college}
@@ -257,19 +302,55 @@ export function SignupForm({
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="department">Department</FieldLabel>
-                  <Select
-                    value={formData.department}
-                    onValueChange={(v) => handleSelectChange("department", v)}
-                  >
-                    <SelectTrigger id="department">
-                      <SelectValue placeholder="Select Dept" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CS">Computer Science</SelectItem>
-                      <SelectItem value="IT">Information Technology</SelectItem>
-                      <SelectItem value="SE">Software Engineering</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {customDepartment ? (
+                    <div className="flex gap-2">
+                      <Input
+                        id="department"
+                        name="department"
+                        placeholder="Type department"
+                        value={formData.department}
+                        onChange={handleChange}
+                        className="flex-1"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="px-2 text-xs"
+                        onClick={() => {
+                          setCustomDepartment(false);
+                          setFormData((p) => ({ ...p, department: "" }));
+                        }}
+                      >
+                        List
+                      </Button>
+                    </div>
+                  ) : (
+                    <Select
+                      value={formData.department}
+                      onValueChange={(v) => {
+                        if (v === "other") {
+                          setCustomDepartment(true);
+                          setFormData((p) => ({ ...p, department: "" }));
+                        } else {
+                          handleSelectChange("department", v);
+                        }
+                      }}
+                    >
+                      <SelectTrigger id="department">
+                        <SelectValue placeholder="Select Dept" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CS">Computer Science</SelectItem>
+                        <SelectItem value="IT">
+                          Information Technology
+                        </SelectItem>
+                        <SelectItem value="SE">Software Engineering</SelectItem>
+                        <SelectItem value="other">
+                          Other (Type manually)
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                   {errors.department && (
                     <FieldDescription className="text-red-500 text-xs mt-1">
                       {errors.department}
@@ -290,7 +371,9 @@ export function SignupForm({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="networking">Networking</SelectItem>
-                      <SelectItem value="software">Software Engineering</SelectItem>
+                      <SelectItem value="software">
+                        Software Engineering
+                      </SelectItem>
                       <SelectItem value="embedded">Embedded Systems</SelectItem>
                     </SelectContent>
                   </Select>
@@ -356,7 +439,7 @@ export function SignupForm({
                   </Field>
                   <Field>
                     <FieldLabel htmlFor="confirmPassword">
-                      Confirm
+                      Confirm Password
                     </FieldLabel>
                     <Input
                       id="confirmPassword"
@@ -401,7 +484,7 @@ export function SignupForm({
           {/* Right Side - Decorative Image */}
           <div className="relative hidden bg-muted md:block">
             <img
-              src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
+              src="images/Login Image.png"
               alt="Students in academic environment"
               className="absolute inset-0 h-full w-full object-cover"
             />

@@ -342,13 +342,20 @@ class BulkAssessmentSection(BaseModel):
     allowedTypes: list[str] = []
 
 
+class BulkAssessmentOption(BaseModel):
+    option_text: str
+    is_correct: bool = False
+    order_index: int = 0
+    option_text_right: str | None = None
+
+
 class BulkAssessmentQuestion(BaseModel):
     id: str
     sectionId: str
     text: str
     type: str
     marks: int = Field(..., ge=0)
-    options: list[str] | None = None
+    options: list[BulkAssessmentOption] | None = None
     correctAnswer: str | None = None
     aiGenerated: bool = False
 

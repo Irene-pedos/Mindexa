@@ -188,7 +188,7 @@ class QuestionSummaryResponse(BaseModel):
     subject: str | None
     topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None
-    suggested_marks: int | None = Field(None, validation_alias="marks")
+    suggested_marks: int | None = Field(None, alias="marks")
     is_active: bool
     source_type: str
     version_number: int = Field(1, validation_alias="version")
@@ -196,7 +196,7 @@ class QuestionSummaryResponse(BaseModel):
     created_by_id: uuid.UUID
     created_at: datetime
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class QuestionDetailResponse(BaseModel):
@@ -214,7 +214,7 @@ class QuestionDetailResponse(BaseModel):
     subject: str | None
     topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None
-    suggested_marks: int | None = Field(None, validation_alias="marks")
+    suggested_marks: int | None = Field(None, alias="marks")
     estimated_time_minutes: int | None
     fill_blank_template: str | None
     correct_order_json: str | None

@@ -96,8 +96,8 @@ export default function UnifiedSolutionSection() {
             <InView>
               <div className="relative h-[600px] w-full rounded-3xl overflow-hidden shadow-xl border border-border">
                 <img
-                  src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
-                  alt="Students focused during digital exam"
+                  src="/images/Unified Academic Solution.png"
+                  alt="Academic Solution"
                   className="object-cover h-full w-full"
                 />
               </div>

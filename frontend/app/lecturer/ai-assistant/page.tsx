@@ -17,12 +17,15 @@ import {
 } from "lucide-react"
 import { AdvancedChatInput, type FileAttachment } from "@/components/advanced-ai-chat-input"
 import { cn } from "@/lib/utils"
+import { geminiApi, ChatMessage } from "@/lib/api/gemini"
+import { toast } from "sonner"
 
 export default function LecturerAIAssistant() {
   const [prompt, setPrompt] = useState("")
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedContent, setGeneratedContent] = useState("")
   const [selectedTask, setSelectedTask] = useState("")
+  const [history, setHistory] = useState<ChatMessage[]>([])
   const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([])
 
   const quickTasks = [
@@ -36,41 +39,30 @@ export default function LecturerAIAssistant() {
     "Generate practice questions from uploaded lecture notes",
   ]
 
-  const handleSend = () => {
-    if (!prompt.trim() && !selectedTask) return
+  const handleSend = async () => {
+    const userMessage = prompt.trim() || selectedTask
+    if (!userMessage) return
 
     setIsGenerating(true)
-    setGeneratedContent("")
+    
+    try {
+      const response = await geminiApi.chat({
+        message: userMessage,
+        system_prompt: "You are an expert academic assistant helping a lecturer create high-quality assessments. Be precise, professional, and follow best pedagogical practices.",
+        history: history.slice(-10) // Keep last 10 turns
+      })
 
-    // Simulate LangChain + FastAPI Brain call
-    setTimeout(() => {
-      let output = ""
-
-      if (selectedTask.includes("MCQs")) {
-        output = `10 High-Quality MCQs on Database Normalization (with answer key):\n\n` +
-                 `1. What is the main goal of normalization?\n` +
-                 `   A) Increase redundancy   B) Reduce redundancy   C) ... \n\n` +
-                 `AI Confidence: 96% • Suggested difficulty: Balanced`
-      } else if (selectedTask.includes("rubric")) {
-        output = `Recommended Rubric for Essay Question (Total: 20 marks)\n\n` +
-                 `• Depth of Understanding (8 marks)\n` +
-                 `• Structure and Logical Flow (6 marks)\n` +
-                 `• Use of Examples & References (6 marks)\n\n` +
-                 `Descriptors for each level provided.`
-      } else if (selectedTask.includes("assessment draft")) {
-        output = `Assessment Draft: Mid-Semester CAT – Operating Systems\n\n` +
-                 `Type: CAT | Duration: 90 min | Total Marks: 100\n` +
-                 `Blueprint: 3 sections with balanced difficulty...\n\n` +
-                 `Ready for your review and edits.`
-      } else {
-        output = `AI Draft for: "${prompt || selectedTask}"\n\n` +
-                 `Professional academic content generated.\n` +
-                 `Please review carefully, make any necessary edits, and approve before using in any live assessment.`
-      }
-
-      setGeneratedContent(output)
+      setGeneratedContent(response.reply)
+      setHistory(prev => [...prev, 
+        { role: "user", content: userMessage },
+        { role: "model", content: response.reply }
+      ])
+      setPrompt("")
+    } catch (e) {
+      toast.error("AI assistant failed to respond. Please try again.")
+    } finally {
       setIsGenerating(false)
-    }, 1600)
+    }
   }
 
   const handleFileRemove = (id: string | number) => {

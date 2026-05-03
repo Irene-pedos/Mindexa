@@ -120,7 +120,7 @@ export function AdminLoginForm({
 
           <div className="relative hidden bg-muted md:block">
             <img
-              src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
+              src="/images/Login Image.png"
               alt="Secure admin environment"
               className="absolute inset-0 h-full w-full object-cover"
             />

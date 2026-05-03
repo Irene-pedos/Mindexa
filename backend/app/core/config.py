@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     # ─── Application ──────────────────────────────────────────────────────────
     APP_NAME: str = "Mindexa Platform"
     APP_VERSION: str = "0.1.0"
+    API_V1_STR: str = "/api/v1"
     ENVIRONMENT: Literal["development", "staging", "production", "test"] = "development"
     DEBUG: bool = False
 
@@ -86,6 +87,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://127.0.0.1:3000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
     ]
     CORS_ALLOW_CREDENTIALS: bool = True
     FRONTEND_URL: str = "http://localhost:3000"

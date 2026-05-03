@@ -38,7 +38,7 @@ FIELD MAPPING (model -> repo):
         is_deleted, deleted_at
 
     AssessmentSection:
-        assessment_id, title, instructions, order_index, marks_allocated,
+        assessment_id, title, description, instructions, order_index, allocated_marks,
         question_count_target, allowed_question_types (JSONB),
         difficulty_distribution (JSONB), ai_generation_prompt_hint,
         is_deleted, deleted_at
@@ -190,14 +190,14 @@ class AssessmentRepository:
         result = await self.db.execute(
             select(Assessment)
             .options(
-                selectinload("sections"),
-                selectinload("blueprint_rules"),
-                selectinload("draft_progress"),
-                selectinload("supervisors"),
-                selectinload("target_sections"),
-                selectinload("publish_validations"),
-                selectinload("assessment_questions").selectinload(
-                    "question"
+                selectinload(Assessment.sections),
+                selectinload(Assessment.blueprint_rules),
+                selectinload(Assessment.draft_progress),
+                selectinload(Assessment.supervisors),
+                selectinload(Assessment.target_sections),
+                selectinload(Assessment.publish_validations),
+                selectinload(Assessment.assessment_questions).selectinload(
+                    AssessmentQuestion.question
                 ),
             )
             .where(
@@ -339,7 +339,7 @@ class AssessmentRepository:
         published_at: datetime | None = None,
     ) -> None:
         """
-        Set status=SCHEDULED and published_at on a finalized assessment.
+        Set status=PUBLISHED and published_at on a finalized assessment.
 
         draft_step is set to NULL — the wizard is no longer relevant once
         the assessment is published.
@@ -349,7 +349,7 @@ class AssessmentRepository:
             update(Assessment)
             .where(col(Assessment.id) == assessment_id)
             .values(
-                status=AssessmentStatus.SCHEDULED,
+                status=AssessmentStatus.PUBLISHED,
                 draft_is_complete=True,
                 draft_step=None,
                 published_at=now,
@@ -384,7 +384,7 @@ class AssessmentRepository:
         order_index: int,
         description: str | None = None,
         instructions: str | None = None,
-        marks_allocated: int = 0,
+        allocated_marks: int = 0,
         question_count_target: int | None = None,
         allowed_question_types: dict | None = None,
         difficulty_distribution: dict | None = None,
@@ -396,7 +396,7 @@ class AssessmentRepository:
             description=description,
             order_index=order_index,
             instructions=instructions,
-            marks_allocated=marks_allocated,
+            allocated_marks=allocated_marks,
             question_count_target=question_count_target,
             allowed_question_types=allowed_question_types,
             difficulty_distribution=difficulty_distribution,
@@ -405,6 +405,60 @@ class AssessmentRepository:
         self.db.add(section)
         await self.db.flush()
         return section
+
+    async def count_sections(self, assessment_id: uuid.UUID) -> int:
+        """Return the number of non-deleted sections in an assessment."""
+        result = await self.db.execute(
+            select(func.count(col(AssessmentSection.id))).where(
+                col(AssessmentSection.assessment_id) == assessment_id,
+                col(AssessmentSection.is_deleted) == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one()
+
+    async def count_questions(self, assessment_id: uuid.UUID) -> int:
+        """Return the number of non-deleted questions in an assessment."""
+        result = await self.db.execute(
+            select(func.count(col(AssessmentQuestion.id))).where(
+                col(AssessmentQuestion.assessment_id) == assessment_id,
+                col(AssessmentQuestion.is_deleted) == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one()
+
+    async def sum_marks(self, assessment_id: uuid.UUID) -> int:
+        """Sum the marks for all non-deleted questions in an assessment."""
+        from sqlalchemy import case
+        from app.db.models.question import Question
+
+        result = await self.db.execute(
+            select(
+                func.sum(
+                    case(
+                        (
+                            col(AssessmentQuestion.marks_override).is_not(None),
+                            col(AssessmentQuestion.marks_override),
+                        ),
+                        else_=col(Question.marks),
+                    )
+                )
+            )
+            .join(Question, col(Question.id) == col(AssessmentQuestion.question_id))
+            .where(
+                col(AssessmentQuestion.assessment_id) == assessment_id,
+                col(AssessmentQuestion.is_deleted) == False,  # noqa: E712
+                col(Question.is_deleted) == False,  # noqa: E712
+            )
+        )
+        return result.scalar() or 0
+
+    async def delete_draft_progress(self, assessment_id: uuid.UUID) -> None:
+        """Hard-delete the wizard progress row for an assessment."""
+        await self.db.execute(
+            delete(AssessmentDraftProgress).where(
+                col(AssessmentDraftProgress.assessment_id) == assessment_id
+            )
+        )
 
     async def get_section(
         self, section_id: uuid.UUID
@@ -1141,10 +1195,10 @@ class AssessmentRepository:
         
         Future: will filter by student's class_section_id / course enrollment.
         """
+        from app.db.models.academic import Course
         filters = [
             col(Assessment.status).in_([
                 AssessmentStatus.PUBLISHED,
-                AssessmentStatus.SCHEDULED,
                 AssessmentStatus.ACTIVE,
             ]),
             col(Assessment.is_deleted) == False,  # noqa: E712
@@ -1157,6 +1211,7 @@ class AssessmentRepository:
 
         result = await self.db.execute(
             select(Assessment)
+            .options(selectinload(Assessment.course))
             .where(*filters)
             .order_by(col(Assessment.published_at).desc())
             .offset((page - 1) * page_size)

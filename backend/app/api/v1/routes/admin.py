@@ -17,10 +17,39 @@ from app.schemas.admin import (
     AdminDashboardResponse,
     AdminUserListResponse,
     AdminUserStatusUpdate,
+    AdminAnalyticsResponse,
+    AdminIntegrityOverview,
+    SystemSettingsSchema,
 )
 from app.services.admin_service import AdminService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+
+@router.get(
+    "/settings",
+    response_model=SystemSettingsSchema,
+    summary="Get platform-wide system settings",
+)
+async def get_system_settings(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SystemSettingsSchema:
+    service = AdminService(db)
+    return await service.get_system_settings()
+
+
+@router.patch(
+    "/settings",
+    response_model=SystemSettingsSchema,
+    summary="Update platform-wide system settings",
+)
+async def update_system_settings(
+    body: SystemSettingsSchema,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SystemSettingsSchema:
+    service = AdminService(db)
+    return await service.update_system_settings(body)
 
 @router.get(
     "/dashboard",
@@ -34,6 +63,32 @@ async def get_admin_dashboard(
     """Returns platform-wide metrics and recent activity for the admin dashboard."""
     service = AdminService(db)
     return await service.get_dashboard_data()
+
+@router.get(
+    "/analytics",
+    response_model=AdminAnalyticsResponse,
+    summary="Get detailed platform analytics",
+)
+async def get_admin_analytics(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminAnalyticsResponse:
+    """Returns detailed usage, user distribution, and integrity analytics."""
+    service = AdminService(db)
+    return await service.get_analytics_data()
+
+@router.get(
+    "/integrity-overview",
+    response_model=AdminIntegrityOverview,
+    summary="Get global integrity overview",
+)
+async def get_admin_integrity_overview(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminIntegrityOverview:
+    """Returns summary stats and recent flags for the integrity dashboard."""
+    service = AdminService(db)
+    return await service.get_integrity_overview()
 
 @router.get(
     "/users",

@@ -188,14 +188,38 @@ async def get_attempt(
     Lecturers/Admins: can access any attempt.
     """
     repo = AttemptRepository(db)
-    attempt = await repo.get_by_id_simple(attempt_id)
+    attempt = await repo.get_with_questions(attempt_id)
     if not attempt:
         raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
 
     if current_user.role == UserRole.STUDENT.value and attempt.student_id != current_user.id:
         raise AuthorizationError("You do not own this attempt", code="ATTEMPT_OWNERSHIP_VIOLATION")
 
-    return AttemptResponse.model_validate(attempt)
+    # Map assessment questions to attempt questions
+    questions_data = []
+    if attempt.assessment and attempt.assessment.assessment_questions:
+        for aq in attempt.assessment.assessment_questions:
+            if aq.question:
+                q = aq.question
+                questions_data.append({
+                    "id": str(q.id),
+                    "type": q.question_type.value,
+                    "content": q.content,
+                    "text": q.content, # Frontend fallback
+                    "marks": aq.marks_override or q.marks,
+                    "order_index": aq.order_index,
+                    "options": [
+                        {"text": opt.content, "order_index": opt.order_index}
+                        for opt in (q.options or [])
+                    ] if q.options else None
+                })
+
+    # Sort by order_index
+    questions_data.sort(key=lambda x: x["order_index"])
+
+    response = AttemptResponse.model_validate(attempt)
+    response.questions = questions_data
+    return response
 
 
 # ── LIST MY ATTEMPTS ──────────────────────────────────────────────────────────

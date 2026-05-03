@@ -118,7 +118,19 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Platform Activity Chart */}
         <div className="lg:col-span-7">
-          <ChartAreaInteractive />
+          <ChartAreaInteractive
+            title="Platform Activity"
+            description="Institutional oversight: Submissions and Security Alerts"
+            data={data?.chart_data || []}
+            config={{
+              submissions: { label: "Submissions", color: "var(--primary)" },
+              alerts: { label: "Security Alerts", color: "#ef4444" },
+            }}
+            areaKeys={[
+              { key: "submissions", fill: "var(--primary)", stroke: "var(--primary)" },
+              { key: "alerts", fill: "#ef4444", stroke: "#ef4444" },
+            ]}
+          />
         </div>
 
         {/* Quick Actions */}

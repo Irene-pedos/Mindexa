@@ -1,10 +1,6 @@
-"use client"
+"use client";
 
-import {
-  Avatar,
-  AvatarFallback,
-  AvatarImage,
-} from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -13,28 +9,42 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+} from "@/components/ui/dropdown-menu";
 import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
   useSidebar,
-} from "@/components/ui/sidebar"
-import { ChevronsUpDownIcon, BadgeCheckIcon, BellIcon, LogOutIcon, UserIcon } from "lucide-react"
-import { useAuth } from "@/hooks/use-auth"
-import Link from "next/link"
+} from "@/components/ui/sidebar";
+import {
+  ChevronsUpDownIcon,
+  BadgeCheckIcon,
+  BellIcon,
+  LogOutIcon,
+  UserIcon,
+} from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
+import Link from "next/link";
 
-export function NavUser({
-  user,
-}: {
-  user: {
-    name: string
-    email: string
-    avatar: string
-  }
-}) {
-  const { isMobile } = useSidebar()
-  const { logout } = useAuth()
+export function NavUser() {
+  const { isMobile } = useSidebar();
+  const { logout, user } = useAuth();
+
+  if (!user) return null;
+
+  const rolePrefix = user.role?.toLowerCase() || "student";
+  const name = user.profile ? `${user.profile.first_name} ${user.profile.last_name || ""}`.trim() : "User";
+  const email = user.email;
+  const avatar = user.profile?.profile_picture_url 
+    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.profile_picture_url}`
+    : "/avatars/user avatar.png";
+
+  const initials = name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .substring(0, 2)
+    .toUpperCase();
 
   return (
     <SidebarMenu>
@@ -45,13 +55,15 @@ export function NavUser({
               size="lg"
               className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
             >
-              <Avatar className="h-8 w-8 rounded-lg">
-                <AvatarImage src={user.avatar} alt={user.name} />
-                <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+              <Avatar className="h-8 w-8 rounded-lg border">
+                <AvatarImage src={avatar} alt={name} />
+                <AvatarFallback className="rounded-lg uppercase text-[10px]">
+                  {initials}
+                </AvatarFallback>
               </Avatar>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-medium">{user.name}</span>
-                <span className="truncate text-xs">{user.email}</span>
+                <span className="truncate font-medium">{name}</span>
+                <span className="truncate text-xs">{email}</span>
               </div>
               <ChevronsUpDownIcon className="ml-auto size-4" />
             </SidebarMenuButton>
@@ -64,34 +76,42 @@ export function NavUser({
           >
             <DropdownMenuLabel className="p-0 font-normal">
               <div className="flex items-center gap-2 px-1 py-1.5 text-left text-sm">
-                <Avatar className="h-8 w-8 rounded-lg">
-                  <AvatarImage src={user.avatar} alt={user.name} />
-                  <AvatarFallback className="rounded-lg">CN</AvatarFallback>
+                <Avatar className="h-8 w-8 rounded-lg border">
+                  <AvatarImage src={avatar} alt={name} />
+                  <AvatarFallback className="rounded-lg uppercase text-[10px]">
+                    {initials}
+                  </AvatarFallback>
                 </Avatar>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">{user.name}</span>
-                  <span className="truncate text-xs">{user.email}</span>
+                  <span className="truncate font-medium">{name}</span>
+                  <span className="truncate text-xs">{email}</span>
                 </div>
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuItem asChild>
-                <Link href="/profile" className="w-full flex items-center cursor-pointer">
+                <Link
+                  href={`/${rolePrefix}/profile`}
+                  className="w-full flex items-center cursor-pointer"
+                >
                   <UserIcon className="mr-2 size-4" />
                   <span>Profile Settings</span>
                 </Link>
               </DropdownMenuItem>
               <DropdownMenuItem asChild>
-                <Link href="/student/notifications" className="w-full flex items-center cursor-pointer">
+                <Link
+                  href={`/${rolePrefix}/notifications`}
+                  className="w-full flex items-center cursor-pointer"
+                >
                   <BellIcon className="mr-2 size-4" />
                   <span>Notifications</span>
                 </Link>
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
-            <DropdownMenuItem 
-              className="text-destructive cursor-pointer" 
+            <DropdownMenuItem
+              className="text-destructive cursor-pointer"
               onClick={() => logout()}
             >
               <LogOutIcon className="mr-2 size-4" />
@@ -101,5 +121,5 @@ export function NavUser({
         </DropdownMenu>
       </SidebarMenuItem>
     </SidebarMenu>
-  )
+  );
 }

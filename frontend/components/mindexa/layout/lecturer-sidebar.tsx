@@ -69,7 +69,7 @@ export function LecturerSidebar({
     name: displayName,
     email: (user as any)?.email || "",
     avatar:
-      (user?.profile as any)?.profile_picture_url || "/avatars/lecturer.jpg",
+      (user?.profile as any)?.profile_picture_url || "/avatars/user avatar.png",
   };
 
   return (

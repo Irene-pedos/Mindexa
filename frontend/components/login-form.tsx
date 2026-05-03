@@ -30,12 +30,19 @@ export function LoginForm({
       const data = await login({ email, password });
       toast.success("Login successful");
 
-      // Redirect based on backend role
-      if (data.user.role === "STUDENT") router.push("/student/dashboard");
-      else if (data.user.role === "LECTURER")
-        router.push("/lecturer/dashboard");
-      else if (data.user.role === "ADMIN" || data.user.role === "SUPER_ADMIN")
-        router.push("/admin/dashboard");
+      // Redirect based on backend role (lowercase in database)
+      const role = data.user.role.toLowerCase();
+
+      if (role === "admin" || role === "super_admin") {
+        toast.error("Access Denied: Admins must login via the Admin Portal.");
+        // We log them out immediately to clear the session they just established here
+        const { authApi } = await import("@/lib/api/auth");
+        await authApi.logout();
+        return;
+      }
+
+      if (role === "student") router.push("/student/dashboard");
+      else if (role === "lecturer") router.push("/lecturer/dashboard");
       else router.push("/student/dashboard");
     } catch (err: unknown) {
       const errorMessage =
@@ -133,7 +140,7 @@ export function LoginForm({
 
           <div className="relative hidden bg-muted md:block">
             <img
-              src="https://images.unsplash.com/photo-1524178232363-1fb2b075b655"
+              src="images/Login Image.png"
               alt="Academic environment"
               className="absolute inset-0 h-full w-full object-cover"
             />

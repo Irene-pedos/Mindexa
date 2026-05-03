@@ -145,7 +145,7 @@ class AssessmentSectionCreate(MindexaSchema):
     title: str = Field(min_length=1, max_length=255)
     instructions: str | None = Field(default=None, max_length=2000)
     order_index: int = Field(ge=0)
-    marks_allocated: int = Field(ge=0, le=1000)
+    allocated_marks: int = Field(ge=0, le=1000)
     question_count_target: int | None = Field(default=None, ge=1)
     allowed_question_types: list[str] | None = None
     difficulty_distribution: dict[str, int] | None = None
@@ -208,7 +208,7 @@ class AssessmentSectionResponse(BaseAuditedResponse):
     title: str
     instructions: str | None
     order_index: int
-    marks_allocated: int
+    allocated_marks: int
     question_count_target: int | None
     allowed_question_types: Any | None
     difficulty_distribution: Any | None

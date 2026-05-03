@@ -1,35 +1,44 @@
-import { useEffect, useState } from "react"
-import { useParams } from "next/navigation"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { BookOpen, Users, Calendar, Award, FileText, Loader2 } from "lucide-react"
-import Link from "next/link"
-import { studentApi, StudentCourseDetail } from "@/lib/api/student"
-import { Skeleton } from "@/components/ui/skeleton"
-import { toast } from "sonner"
+"use client";
+
+import { useEffect, useState } from "react";
+import { useParams } from "next/navigation";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import {
+  BookOpen,
+  Users,
+  Calendar,
+  Award,
+  FileText,
+  Loader2,
+} from "lucide-react";
+import Link from "next/link";
+import { studentApi, StudentCourseDetail } from "@/lib/api/student";
+import { Skeleton } from "@/components/ui/skeleton";
+import { toast } from "sonner";
 
 export default function CourseDetailPage() {
-  const params = useParams()
-  const courseId = params.id as string
-  const [course, setCourse] = useState<StudentCourseDetail | null>(null)
-  const [loading, setLoading] = useState(true)
+  const params = useParams();
+  const courseId = params.id as string;
+  const [course, setCourse] = useState<StudentCourseDetail | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadCourse() {
       try {
-        const data = await studentApi.getCourseDetail(courseId)
-        setCourse(data)
+        const data = await studentApi.getCourseDetail(courseId);
+        setCourse(data);
       } catch (err) {
-        console.error("Failed to load course details", err)
-        toast.error("Failed to load course details")
+        console.error("Failed to load course details", err);
+        toast.error("Failed to load course details");
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
     }
-    loadCourse()
-  }, [courseId])
+    loadCourse();
+  }, [courseId]);
 
   if (loading) {
     return (
@@ -56,7 +65,7 @@ export default function CourseDetailPage() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   if (!course) {
@@ -67,7 +76,7 @@ export default function CourseDetailPage() {
           <Link href="/student/courses">Back to My Courses</Link>
         </Button>
       </div>
-    )
+    );
   }
 
   return (
@@ -79,12 +88,18 @@ export default function CourseDetailPage() {
               <BookOpen className="size-6" />
             </div>
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight">{course.title}</h1>
-              <p className="text-muted-foreground">{course.code} • {course.lecturer}</p>
+              <h1 className="text-3xl font-semibold tracking-tight">
+                {course.title}
+              </h1>
+              <p className="text-muted-foreground">
+                {course.code} • {course.lecturer}
+              </p>
             </div>
           </div>
         </div>
-        <Badge variant="outline" className="text-base px-4 py-1">In Progress</Badge>
+        <Badge variant="outline" className="text-base px-4 py-1">
+          In Progress
+        </Badge>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -108,7 +123,9 @@ export default function CourseDetailPage() {
               <CardTitle>Course Description</CardTitle>
             </CardHeader>
             <CardContent>
-              <p className="text-muted-foreground leading-relaxed">{course.description}</p>
+              <p className="text-muted-foreground leading-relaxed">
+                {course.description}
+              </p>
             </CardContent>
           </Card>
 
@@ -119,19 +136,30 @@ export default function CourseDetailPage() {
             <CardContent className="space-y-4">
               {course.materials > 0 ? (
                 Array.from({ length: course.materials }).map((_, i) => (
-                  <div key={i} className="flex items-center justify-between rounded-lg border p-4">
+                  <div
+                    key={i}
+                    className="flex items-center justify-between rounded-lg border p-4"
+                  >
                     <div className="flex items-center gap-3">
                       <FileText className="size-5 text-muted-foreground" />
                       <div>
-                        <div className="font-medium">Module {i + 1}: Advanced Topics</div>
-                        <div className="text-xs text-muted-foreground">PDF • 45 pages</div>
+                        <div className="font-medium">
+                          Module {i + 1}: Advanced Topics
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          PDF • 45 pages
+                        </div>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">Download</Button>
+                    <Button variant="outline" size="sm">
+                      Download
+                    </Button>
                   </div>
                 ))
               ) : (
-                <p className="text-sm text-muted-foreground py-4 text-center">No materials available yet.</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  No materials available yet.
+                </p>
               )}
             </CardContent>
           </Card>
@@ -152,7 +180,9 @@ export default function CourseDetailPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Next Assessment</span>
-                <span className="font-medium text-right">{course.nextAssessment}</span>
+                <span className="font-medium text-right">
+                  {course.nextAssessment}
+                </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Total Assessments</span>
@@ -180,5 +210,5 @@ export default function CourseDetailPage() {
         </div>
       </div>
     </div>
-  )
+  );
 }

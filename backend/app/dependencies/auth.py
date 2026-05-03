@@ -125,7 +125,8 @@ async def get_current_user(
     """
     # Decode JWT — raises TokenExpiredError or InvalidTokenError on failure
     try:
-        payload: TokenPayload = decode_token(token, TokenType.ACCESS)
+        # Use the literal string "ACCESS" to match create_access_token exactly
+        payload: TokenPayload = decode_token(token, "ACCESS")
     except (TokenExpiredError, InvalidTokenError):
         raise
     except Exception as exc:

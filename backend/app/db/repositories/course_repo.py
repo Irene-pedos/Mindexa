@@ -68,3 +68,9 @@ class CourseRepository:
             .distinct()
         )
         return list(result.scalars().all())
+
+    async def create(self, course: Course) -> Course:
+        self.db.add(course)
+        await self.db.flush()
+        return course
+

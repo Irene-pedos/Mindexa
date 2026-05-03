@@ -91,17 +91,13 @@ THRESHOLDS: dict[str, list] = {
         (3, WarningLevel.WARNING_3, RiskLevel.CRITICAL,
          "Critical: repeated paste attempts flagged"),
     ],
-    IntegrityEventType.DEVTOOLS_DETECTED: [
-        (1, WarningLevel.WARNING_3, RiskLevel.CRITICAL,
-         "Developer tools detected — this attempt has been flagged"),
-    ],
     IntegrityEventType.WINDOW_BLUR: [
         (5, WarningLevel.WARNING_1, RiskLevel.LOW,
          "Window switching detected"),
         (10, WarningLevel.WARNING_2, RiskLevel.MEDIUM,
          "Repeated window switching — supervisor notified"),
     ],
-    IntegrityEventType.SUSPICIOUS_INACTIVITY: [
+    IntegrityEventType.EXTENDED_INACTIVITY: [
         (1, WarningLevel.WARNING_1, RiskLevel.LOW,
          "Extended inactivity detected"),
     ],
@@ -464,3 +460,7 @@ class IntegrityService:
         session = await self.integrity_repo.get_active_session(assessment_id, supervisor_id)
         if session:
             await self.integrity_repo.end_session(session.id)
+
+    async def get_supervision_stats(self, assessment_id: uuid.UUID) -> dict:
+        """Fetch aggregated stats for live supervision panel."""
+        return await self.integrity_repo.get_supervision_stats(assessment_id)

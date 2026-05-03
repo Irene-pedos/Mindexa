@@ -20,10 +20,11 @@ import { cn } from "@/lib/utils"
 import { assessmentApi } from "@/lib/api/assessment"
 import { attemptApi } from "@/lib/api/attempt"
 import { submissionApi } from "@/lib/api/submission"
+import { integrityApi } from "@/lib/api/integrity"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 
-type Stage = "intro" | "password" | "readiness" | "taking" | "submitted"
+type Stage = "intro" | "password" | "readiness" | "taking" | "submitted" | "terminated"
 
 export default function StudentAssessmentTake() {
   const params = useParams()
@@ -42,11 +43,13 @@ export default function StudentAssessmentTake() {
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [warnings, setWarnings] = useState(0)
   const [showWarningModal, setShowWarningModal] = useState(false)
+  const [activeWarning, setActiveWarning] = useState<any>(null)
   const [lastSaved, setLastSaved] = useState<Date | null>(null)
   const [passwordInput, setPasswordInput] = useState("")
   const [passwordError, setPasswordError] = useState(false)
   const [readinessChecked, setReadinessChecked] = useState(false)
   const [submitted, setSubmitted] = useState(false)
+  const [terminationReason, setTerminationReason] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -116,23 +119,94 @@ export default function StudentAssessmentTake() {
   }, [triggerAutosave])
 
   // ── Integrity Guard – real-time monitoring ────────────────────────
-  const incrementWarning = useCallback((reason: string) => {
-    setWarnings((w) => {
-      const newCount = Math.min(w + 1, 3)
-      if (newCount >= 3) {
-        console.warn(`[INTEGRITY] Critical violation logged: ${reason}`)
+  const handleTerminateAssessment = useCallback(async (reason: string) => {
+    if (submitted || stage !== "taking") return
+    
+    setSubmitted(true)
+    setStage("terminated")
+    setTerminationReason(reason)
+    
+    if (attemptId && attemptToken) {
+      try {
+        // Record the critical event first
+        await integrityApi.recordEvent({
+          attempt_id: attemptId,
+          access_token: attemptToken,
+          event_type: "TERMINATION_" + reason.toUpperCase().replace(/\s/g, "_"),
+        })
+        
+        // Then submit the assessment
+        await attemptApi.submitAttempt(attemptId, attemptToken)
+        toast.error("Assessment terminated due to integrity violation")
+      } catch (err) {
+        console.error("Failed to terminate assessment securely", err)
       }
-      return newCount
+    }
+  }, [attemptId, attemptToken, submitted, stage])
+
+  const incrementWarning = useCallback(async (reason: string) => {
+    // Immediate termination for tab switching or window blur in supervised mode
+    if (assessment?.is_supervised && (reason === "TAB_SWITCH" || reason === "WINDOW_BLUR")) {
+      handleTerminateAssessment(reason === "TAB_SWITCH" ? "Tab switching detected" : "Assessment window left")
+      return
+    }
+
+    setWarnings((w) => {
+      const next = w + 1
+      if (next >= 3) {
+        handleTerminateAssessment("Multiple integrity warnings")
+      }
+      return Math.min(next, 3)
     })
     setShowWarningModal(true)
-  }, [])
+
+    if (attemptId && attemptToken) {
+      try {
+        const result = await integrityApi.recordEvent({
+          attempt_id: attemptId,
+          access_token: attemptToken,
+          event_type: reason,
+        })
+        if (result.warning) {
+          setActiveWarning(result.warning)
+        }
+      } catch (err) {
+        console.error("Failed to record integrity event", err)
+      }
+    }
+  }, [attemptId, attemptToken, assessment, handleTerminateAssessment])
+
+  const handleAcknowledgeWarning = async () => {
+    if (activeWarning && attemptToken) {
+      try {
+        await integrityApi.acknowledgeWarning({
+          warning_id: activeWarning.id,
+          access_token: attemptToken,
+        })
+      } catch (err) {
+        console.error("Failed to acknowledge warning", err)
+      }
+    }
+    setShowWarningModal(false)
+    setActiveWarning(null)
+    if (assessment?.fullscreen_required && !isFullscreen) {
+      enterFullscreen()
+    }
+  }
 
   const enterFullscreen = useCallback(async () => {
     try {
       const elem = document.documentElement
-      if (elem.requestFullscreen) await elem.requestFullscreen()
+      if (elem.requestFullscreen) {
+        await elem.requestFullscreen()
+      } else if ((elem as any).webkitRequestFullscreen) {
+        await (elem as any).webkitRequestFullscreen()
+      } else if ((elem as any).msRequestFullscreen) {
+        await (elem as any).msRequestFullscreen()
+      }
       setIsFullscreen(true)
-    } catch {
+    } catch (err) {
+      console.error("Fullscreen error", err)
       incrementWarning("fullscreen-request-failed")
     }
   }, [incrementWarning])
@@ -143,20 +217,20 @@ export default function StudentAssessmentTake() {
     const handleFullscreenChange = () => {
       const isNowFullscreen = !!document.fullscreenElement
       setIsFullscreen(isNowFullscreen)
-      if (!isNowFullscreen && !submitted) incrementWarning("fullscreen-exit")
+      if (!isNowFullscreen && !submitted) incrementWarning("FULLSCREEN_EXIT")
     }
     const handleVisibilityChange = () => {
       if (document.visibilityState === "hidden" && !submitted) {
-        incrementWarning("tab-switch-or-minimize")
+        incrementWarning("TAB_SWITCH")
       }
     }
     const handleBlur = () => {
-      if (!submitted) incrementWarning("window-blur")
+      if (!submitted) incrementWarning("WINDOW_BLUR")
     }
     const handleCopyPaste = (e: ClipboardEvent) => {
       if (assessment?.is_closed_book && !submitted) {
         e.preventDefault()
-        incrementWarning("copy-paste-attempt-closed-book")
+        incrementWarning(e.type === "copy" ? "COPY_ATTEMPT" : "PASTE_ATTEMPT")
       }
     }
 
@@ -505,50 +579,69 @@ export default function StudentAssessmentTake() {
       {stage === "taking" && (
         <div className="flex-1 flex">
           <div className="flex-1 p-8 max-w-4xl mx-auto">
-            {!isFullscreen && (
-              <Card className="mb-8 border-destructive bg-destructive/10">
-                <CardContent className="p-8 text-center">
-                  <p className="text-destructive mb-6 font-medium">Fullscreen mode required.</p>
-                  <Button onClick={enterFullscreen} variant="destructive">Return to Fullscreen</Button>
-                </CardContent>
-              </Card>
-            )}
-
-            <Progress value={progress} className="h-2 mb-8 bg-muted" />
-
-            <Card className="bg-card border-border">
-              <CardContent className="p-10">
-                <div className="flex justify-between items-baseline mb-8">
-                  <div>
-                    <span className="text-muted-foreground">Question {currentQuestionIndex + 1}</span>
-                    {currentQ?.section_id && (
-                      <span className="ml-3 text-xs bg-secondary px-3 py-1 rounded-full">Sec {currentQ.section_id}</span>
-                    )}
-                  </div>
-                  <span className="font-medium text-emerald-500">{currentQ?.marks || 0} marks</span>
+            {!isFullscreen && assessment?.fullscreen_required ? (
+              <div className="h-full flex flex-col items-center justify-center space-y-6 py-20">
+                <div className="bg-destructive/10 p-6 rounded-full">
+                  <Monitor className="size-16 text-destructive" />
                 </div>
+                <div className="text-center space-y-2">
+                  <h3 className="text-2xl font-bold">Fullscreen Required</h3>
+                  <p className="text-muted-foreground max-w-md">
+                    This assessment is being taken in secure mode. You must remain in fullscreen to view and answer questions.
+                  </p>
+                </div>
+                <Button onClick={enterFullscreen} size="lg" variant="destructive" className="h-14 px-8 text-lg">
+                  Return to Fullscreen
+                </Button>
+              </div>
+            ) : (
+              <>
+                {!isFullscreen && (
+                  <Card className="mb-8 border-destructive bg-destructive/10">
+                    <CardContent className="p-8 text-center">
+                      <p className="text-destructive mb-6 font-medium">Fullscreen mode recommended for all assessments.</p>
+                      <Button onClick={enterFullscreen} variant="destructive">Enter Fullscreen</Button>
+                    </CardContent>
+                  </Card>
+                )}
 
-                <h2 className="text-2xl leading-tight mb-10 text-foreground">{currentQ?.text || currentQ?.content || "Question text missing"}</h2>
-                {renderQuestion(currentQ)}
-              </CardContent>
-            </Card>
+                <Progress value={progress} className="h-2 mb-8 bg-muted" />
 
-            <div className="flex justify-between mt-8">
-              <Button variant="outline" onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))} disabled={currentQuestionIndex === 0}>
-                <ArrowLeft className="mr-2 size-4" /> Previous
-              </Button>
+                <Card className="bg-card border-border">
+                  <CardContent className="p-10">
+                    <div className="flex justify-between items-baseline mb-8">
+                      <div>
+                        <span className="text-muted-foreground">Question {currentQuestionIndex + 1}</span>
+                        {currentQ?.section_id && (
+                          <span className="ml-3 text-xs bg-secondary px-3 py-1 rounded-full">Sec {currentQ.section_id}</span>
+                        )}
+                      </div>
+                      <span className="font-medium text-emerald-500">{currentQ?.marks || 0} marks</span>
+                    </div>
 
-              <Button onClick={() => {
-                if (currentQuestionIndex < questions.length - 1) {
-                  setCurrentQuestionIndex(currentQuestionIndex + 1)
-                } else {
-                  submitAssessment()
-                }
-              }}>
-                {currentQuestionIndex === questions.length - 1 ? "Finish & Submit" : "Next Question"}
-                <ArrowRight className="ml-2 size-4" />
-              </Button>
-            </div>
+                    <h2 className="text-2xl leading-tight mb-10 text-foreground">{currentQ?.text || currentQ?.content || "Question text missing"}</h2>
+                    {renderQuestion(currentQ)}
+                  </CardContent>
+                </Card>
+
+                <div className="flex justify-between mt-8">
+                  <Button variant="outline" onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))} disabled={currentQuestionIndex === 0}>
+                    <ArrowLeft className="mr-2 size-4" /> Previous
+                  </Button>
+
+                  <Button onClick={() => {
+                    if (currentQuestionIndex < questions.length - 1) {
+                      setCurrentQuestionIndex(currentQuestionIndex + 1)
+                    } else {
+                      submitAssessment()
+                    }
+                  }}>
+                    {currentQuestionIndex === questions.length - 1 ? "Finish & Submit" : "Next Question"}
+                    <ArrowRight className="ml-2 size-4" />
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
 
           <div className="w-80 border-l border-border bg-card p-6 hidden xl:block">
@@ -580,10 +673,12 @@ export default function StudentAssessmentTake() {
           <Card className="max-w-md bg-card border-destructive">
             <CardContent className="p-8 text-center">
               <AlertTriangle className="mx-auto size-12 text-destructive mb-4" />
-              <CardTitle className="text-2xl">Security Violation Detected</CardTitle>
-              <p className="text-muted-foreground mt-3 mb-8">Your action has been logged. Please return to secure mode.</p>
-              <Button onClick={() => { setShowWarningModal(false); if (!isFullscreen) enterFullscreen() }} className="w-full">
-                Return
+              <CardTitle className="text-2xl">{activeWarning?.message || "Security Violation Detected"}</CardTitle>
+              <p className="text-muted-foreground mt-3 mb-8">
+                {activeWarning ? "This violation has been logged to your lecturer." : "Your action has been logged. Please return to secure mode."}
+              </p>
+              <Button onClick={handleAcknowledgeWarning} className="w-full h-12">
+                I Understand
               </Button>
             </CardContent>
           </Card>

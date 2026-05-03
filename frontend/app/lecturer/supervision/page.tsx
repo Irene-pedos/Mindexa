@@ -1,7 +1,7 @@
 // app/lecturer/supervision/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -27,71 +27,68 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface SupervisionEvent {
-  id: number;
-  studentId: string;
-  studentName: string;
-  assessment: string;
-  event: string;
-  time: string;
-  severity: "low" | "medium" | "high";
-  riskScore: number;
-  actionTaken?: string;
-}
-
-const liveEvents: SupervisionEvent[] = [
-  {
-    id: 1,
-    studentId: "S3921",
-    studentName: "Jordan Lee",
-    assessment: "Database Systems CAT",
-    event: "Tab switching detected (3 times)",
-    time: "Just now",
-    severity: "high",
-    riskScore: 85,
-  },
-  {
-    id: 2,
-    studentId: "S2847",
-    studentName: "Taylor Kim",
-    assessment: "Algorithms Formative Quiz",
-    event: "Extended inactivity (4.5 minutes)",
-    time: "2 min ago",
-    severity: "medium",
-    riskScore: 62,
-  },
-  {
-    id: 3,
-    studentId: "S1759",
-    studentName: "Sam Rivera",
-    assessment: "Database Systems CAT",
-    event: "Browser window minimized",
-    time: "7 min ago",
-    severity: "medium",
-    riskScore: 45,
-  },
-  {
-    id: 4,
-    studentId: "S4412",
-    studentName: "Alex Chen",
-    assessment: "Database Systems CAT",
-    event: "Copy-paste attempt (Closed Book)",
-    time: "11 min ago",
-    severity: "high",
-    riskScore: 91,
-  },
-];
+import {
+  supervisionApi,
+  SupervisionEvent,
+  SupervisionStats,
+} from "@/lib/api/supervision";
+import { assessmentApi } from "@/lib/api/assessment";
+import { toast } from "sonner";
 
 export default function LecturerLiveSupervision() {
-  const [activeAssessment, setActiveAssessment] = useState(
-    "Database Systems CAT",
-  );
+  const [assessments, setAssessments] = useState<any[]>([]);
+  const [activeAssessmentId, setActiveAssessmentId] = useState<string>("");
+  const [stats, setStats] = useState<SupervisionStats | null>(null);
+  const [events, setEvents] = useState<SupervisionEvent[]>([]);
   const [filterSeverity, setFilterSeverity] = useState<
     "all" | "low" | "medium" | "high"
   >("all");
+  const [loading, setLoading] = useState(true);
 
-  const filteredEvents = liveEvents.filter(
+  useEffect(() => {
+    fetchAssessments();
+  }, []);
+
+  useEffect(() => {
+    if (!activeAssessmentId) return;
+
+    // Initial fetch
+    fetchData();
+
+    // Start polling
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [activeAssessmentId]);
+
+  const fetchAssessments = async () => {
+    try {
+      const response = await assessmentApi.getAssessments();
+      const data = response.items || response;
+      setAssessments(data);
+      if (data.length > 0) {
+        setActiveAssessmentId(data[0].id);
+      }
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load assessments");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchData = async () => {
+    try {
+      const [statsRes, eventsRes] = await Promise.all([
+        supervisionApi.getStats(activeAssessmentId),
+        supervisionApi.getEvents(activeAssessmentId),
+      ]);
+      setStats(statsRes);
+      setEvents(eventsRes.events);
+    } catch (e) {
+      console.error("Supervision polling failed");
+    }
+  };
+
+  const filteredEvents = events.filter(
     (e) => filterSeverity === "all" || e.severity === filterSeverity,
   );
 
@@ -108,23 +105,27 @@ export default function LecturerLiveSupervision() {
         </div>
 
         <div className="flex items-center gap-3">
-          <Select value={activeAssessment} onValueChange={setActiveAssessment}>
+          <Select
+            value={activeAssessmentId}
+            onValueChange={setActiveAssessmentId}
+          >
             <SelectTrigger className="w-[260px]">
-              <SelectValue />
+              <SelectValue placeholder="Select Assessment" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="Database Systems CAT">
-                Database Systems CAT
-              </SelectItem>
-              <SelectItem value="Algorithms Formative Quiz">
-                Algorithms Formative Quiz
-              </SelectItem>
-              <SelectItem value="Software Engineering Group Work">
-                Software Engineering Group Work
-              </SelectItem>
+              {assessments.map((a) => (
+                <SelectItem key={a.id} value={a.id}>
+                  {a.title}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
-          <Button variant="secondary">Assign Assistant</Button>
+          <Button
+            variant="secondary"
+            onClick={() => supervisionApi.startSession(activeAssessmentId)}
+          >
+            Start Session
+          </Button>
         </div>
       </div>
 
@@ -139,31 +140,35 @@ export default function LecturerLiveSupervision() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <div className="text-2xl font-semibold tracking-tight">
-                    47
+                    {stats?.online_count || 0}
                   </div>
                   <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
                     Online
                   </div>
                 </div>
                 <div className="space-y-1">
-                  <div className="text-2xl font-semibold tracking-tight">5</div>
+                  <div className="text-2xl font-semibold tracking-tight">
+                    {stats?.warning_count || 0}
+                  </div>
                   <div className="text-xs text-muted-foreground font-medium uppercase tracking-wider">
                     Warnings
                   </div>
                 </div>
               </div>
 
-              <div className="mt-6 rounded-lg bg-destructive/10 p-4 flex gap-3 items-start border border-destructive/20">
-                <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
-                <div>
-                  <div className="text-sm font-medium text-destructive">
-                    2 High Risk Students
-                  </div>
-                  <div className="text-xs text-destructive/80 mt-1">
-                    Immediate attention recommended
+              {stats && stats.high_risk_count > 0 && (
+                <div className="mt-6 rounded-lg bg-destructive/10 p-4 flex gap-3 items-start border border-destructive/20">
+                  <AlertCircle className="size-5 text-destructive shrink-0 mt-0.5" />
+                  <div>
+                    <div className="text-sm font-medium text-destructive">
+                      {stats.high_risk_count} High Risk Students
+                    </div>
+                    <div className="text-xs text-destructive/80 mt-1">
+                      Immediate attention recommended
+                    </div>
                   </div>
                 </div>
-              </div>
+              )}
             </CardContent>
           </Card>
 
@@ -177,11 +182,9 @@ export default function LecturerLiveSupervision() {
                   <UserCheck className="size-4 text-primary" />
                 </div>
                 <div>
-                  <div className="text-sm font-medium">
-                    Supervised Mode Active
-                  </div>
+                  <div className="text-sm font-medium">Monitoring Active</div>
                   <div className="text-xs text-muted-foreground mt-0.5">
-                    Multi-supervisor enabled
+                    Data updates every 5 seconds
                   </div>
                 </div>
               </div>
@@ -231,17 +234,18 @@ export default function LecturerLiveSupervision() {
                       <div className="flex-1 min-w-0 pr-4">
                         <div className="flex items-center gap-2">
                           <span className="font-medium text-sm truncate">
-                            {event.studentName}
+                            {event.student_name}
                           </span>
                           <span className="text-xs text-muted-foreground">
-                            {event.studentId}
+                            {event.student_id}
                           </span>
                         </div>
-                        <div className="mt-1 text-sm text-foreground/90">
-                          {event.event}
+                        <div className="mt-1 text-sm text-foreground/90 capitalize">
+                          {event.event_type.replace("_", " ")}
                         </div>
                         <div className="mt-2 text-xs text-muted-foreground flex items-center gap-1.5">
-                          <Clock className="size-3" /> {event.time}
+                          <Clock className="size-3" />{" "}
+                          {new Date(event.created_at).toLocaleTimeString()}
                         </div>
                       </div>
 
@@ -254,17 +258,16 @@ export default function LecturerLiveSupervision() {
                           }
                           className="text-[10px] font-medium"
                         >
-                          Risk {event.riskScore}%
+                          Risk {event.risk_score}%
                         </Badge>
-                        <Button variant="ghost" size="icon" className="size-8">
-                          <MoreVertical className="size-4" />
-                        </Button>
                       </div>
                     </div>
                   ))
                 ) : (
                   <div className="text-center py-12 text-sm text-muted-foreground">
-                    No events match the current filter.
+                    {activeAssessmentId
+                      ? "No events detected yet."
+                      : "Select an assessment to monitor."}
                   </div>
                 )}
               </div>
@@ -273,11 +276,9 @@ export default function LecturerLiveSupervision() {
         </Card>
       </div>
 
-      {/* Institutional Note */}
       <p className="text-xs text-muted-foreground text-center max-w-2xl mx-auto">
-        All integrity events are automatically logged with full timestamps and
-        screenshots. This panel supports multi-supervisor mode. Every action is
-        traceable for academic integrity audit.
+        All integrity events are automatically logged with full timestamps.
+        Every action is traceable for academic integrity audit.
       </p>
     </div>
   );

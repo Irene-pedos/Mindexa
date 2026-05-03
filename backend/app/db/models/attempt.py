@@ -72,6 +72,7 @@ if TYPE_CHECKING:
     from app.db.models.assessment import (
         Assessment,
     )
+    from app.db.models.auth import User
     from app.db.models.integrity import (
         IntegrityEvent,
         IntegrityFlag,
@@ -306,6 +307,7 @@ class AssessmentAttempt(BaseModel, table=True):
     assessment: Optional["Assessment"] = Relationship(
         back_populates="attempts"
     )
+    student: Optional["User"] = Relationship()
     group: Optional["StudentGroup"] = Relationship(
         back_populates="attempts"
     )

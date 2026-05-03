@@ -343,7 +343,7 @@ def create_access_token(
         "sub": str(user_id),
         "role": role_value,
         "email": str(email),
-        "type": TOKEN_TYPE_ACCESS,
+        "type": "ACCESS",
         "jti": jti,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),
@@ -410,7 +410,7 @@ def create_refresh_token(
 
     payload: dict[str, Any] = {
         "sub": str(user_id),
-        "type": TOKEN_TYPE_REFRESH,
+        "type": "REFRESH",
         "jti": jti,
         "iat": int(now.timestamp()),
         "exp": int(expires_at.timestamp()),

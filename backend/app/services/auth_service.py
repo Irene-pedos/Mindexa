@@ -51,6 +51,7 @@ from app.core.exceptions import (
     AccountLockedError,
     AlreadyExistsError,
     AuthenticationError,
+    EmailAlreadyRegisteredError,
     InvalidTokenError,
     NotFoundError,
     PermissionDeniedError,
@@ -124,6 +125,10 @@ class AuthService:
         self._refresh_tokens = RefreshTokenRepository(db)
         self._reset_tokens = PasswordResetTokenRepository(db)
 
+    @staticmethod
+    def _enum_value(value: object) -> str:
+        return value.value if hasattr(value, "value") else str(value)
+
     # ─────────────────────────────────────────────────────────────────────────
     # REGISTRATION
     # ─────────────────────────────────────────────────────────────────────────
@@ -160,7 +165,9 @@ class AuthService:
         """
         # email is already normalised by the route validator
         if await self._users.email_exists(email):
-            raise AlreadyExistsError("User")
+            raise EmailAlreadyRegisteredError()
+
+        role_value = self._enum_value(role)
 
         # Registration Number Uniqueness (if provided)
         if reg_number:
@@ -174,7 +181,7 @@ class AuthService:
         hashed = hash_password(password)
 
         # Role-specific status logic
-        if role == UserRole.LECTURER:
+        if role_value == UserRole.LECTURER.value:
             status = UserStatus.PENDING_APPROVAL
             email_verified = False # Usually True if admin created, but here it's signup
         else:
@@ -184,8 +191,8 @@ class AuthService:
         user = User(
             email=email,
             hashed_password=hashed,
-            role=role,
-            status=status,
+            role=role_value,
+            status=self._enum_value(status),
             email_verified=email_verified,
             failed_login_attempts=0,
         )
@@ -193,8 +200,8 @@ class AuthService:
             user_id=user.id,
             first_name=first_name,
             last_name=last_name,
-            student_id=reg_number if role == UserRole.STUDENT else None,
-            staff_id=reg_number if role == UserRole.LECTURER else None,
+            student_id=reg_number if role_value == UserRole.STUDENT.value else None,
+            staff_id=reg_number if role_value == UserRole.LECTURER.value else None,
             college=college,
             department=department,
             option=option,
@@ -208,7 +215,7 @@ class AuthService:
         await self.db.flush()
 
         raw_token = None
-        if role == UserRole.STUDENT:
+        if role_value == UserRole.STUDENT.value:
             raw_token = await self._create_verification_token(user.id)
 
         await self._record_security_event(
@@ -417,7 +424,7 @@ class AuthService:
             AuthenticationError — user account no longer active
         """
         # Step 1: Cryptographic validation
-        payload: TokenPayload = decode_token(refresh_token_str, TokenType.REFRESH)
+        payload: TokenPayload = decode_token(refresh_token_str, "REFRESH")
         jti: str = payload.jti
         user_id_str: str = payload.sub
 

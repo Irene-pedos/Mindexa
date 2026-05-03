@@ -15,9 +15,16 @@ export interface AdminRecentActivity {
   time: string;
 }
 
+export interface AdminChartDataPoint {
+  date: string;
+  submissions: number;
+  alerts: number;
+}
+
 export interface AdminDashboardResponse {
   summary: AdminDashboardSummary;
   recent_activity: AdminRecentActivity[];
+  chart_data: AdminChartDataPoint[];
 }
 
 export interface UserProfileResponse {
@@ -70,9 +77,56 @@ export interface AdminCourseListResponse {
   total: number;
 }
 
+export interface AdminAnalyticsMetric {
+  label: string;
+  value: string | number;
+  trend?: string;
+  trend_direction?: "up" | "down";
+}
+
+export interface AdminAnalyticsResponse {
+  summary: AdminAnalyticsMetric[];
+  user_distribution: { name: string; value: number }[];
+  assessment_trends: { date: string; count: number }[];
+  integrity_hotspots: { course: string; flags: number }[];
+  key_insights: string[];
+}
+
+export interface AdminIntegrityOverview {
+  total_flagged_today: number;
+  high_severity_today: number;
+  active_sessions: number;
+  recent_flags: any[];
+}
+
+export interface SystemSettings {
+  platform_name: string;
+  timezone: string;
+  maintenance_mode: boolean;
+  enforce_fullscreen: boolean;
+  ai_assistance_default: boolean;
+  auto_flag_threshold: string;
+  default_duration: number;
+}
+
 export const adminApi = {
   getDashboard: async (): Promise<AdminDashboardResponse> => {
     return apiClient("/admin/dashboard");
+  },
+  getAnalytics: async (): Promise<AdminAnalyticsResponse> => {
+    return apiClient("/admin/analytics");
+  },
+  getIntegrityOverview: async (): Promise<AdminIntegrityOverview> => {
+    return apiClient("/admin/integrity-overview");
+  },
+  getSystemSettings: async (): Promise<SystemSettings> => {
+    return apiClient("/admin/settings");
+  },
+  updateSystemSettings: async (data: SystemSettings): Promise<SystemSettings> => {
+    return apiClient("/admin/settings", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
   },
   getUsers: async (page = 1, pageSize = 20): Promise<AdminUserListResponse> => {
     return apiClient(`/admin/users?page=${page}&page_size=${pageSize}`);

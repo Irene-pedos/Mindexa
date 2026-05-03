@@ -36,10 +36,10 @@ def infer_grading_mode(question_type: str, override: str | None = None) -> str:
         QuestionType.MATCHING.value: GradingMode.AUTO.value,
         QuestionType.ORDERING.value: GradingMode.AUTO.value,
         QuestionType.FILL_BLANK.value: GradingMode.AUTO.value,
-        QuestionType.SHORT_ANSWER.value: GradingMode.SEMI_AUTO.value,
-        QuestionType.COMPUTATIONAL.value: GradingMode.SEMI_AUTO.value,
-        QuestionType.ESSAY.value: GradingMode.AI_ASSISTED.value,
-        QuestionType.CASE_STUDY.value: GradingMode.AI_ASSISTED.value,
+        QuestionType.SHORT_ANSWER.value: GradingMode.SEMI.value,
+        QuestionType.COMPUTATIONAL.value: GradingMode.SEMI.value,
+        QuestionType.ESSAY.value: GradingMode.SEMI.value,
+        QuestionType.CASE_STUDY.value: GradingMode.SEMI.value,
     }
     return type_to_mode.get(question_type, GradingMode.MANUAL.value)
 
@@ -52,6 +52,30 @@ class QuestionService:
     @staticmethod
     def _role_value(role: Any) -> str:
         return role.value if hasattr(role, "value") else str(role)
+
+    @staticmethod
+    def _enum_value(value: Any) -> Any:
+        return value.value if hasattr(value, "value") else value
+
+    def _to_summary_response(self, question: Question) -> QuestionSummaryResponse:
+        return QuestionSummaryResponse(
+            id=question.id,
+            content=question.content,
+            question_type=str(self._enum_value(question.question_type)),
+            difficulty=str(self._enum_value(question.difficulty)),
+            grading_mode=str(getattr(question, "grading_mode", "auto")),
+            status="active" if getattr(question, "is_active", True) else "archived",
+            subject=None,
+            topic=getattr(question, "topic_tag", None),
+            bloom_level=None,
+            suggested_marks=getattr(question, "marks", None),
+            is_active=getattr(question, "is_active", True),
+            source_type=str(self._enum_value(question.source_type)),
+            version_number=getattr(question, "version", 1),
+            parent_question_id=getattr(question, "parent_question_id", None),
+            created_by_id=question.created_by_id,
+            created_at=question.created_at,
+        )
 
     async def create_question(self, data: QuestionCreateRequest, created_by: User) -> Question:
         grading_mode = infer_grading_mode(data.question_type, data.grading_mode)
@@ -227,7 +251,7 @@ class QuestionService:
         )
 
         return QuestionListResponse(
-            items=[QuestionSummaryResponse.model_validate(q) for q in items],
+            items=[self._to_summary_response(q) for q in items],
             total=total,
             page=params.page,
             page_size=params.page_size,

@@ -18,7 +18,13 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 
-const chartData = [
+interface PerformanceChartProps {
+  data?: { month: string; score: number; average: number }[]
+  title?: string
+  description?: string
+}
+
+const defaultData = [
   { month: "Jan", score: 78, average: 72 },
   { month: "Feb", score: 85, average: 74 },
   { month: "Mar", score: 82, average: 76 },
@@ -38,22 +44,24 @@ const chartConfig = {
   },
 } satisfies ChartConfig
 
-export function PerformanceChart() {
+export function PerformanceChart({
+  data = defaultData,
+  title = "Academic Performance Trend",
+  description = "Your scores vs class average (Last 6 months)",
+}: PerformanceChartProps) {
   return (
     <Card className="col-span-full">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
-          Academic Performance Trend
+          {title}
           <TrendingUp className="h-4 w-4 text-emerald-500" />
         </CardTitle>
-        <CardDescription>
-          Your scores vs class average (Last 6 months)
-        </CardDescription>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="h-[260px] w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={chartData} accessibilityLayer>
+            <BarChart data={data} accessibilityLayer>
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
               <XAxis
                 dataKey="month"
@@ -77,7 +85,7 @@ export function PerformanceChart() {
           Trending up by 8.4% this semester <TrendingUp className="h-4 w-4" />
         </div>
         <div className="leading-none text-muted-foreground">
-          Strong improvement in Database Systems and Algorithms modules
+          Based on your recently released results and class statistics
         </div>
       </CardFooter>
     </Card>

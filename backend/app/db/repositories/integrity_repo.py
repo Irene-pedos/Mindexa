@@ -19,6 +19,9 @@ from app.db.models.integrity import (
     IntegrityWarning,
     SupervisionSession,
 )
+from app.db.models.auth import User, UserProfile
+from app.db.models.attempt import AssessmentAttempt
+from app.db.enums import AttemptStatus
 
 
 def _utcnow() -> datetime:
@@ -87,8 +90,8 @@ class IntegrityRepository:
 
     async def list_events_for_assessment(
         self, assessment_id: uuid.UUID, page: int = 1, page_size: int = 100
-    ) -> tuple[list[IntegrityEvent], int]:
-        """Supervisor live feed — all events across all attempts for an assessment."""
+    ) -> tuple[list[dict], int]:
+        """Supervisor live feed — all events across all attempts for an assessment with student names."""
         count_result = await self.db.execute(
             select(func.count(IntegrityEvent.id)).where(
                 IntegrityEvent.assessment_id == assessment_id
@@ -97,13 +100,87 @@ class IntegrityRepository:
         total = count_result.scalar_one()
 
         result = await self.db.execute(
-            select(IntegrityEvent)
+            select(
+                IntegrityEvent,
+                UserProfile.first_name,
+                UserProfile.last_name
+            )
+            .join(User, User.id == IntegrityEvent.student_id)
+            .join(UserProfile, UserProfile.user_id == User.id)
             .where(IntegrityEvent.assessment_id == assessment_id)
             .order_by(IntegrityEvent.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return list(result.scalars().all()), total
+        
+        events = []
+        for row in result.all():
+            event = row[0]
+            first_name = row[1] or ""
+            last_name = row[2] or ""
+            
+            # Determine severity based on event type
+            severity = "low"
+            risk_score = 10
+            if event.event_type in ["DEVTOOLS_DETECTED", "SUSPICIOUS_DEVICE"]:
+                severity = "high"
+                risk_score = 80
+            elif event.event_type in ["COPY_ATTEMPT", "FULLSCREEN_EXIT", "TAB_SWITCH"]:
+                # Actually these depend on count, but for the feed we'll mark as medium
+                severity = "medium"
+                risk_score = 40
+
+            # Convert to dict and add student_name
+            event_dict = {
+                "id": event.id,
+                "attempt_id": event.attempt_id,
+                "assessment_id": event.assessment_id,
+                "student_id": event.student_id,
+                "event_type": event.event_type,
+                "metadata_json": event.metadata_json,
+                "created_at": event.created_at,
+                "student_name": f"{first_name} {last_name}".strip() or "Unknown Student",
+                "severity": severity,
+                "risk_score": risk_score
+            }
+            events.append(event_dict)
+
+        return events, total
+
+    async def get_supervision_stats(self, assessment_id: uuid.UUID) -> dict:
+        """Fetch aggregated stats for live supervision."""
+        # Online Count: Attempts that are currently ACTIVE
+        online_result = await self.db.execute(
+            select(func.count(AssessmentAttempt.id))
+            .where(
+                AssessmentAttempt.assessment_id == assessment_id,
+                AssessmentAttempt.status == AttemptStatus.ACTIVE
+            )
+        )
+        online_count = online_result.scalar_one()
+
+        # Warning Count: Sum of total_integrity_warnings across all attempts for this assessment
+        warning_result = await self.db.execute(
+            select(func.sum(AssessmentAttempt.total_integrity_warnings))
+            .where(AssessmentAttempt.assessment_id == assessment_id)
+        )
+        warning_count = warning_result.scalar() or 0
+
+        # High Risk Count: Attempts with risk score > 70 or is_flagged
+        high_risk_result = await self.db.execute(
+            select(func.count(AssessmentAttempt.id))
+            .where(
+                AssessmentAttempt.assessment_id == assessment_id,
+                (AssessmentAttempt.integrity_risk_score > 70) | (AssessmentAttempt.is_flagged == True)
+            )
+        )
+        high_risk_count = high_risk_result.scalar_one()
+
+        return {
+            "online_count": online_count,
+            "warning_count": int(warning_count),
+            "high_risk_count": high_risk_count,
+        }
 
     # -----------------------------------------------------------------------
     # IntegrityFlag — CRUD
@@ -226,6 +303,50 @@ class IntegrityRepository:
         )
         return list(result.scalars().all()), total
 
+    async def list_all_flags(
+        self,
+        status: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[list[dict], int]:
+        from app.db.models.auth import User, UserProfile
+        from app.db.models.assessment import Assessment
+
+        filters = [
+            IntegrityFlag.is_deleted == False,  # noqa: E712
+        ]
+        if status:
+            filters.append(IntegrityFlag.status == status)
+
+        count_result = await self.db.execute(
+            select(func.count(IntegrityFlag.id)).where(*filters)
+        )
+        total = count_result.scalar_one()
+
+        stmt = (
+            select(IntegrityFlag, UserProfile.first_name, UserProfile.last_name, Assessment.title)
+            .join(User, User.id == IntegrityFlag.student_id)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .join(Assessment, Assessment.id == IntegrityFlag.assessment_id)
+            .where(*filters)
+            .order_by(IntegrityFlag.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        result = await self.db.execute(stmt)
+        rows = result.all()
+
+        flags = []
+        for flag, fn, ln, title in rows:
+            # We convert to dict for the router to handle or model_validate
+            d = flag.model_dump()
+            d["student_name"] = f"{fn} {ln}"
+            d["assessment_name"] = title
+            flags.append(d)
+
+        return flags, total
+
+
     # -----------------------------------------------------------------------
     # IntegrityWarning — CRUD
     # -----------------------------------------------------------------------
@@ -347,3 +468,37 @@ class IntegrityRepository:
             ).order_by(SupervisionSession.started_at.desc())
         )
         return list(result.scalars().all())
+
+    async def get_attempt_integrity_report(self, attempt_id: uuid.UUID) -> dict:
+        """
+        Builds a comprehensive integrity report for a single attempt.
+        """
+        # 1. Fetch the attempt to get student and assessment links
+        from app.db.models.attempt import AssessmentAttempt
+        res = await self.db.execute(select(AssessmentAttempt).where(AssessmentAttempt.id == attempt_id))
+        attempt = res.scalar_one_or_none()
+        if not attempt:
+            return None # Service handles this
+
+        # 2. Fetch events, flags, warnings
+        events = await self.list_events_for_attempt(attempt_id)
+        flags = await self.list_flags_for_attempt(attempt_id)
+        warnings = await self.list_warnings_for_attempt(attempt_id)
+
+        # 3. Aggregate event counts
+        event_counts = {}
+        for e in events:
+            etype = e.event_type
+            event_counts[etype] = event_counts.get(etype, 0) + 1
+
+        return {
+            "attempt_id": attempt_id,
+            "student_id": attempt.student_id,
+            "assessment_id": attempt.assessment_id,
+            "is_flagged": len(flags) > 0,
+            "total_warnings": len(warnings),
+            "event_counts": event_counts,
+            "events": events,
+            "flags": flags,
+            "warnings": warnings
+        }

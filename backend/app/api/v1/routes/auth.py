@@ -53,11 +53,11 @@ RESPONSE PATTERNS:
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter, Cookie, Depends, Request, Response, status
+from fastapi import APIRouter, Cookie, Depends, Request, Response, status, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.constants import UserRole as CoreUserRole
+from app.db.enums import UserRole
 from app.core.exceptions import AuthenticationError
 from app.db.schemas.auth import (
     AuthMessageResponse,
@@ -113,6 +113,35 @@ def _get_client_ip(request: Request) -> str | None:
     return None
 
 
+def _queue_email_notification(
+    *,
+    to_email: str,
+    subject: str,
+    template_name: str,
+    context: dict[str, object],
+) -> None:
+    """
+    Best-effort Celery dispatch.
+
+    Local development should not fail the HTTP request just because the
+    email worker or broker is unavailable.
+    """
+    try:
+        send_email_notification.delay(
+            to_email=to_email,
+            subject=subject,
+            template_name=template_name,
+            context=context,
+        )
+    except Exception as exc:
+        logger.warning(
+            "email_queue_dispatch_failed",
+            to_email=to_email,
+            template_name=template_name,
+            error=str(exc),
+        )
+
+
 def _build_user_response(user) -> UserResponse:
     """
     Build a UserResponse from a User ORM object with its loaded profile.
@@ -127,7 +156,7 @@ def _build_user_response(user) -> UserResponse:
             display_name=getattr(user.profile, "display_name", None),
             bio=getattr(user.profile, "bio", None),
             phone_number=getattr(user.profile, "phone_number", None),
-            profile_picture_url=getattr(user.profile, "profile_picture_url", None),
+            profile_picture_url=getattr(user.profile, "avatar_url", None),
             student_id=getattr(user.profile, "student_id", None),
             staff_id=getattr(user.profile, "staff_id", None),
             college=getattr(user.profile, "college", None),
@@ -169,7 +198,7 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         samesite="lax",
         secure=settings.ACCESS_TOKEN_COOKIE_SECURE,
         max_age=settings.refresh_token_expire_seconds,
-        path="/auth",  # Only sent to /auth/* endpoints — minimal cookie exposure
+        path="/",  # Use root path so cookie is available for /api/v1/auth/refresh
     )
 
 
@@ -177,7 +206,7 @@ def _clear_refresh_cookie(response: Response) -> None:
     """Clear the refresh token cookie (used on logout)."""
     response.delete_cookie(
         key=settings.REFRESH_TOKEN_COOKIE_NAME,
-        path="/auth",
+        path="/",
     )
 
 
@@ -245,7 +274,7 @@ async def register(
         password=body.password,
         first_name=body.first_name,
         last_name=body.last_name,
-        role=CoreUserRole(body.role.value) if hasattr(body.role, "value") else CoreUserRole(str(body.role)),
+        role=UserRole(body.role.value) if hasattr(body.role, "value") else UserRole(str(body.role)),
         reg_number=body.reg_number,
         college=body.college,
         department=body.department,
@@ -259,7 +288,7 @@ async def register(
     # Dispatch verification email via Celery (only for students who get a token)
     if raw_verification_token:
         verification_url = settings.build_verification_url(raw_verification_token)
-        send_email_notification.delay(
+        _queue_email_notification(
             to_email=user.email,
             subject="Verify your Mindexa account",
             template_name="verification",
@@ -603,7 +632,7 @@ async def resend_verification(
         # ── EMAIL SENDING HOOK ────────────────────────────────────────────────
         # Dispatch new verification email via Celery
         verification_url = settings.build_verification_url(raw_token)
-        send_email_notification.delay(
+        _queue_email_notification(
             to_email=user.email,
             subject="Verify your Mindexa account",
             template_name="verification",
@@ -673,7 +702,7 @@ async def forgot_password(
         # ── EMAIL SENDING HOOK ────────────────────────────────────────────────
         # Dispatch password reset email via Celery
         reset_url = settings.build_password_reset_url(raw_token)
-        send_email_notification.delay(
+        _queue_email_notification(
             to_email=user.email,
             subject="Reset your Mindexa password",
             template_name="password_reset",
@@ -820,6 +849,66 @@ async def update_me(
     db.add(profile)
     await db.flush()
     await db.refresh(profile)
+
+    return _build_user_response(current_user)
+
+
+@router.post(
+    "/me/avatar",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Upload profile picture",
+)
+async def upload_avatar(
+    current_user: VerifiedUser,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """
+    Upload and set a profile picture for the authenticated user.
+    """
+    import os
+    import shutil
+    from uuid import uuid4
+    from fastapi import HTTPException
+
+    # Validate file type
+    if not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="File must be an image",
+        )
+
+    # Ensure upload directory exists
+    # We use a relative path from the app root
+    upload_dir = os.path.join("uploads", "avatars")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    # Generate unique filename
+    ext = os.path.splitext(file.filename)[1]
+    filename = f"{current_user.id}_{uuid4().hex}{ext}"
+    file_path = os.path.join(upload_dir, filename)
+
+    # Save file
+    try:
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+    except Exception as e:
+        logger.error("avatar_upload_failed", error=str(e), user_id=str(current_user.id))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not save file",
+        )
+
+    # Update profile
+    profile = current_user.profile
+    if profile:
+        # Save the relative URL that the frontend can use
+        # We assume the /uploads directory is served statically
+        profile.avatar_url = f"/uploads/avatars/{filename}"
+        db.add(profile)
+        await db.flush()
+        await db.refresh(profile)
 
     return _build_user_response(current_user)
 

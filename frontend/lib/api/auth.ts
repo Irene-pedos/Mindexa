@@ -37,11 +37,13 @@ export const authApi = {
       body: JSON.stringify(credentials),
       requireAuth: false,
     });
+    
     if (data.access_token) {
+      // Sync memory and localStorage via client.ts helper
       setAccessToken(data.access_token);
+      
       if (typeof window !== "undefined") {
         localStorage.setItem("user", JSON.stringify(data.user));
-        localStorage.setItem("accessToken", data.access_token);
         localStorage.setItem("refreshToken", data.refresh_token);
       }
     }
@@ -66,7 +68,6 @@ export const authApi = {
       setAccessToken(null);
       if (typeof window !== "undefined") {
         localStorage.removeItem("user");
-        localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
       }
     }
@@ -111,6 +112,19 @@ export const authApi = {
     return apiClient("/auth/me", {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  },
+
+  uploadAvatar: async (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+
+    // apiClient handles JSON by default, for FormData we need to be careful
+    // If apiClient is a wrapper around fetch, we might need to adjust it
+    return apiClient("/auth/me/avatar", {
+      method: "POST",
+      body: formData,
+      // Do not set Content-Type header, browser will set it with boundary
     });
   },
 };

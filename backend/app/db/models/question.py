@@ -127,7 +127,6 @@ class Question(BaseModel, table=True):
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("question.id", ondelete="SET NULL"),
-            nullable=True,
         ),
     )
 
@@ -279,6 +278,18 @@ class AssessmentQuestion(BaseModel, table=True):
             index=True,
         ),
     )
+
+    @property
+    def marks(self) -> int:
+        """Alias for marks_override or base question marks for schema alignment."""
+        if self.marks_override is not None:
+            return self.marks_override
+        return self.question.marks if self.question else 0
+
+    @property
+    def section_id(self) -> uuid.UUID | None:
+        """Alias for assessment_section_id for schema alignment."""
+        return self.assessment_section_id
 
     question: Optional["Question"] = Relationship(back_populates="assessment_questions")
     assessment: Optional["Assessment"] = Relationship(back_populates="assessment_questions")

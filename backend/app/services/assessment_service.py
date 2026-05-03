@@ -37,7 +37,14 @@ from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.core.security import hash_password
 from app.db.enums import AssessmentStatus as DbAssessmentStatus
 from app.db.enums import AssessmentType as DbAssessmentType
-from app.db.enums import DifficultyLevel, GradingMode, ResultReleaseMode
+from app.db.enums import (
+    DifficultyLevel,
+    GradingMode,
+    QuestionAddedVia,
+    QuestionSourceType,
+    QuestionType as DbQuestionType,
+    ResultReleaseMode,
+)
 from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.question_repo import QuestionRepository
@@ -255,8 +262,8 @@ class AssessmentService:
             "ai_assistance_allowed": data.ai_assistance_allowed,
             "is_open_book": data.is_open_book,
             "integrity_monitoring_enabled": data.integrity_monitoring_enabled,
-            "randomise_questions": data.randomize_questions,
-            "randomise_options": data.randomize_options,
+            "randomize_questions": data.randomize_questions,
+            "randomize_options": data.randomize_options,
         }
 
         if data.window_start:
@@ -300,7 +307,7 @@ class AssessmentService:
             description=data.description,
             order_index=data.order_index,
             instructions=data.instructions,
-            marks_allocated=data.allocated_marks or 0,
+            allocated_marks=data.allocated_marks or 0,
         )
 
         # Advance wizard step if needed
@@ -520,7 +527,7 @@ class AssessmentService:
         return FinalizeAssessmentResponse(
             id=assessment.id,
             title=assessment.title,
-            status=AssessmentStatus.SCHEDULED.value,
+            status=AssessmentStatus.PUBLISHED.value,
             is_finalized=True,
             finalized_at=datetime.now(tz=UTC),
             validation_passed=True,
@@ -588,11 +595,17 @@ class AssessmentService:
                 page=page,
                 page_size=page_size,
             )
-        else:
+        elif current_user.role == UserRole.LECTURER.value:
             items, total = await self._repo.list_by_creator(
                 created_by_id=current_user.id,
                 status=db_status,
                 assessment_type=db_type,
+                page=page,
+                page_size=page_size,
+            )
+        else:
+            # Students and others
+            items, total = await self._repo.list_available_for_student(
                 page=page,
                 page_size=page_size,
             )
@@ -640,7 +653,33 @@ class AssessmentService:
         Creates an assessment and all its dependencies in one go.
         Used by the frontend single-page builder.
         """
-        # 1. Map metadata to AssessmentCreateRequest
+        assessment = await self._build_bulk_assessment(data, current_user)
+
+        # We call the existing finalize logic to ensure all validations pass.
+        return await self.finalize_assessment(assessment.id, current_user)
+
+    async def bulk_save_draft_assessment(
+        self,
+        data: BulkAssessmentPublishRequest,
+        current_user: User,
+    ) -> FinalizeAssessmentResponse:
+        assessment = await self._build_bulk_assessment(data, current_user)
+        return FinalizeAssessmentResponse(
+            id=assessment.id,
+            title=assessment.title,
+            status=assessment.status.value,
+            is_finalized=False,
+            finalized_at=None,
+            validation_passed=True,
+            errors=[],
+            warnings=[],
+        )
+
+    async def _build_bulk_assessment(
+        self,
+        data: BulkAssessmentPublishRequest,
+        current_user: User,
+    ):
         # Note: Frontend 'mode' maps to AssessmentType (e.g. 'CAT' -> 'CAT')
         mode_mapping = {
             "Practice": "FORMATIVE",
@@ -661,22 +700,31 @@ class AssessmentService:
         window_end = None
         if data.metadata.date:
             try:
-                date_str = data.metadata.date.strftime("%Y-%m-%d")
+                # data.metadata.date might be a datetime object from Pydantic
+                d = data.metadata.date
+                date_str = d.strftime("%Y-%m-%d")
                 window_start = datetime.strptime(f"{date_str} {data.metadata.startTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
                 window_end = datetime.strptime(f"{date_str} {data.metadata.endTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
             except Exception:
                 pass # Fallback to None if parsing fails
 
         # 2. Create Assessment
-        from sqlalchemy import select
+        from sqlalchemy import or_, select
         from app.db.models.academic import Course
         
         course_id = None
         try:
             course_id = uuid.UUID(data.metadata.course)
-        except ValueError:
-            # Try to find course by name
-            res = await self.db.execute(select(Course).where(Course.name == data.metadata.course))
+        except (ValueError, TypeError):
+            # Try to find course by name or code
+            res = await self.db.execute(
+                select(Course).where(
+                    or_(
+                        Course.name == data.metadata.course,
+                        Course.code == data.metadata.course
+                    )
+                )
+            )
             course = res.scalars().first()
             if not course:
                 # Try partial match or just take the first one for demo safety
@@ -711,8 +759,8 @@ class AssessmentService:
             "ai_assistance_allowed": data.rules.aiAllowed,
             "is_open_book": data.rules.openBook,
             "integrity_monitoring_enabled": True,
-            "randomise_questions": data.rules.shuffleQuestions,
-            "randomise_options": data.rules.shuffleOptions,
+            "randomize_questions": data.rules.shuffleQuestions,
+            "randomize_options": data.rules.shuffleOptions,
         }
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
@@ -723,7 +771,7 @@ class AssessmentService:
                 assessment_id=assessment.id,
                 title=b_sec.section,
                 order_index=i,
-                marks_allocated=b_sec.marks,
+                allocated_marks=b_sec.marks,
                 description=b_sec.topics,
                 allowed_question_types={"types": b_sec.allowedTypes},
             )
@@ -731,7 +779,6 @@ class AssessmentService:
 
         # Add questions
         from app.db.models.question import Question as QuestionModel
-        from app.db.enums import QuestionType as DbQuestionType, QuestionSourceType
         
         for i, q in enumerate(data.questions):
             # Map frontend question type to DB enum
@@ -760,15 +807,46 @@ class AssessmentService:
             self.db.add(new_q)
             await self.db.flush()
 
+            # Handle options based on question type
+            if q.options:
+                if db_q_type in [DbQuestionType.MCQ, DbQuestionType.TRUE_FALSE, DbQuestionType.ORDERING]:
+                    for opt in q.options:
+                        await self._question_repo.add_option(
+                            question_id=new_q.id,
+                            content=opt.option_text,
+                            order_index=opt.order_index,
+                            is_correct=opt.is_correct
+                        )
+                elif db_q_type == DbQuestionType.MATCHING:
+                    for opt in q.options:
+                        await self._question_repo.add_option(
+                            question_id=new_q.id,
+                            content=opt.option_text,
+                            order_index=opt.order_index,
+                            match_key=opt.option_text,
+                            match_value=opt.option_text_right,
+                            is_correct=True
+                        )
+                elif db_q_type == DbQuestionType.FILL_BLANK:
+                    for idx, opt in enumerate(q.options):
+                        await self._question_repo.add_blank(
+                            question_id=new_q.id,
+                            blank_index=idx,
+                            accepted_answers=[opt.option_text],
+                            case_sensitive=False
+                        )
+                elif db_q_type in [DbQuestionType.SHORT_ANSWER, DbQuestionType.ESSAY]:
+                    # Store sample answer in explanation if provided
+                    if q.options and q.options[0].option_text:
+                        new_q.explanation = q.options[0].option_text
+
             await self._repo.add_question(
                 assessment_id=assessment.id,
                 question_id=new_q.id,
                 order_index=i,
-                added_via="manual_write",
+                added_via=QuestionAddedVia.MANUAL_WRITE,
                 assessment_section_id=section_id_map.get(q.sectionId),
                 marks_override=q.marks,
             )
 
-        # 5. Finalize
-        # We call the existing finalize logic to ensure all validations pass
-        return await self.finalize_assessment(assessment.id, current_user)
+        return assessment

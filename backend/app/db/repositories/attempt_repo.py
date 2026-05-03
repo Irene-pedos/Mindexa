@@ -77,9 +77,20 @@ class AttemptRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_by_id_simple(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
+    async def get_with_questions(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
+        from app.db.models.assessment import Assessment
+        from app.db.models.question import AssessmentQuestion, Question, QuestionOption
         result = await self.db.execute(
-            select(AssessmentAttempt).where(
+            select(AssessmentAttempt)
+            .options(
+                selectinload(AssessmentAttempt.assessment)
+                .selectinload(Assessment.assessment_questions)
+                .selectinload(AssessmentQuestion.question)
+                .selectinload(Question.options),
+                selectinload(AssessmentAttempt.assessment)
+                .selectinload(Assessment.sections)
+            )
+            .where(
                 AssessmentAttempt.id == attempt_id,
                 AssessmentAttempt.is_deleted.is_(False),
             )

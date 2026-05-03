@@ -21,7 +21,7 @@ class NotificationResponse(BaseModel):
         from_attributes = True
 
 class NotificationListResponse(BaseModel):
-    items: List[NotificationResponse]
+    items: list[NotificationResponse]
     total: int
     page: int
     page_size: int
@@ -29,3 +29,9 @@ class NotificationListResponse(BaseModel):
 class MarkReadResponse(BaseModel):
     success: bool
     message: str
+
+# Rebuild models
+NotificationResponse.model_rebuild()
+NotificationListResponse.model_rebuild()
+MarkReadResponse.model_rebuild()
+

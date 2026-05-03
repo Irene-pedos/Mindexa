@@ -229,16 +229,8 @@ async def save_draft_bulk(
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> FinalizeAssessmentResponse:
-    # For now, we'll use the same logic but maybe skip finalization?
-    # Actually, let's just use bulk_publish but maybe with a 'is_draft' flag if we had one.
-    # Given the current service logic, bulk_publish calls finalize.
-    # If the user wants a draft, we can just do everything except the final status change.
-    
-    # For MVP, I'll just make it call the same logic but maybe the service should handle it.
-    # But since the user specifically asked about 'publish' error, I'll focus on that.
     svc = _service(db)
-    # Mocking a draft save for now or just calling the same logic
-    result = await svc.bulk_publish_assessment(body, current_user)
+    result = await svc.bulk_save_draft_assessment(body, current_user)
     await db.commit()
     return result
 
