@@ -143,7 +143,7 @@ export function AdminSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <NavUser user={userData} />
+        <NavUser />
       </SidebarFooter>
 
       <SidebarRail />

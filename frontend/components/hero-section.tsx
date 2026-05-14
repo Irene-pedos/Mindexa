@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent } from "@/components/ui/card";
 import { InView } from "@/components/ui/in-view";
 import { Variants } from "motion/react";
+import Image from "next/image";
 
 const transitionVariants: Variants = {
   hidden: { opacity: 0, filter: "blur(12px)", y: 12 },
@@ -33,10 +34,12 @@ export default function HeroSection() {
       <main className="overflow-hidden min-h-screen relative">
         {/* Background Image */}
         <div className="absolute top-15 md:top-18 inset-x-4 md:inset-x-6 bottom-4 md:bottom-6 z-0 rounded-2xl md:rounded-[2.5rem] overflow-hidden">
-          <img
+          <Image
             src="/images/hero-section-background.png"
             alt="Students focused during digital exam"
-            className="object-cover h-full w-full brightness-50"
+            fill
+            priority
+            className="object-cover brightness-50"
           />
           {/* Overlay to ensure text readability */}
           <div className="absolute inset-0 bg-gradient-to-t from-white via-white/0 via-white/0 to-white/0" />

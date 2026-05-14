@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { studentApi, StudentCourseDetail } from "@/lib/api/student";
+import { LecturerMaterialResponse } from "@/lib/api/lecturer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 
@@ -23,13 +24,18 @@ export default function CourseDetailPage() {
   const params = useParams();
   const courseId = params.id as string;
   const [course, setCourse] = useState<StudentCourseDetail | null>(null);
+  const [materials, setMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function loadCourse() {
       try {
-        const data = await studentApi.getCourseDetail(courseId);
-        setCourse(data);
+        const [courseData, materialsData] = await Promise.all([
+          studentApi.getCourseDetail(courseId),
+          studentApi.getCourseMaterials(courseId),
+        ]);
+        setCourse(courseData);
+        setMaterials(materialsData);
       } catch (err) {
         console.error("Failed to load course details", err);
         toast.error("Failed to load course details");
@@ -131,28 +137,34 @@ export default function CourseDetailPage() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Learning Materials ({course.materials})</CardTitle>
+              <CardTitle>Learning Materials ({materials.length})</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {course.materials > 0 ? (
-                Array.from({ length: course.materials }).map((_, i) => (
+              {materials.length > 0 ? (
+                materials.map((m) => (
                   <div
-                    key={i}
+                    key={m.id}
                     className="flex items-center justify-between rounded-lg border p-4"
                   >
                     <div className="flex items-center gap-3">
                       <FileText className="size-5 text-muted-foreground" />
                       <div>
                         <div className="font-medium">
-                          Module {i + 1}: Advanced Topics
+                          {m.display_name || m.original_filename}
                         </div>
-                        <div className="text-xs text-muted-foreground">
-                          PDF • 45 pages
+                        <div className="text-xs text-muted-foreground uppercase">
+                          {m.file_extension.replace(".", "")} • {(m.file_size_bytes / 1024).toFixed(0)} KB
                         </div>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm">
-                      Download
+                    <Button variant="outline" size="sm" asChild>
+                      <a 
+                        href={`${process.env.NEXT_PUBLIC_API_URL || ""}/resources/download/${m.id}`} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                      >
+                        Download
+                      </a>
                     </Button>
                   </div>
                 ))

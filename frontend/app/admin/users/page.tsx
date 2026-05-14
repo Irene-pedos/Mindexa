@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -17,9 +17,10 @@ import {
   ChevronRight,
   Mail,
   ShieldCheck,
-  UserCog
+  UserCog,
+  Loader2
 } from "lucide-react"
-import { adminApi, UserResponse } from "@/lib/api/admin"
+import { adminApi, UserResponse, AdminUserCreate } from "@/lib/api/admin"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
@@ -38,6 +39,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 
 export default function AdminUsersPage() {
@@ -50,7 +60,24 @@ export default function AdminUsersPage() {
   const [totalUsers, setTotalUsers] = useState(0)
   const pageSize = 10
 
-  async function loadUsers() {
+  // Dialog States
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
+  const [isViewDetailsOpen, setIsViewDetailsOpen] = useState(false)
+  const [selectedUser, setSelectedUser] = useState<UserResponse | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // New User Form State
+  const [newUser, setNewUser] = useState<AdminUserCreate>({
+    email: "",
+    password: "",
+    first_name: "",
+    last_name: "",
+    role: "STUDENT",
+    status: "ACTIVE",
+    email_verified: true,
+  })
+
+  const loadUsers = useCallback(async () => {
     setLoading(true)
     try {
       const data = await adminApi.getUsers(currentPage, pageSize)
@@ -62,11 +89,11 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentPage, pageSize])
 
   useEffect(() => {
     loadUsers()
-  }, [currentPage])
+  }, [loadUsers])
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
@@ -99,6 +126,34 @@ export default function AdminUsersPage() {
     }
   }
 
+  const handleAddUser = async () => {
+    if (!newUser.email || !newUser.password || !newUser.first_name || !newUser.last_name) {
+      toast.error("Please fill in all required fields")
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      await adminApi.createUser(newUser)
+      toast.success("User created successfully")
+      setIsAddDialogOpen(false)
+      setNewUser({
+        email: "",
+        password: "",
+        first_name: "",
+        last_name: "",
+        role: "STUDENT",
+        status: "ACTIVE",
+        email_verified: true,
+      })
+      loadUsers()
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create user")
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -106,10 +161,230 @@ export default function AdminUsersPage() {
           <h1 className="text-2xl font-semibold tracking-tight">Users & Roles</h1>
           <p className="text-muted-foreground text-sm">Manage all platform users and permissions</p>
         </div>
-        <Button className="rounded-lg px-5 h-9">
+        <Button className="rounded-lg px-5 h-9" onClick={() => setIsAddDialogOpen(true)}>
           <UserPlus className="mr-2 size-4" /> Add User
         </Button>
       </div>
+
+      {/* Add User Dialog */}
+      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Add New User</DialogTitle>
+            <DialogDescription>
+              Create a new user account manually.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="firstName">First Name</Label>
+                <Input 
+                  id="firstName" 
+                  placeholder="John" 
+                  value={newUser.first_name}
+                  onChange={(e) => setNewUser({...newUser, first_name: e.target.value})}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lastName">Last Name</Label>
+                <Input 
+                  id="lastName" 
+                  placeholder="Doe" 
+                  value={newUser.last_name}
+                  onChange={(e) => setNewUser({...newUser, last_name: e.target.value})}
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="email">Email Address</Label>
+              <Input 
+                id="email" 
+                type="email" 
+                placeholder="john.doe@university.ac" 
+                value={newUser.email}
+                onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="password">Initial Password</Label>
+              <Input 
+                id="password" 
+                type="password" 
+                placeholder="••••••••" 
+                value={newUser.password}
+                onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="role">User Role</Label>
+                <Select 
+                  value={newUser.role} 
+                  onValueChange={(v) => setNewUser({...newUser, role: v})}
+                >
+                  <SelectTrigger id="role">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="STUDENT">Student</SelectItem>
+                    <SelectItem value="LECTURER">Lecturer</SelectItem>
+                    <SelectItem value="ADMIN">Administrator</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="status">Initial Status</Label>
+                <Select 
+                  value={newUser.status} 
+                  onValueChange={(v) => setNewUser({...newUser, status: v})}
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="ACTIVE">Active</SelectItem>
+                    <SelectItem value="PENDING_APPROVAL">Pending Approval</SelectItem>
+                    <SelectItem value="SUSPENDED">Suspended</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
+            <Button onClick={handleAddUser} disabled={isSubmitting}>
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Create User
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* View Details Dialog */}
+      <Dialog open={isViewDetailsOpen} onOpenChange={setIsViewDetailsOpen}>
+        <DialogContent className="sm:max-w-[600px]">
+          <DialogHeader>
+            <DialogTitle>User Details</DialogTitle>
+            <DialogDescription>
+              Comprehensive information about the user account.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedUser && (
+            <div className="space-y-6 py-4">
+              <div className="flex items-center gap-4 border-b pb-6">
+                <div className="size-16 rounded-full bg-muted flex items-center justify-center font-bold text-2xl text-muted-foreground">
+                  {selectedUser.profile?.first_name?.[0] || selectedUser.email[0].toUpperCase()}
+                </div>
+                <div className="space-y-1">
+                  <h3 className="text-xl font-bold">
+                    {selectedUser.profile ? `${selectedUser.profile.first_name} ${selectedUser.profile.last_name}` : "No Profile"}
+                  </h3>
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Mail className="size-3.5" />
+                    <span className="text-sm">{selectedUser.email}</span>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Badge variant="outline">{selectedUser.role}</Badge>
+                    <Badge 
+                      variant="secondary"
+                      className={cn(
+                        "bg-transparent border",
+                        selectedUser.status === "ACTIVE" && "border-emerald-200 text-emerald-700",
+                        selectedUser.status === "PENDING_APPROVAL" && "border-amber-200 text-amber-700",
+                        selectedUser.status === "SUSPENDED" && "border-red-200 text-red-700"
+                      )}
+                    >
+                      {selectedUser.status}
+                    </Badge>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-y-6 gap-x-12">
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">User ID</p>
+                  <p className="text-sm font-mono truncate">{selectedUser.id}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Joined Date</p>
+                  <p className="text-sm">{new Date(selectedUser.created_at).toLocaleString()}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Email Verified</p>
+                  <p className="text-sm flex items-center gap-2">
+                    {selectedUser.email_verified ? (
+                      <><ShieldCheck className="size-4 text-emerald-500" /> Yes</>
+                    ) : (
+                      <><XCircle className="size-4 text-muted-foreground/40" /> No</>
+                    )}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Last Login</p>
+                  <p className="text-sm">{selectedUser.last_login_at ? new Date(selectedUser.last_login_at).toLocaleString() : "Never"}</p>
+                </div>
+
+                {selectedUser.role === "STUDENT" && (
+                  <>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Student ID</p>
+                      <p className="text-sm">{selectedUser.profile?.student_id || "N/A"}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Academic Level</p>
+                      <p className="text-sm">{selectedUser.profile?.level} Year {selectedUser.profile?.year}</p>
+                    </div>
+                  </>
+                )}
+
+                {selectedUser.role === "LECTURER" && (
+                  <>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Staff ID</p>
+                      <p className="text-sm">{selectedUser.profile?.staff_id || "N/A"}</p>
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Assigned Courses</p>
+                      <div className="flex flex-wrap gap-1">
+                        {selectedUser.profile?.assigned_courses?.map(c => (
+                          <Badge key={c} variant="secondary" className="text-[10px]">{c}</Badge>
+                        )) || "None"}
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div className="space-y-1 col-span-2">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Department & College</p>
+                  <p className="text-sm">{selectedUser.profile?.department} • {selectedUser.profile?.college}</p>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter className="border-t pt-4">
+             <Button variant="ghost" onClick={() => setIsViewDetailsOpen(false)}>Close</Button>
+             {selectedUser?.status === "PENDING_APPROVAL" && (
+               <Button className="bg-emerald-600 hover:bg-emerald-700" onClick={() => {
+                 handleApprove(selectedUser.id);
+                 setIsViewDetailsOpen(false);
+               }}>Approve User</Button>
+             )}
+             {selectedUser?.status === "ACTIVE" && (
+               <Button variant="destructive" onClick={() => {
+                 handleStatusUpdate(selectedUser.id, "SUSPENDED");
+                 setIsViewDetailsOpen(false);
+               }}>Suspend Account</Button>
+             )}
+             {selectedUser?.status === "SUSPENDED" && (
+               <Button className="bg-primary" onClick={() => {
+                 handleStatusUpdate(selectedUser.id, "ACTIVE");
+                 setIsViewDetailsOpen(false);
+               }}>Reactivate Account</Button>
+             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         <div className="md:col-span-2 relative">
@@ -246,7 +521,13 @@ export default function AdminUsersPage() {
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-40 rounded-lg">
-                          <DropdownMenuItem className="text-xs">
+                          <DropdownMenuItem 
+                            className="text-xs"
+                            onClick={() => {
+                              setSelectedUser(user);
+                              setIsViewDetailsOpen(true);
+                            }}
+                          >
                             <UserCog className="mr-2 size-3.5" /> View details
                           </DropdownMenuItem>
                           {user.status === "PENDING_APPROVAL" && (
@@ -257,6 +538,11 @@ export default function AdminUsersPage() {
                           {user.status === "ACTIVE" && (
                             <DropdownMenuItem onClick={() => handleStatusUpdate(user.id, "SUSPENDED")} className="text-xs text-destructive">
                               <XCircle className="mr-2 size-3.5" /> Suspend
+                            </DropdownMenuItem>
+                          )}
+                          {user.status === "SUSPENDED" && (
+                            <DropdownMenuItem onClick={() => handleStatusUpdate(user.id, "ACTIVE")} className="text-xs text-emerald-600">
+                              <CheckCircle className="mr-2 size-3.5" /> Reactivate
                             </DropdownMenuItem>
                           )}
                         </DropdownMenuContent>

@@ -1,7 +1,8 @@
 // app/lecturer/assessments/new/page.tsx
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -62,12 +63,6 @@ import {
   StepperTitle,
   StepperTrigger,
 } from "@/components/ui/stepper";
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupInput,
-} from "@/components/ui/input-group";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -75,10 +70,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
 import { questionApi } from "@/lib/api/question";
+import { assessmentApi } from "@/lib/api/assessment";
 import { QuestionBankSelector } from "@/components/mindexa/assessment/question-bank-selector";
 import { QuestionBankItem } from "@/lib/api/question";
 
-type AssessmentMode = "Practice" | "Homework" | "CAT" | "Summative";
+type AssessmentMode = "Practice" | "Formative" | "Homework" | "CAT" | "Summative" | "Groupwork";
 type Difficulty = "Easy" | "Medium" | "Hard";
 type QuestionType =
   | "mcq"
@@ -135,15 +131,36 @@ const TEACHING_SCOPE = {
       name: "College of Science and Technology",
       departments: [
         {
-          id: "IT",
-          name: "Information Technology",
+          id: "ALL",
+          name: "All Departments",
           courses: [
             {
               id: "BIT211",
               name: "Database Systems",
               classes: [
-                { id: "YR2A", name: "Year 2 Section A" },
-                { id: "YR2B", name: "Year 2 Section B" },
+                { id: "Y2_IT", name: "Y2 IT" },
+                { id: "Y3_IT", name: "Y3 IT" },
+              ],
+            },
+            {
+              id: "CS101",
+              name: "Introduction to Computer Science",
+              classes: [
+                { id: "Y1_CS", name: "Y1 CS" },
+              ],
+            },
+            {
+              id: "VET301",
+              name: "Animal Anatomy",
+              classes: [
+                { id: "Y2_VET", name: "Y2 Veterinary" },
+              ],
+            },
+            {
+              id: "MAT101",
+              name: "Business Mathematics",
+              classes: [
+                { id: "Y1_BUS", name: "Y1 Business" },
               ],
             },
           ],
@@ -162,9 +179,13 @@ const STEPS = [
 ];
 
 export default function NewAssessmentBuilder() {
+  const searchParams = useSearchParams();
+  const draftId = searchParams.get("draft");
+
   const [activeStep, setActiveStep] = useState(1);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isLoadingDraft, setIsLoadingDraft] = useState(false);
 
   // Step 1: Metadata
   const [metadata, setMetadata] = useState({
@@ -180,6 +201,8 @@ export default function NewAssessmentBuilder() {
     durationMinutes: 120,
     selectedInstructions: [] as string[],
     customInstructions: "",
+    maxGroupSize: 4,
+    groupFormation: "self_enrol" as "self_enrol" | "manual",
   });
 
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
@@ -210,6 +233,104 @@ export default function NewAssessmentBuilder() {
 
   // Step 3: Question Creation
   const [questions, setQuestions] = useState<Question[]>([]);
+
+  const selectedCourseObj = useMemo(() => {
+    return TEACHING_SCOPE.colleges[0].departments[0].courses.find(c => c.id === metadata.course);
+  }, [metadata.course]);
+
+  useEffect(() => {
+    if (draftId) {
+      loadDraft(draftId);
+    }
+  }, [draftId]);
+
+  const loadDraft = async (id: string) => {
+    setIsLoadingDraft(true);
+    try {
+      const res = await assessmentApi.getAssessmentById(id) as any;
+      
+      // Map Metadata
+      const modeMap: Record<string, AssessmentMode> = {
+        "FORMATIVE": "Formative",
+        "HOMEWORK": "Homework",
+        "CAT": "CAT",
+        "SUMMATIVE": "Summative",
+        "GROUP_WORK": "Groupwork",
+      };
+
+      const formatTime = (dateStr: string) => {
+        const d = new Date(dateStr);
+        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
+      };
+
+      setMetadata({
+        title: res.title || "",
+        mode: modeMap[res.assessment_type] || "CAT",
+        college: "", 
+        department: "",
+        course: res.course_id || "",
+        targetClass: res.target_class || "",
+        date: res.window_start ? new Date(res.window_start) : undefined,
+        startTime: res.window_start ? formatTime(res.window_start) : "09:00",
+        endTime: res.window_end ? formatTime(res.window_end) : "11:00",
+        durationMinutes: res.duration_minutes || 120,
+        selectedInstructions: [], // instructions are merged in backend, we'll put them in custom
+        customInstructions: res.instructions || "",
+        maxGroupSize: res.max_group_size || 4,
+        groupFormation: res.group_formation_mode || "self_enrol",
+      });
+
+      // Map Blueprint
+      if (res.sections && res.sections.length > 0) {
+        setBlueprint(res.sections.map((s: any) => ({
+          id: s.id,
+          section: s.title,
+          topics: s.description || "",
+          marks: s.allocated_marks || 0,
+          questions: s.question_count_target || 0,
+          difficulty: "Medium",
+          allowedTypes: s.allowed_question_types?.types || ["mcq"]
+        })));
+      }
+
+      // Map Rules
+      setRules({
+        openBook: res.is_open_book,
+        supervised: res.is_supervised,
+        aiAllowed: res.ai_assistance_allowed,
+        browserRestricted: res.fullscreen_required,
+        shuffleQuestions: res.randomise_questions,
+        shuffleOptions: res.randomise_options,
+        resultRelease: res.result_release_mode === "immediate" ? "immediate" : "delayed",
+        attempts: res.max_attempts,
+      });
+
+      // Map Questions
+      if (res.assessment_questions && res.assessment_questions.length > 0) {
+        setQuestions(res.assessment_questions.map((aq: any) => ({
+          id: aq.id,
+          sectionId: aq.section_id,
+          text: aq.question.content,
+          type: aq.question.question_type.toLowerCase().replace("_", ""),
+          marks: aq.marks,
+          options: aq.question.options.map((opt: any) => ({
+            id: opt.id,
+            option_text: opt.option_text,
+            option_text_right: opt.option_text_right,
+            is_correct: opt.is_correct,
+            order_index: opt.order_index
+          })),
+          aiGenerated: aq.added_via === "ai_generated"
+        })));
+      }
+
+      toast.success("Draft loaded successfully");
+    } catch (error: any) {
+      toast.error("Failed to load draft: " + error.message);
+    } finally {
+      setIsLoadingDraft(false);
+    }
+  };
 
   // Derived State
   const totalMarks = useMemo(
@@ -458,6 +579,15 @@ export default function NewAssessmentBuilder() {
     }
   };
 
+  if (isLoadingDraft) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+        <LoaderCircleIcon className="size-12 animate-spin text-primary" />
+        <p className="text-muted-foreground animate-pulse">Loading draft assessment...</p>
+      </div>
+    );
+  }
+
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-12">
       <div className="flex items-center justify-between">
@@ -549,10 +679,12 @@ export default function NewAssessmentBuilder() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="Practice">Practice</SelectItem>
-                      <SelectItem value="Homework">Homework</SelectItem>
+                      <SelectItem value="Practice">Practice Mode</SelectItem>
+                      <SelectItem value="Formative">Formative Assessment</SelectItem>
+                      <SelectItem value="Homework">Homework / Assignment</SelectItem>
                       <SelectItem value="CAT">Continuous Assessment Test (CAT)</SelectItem>
                       <SelectItem value="Summative">Summative Examination</SelectItem>
+                      <SelectItem value="Groupwork">Group Work Assessment</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -561,7 +693,7 @@ export default function NewAssessmentBuilder() {
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Course / Module</Label>
                   <Select
                     value={metadata.course}
-                    onValueChange={(v) => setMetadata({ ...metadata, course: v })}
+                    onValueChange={(v) => setMetadata({ ...metadata, course: v, targetClass: "" })}
                   >
                     <SelectTrigger className="h-9 text-sm">
                       <SelectValue placeholder="Select course" />
@@ -586,11 +718,15 @@ export default function NewAssessmentBuilder() {
                       <SelectValue placeholder="Select Class" />
                     </SelectTrigger>
                     <SelectContent>
-                      {TEACHING_SCOPE.colleges[0].departments[0].courses[0].classes.map((cl) => (
-                        <SelectItem key={cl.id} value={cl.id}>
-                          {cl.name}
-                        </SelectItem>
-                      ))}
+                      {selectedCourseObj ? (
+                        selectedCourseObj.classes.map((cl) => (
+                          <SelectItem key={cl.id} value={cl.id}>
+                            {cl.name}
+                          </SelectItem>
+                        ))
+                      ) : (
+                        <SelectItem value="none" disabled>Select a course first</SelectItem>
+                      )}
                     </SelectContent>
                   </Select>
                 </div>
@@ -609,6 +745,47 @@ export default function NewAssessmentBuilder() {
                     className="h-9 text-sm"
                   />
                 </div>
+
+                {metadata.mode === "Groupwork" && (
+                  <div className="md:col-span-2 p-5 border-2 border-primary/20 bg-primary/5 rounded-2xl space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
+                    <div className="flex items-center gap-2 mb-2">
+                      <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Plus className="size-4 text-primary" />
+                      </div>
+                      <h3 className="font-bold text-sm uppercase tracking-tight">Group Work Configuration</h3>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-bold uppercase text-muted-foreground">Max Group Size</Label>
+                        <Input
+                          type="number"
+                          value={metadata.maxGroupSize}
+                          onChange={(e) => setMetadata({ ...metadata, maxGroupSize: parseInt(e.target.value) || 1 })}
+                          className="h-9 border-primary/20"
+                          min={2}
+                          max={50}
+                        />
+                        <p className="text-[10px] text-muted-foreground">Maximum number of students per group.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-[10px] font-bold uppercase text-muted-foreground">Formation Strategy</Label>
+                        <Select
+                          value={metadata.groupFormation}
+                          onValueChange={(v: "self_enrol" | "manual") => setMetadata({ ...metadata, groupFormation: v })}
+                        >
+                          <SelectTrigger className="h-9 border-primary/20">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="self_enrol">Student Self-Enrollment</SelectItem>
+                            <SelectItem value="manual">Lecturer Manual Assignment</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-[10px] text-muted-foreground">How students will be assigned to groups.</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 <div className="md:col-span-2 space-y-3">
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Instructions</Label>
@@ -1085,7 +1262,7 @@ export default function NewAssessmentBuilder() {
                       </Card>
                     ))}
                     <div className="flex gap-4">
-                      <Button variant="dashed" className="flex-1 h-20 rounded-2xl border-2 hover:bg-muted/50 hover:border-primary/50 transition-all" onClick={() => addQuestion(sec.id)}>
+                      <Button variant="outline" className="flex-1 h-20 rounded-2xl border-2 hover:bg-muted/50 hover:border-primary/50 transition-all" onClick={() => addQuestion(sec.id)}>
                         <div className="flex flex-col items-center">
                           <Plus className="size-6 mb-1" />
                           <span className="font-semibold text-sm uppercase tracking-wider">Add Manually</span>

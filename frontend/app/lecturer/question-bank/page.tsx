@@ -1,7 +1,7 @@
 // frontend/app/lecturer/question-bank/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -30,23 +30,23 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { 
-  Plus, 
-  Search, 
-  Eye, 
-  Edit, 
-  Trash2, 
-  Loader2, 
-  ChevronLeft, 
+import {
+  Plus,
+  Search,
+  Eye,
+  Edit,
+  Trash2,
+  Loader2,
+  ChevronLeft,
   X,
   CheckCircle2,
-  AlertCircle
+  AlertCircle,
 } from "lucide-react";
-import { 
-  questionApi, 
-  QuestionBankItem, 
-  QuestionOption, 
-  QuestionCreateRequest 
+import {
+  questionApi,
+  QuestionBankItem,
+  QuestionOption,
+  QuestionCreateRequest,
 } from "@/lib/api/question";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
@@ -81,7 +81,7 @@ export default function LecturerQuestionBank() {
     ],
   });
 
-  const fetchQuestions = async () => {
+  const fetchQuestions = useCallback(async () => {
     setLoading(true);
     try {
       const response = await questionApi.getQuestions({
@@ -98,11 +98,11 @@ export default function LecturerQuestionBank() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [debouncedSearch, filterType, filterDifficulty]);
 
   useEffect(() => {
     fetchQuestions();
-  }, [debouncedSearch, filterType, filterDifficulty]);
+  }, [fetchQuestions]);
 
   const handlePreview = async (id: string) => {
     setPreviewOpen(true);
@@ -132,7 +132,7 @@ export default function LecturerQuestionBank() {
         question_type: data.question_type.toLowerCase() as any,
         difficulty: data.difficulty.toLowerCase() as any,
         suggested_marks: data.marks,
-        options: data.options.map(opt => ({
+        options: data.options.map((opt) => ({
           option_text: opt.option_text,
           is_correct: opt.is_correct,
           order_index: opt.order_index,
@@ -165,10 +165,13 @@ export default function LecturerQuestionBank() {
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // Simple validation
-    if (formData.question_type === "mcq" || formData.question_type === "true_false") {
-      const hasCorrect = formData.options.some(o => o.is_correct);
+    if (
+      formData.question_type === "mcq" ||
+      formData.question_type === "true_false"
+    ) {
+      const hasCorrect = formData.options.some((o) => o.is_correct);
       if (!hasCorrect) {
         toast.error("Please mark at least one option as correct");
         return;
@@ -206,32 +209,40 @@ export default function LecturerQuestionBank() {
   };
 
   const addOption = () => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
       options: [
         ...prev.options,
-        { option_text: "", is_correct: false, order_index: prev.options.length + 1 }
-      ]
+        {
+          option_text: "",
+          is_correct: false,
+          order_index: prev.options.length + 1,
+        },
+      ],
     }));
   };
 
   const removeOption = (index: number) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      options: prev.options.filter((_, i) => i !== index)
+      options: prev.options.filter((_, i) => i !== index),
     }));
   };
 
-  const updateOption = (index: number, field: keyof Omit<QuestionOption, "id">, value: any) => {
-    setFormData(prev => {
+  const updateOption = (
+    index: number,
+    field: keyof Omit<QuestionOption, "id">,
+    value: any,
+  ) => {
+    setFormData((prev) => {
       const newOptions = [...prev.options];
       newOptions[index] = { ...newOptions[index], [field]: value };
-      
+
       // If setting MCQ correct and only one should be correct (optional logic)
       // if (field === 'is_correct' && value === true && prev.question_type === 'mcq') {
       //   newOptions.forEach((o, i) => { if(i !== index) o.is_correct = false; });
       // }
-      
+
       return { ...prev, options: newOptions };
     });
   };
@@ -363,15 +374,15 @@ export default function LecturerQuestionBank() {
                     </div>
                   </div>
                   <div className="flex gap-3">
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => handlePreview(q.id)}
                     >
                       <Eye className="mr-2 size-4" /> Preview
                     </Button>
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       size="sm"
                       onClick={() => handleEdit(q.id)}
                     >
@@ -387,7 +398,7 @@ export default function LecturerQuestionBank() {
 
       {/* Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Question Preview</DialogTitle>
             <DialogDescription>
@@ -413,12 +424,14 @@ export default function LecturerQuestionBank() {
 
               {previewData.options && previewData.options.length > 0 && (
                 <div className="space-y-3">
-                  <p className="text-xs font-bold text-muted-foreground uppercase">Options</p>
+                  <p className="text-xs font-bold text-muted-foreground uppercase">
+                    Options
+                  </p>
                   <div className="grid gap-2">
                     {previewData.options.map((opt, idx) => (
-                      <div 
-                        key={idx} 
-                        className={`flex items-center justify-between p-3 rounded-md border ${opt.is_correct ? 'bg-emerald-50 border-emerald-200' : 'bg-white'}`}
+                      <div
+                        key={idx}
+                        className={`flex items-center justify-between p-3 rounded-md border ${opt.is_correct ? "bg-emerald-50 border-emerald-200" : "bg-white"}`}
                       >
                         <div className="flex items-center gap-3">
                           <div className="size-6 rounded-full border flex items-center justify-center text-[10px] font-bold">
@@ -440,25 +453,33 @@ export default function LecturerQuestionBank() {
                   <h4 className="text-sm font-semibold flex items-center gap-2 mb-1">
                     <AlertCircle className="size-4 text-primary" /> Explanation
                   </h4>
-                  <p className="text-sm text-muted-foreground">{previewData.explanation}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {previewData.explanation}
+                  </p>
                 </div>
               )}
             </div>
           ) : null}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>
-            <Button onClick={() => previewData && handleEdit(previewData.id)}>Edit Question</Button>
+            <Button variant="outline" onClick={() => setPreviewOpen(false)}>
+              Close
+            </Button>
+            <Button onClick={() => previewData && handleEdit(previewData.id)}>
+              Edit Question
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {/* Add/Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
           <form onSubmit={handleFormSubmit}>
             <DialogHeader>
-              <DialogTitle>{editingId ? "Edit Question" : "Add New Question"}</DialogTitle>
+              <DialogTitle>
+                {editingId ? "Edit Question" : "Add New Question"}
+              </DialogTitle>
               <DialogDescription>
                 Fill in the details for your reusable question bank item.
               </DialogDescription>
@@ -473,12 +494,17 @@ export default function LecturerQuestionBank() {
                 <div className="space-y-4">
                   <div className="space-y-2">
                     <Label htmlFor="content">Question Content</Label>
-                    <Textarea 
+                    <Textarea
                       id="content"
                       placeholder="Enter the main question text here..."
                       className="min-h-[100px]"
                       value={formData.content}
-                      onChange={e => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          content: e.target.value,
+                        }))
+                      }
                       required
                     />
                   </div>
@@ -486,9 +512,14 @@ export default function LecturerQuestionBank() {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="type">Question Type</Label>
-                      <Select 
-                        value={formData.question_type} 
-                        onValueChange={val => setFormData(prev => ({ ...prev, question_type: val as any }))}
+                      <Select
+                        value={formData.question_type}
+                        onValueChange={(val) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            question_type: val as any,
+                          }))
+                        }
                       >
                         <SelectTrigger id="type">
                           <SelectValue />
@@ -496,16 +527,23 @@ export default function LecturerQuestionBank() {
                         <SelectContent>
                           <SelectItem value="mcq">Multiple Choice</SelectItem>
                           <SelectItem value="true_false">True/False</SelectItem>
-                          <SelectItem value="short_answer">Short Answer</SelectItem>
+                          <SelectItem value="short_answer">
+                            Short Answer
+                          </SelectItem>
                           <SelectItem value="essay">Essay</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="difficulty">Difficulty</Label>
-                      <Select 
-                        value={formData.difficulty} 
-                        onValueChange={val => setFormData(prev => ({ ...prev, difficulty: val as any }))}
+                      <Select
+                        value={formData.difficulty}
+                        onValueChange={(val) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            difficulty: val as any,
+                          }))
+                        }
                       >
                         <SelectTrigger id="difficulty">
                           <SelectValue />
@@ -522,65 +560,89 @@ export default function LecturerQuestionBank() {
                   <div className="grid grid-cols-3 gap-4">
                     <div className="space-y-2">
                       <Label htmlFor="marks">Suggested Marks</Label>
-                      <Input 
-                        id="marks" 
-                        type="number" 
+                      <Input
+                        id="marks"
+                        type="number"
                         min={1}
                         value={formData.suggested_marks}
-                        onChange={e => setFormData(prev => ({ ...prev, suggested_marks: Number(e.target.value) }))}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            suggested_marks: Number(e.target.value),
+                          }))
+                        }
                       />
                     </div>
                     <div className="space-y-2 col-span-2">
                       <Label htmlFor="topic">Topic / Tag</Label>
-                      <Input 
-                        id="topic" 
+                      <Input
+                        id="topic"
                         placeholder="e.g. Thermodynamics, Algebra"
                         value={formData.topic}
-                        onChange={e => setFormData(prev => ({ ...prev, topic: e.target.value }))}
+                        onChange={(e) =>
+                          setFormData((prev) => ({
+                            ...prev,
+                            topic: e.target.value,
+                          }))
+                        }
                       />
                     </div>
                   </div>
                 </div>
 
                 {/* Options Section */}
-                {(formData.question_type === "mcq" || formData.question_type === "true_false") && (
+                {(formData.question_type === "mcq" ||
+                  formData.question_type === "true_false") && (
                   <div className="space-y-4">
                     <div className="flex items-center justify-between">
                       <Label className="text-base">Options</Label>
                       {formData.question_type === "mcq" && (
-                        <Button type="button" variant="outline" size="sm" onClick={addOption}>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={addOption}
+                        >
                           <Plus className="mr-2 size-4" /> Add Option
                         </Button>
                       )}
                     </div>
                     <div className="space-y-3">
                       {formData.options.map((opt, idx) => (
-                        <div key={idx} className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20">
+                        <div
+                          key={idx}
+                          className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20"
+                        >
                           <div className="pt-2">
-                            <Checkbox 
+                            <Checkbox
                               checked={opt.is_correct}
-                              onCheckedChange={checked => updateOption(idx, "is_correct", !!checked)}
+                              onCheckedChange={(checked) =>
+                                updateOption(idx, "is_correct", !!checked)
+                              }
                             />
                           </div>
                           <div className="flex-1 space-y-2">
-                            <Input 
+                            <Input
                               placeholder={`Option ${idx + 1}`}
                               value={opt.option_text}
-                              onChange={e => updateOption(idx, "option_text", e.target.value)}
+                              onChange={(e) =>
+                                updateOption(idx, "option_text", e.target.value)
+                              }
                               required
                             />
                           </div>
-                          {formData.question_type === "mcq" && formData.options.length > 2 && (
-                            <Button 
-                              type="button" 
-                              variant="ghost" 
-                              size="icon" 
-                              onClick={() => removeOption(idx)}
-                              className="text-destructive"
-                            >
-                              <X className="size-4" />
-                            </Button>
-                          )}
+                          {formData.question_type === "mcq" &&
+                            formData.options.length > 2 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeOption(idx)}
+                                className="text-destructive"
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            )}
                         </div>
                       ))}
                     </div>
@@ -590,20 +652,30 @@ export default function LecturerQuestionBank() {
                 <div className="space-y-4 border-t pt-6">
                   <div className="space-y-2">
                     <Label htmlFor="explanation">Explanation (Optional)</Label>
-                    <Textarea 
+                    <Textarea
                       id="explanation"
                       placeholder="Visible to students after grading..."
                       value={formData.explanation}
-                      onChange={e => setFormData(prev => ({ ...prev, explanation: e.target.value }))}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          explanation: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="hint">Hint (Optional)</Label>
-                    <Input 
+                    <Input
                       id="hint"
                       placeholder="Helpful nudge for students during attempt..."
                       value={formData.hint}
-                      onChange={e => setFormData(prev => ({ ...prev, hint: e.target.value }))}
+                      onChange={(e) =>
+                        setFormData((prev) => ({
+                          ...prev,
+                          hint: e.target.value,
+                        }))
+                      }
                     />
                   </div>
                 </div>
@@ -611,9 +683,19 @@ export default function LecturerQuestionBank() {
             )}
 
             <DialogFooter>
-              <Button variant="outline" type="button" onClick={() => setFormOpen(false)}>Cancel</Button>
+              <Button
+                variant="outline"
+                type="button"
+                onClick={() => setFormOpen(false)}
+              >
+                Cancel
+              </Button>
               <Button type="submit" disabled={formLoading}>
-                {formLoading ? <Loader2 className="mr-2 size-4 animate-spin" /> : "Save Question"}
+                {formLoading ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  "Save Question"
+                )}
               </Button>
             </DialogFooter>
           </form>

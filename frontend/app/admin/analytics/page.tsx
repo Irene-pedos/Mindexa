@@ -11,6 +11,7 @@ import {
 import { TrendingUp, Users, BookOpen, Shield, ArrowUpRight, ArrowDownRight, Activity } from "lucide-react";
 import { adminApi, AdminAnalyticsResponse } from "@/lib/api/admin";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ChartBarMultiple } from "@/components/chart-bar-multiple";

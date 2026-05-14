@@ -3,6 +3,7 @@ import { TypographyH2, TypographyP } from "@/components/ui/typography";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InView } from "@/components/ui/in-view";
 import { ChevronRight } from "lucide-react";
+import Image from "next/image";
 
 export default function RedefiningSection() {
   return (
@@ -39,11 +40,12 @@ export default function RedefiningSection() {
 
             {/* Students Image */}
             <InView>
-              <div className="rounded-2xl h-[470px] overflow-hidden shadow border border-border">
-                <img
+              <div className="relative h-[470px] w-full rounded-3xl overflow-hidden shadow-xl border border-border">
+                <Image
                   src="/images/Redefining Academic Assessment2.png"
-                  alt="Students focused during digital exam"
-                  className="object-cover h-full w-full"
+                  alt="Academic Solution"
+                  fill
+                  className="object-cover"
                 />
               </div>
             </InView>

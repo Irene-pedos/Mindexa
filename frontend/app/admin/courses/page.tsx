@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -48,7 +48,7 @@ export default function AdminCoursesPage() {
   const [totalCourses, setTotalCourses] = useState(0)
   const pageSize = 10
 
-  async function loadCourses() {
+  const loadCourses = useCallback(async () => {
     setLoading(true)
     try {
       const data = await adminApi.getCourses(currentPage, pageSize)
@@ -60,11 +60,11 @@ export default function AdminCoursesPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [currentPage, pageSize])
 
   useEffect(() => {
     loadCourses()
-  }, [currentPage])
+  }, [loadCourses])
 
   const filteredCourses = useMemo(() => {
     return courses.filter(course => {

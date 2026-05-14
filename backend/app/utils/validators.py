@@ -86,7 +86,7 @@ def validate_upload_file(filename: str, file_size_bytes: int) -> str:
 # ── Academic Validators ───────────────────────────────────────────────────────
 
 def validate_marks_range(marks: int | float, total_marks: int | float) -> None:
-    """Validate awarded marks are not negative and don't exceed total."""
+    """Validate awarded marks are not negative and don&apos;t exceed total."""
     if marks < 0:
         raise ValueError("Marks cannot be negative.")
     if marks > total_marks:

@@ -1,6 +1,7 @@
 // frontend/lib/api/student.ts
 import { AdminCourseListItem } from "./admin";
 import { apiClient } from "./client";
+import { LecturerMaterialResponse } from "./lecturer";
 
 export interface StudentDashboardSummary {
   cgpa: number;
@@ -97,5 +98,8 @@ export const studentApi = {
   },
   getCourseDetail: async (courseId: string): Promise<StudentCourseDetail> => {
     return apiClient("/students/me/courses/" + courseId);
+  },
+  getCourseMaterials: async (courseId: string): Promise<LecturerMaterialResponse[]> => {
+    return apiClient(`/resources/courses/${courseId}/materials`);
   },
 };

@@ -2,6 +2,7 @@
 import { ReactNode } from 'react';
 import { motion, Variants } from 'motion/react';
 import React from 'react';
+import { cn } from '@/lib/utils';
 
 export type PresetType =
   | 'fade'
@@ -15,7 +16,7 @@ export type PresetType =
   | 'rotate'
   | 'swing';
 
-export type AnimatedGroupProps = {
+export interface AnimatedGroupProps extends React.HTMLAttributes<HTMLElement> {
   children: ReactNode;
   className?: string;
   variants?: {
@@ -25,7 +26,7 @@ export type AnimatedGroupProps = {
   preset?: PresetType;
   as?: React.ElementType;
   asChild?: React.ElementType;
-};
+}
 
 const defaultContainerVariants: Variants = {
   visible: {
@@ -107,6 +108,7 @@ function AnimatedGroup({
   preset,
   as = 'div',
   asChild = 'div',
+  ...props
 }: AnimatedGroupProps) {
   const selectedVariants = {
     item: addDefaultVariants(preset ? presetVariants[preset] : {}),
@@ -116,27 +118,30 @@ function AnimatedGroup({
   const itemVariants = variants?.item || selectedVariants.item;
 
   const MotionComponent = React.useMemo(
-    () => motion.create(as as keyof JSX.IntrinsicElements),
+    () => motion.create(as as string | React.ComponentType<any>),
     [as]
   );
   const MotionChild = React.useMemo(
-    () => motion.create(asChild as keyof JSX.IntrinsicElements),
+    () => motion.create(asChild as string | React.ComponentType<any>),
     [asChild]
   );
 
-  return (
-    <MotionComponent
-      initial='hidden'
-      animate='visible'
-      variants={containerVariants}
-      className={className}
-    >
-      {React.Children.map(children, (child, index) => (
-        <MotionChild key={index} variants={itemVariants}>
-          {child}
-        </MotionChild>
-      ))}
-    </MotionComponent>
+  return React.createElement(
+    MotionComponent,
+    {
+      initial: 'hidden',
+      animate: 'visible',
+      variants: containerVariants,
+      className: cn(className),
+      ...props,
+    },
+    React.Children.map(children, (child, index) =>
+      React.createElement(
+        MotionChild,
+        { key: index, variants: itemVariants },
+        child
+      )
+    )
   );
 }
 

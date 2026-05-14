@@ -175,3 +175,4 @@ backend\
 4. **Repositories never commit** — only `get_db` and Celery tasks call `commit()`.
 5. **Structured logging everywhere** — `logger.info("event", key=value)`, never f-strings.
 6. **Secrets never in code** — everything comes from environment variables via `settings`.
+7. **AI agent design** — see [AI_AGENTS_DESIGN.md](./AI_AGENTS_DESIGN.md) for the service/agent boundary.

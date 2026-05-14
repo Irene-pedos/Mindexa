@@ -16,7 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 export default function StudentAssessmentResult() {
   const params = useParams()
   const router = useRouter()
-  const assessmentId = params.id as string
+  const attemptId = params.id as string
 
   const [loading, setLoading] = useState(true)
   const [result, setResult] = useState<any>(null)
@@ -24,8 +24,8 @@ export default function StudentAssessmentResult() {
   useEffect(() => {
     async function loadResult() {
       try {
-        const submissions = await submissionApi.getSubmissionsForAssessment(assessmentId)
-        // Assuming the backend returns a list of submissions for this assessment
+        const submissions = await submissionApi.getSubmissionsForAttempt(attemptId)
+        // Assuming the backend returns a list of submissions for this attempt
         // or a single submission context
         if (submissions && submissions.length > 0) {
           setResult(submissions[0])
@@ -37,7 +37,7 @@ export default function StudentAssessmentResult() {
       }
     }
     loadResult()
-  }, [assessmentId])
+  }, [attemptId])
 
   if (loading) {
     return (

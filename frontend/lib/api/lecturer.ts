@@ -69,6 +69,24 @@ export interface LecturerCourseDetail {
   roster: LecturerCourseRosterItem[];
 }
 
+export interface LecturerMaterialResponse {
+  id: string;
+  lecturer_id: string;
+  course_id: string | null;
+  assessment_id: string | null;
+  original_filename: string;
+  display_name: string | null;
+  description: string | null;
+  file_size_bytes: number;
+  file_extension: string;
+  mime_type: string;
+  material_category: string;
+  is_student_visible: boolean;
+  version: number;
+  is_current: boolean;
+  created_at: string;
+}
+
 export interface InstitutionResponse {
   id: string;
   name: string;
@@ -129,6 +147,11 @@ export const lecturerApi = {
       body: JSON.stringify(data),
     });
   },
+  deleteCourse: async (courseId: string): Promise<any> => {
+    return apiClient(`/lecturers/me/courses/${courseId}`, {
+      method: "DELETE",
+    });
+  },
   enrollStudent: async (courseId: string, email: string): Promise<any> => {
     return apiClient(`/lecturers/me/courses/${courseId}/students`, {
       method: "POST",
@@ -148,5 +171,16 @@ export const lecturerApi = {
   },
   getPeriods: async (): Promise<AcademicPeriodResponse[]> => {
     return apiClient("/lecturers/academic-periods");
+  },
+
+  // Resource / Materials
+  uploadMaterial: async (formData: FormData): Promise<LecturerMaterialResponse> => {
+    return apiClient("/resources/lecturer-materials", {
+      method: "POST",
+      body: formData,
+    });
+  },
+  getCourseMaterials: async (courseId: string): Promise<LecturerMaterialResponse[]> => {
+    return apiClient(`/resources/courses/${courseId}/materials`);
   },
 };

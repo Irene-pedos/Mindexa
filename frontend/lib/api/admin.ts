@@ -109,6 +109,24 @@ export interface SystemSettings {
   default_duration: number;
 }
 
+export interface AdminUserStatusUpdate {
+  status: string;
+}
+
+export interface AdminUserCreate {
+  email: string;
+  password?: string;
+  first_name: string;
+  last_name: string;
+  role: string;
+  status?: string;
+  email_verified?: boolean;
+  staff_id?: string;
+  student_id?: string;
+  college?: string;
+  department?: string;
+}
+
 export const adminApi = {
   getDashboard: async (): Promise<AdminDashboardResponse> => {
     return apiClient("/admin/dashboard");
@@ -130,6 +148,12 @@ export const adminApi = {
   },
   getUsers: async (page = 1, pageSize = 20): Promise<AdminUserListResponse> => {
     return apiClient(`/admin/users?page=${page}&page_size=${pageSize}`);
+  },
+  createUser: async (data: AdminUserCreate): Promise<UserResponse> => {
+    return apiClient("/admin/users", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
   getCourses: async (page = 1, pageSize = 20): Promise<AdminCourseListResponse> => {
     return apiClient(`/admin/courses?page=${page}&page_size=${pageSize}`);

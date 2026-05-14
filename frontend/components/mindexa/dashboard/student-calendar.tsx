@@ -7,15 +7,23 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 
 import { StudentScheduleEvent } from "@/lib/api/student"
-import { format, isToday } from "date-fns"
+import { format, isToday, isAfter, startOfDay } from "date-fns"
 
 interface StudentCalendarProps {
   events?: StudentScheduleEvent[]
 }
 
 export function StudentCalendar({ events = [] }: StudentCalendarProps) {
-  // Group events by day
-  const groupedEvents = events.reduce((acc: Record<string, StudentScheduleEvent[]>, event) => {
+  const today = startOfDay(new Date())
+
+  // Filter events: only today or future
+  const filteredEvents = events.filter(event => {
+    const eventDate = new Date(event.start_at)
+    return isToday(eventDate) || isAfter(eventDate, today)
+  })
+
+  // Group filtered events by day
+  const groupedEvents = filteredEvents.reduce((acc: Record<string, StudentScheduleEvent[]>, event) => {
     const date = new Date(event.start_at)
     const dayKey = isToday(date) ? "Today" : format(date, "MMM dd")
     if (!acc[dayKey]) acc[dayKey] = []

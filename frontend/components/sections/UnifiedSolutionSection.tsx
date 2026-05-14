@@ -10,6 +10,7 @@ import {
 import { InView } from "@/components/ui/in-view";
 import ShinyText from "@/components/ShinyText";
 import { Shield, TrendingUp, Brain, Briefcase } from "lucide-react";
+import Image from "next/image";
 
 const features = [
   {
@@ -95,10 +96,11 @@ export default function UnifiedSolutionSection() {
           <div className="lg:col-span-5">
             <InView>
               <div className="relative h-[600px] w-full rounded-3xl overflow-hidden shadow-xl border border-border">
-                <img
+                <Image
                   src="/images/Unified Academic Solution.png"
                   alt="Academic Solution"
-                  className="object-cover h-full w-full"
+                  fill
+                  className="object-cover"
                 />
               </div>
             </InView>

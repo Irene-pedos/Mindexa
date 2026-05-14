@@ -151,7 +151,7 @@ export function StudentSidebar({
       </SidebarContent>
 
       <SidebarFooter>
-        <NavUser user={userData} />
+        <NavUser />
       </SidebarFooter>
 
       <SidebarRail />

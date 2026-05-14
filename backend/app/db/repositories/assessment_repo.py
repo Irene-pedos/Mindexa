@@ -73,7 +73,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, func, update, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -140,6 +140,9 @@ class AssessmentRepository:
         instructions: str | None = None,
         passing_marks: int | None = None,
         duration_minutes: int | None = None,
+        is_group_assessment: bool = False,
+        max_group_size: int | None = None,
+        group_formation_mode: str | None = None,
     ) -> Assessment:
         """
         Create a new Assessment row.
@@ -165,6 +168,9 @@ class AssessmentRepository:
             instructions=instructions,
             passing_marks=passing_marks,
             duration_minutes=duration_minutes,
+            is_group_assessment=is_group_assessment,
+            max_group_size=max_group_size,
+            group_formation_mode=group_formation_mode,
             draft_step=1,
             draft_is_complete=False,
         )
@@ -1196,12 +1202,17 @@ class AssessmentRepository:
         Future: will filter by student's class_section_id / course enrollment.
         """
         from app.db.models.academic import Course
+        now = _utcnow()
         filters = [
             col(Assessment.status).in_([
                 AssessmentStatus.PUBLISHED,
                 AssessmentStatus.ACTIVE,
             ]),
             col(Assessment.is_deleted) == False,  # noqa: E712
+            or_(
+                col(Assessment.window_end).is_(None),
+                col(Assessment.window_end) >= now,
+            ),
         ]
 
         count_result = await self.db.execute(

@@ -230,6 +230,44 @@ class AdminService:
 
         return items, total
 
+    async def create_user(self, data: AdminUserCreate) -> UserResponse:
+        """Create a new user with profile by an admin."""
+        from app.db.models.auth import User, UserProfile
+        from app.core.security import hash_password
+
+        # 1. Check if email exists
+        if await self.user_repo.email_exists(data.email):
+            from app.core.exceptions import AuthenticationError
+            raise AuthenticationError("Email already registered")
+
+        # 2. Create User
+        user = User(
+            email=data.email,
+            hashed_password=hash_password(data.password),
+            role=UserRole(data.role.upper()),
+            status=UserStatus(data.status.upper()),
+            email_verified=data.email_verified,
+            email_verified_at=datetime.now(UTC) if data.email_verified else None,
+        )
+        user = await self.user_repo.create(user)
+
+        # 3. Create Profile
+        profile = UserProfile(
+            user_id=user.id,
+            first_name=data.first_name,
+            last_name=data.last_name,
+            staff_id=data.staff_id,
+            student_id=data.student_id,
+            college=data.college,
+            department=data.department,
+        )
+        from app.db.repositories.auth import UserProfileRepository
+        profile_repo = UserProfileRepository(self.db)
+        await profile_repo.create(profile)
+        
+        await self.db.refresh(user)
+        return await self._build_user_response_with_courses(user)
+
     async def list_courses(self, page: int = 1, page_size: int = 20) -> Tuple[List[AdminCourseListItem], int]:
         courses, total = await self.course_repo.list_all(page=page, page_size=page_size)
 

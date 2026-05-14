@@ -16,6 +16,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.constants import AssessmentType, GradingMode
+from app.schemas.question import QuestionDetailResponse
 
 # ─── Assessment Section Schemas ───────────────────────────────────────────────
 
@@ -104,6 +105,7 @@ class AssessmentQuestionResponse(BaseModel):
     order_index: int
     added_via: str
     is_required: bool
+    question: QuestionDetailResponse | None = None
 
     model_config = {"from_attributes": True}
 
@@ -142,6 +144,9 @@ class AssessmentCreateRequest(BaseModel):
     total_marks: int = Field(default=100, ge=1, le=10000)
     passing_marks: int | None = Field(default=None, ge=0)
     duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    is_group_assessment: bool = False
+    max_group_size: int | None = Field(default=None, ge=1)
+    group_formation_mode: str | None = None
 
     @field_validator("assessment_type")
     @classmethod
@@ -227,6 +232,9 @@ class AssessmentGeneralUpdate(BaseModel):
     total_marks: int | None = Field(default=None, ge=1, le=10000)
     passing_marks: int | None = Field(default=None, ge=0)
     duration_minutes: int | None = Field(default=None, ge=1, le=1440)
+    is_group_assessment: bool | None = None
+    max_group_size: int | None = None
+    group_formation_mode: str | None = None
     show_marks_per_question: bool | None = None
     show_feedback_after_submit: bool | None = None
     is_ai_generation_enabled: bool | None = None
@@ -371,6 +379,8 @@ class BulkAssessmentMetadata(BaseModel):
     durationMinutes: int = Field(..., ge=1)
     selectedInstructions: list[str] = []
     customInstructions: str | None = None
+    maxGroupSize: int | None = Field(default=None, ge=1)
+    groupFormation: str | None = None
 
 
 class BulkAssessmentRules(BaseModel):

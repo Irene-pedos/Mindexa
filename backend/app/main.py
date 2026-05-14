@@ -22,6 +22,7 @@ from app.api.v1.routes import (
     lecturer,
     notification,
     question,
+    resource,
     result,
     student,
     submission,
@@ -56,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)
+    app.include_router(resource.router, prefix=settings.API_V1_STR)
     app.include_router(question.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.router, prefix=settings.API_V1_STR)
     app.include_router(attempt.router, prefix=settings.API_V1_STR)

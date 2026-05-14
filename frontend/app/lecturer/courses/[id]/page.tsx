@@ -1,7 +1,7 @@
 // app/lecturer/courses/[id]/page.tsx
 "use client";
-import React, { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import React, { useEffect, useState, useCallback } from "react";
+import { useParams, useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,26 +30,36 @@ import {
   Mail,
   Calendar,
   ExternalLink,
+  Upload,
+  FileText,
+  Trash2,
+  Link,
 } from "lucide-react";
 import {
   lecturerApi,
   LecturerCourseDetail as ICourseDetail,
   StudentCourseRecordResponse,
+  LecturerMaterialResponse,
 } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { format } from "date-fns";
 
 export default function LecturerCourseDetail() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
 
   const [course, setCourse] = useState<ICourseDetail | null>(null);
+  const [materials, setMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Add Student State
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [studentEmail, setStudentEmail] = useState("");
   const [adding, setAdding] = useState(false);
+
+  // Material Upload State
+  const [uploading, setUploading] = useState(false);
 
   // View Record State
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
@@ -62,22 +72,69 @@ export default function LecturerCourseDetail() {
   );
   const [loadingRecord, setLoadingRecord] = useState(false);
 
-  async function loadCourse() {
+  // Delete Course State
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+
+  const handleDeleteCourse = async () => {
+    setDeleting(true);
+    try {
+      await lecturerApi.deleteCourse(id);
+      toast.success("Course deleted successfully");
+      router.push("/lecturer/courses");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete course");
+      setDeleteDialogOpen(false);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleUploadMaterial = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("course_id", id);
+      formData.append("material_category", "LECTURE_NOTES");
+      formData.append("is_student_visible", "true");
+
+      await lecturerApi.uploadMaterial(formData);
+      toast.success("Material uploaded successfully");
+
+      // Refresh materials
+      const materialsData = await lecturerApi.getCourseMaterials(id);
+      setMaterials(materialsData);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload material");
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const loadCourse = useCallback(async () => {
     try {
       setLoading(true);
-      const data = await lecturerApi.getCourseDetail(id);
-      setCourse(data);
+      const [courseData, materialsData] = await Promise.all([
+        lecturerApi.getCourseDetail(id),
+        lecturerApi.getCourseMaterials(id),
+      ]);
+      setCourse(courseData);
+      setMaterials(materialsData);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to load course details";
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]);
 
   useEffect(() => {
     loadCourse();
-  }, [id, loadCourse]);
+  }, [loadCourse]);
 
   const handleAddStudent = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,9 +200,18 @@ export default function LecturerCourseDetail() {
             {course.code} • {course.student_count} students enrolled
           </p>
         </div>
-        <Button onClick={() => setAddDialogOpen(true)}>
-          <Plus className="mr-2 size-5" /> Add Student
-        </Button>
+        <div className="flex gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setDeleteDialogOpen(true)}
+            className="text-destructive hover:bg-destructive/10 border-destructive/20"
+          >
+            <Trash2 className="mr-2 size-5" /> Delete Course
+          </Button>
+          <Button onClick={() => setAddDialogOpen(true)}>
+            <Plus className="mr-2 size-5" /> Add Student
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
@@ -255,11 +321,61 @@ export default function LecturerCourseDetail() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Button asChild className="w-full" size="lg">
-                <a href="/lecturer/assessments">Create Assessment</a>
+                <Link href="/lecturer/assessments">Create Assessment</Link>
               </Button>
               <Button asChild variant="outline" className="w-full" size="lg">
-                <a href="/lecturer/question-bank">Question Bank</a>
+                <Link href="/lecturer/question-bank">Question Bank</Link>
               </Button>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-base font-semibold">Course Materials</CardTitle>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                disabled={uploading}
+                onClick={() => document.getElementById("material-upload")?.click()}
+              >
+                {uploading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+              </Button>
+              <input
+                id="material-upload"
+                type="file"
+                className="hidden"
+                onChange={handleUploadMaterial}
+              />
+            </CardHeader>
+            <CardContent>
+              {materials.length === 0 ? (
+                <div className="text-center py-6 border-2 border-dashed rounded-lg">
+                  <FileText className="size-8 mx-auto text-muted-foreground/50 mb-2" />
+                  <p className="text-xs text-muted-foreground">No materials uploaded yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {materials.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 border transition-colors group">
+                      <div className="flex items-center gap-3 truncate">
+                        <div className="bg-primary/10 p-2 rounded text-primary">
+                          <FileText className="size-4" />
+                        </div>
+                        <div className="truncate">
+                          <p className="text-xs font-medium truncate">{m.display_name || m.original_filename}</p>
+                          <p className="text-[10px] text-muted-foreground">
+                            {(m.file_size_bytes / 1024).toFixed(0)} KB • {m.file_extension.toUpperCase()}
+                          </p>
+                        </div>
+                      </div>
+                      <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <ExternalLink className="size-3" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -272,7 +388,7 @@ export default function LecturerCourseDetail() {
             <DialogHeader>
               <DialogTitle>Add Student to Course</DialogTitle>
               <DialogDescription>
-                Enter the student's email address to enroll them in{" "}
+                Enter the student&apos;s email address to enroll them in{" "}
                 {course.title}.
               </DialogDescription>
             </DialogHeader>
@@ -436,6 +552,40 @@ export default function LecturerCourseDetail() {
             </Button>
             <Button className="gap-2">
               <ExternalLink className="size-4" /> Full Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Course Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Course</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete <strong>{course.title}</strong>? This action cannot be undone and will remove all student enrollments.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={deleting}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleDeleteCourse}
+              disabled={deleting}
+            >
+              {deleting ? (
+                <>
+                  <Loader2 className="mr-2 size-4 animate-spin" /> Deleting...
+                </>
+              ) : (
+                "Yes, Delete Course"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

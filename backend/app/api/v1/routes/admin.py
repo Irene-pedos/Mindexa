@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.schemas.auth import (
@@ -17,6 +17,7 @@ from app.schemas.admin import (
     AdminDashboardResponse,
     AdminUserListResponse,
     AdminUserStatusUpdate,
+    AdminUserCreate,
     AdminAnalyticsResponse,
     AdminIntegrityOverview,
     SystemSettingsSchema,
@@ -105,6 +106,21 @@ async def list_users(
     service = AdminService(db)
     items, total = await service.list_users(page, page_size)
     return AdminUserListResponse(items=items, total=total)
+
+@router.post(
+    "/users",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new user account (Admin only)",
+)
+async def create_user(
+    body: AdminUserCreate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Creates a new user account and profile."""
+    service = AdminService(db)
+    return await service.create_user(body)
 
 @router.get(
     "/courses",

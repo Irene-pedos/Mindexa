@@ -146,6 +146,9 @@ class AssessmentService:
             instructions=data.instructions,
             passing_marks=data.passing_marks,
             duration_minutes=data.duration_minutes,
+            is_group_assessment=data.is_group_assessment,
+            max_group_size=data.max_group_size,
+            group_formation_mode=data.group_formation_mode,
         )
 
         # Initialize draft progress
@@ -212,6 +215,12 @@ class AssessmentService:
             update_fields["passing_marks"] = data.passing_marks
         if data.duration_minutes is not None:
             update_fields["duration_minutes"] = data.duration_minutes
+        if data.is_group_assessment is not None:
+            update_fields["is_group_assessment"] = data.is_group_assessment
+        if data.max_group_size is not None:
+            update_fields["max_group_size"] = data.max_group_size
+        if data.group_formation_mode is not None:
+            update_fields["group_formation_mode"] = data.group_formation_mode
         if data.show_marks_per_question is not None:
             update_fields["show_marks_per_question"] = data.show_marks_per_question
         if data.show_feedback_after_submit is not None:
@@ -683,11 +692,14 @@ class AssessmentService:
         # Note: Frontend 'mode' maps to AssessmentType (e.g. 'CAT' -> 'CAT')
         mode_mapping = {
             "Practice": "FORMATIVE",
+            "Formative": "FORMATIVE",
             "Homework": "HOMEWORK",
             "CAT": "CAT",
             "Summative": "SUMMATIVE",
+            "Groupwork": "GROUP_WORK",
         }
         assessment_type = mode_mapping.get(data.metadata.mode, "FORMATIVE")
+        is_group = data.metadata.mode == "Groupwork"
 
         # Instructions logic: merge selected and custom
         instructions = "\n".join(data.metadata.selectedInstructions)
@@ -695,18 +707,22 @@ class AssessmentService:
             instructions += f"\n\nAdditional Instructions:\n{data.metadata.customInstructions}"
 
         # Calculate window start/end
-        # data.metadata.date is the day. startTime/endTime are strings like "09:00"
+        # data.metadata.date is the day. startTime/endTime are strings like "09:00" or "07:45 PM"
         window_start = None
         window_end = None
         if data.metadata.date:
-            try:
-                # data.metadata.date might be a datetime object from Pydantic
-                d = data.metadata.date
-                date_str = d.strftime("%Y-%m-%d")
-                window_start = datetime.strptime(f"{date_str} {data.metadata.startTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
-                window_end = datetime.strptime(f"{date_str} {data.metadata.endTime}", "%Y-%m-%d %H:%M").replace(tzinfo=UTC)
-            except Exception:
-                pass # Fallback to None if parsing fails
+            def parse_time(t_str: str) -> datetime | None:
+                formats = ["%H:%M", "%I:%M %p", "%I:%M%p", "%H:%M:%S"]
+                for fmt in formats:
+                    try:
+                        t = datetime.strptime(t_str, fmt).time()
+                        return datetime.combine(data.metadata.date.date(), t).replace(tzinfo=UTC)
+                    except ValueError:
+                        continue
+                return None
+
+            window_start = parse_time(data.metadata.startTime)
+            window_end = parse_time(data.metadata.endTime)
 
         # 2. Create Assessment
         from sqlalchemy import or_, select
@@ -746,6 +762,9 @@ class AssessmentService:
             total_marks=sum(s.marks for s in data.blueprint),
             instructions=instructions,
             duration_minutes=data.metadata.durationMinutes,
+            is_group_assessment=is_group,
+            max_group_size=data.metadata.maxGroupSize if is_group else None,
+            group_formation_mode=data.metadata.groupFormation if is_group else None,
         )
 
         # 3. Update Security Settings

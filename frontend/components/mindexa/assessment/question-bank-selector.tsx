@@ -1,7 +1,7 @@
 // components/mindexa/assessment/question-bank-selector.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Sheet,
   SheetContent,
@@ -40,7 +40,7 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
   const [type, setType] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
 
-  const fetchQuestions = async () => {
+  const fetchQuestions = useCallback(async () => {
     setLoading(true);
     try {
       const response = await questionApi.getQuestions({
@@ -56,19 +56,19 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
     } finally {
       setLoading(false);
     }
-  };
+  }, [search, type, difficulty]);
 
   useEffect(() => {
     if (isOpen) {
       fetchQuestions();
     }
-  }, [isOpen, search, type, difficulty]);
+  }, [isOpen, fetchQuestions]);
 
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
       <SheetTrigger asChild>
         <Button 
-          variant="dashed" 
+          variant="outline" 
           className="flex-1 h-16 border-2 border-muted hover:border-primary/50 hover:bg-primary/5 rounded-2xl"
         >
           <BookOpen className="mr-2 size-4" /> Import from Bank

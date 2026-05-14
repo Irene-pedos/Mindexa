@@ -74,8 +74,8 @@ class AttemptService:
         if not assessment:
             raise NotFoundError("Assessment not found", code="ASSESSMENT_NOT_FOUND")
 
-        # Gate 1 — status must be ACTIVE
-        if assessment.status != AssessmentStatus.ACTIVE:
+        # Gate 1 — status must be PUBLISHED or ACTIVE
+        if assessment.status not in [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE]:
             raise ValidationError(
                 "This assessment is not currently available",
                 code="ASSESSMENT_NOT_ACTIVE",

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
-import { Button, type ButtonProps } from "@/components/ui/button";
-import { Textarea, type TextareaProps } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { motion, AnimatePresence } from "framer-motion";
 import { CornerUpLeft, X } from "lucide-react";
 
@@ -14,8 +14,8 @@ interface FileAttachment {
 
 // Main component props interface
 interface AdvancedChatInputProps extends React.HTMLAttributes<HTMLDivElement> {
-  textareaProps?: TextareaProps;
-  sendButtonProps?: ButtonProps;
+  textareaProps?: React.ComponentProps<typeof Textarea>;
+  sendButtonProps?: React.ComponentProps<typeof Button>;
   files?: FileAttachment[];
   onFileRemove?: (id: string | number) => void;
   onSend?: () => void;

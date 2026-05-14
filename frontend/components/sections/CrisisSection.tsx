@@ -3,6 +3,7 @@ import { TypographyH2, TypographyP } from "@/components/ui/typography";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InView } from "@/components/ui/in-view";
 import { AlertTriangle, Link2Off, Clock, ZapOff } from "lucide-react";
+import Image from "next/image";
 
 const problems = [
   {
@@ -50,11 +51,12 @@ export default function CrisisSection() {
           {/* Left: Image */}
           <div className="lg:col-span-5">
             <InView>
-              <div className="rounded-2xl h-[425px] overflow-hidden shadow-lg border border-border">
-                <img
+              <div className="relative h-[435px] w-full rounded-3xl overflow-hidden shadow-xl border border-border">
+                <Image
                   src="/images/Lecturer overwhelmed.png"
                   alt="Overwhelmed lecturer"
-                  className="object-cover h-full w-full"
+                  fill
+                  className="object-cover"
                 />
               </div>
             </InView>

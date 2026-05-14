@@ -11,6 +11,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
+import Image from "next/image";
 
 export function LoginForm({
   className,
@@ -139,10 +140,11 @@ export function LoginForm({
           </form>
 
           <div className="relative hidden bg-muted md:block">
-            <img
-              src="images/Login Image.png"
+            <Image
+              src="/images/Login Image.png"
               alt="Academic environment"
-              className="absolute inset-0 h-full w-full object-cover"
+              fill
+              className="object-cover"
             />
           </div>
         </CardContent>

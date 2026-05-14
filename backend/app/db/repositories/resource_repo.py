@@ -1,0 +1,68 @@
+"""
+app/db/repositories/resource_repo.py
+
+Repository for student resources and lecturer materials.
+"""
+
+import uuid
+from typing import List, Optional
+
+from sqlalchemy import select, and_
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.models.resource import LecturerMaterial, StudentResource
+from app.db.repositories.base import BaseRepository
+
+
+class ResourceRepository(BaseRepository[LecturerMaterial]):
+    def __init__(self, db: AsyncSession) -> None:
+        super().__init__(LecturerMaterial, db)
+
+    async def list_materials_by_course(
+        self, course_id: uuid.UUID, is_current: bool = True
+    ) -> List[LecturerMaterial]:
+        """List all materials for a course."""
+        stmt = select(LecturerMaterial).where(
+            and_(
+                LecturerMaterial.course_id == course_id,
+                LecturerMaterial.is_current == is_current,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def list_materials_by_assessment(
+        self, assessment_id: uuid.UUID, is_current: bool = True
+    ) -> List[LecturerMaterial]:
+        """List all materials specifically linked to an assessment."""
+        stmt = select(LecturerMaterial).where(
+            and_(
+                LecturerMaterial.assessment_id == assessment_id,
+                LecturerMaterial.is_current == is_current,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def get_material_by_id(self, material_id: uuid.UUID) -> Optional[LecturerMaterial]:
+        """Fetch a single material by ID."""
+        return await self.get_by_id_simple(material_id)
+
+    async def mark_superseded(self, course_id: uuid.UUID, original_filename: str) -> None:
+        """Mark old versions of a file as not current."""
+        from sqlalchemy import update
+
+        stmt = (
+            update(LecturerMaterial)
+            .where(
+                and_(
+                    LecturerMaterial.course_id == course_id,
+                    LecturerMaterial.original_filename == original_filename,
+                    LecturerMaterial.is_current == True,
+                )
+            )
+            .values(is_current=False)
+        )
+        await self.db.execute(stmt)

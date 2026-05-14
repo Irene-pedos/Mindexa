@@ -305,37 +305,54 @@ async def seed_academic_structure(
     student_id: uuid.UUID,
 ) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
     """
-    Create institution -> department -> period -> course -> subject -> section -> enrollment.
+    Create institution -> department -> period -> multiple courses -> sections -> enrollments.
 
-    Returns (course_id, subject_id, section_id).
+    Returns (primary_course_id, subject_id, primary_section_id).
     """
     # ── Institution ──────────────────────────────────────────────────────────
     inst_id = await _ensure_institution(session)
 
-    # ── Department ────────────────────────────────────────────────────────────
-    dept_id = await _ensure_department(session, inst_id)
+    # ── Departments ───────────────────────────────────────────────────────────
+    cs_dept_id = await _ensure_department(session, inst_id, "Computer Science", "CS")
+    vet_dept_id = await _ensure_department(session, inst_id, "Veterinary Medicine", "VET")
 
     # ── AcademicPeriod ────────────────────────────────────────────────────────
     period_id = await _ensure_academic_period(session, inst_id)
 
-    # ── Course ────────────────────────────────────────────────────────────────
-    course_id = await _ensure_course(session, inst_id, dept_id, period_id)
+    # ── Courses ────────────────────────────────────────────────────────────────
+    # Course 1: Database Systems
+    db_course_id = await _ensure_course(
+        session, inst_id, cs_dept_id, period_id, "BIT211", "Database Systems"
+    )
+    db_subject_id = await _ensure_subject(
+        session, inst_id, cs_dept_id, db_course_id, "DB_SUB", "Database Design & SQL"
+    )
+    db_section_id = await _ensure_class_section(session, db_course_id, "Y2 IT")
+    await _ensure_lecturer_assignment(session, lecturer_id, db_course_id)
+    await _ensure_enrollment(session, student_id, db_section_id)
 
-    # ── Subject ───────────────────────────────────────────────────────────────
-    subject_id = await _ensure_subject(session, inst_id, dept_id, course_id)
+    # Course 2: Animal Anatomy
+    vet_course_id = await _ensure_course(
+        session, inst_id, vet_dept_id, period_id, "VET301", "Animal Anatomy"
+    )
+    await _ensure_class_section(session, vet_course_id, "Y2 Veterinary")
+    await _ensure_lecturer_assignment(session, lecturer_id, vet_course_id)
 
-    # ── ClassSection ──────────────────────────────────────────────────────────
-    section_id = await _ensure_class_section(session, course_id=course_id)
-
-    # ── Lecturer Assignment ───────────────────────────────────────────────────
-    await _ensure_lecturer_assignment(session, lecturer_id=lecturer_id, course_id=course_id)
-
-    # ── Student Enrollment ────────────────────────────────────────────────────
-    await _ensure_enrollment(session, student_id=student_id, section_id=section_id)
+    # Course 3: Software Engineering
+    se_course_id = await _ensure_course(
+        session, inst_id, cs_dept_id, period_id, "CS101", "Introduction to Computer Science"
+    )
+    se_subject_id = await _ensure_subject(
+        session, inst_id, cs_dept_id, se_course_id, "CS101_SUB", "Programming Fundamentals"
+    )
+    se_section_id = await _ensure_class_section(session, se_course_id, "Y1 CS")
+    await _ensure_lecturer_assignment(session, lecturer_id, se_course_id)
 
     await session.commit()
-    logger.info("  ✔  Academic structure ready")
-    return course_id, subject_id, section_id
+    logger.info("  ✔  Academic structure ready (3 courses, 3 sections)")
+    
+    # Return DB course info for the assessment seed
+    return db_course_id, db_subject_id, db_section_id
 
 
 async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
@@ -359,29 +376,6 @@ async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
     await session.flush()
     logger.info("  ✔  Institution created (%s)", INSTITUTION_CODE)
     return inst.id
-
-
-async def _ensure_department(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
-    """Upsert the seed department."""
-    stmt = select(Department)
-    stmt = stmt.where(Department.code == DEPT_CODE)  # type: ignore[misc]
-    stmt = stmt.where(Department.institution_id == institution_id)  # type: ignore[misc]
-    result = await session.execute(stmt)
-    dept = result.scalar_one_or_none()
-    if dept:
-        logger.info("  ⟳  Department already exists (%s)", DEPT_CODE)
-        return dept.id
-
-    dept = Department(
-        institution_id=institution_id,
-        name=DEPT_NAME,
-        code=DEPT_CODE,
-        is_active=True,
-    )
-    session.add(dept)
-    await session.flush()
-    logger.info("  ✔  Department created (%s)", DEPT_CODE)
-    return dept.id
 
 
 async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UUID) -> uuid.UUID:
@@ -410,34 +404,61 @@ async def _ensure_academic_period(session: AsyncSession, institution_id: uuid.UU
     return period.id
 
 
+async def _ensure_department(
+    session: AsyncSession, institution_id: uuid.UUID, name: str, code: str
+) -> uuid.UUID:
+    """Upsert a department."""
+    stmt = select(Department)
+    stmt = stmt.where(Department.code == code)  # type: ignore[misc]
+    stmt = stmt.where(Department.institution_id == institution_id)  # type: ignore[misc]
+    result = await session.execute(stmt)
+    dept = result.scalar_one_or_none()
+    if dept:
+        logger.info("  ⟳  Department already exists (%s)", code)
+        return dept.id
+
+    dept = Department(
+        institution_id=institution_id,
+        name=name,
+        code=code,
+        is_active=True,
+    )
+    session.add(dept)
+    await session.flush()
+    logger.info("  ✔  Department created (%s)", code)
+    return dept.id
+
+
 async def _ensure_course(
     session: AsyncSession,
     institution_id: uuid.UUID,
     department_id: uuid.UUID,
     period_id: uuid.UUID,
+    code: str,
+    name: str,
 ) -> uuid.UUID:
-    """Upsert the seed course."""
+    """Upsert a course."""
     stmt = select(Course)
-    stmt = stmt.where(Course.code == COURSE_CODE)  # type: ignore[misc]
+    stmt = stmt.where(Course.code == code)  # type: ignore[misc]
     stmt = stmt.where(Course.institution_id == institution_id)  # type: ignore[misc]
     stmt = stmt.where(Course.academic_period_id == period_id)  # type: ignore[misc]
     result = await session.execute(stmt)
     course = result.scalar_one_or_none()
     if course:
-        logger.info("  ⟳  Course already exists (%s)", COURSE_CODE)
+        logger.info("  ⟳  Course already exists (%s)", code)
         return course.id
 
     course = Course(
         institution_id=institution_id,
         department_id=department_id,
         academic_period_id=period_id,
-        code=COURSE_CODE,
-        name=COURSE_TITLE,
+        code=code,
+        name=name,
         is_active=True,
     )
     session.add(course)
     await session.flush()
-    logger.info("  ✔  Course created (%s)", COURSE_CODE)
+    logger.info("  ✔  Course created (%s)", code)
     return course.id
 
 
@@ -446,15 +467,17 @@ async def _ensure_subject(
     institution_id: uuid.UUID,
     department_id: uuid.UUID,
     course_id: uuid.UUID,
+    code: str,
+    title: str,
 ) -> uuid.UUID:
-    """Upsert the seed subject."""
+    """Upsert a subject."""
     stmt = select(Subject)
-    stmt = stmt.where(Subject.title == SUBJECT_TITLE)  # type: ignore[misc]
+    stmt = stmt.where(Subject.title == title)  # type: ignore[misc]
     stmt = stmt.where(Subject.institution_id == institution_id)  # type: ignore[misc]
     result = await session.execute(stmt)
     row = result.fetchone()
     if row:
-        logger.info("  ⟳  Subject already exists (%s)", SUBJECT_TITLE)
+        logger.info("  ⟳  Subject already exists (%s)", title)
         subject = row[0]
         subject_id = subject.id
         # Ensure CourseSubject link exists
@@ -472,7 +495,7 @@ async def _ensure_subject(
     subject = Subject(
         institution_id=institution_id,
         department_id=department_id,
-        title=SUBJECT_TITLE,
+        title=title,
         is_active=True,
     )
     session.add(subject)
@@ -482,33 +505,34 @@ async def _ensure_subject(
     cs = CourseSubject(course_id=course_id, subject_id=subject.id)
     session.add(cs)
 
-    logger.info("  ✔  Subject created (%s)", SUBJECT_TITLE)
+    logger.info("  ✔  Subject created (%s)", title)
     return subject.id
 
 
 async def _ensure_class_section(
     session: AsyncSession,
     course_id: uuid.UUID,
+    name: str,
 ) -> uuid.UUID:
-    """Upsert the seed class section."""
+    """Upsert a class section."""
     stmt = select(ClassSection)
-    stmt = stmt.where(ClassSection.name == SECTION_NAME)  # type: ignore[misc]
+    stmt = stmt.where(ClassSection.name == name)  # type: ignore[misc]
     stmt = stmt.where(ClassSection.course_id == course_id)  # type: ignore[misc]
     result = await session.execute(stmt)
     section = result.scalar_one_or_none()
     if section:
-        logger.info("  ⟳  ClassSection already exists (%s)", SECTION_NAME)
+        logger.info("  ⟳  ClassSection already exists (%s)", name)
         return section.id
 
     section = ClassSection(
         course_id=course_id,
-        name=SECTION_NAME,
+        name=name,
         capacity=50,
         is_active=True,
     )
     session.add(section)
     await session.flush()
-    logger.info("  ✔  ClassSection created (%s)", SECTION_NAME)
+    logger.info("  ✔  ClassSection created (%s)", name)
     return section.id
 
 

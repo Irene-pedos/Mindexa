@@ -119,10 +119,11 @@ export function AdminLoginForm({
           </form>
 
           <div className="relative hidden bg-muted md:block">
-            <img
+            <Image
               src="/images/Login Image.png"
               alt="Secure admin environment"
-              className="absolute inset-0 h-full w-full object-cover"
+              fill
+              className="object-cover"
             />
             <div className="absolute inset-0 bg-primary/20 mix-blend-multiply" />
           </div>

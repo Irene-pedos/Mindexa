@@ -23,6 +23,7 @@ type AuthUser = {
     profile_picture_url?: string | null;
     student_id?: string | null;
     staff_id?: string | null;
+    phone_number?: string | null;
   } | null;
 };
 

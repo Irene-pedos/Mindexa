@@ -2,8 +2,8 @@
 "use client"
 
 import React, { useEffect, useState } from "react"
-import { Calendar as CalendarIcon, Clock, Users, BookOpen, Award, AlertCircle, Loader2 } from "lucide-react"
-import { format, isToday as isDateToday, parseISO } from "date-fns"
+import { Calendar as CalendarIcon, Clock, Users, BookOpen, Award, AlertCircle, Loader2, Link } from "lucide-react"
+import { format, isToday as isDateToday, parseISO, isAfter, startOfDay } from "date-fns"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -36,8 +36,16 @@ export function AcademicPlannerDropdown() {
   }, [])
 
   const today = new Date()
-  const todayEvents = events.filter((e) => isDateToday(parseISO(e.start_at)))
-  const upcomingEvents = events.filter((e) => !isDateToday(parseISO(e.start_at))).slice(0, 4)
+  const todayStart = startOfDay(today)
+
+  // Filter out past events (keep today and future)
+  const filteredEvents = events.filter((e) => {
+    const d = parseISO(e.start_at)
+    return isDateToday(d) || isAfter(d, todayStart)
+  })
+
+  const todayEvents = filteredEvents.filter((e) => isDateToday(parseISO(e.start_at)))
+  const upcomingEvents = filteredEvents.filter((e) => !isDateToday(parseISO(e.start_at))).slice(0, 4)
 
   const getIcon = (type: string) => {
     switch (type.toUpperCase()) {
@@ -64,8 +72,8 @@ export function AcademicPlannerDropdown() {
         </Button>
       </DropdownMenuTrigger>
 
-      <DropdownMenuContent 
-        align="end" 
+      <DropdownMenuContent
+        align="end"
         className="w-80 p-0 overflow-hidden"
         sideOffset={8}
       >
@@ -163,7 +171,7 @@ export function AcademicPlannerDropdown() {
                   <p className="text-sm text-muted-foreground text-center py-4">No upcoming activities.</p>
                 )}
                 <Button variant="ghost" className="w-full mt-4 text-sm" asChild>
-                  <a href="/student/schedule">View Full Schedule →</a>
+                  <Link href="/student/schedule">View Full Schedule →</Link>
                 </Button>
               </div>
             </>

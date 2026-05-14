@@ -1,7 +1,7 @@
 // app/lecturer/supervision/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -45,22 +45,7 @@ export default function LecturerLiveSupervision() {
   >("all");
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    fetchAssessments();
-  }, []);
-
-  useEffect(() => {
-    if (!activeAssessmentId) return;
-
-    // Initial fetch
-    fetchData();
-
-    // Start polling
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [activeAssessmentId]);
-
-  const fetchAssessments = async () => {
+  const fetchAssessments = useCallback(async () => {
     try {
       const response = await assessmentApi.getAssessments();
       const data = response.items || response;
@@ -73,9 +58,9 @@ export default function LecturerLiveSupervision() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       const [statsRes, eventsRes] = await Promise.all([
         supervisionApi.getStats(activeAssessmentId),
@@ -86,7 +71,22 @@ export default function LecturerLiveSupervision() {
     } catch (e) {
       console.error("Supervision polling failed");
     }
-  };
+  }, [activeAssessmentId]);
+
+  useEffect(() => {
+    fetchAssessments();
+  }, [fetchAssessments]);
+
+  useEffect(() => {
+    if (!activeAssessmentId) return;
+
+    // Initial fetch
+    fetchData();
+
+    // Start polling
+    const interval = setInterval(fetchData, 5000);
+    return () => clearInterval(interval);
+  }, [activeAssessmentId, fetchData]);
 
   const filteredEvents = events.filter(
     (e) => filterSeverity === "all" || e.severity === filterSeverity,

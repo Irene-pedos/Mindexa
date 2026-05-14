@@ -25,6 +25,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { authApi } from "@/lib/api/auth";
 import { validateSignupForm } from "@/lib/validation";
+import Image from "next/image";
 
 export function SignupForm({
   className,
@@ -483,10 +484,11 @@ export function SignupForm({
 
           {/* Right Side - Decorative Image */}
           <div className="relative hidden bg-muted md:block">
-            <img
-              src="images/Login Image.png"
+            <Image
+              src="/images/Login Image.png"
               alt="Students in academic environment"
-              className="absolute inset-0 h-full w-full object-cover"
+              fill
+              className="object-cover"
             />
             <div className="absolute inset-0 bg-primary/20 mix-blend-multiply" />
           </div>

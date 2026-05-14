@@ -92,6 +92,21 @@ async def get_course_detail(
     return await service.get_course_detail(current_user.id, course_id)
 
 
+@router.delete(
+    "/me/courses/{course_id}",
+    summary="Delete a course",
+)
+async def delete_course(
+    course_id: uuid.UUID,
+    current_user=Depends(require_lecturer),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft deletes a course. Only the primary lecturer can perform this."""
+    service = LecturerService(db)
+    await service.delete_course(current_user.id, course_id)
+    return {"success": True, "message": "Course deleted successfully"}
+
+
 @router.post(
     "/me/courses/{course_id}/students",
     summary="Enroll a student in the course",

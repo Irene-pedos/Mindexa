@@ -1,21 +1,22 @@
-'use client';
-import { ReactNode } from 'react';
-import { motion, Variants } from 'motion/react';
-import React from 'react';
+"use client";
+import { ReactNode } from "react";
+import { motion, Variants } from "motion/react";
+import React from "react";
+import { cn } from "@/lib/utils";
 
 export type PresetType =
-  | 'fade'
-  | 'slide'
-  | 'scale'
-  | 'blur'
-  | 'blur-slide'
-  | 'zoom'
-  | 'flip'
-  | 'bounce'
-  | 'rotate'
-  | 'swing';
+  | "fade"
+  | "slide"
+  | "scale"
+  | "blur"
+  | "blur-slide"
+  | "zoom"
+  | "flip"
+  | "bounce"
+  | "rotate"
+  | "swing";
 
-export type AnimatedGroupProps = {
+export interface AnimatedGroupProps extends React.HTMLAttributes<HTMLElement> {
   children: ReactNode;
   className?: string;
   variants?: {
@@ -25,7 +26,7 @@ export type AnimatedGroupProps = {
   preset?: PresetType;
   as?: React.ElementType;
   asChild?: React.ElementType;
-};
+}
 
 const defaultContainerVariants: Variants = {
   visible: {
@@ -51,46 +52,46 @@ const presetVariants: Record<PresetType, Variants> = {
     visible: { scale: 1 },
   },
   blur: {
-    hidden: { filter: 'blur(4px)' },
-    visible: { filter: 'blur(0px)' },
+    hidden: { filter: "blur(4px)" },
+    visible: { filter: "blur(0px)" },
   },
-  'blur-slide': {
-    hidden: { filter: 'blur(4px)', y: 20 },
-    visible: { filter: 'blur(0px)', y: 0 },
+  "blur-slide": {
+    hidden: { filter: "blur(4px)", y: 20 },
+    visible: { filter: "blur(0px)", y: 0 },
   },
   zoom: {
     hidden: { scale: 0.5 },
     visible: {
       scale: 1,
-      transition: { type: 'spring', stiffness: 300, damping: 20 },
+      transition: { type: "spring", stiffness: 300, damping: 20 },
     },
   },
   flip: {
     hidden: { rotateX: -90 },
     visible: {
       rotateX: 0,
-      transition: { type: 'spring', stiffness: 300, damping: 20 },
+      transition: { type: "spring", stiffness: 300, damping: 20 },
     },
   },
   bounce: {
     hidden: { y: -50 },
     visible: {
       y: 0,
-      transition: { type: 'spring', stiffness: 400, damping: 10 },
+      transition: { type: "spring", stiffness: 400, damping: 10 },
     },
   },
   rotate: {
     hidden: { rotate: -180 },
     visible: {
       rotate: 0,
-      transition: { type: 'spring', stiffness: 200, damping: 15 },
+      transition: { type: "spring", stiffness: 200, damping: 15 },
     },
   },
   swing: {
     hidden: { rotate: -10 },
     visible: {
       rotate: 0,
-      transition: { type: 'spring', stiffness: 300, damping: 8 },
+      transition: { type: "spring", stiffness: 300, damping: 8 },
     },
   },
 };
@@ -105,8 +106,9 @@ function AnimatedGroup({
   className,
   variants,
   preset,
-  as = 'div',
-  asChild = 'div',
+  as = "div",
+  asChild = "div",
+  ...props
 }: AnimatedGroupProps) {
   const selectedVariants = {
     item: addDefaultVariants(preset ? presetVariants[preset] : {}),
@@ -116,27 +118,30 @@ function AnimatedGroup({
   const itemVariants = variants?.item || selectedVariants.item;
 
   const MotionComponent = React.useMemo(
-    () => motion.create(as as keyof JSX.IntrinsicElements),
-    [as]
+    () => motion.create(as as string | React.ComponentType<any>),
+    [as],
   );
   const MotionChild = React.useMemo(
-    () => motion.create(asChild as keyof JSX.IntrinsicElements),
-    [asChild]
+    () => motion.create(asChild as string | React.ComponentType<any>),
+    [asChild],
   );
 
-  return (
-    <MotionComponent
-      initial='hidden'
-      animate='visible'
-      variants={containerVariants}
-      className={className}
-    >
-      {React.Children.map(children, (child, index) => (
-        <MotionChild key={index} variants={itemVariants}>
-          {child}
-        </MotionChild>
-      ))}
-    </MotionComponent>
+  return React.createElement(
+    MotionComponent,
+    {
+      initial: "hidden",
+      animate: "visible",
+      variants: containerVariants,
+      className: cn(className),
+      ...props,
+    },
+    React.Children.map(children, (child, index) =>
+      React.createElement(
+        MotionChild,
+        { key: index, variants: itemVariants },
+        child,
+      ),
+    ),
   );
 }
 

@@ -49,6 +49,21 @@ class AdminUserStatusUpdate(BaseModel):
     """Request to update a user's status."""
     status: str # Should match UserStatus enum values
 
+class AdminUserCreate(BaseModel):
+    """Request to create a new user by an admin."""
+    email: str
+    password: str
+    first_name: str
+    last_name: str
+    role: str # ADMIN, LECTURER, STUDENT
+    status: str = "ACTIVE"
+    email_verified: bool = True
+    # Optional profile fields
+    staff_id: Optional[str] = None
+    student_id: Optional[str] = None
+    college: Optional[str] = None
+    department: Optional[str] = None
+
 class AdminCourseAssignmentRequest(BaseModel):
     """Request to assign courses to a lecturer."""
     course_ids: List[uuid.UUID]

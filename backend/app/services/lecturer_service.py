@@ -397,3 +397,28 @@ class LecturerService:
             performance_avg=82, # Mocked
             roster=roster
         )
+
+    async def delete_course(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> bool:
+        """Soft delete a course if the lecturer is the primary owner."""
+        from app.db.models.academic import LecturerCourseAssignment
+        from app.db.enums import LecturerAssignmentRole
+        from app.core.exceptions import AuthorizationError
+
+        # 1. Verify lecturer is primary assigned to this course
+        assign_stmt = select(LecturerCourseAssignment).where(
+            LecturerCourseAssignment.lecturer_id == lecturer_id,
+            LecturerCourseAssignment.course_id == course_id,
+            LecturerCourseAssignment.assignment_role == LecturerAssignmentRole.PRIMARY,
+            LecturerCourseAssignment.is_active == True
+        )
+        assign_res = await self.db.execute(assign_stmt)
+        if not assign_res.scalars().first():
+            raise AuthorizationError("Only the primary lecturer can delete the course")
+
+        # 2. Fetch and soft-delete
+        course = await self.course_repo.get_by_id_simple(course_id)
+        if not course:
+            raise NotFoundError("Course not found")
+
+        await self.course_repo.delete(course_id)
+        return True

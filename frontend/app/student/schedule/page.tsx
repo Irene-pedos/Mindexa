@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar as CalendarIcon, Clock, AlertCircle } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, AlertCircle, Link } from "lucide-react";
 import {
   format,
   startOfMonth,
@@ -259,7 +259,7 @@ export default function StudentSchedulePage() {
           </Card>
 
           <Button size="lg" className="w-full" asChild>
-            <a href="/student/assessments">Browse All Assessments</a>
+            <Link href="/student/assessments">Browse All Assessments</Link>
           </Button>
         </div>
       </div>

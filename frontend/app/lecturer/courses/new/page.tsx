@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ChevronLeft, Loader2, Save } from "lucide-react";
+import { ChevronLeft, Loader2, Save, Upload, X, FileText } from "lucide-react";
 import { lecturerApi, InstitutionResponse, AcademicPeriodResponse } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -30,6 +30,8 @@ export default function NewCoursePage() {
     institution_id: "",
     academic_period_id: "",
   });
+
+  const [courseNotes, setCourseNotes] = useState<File[]>([]);
 
   useEffect(() => {
     async function loadMetadata() {
@@ -66,10 +68,24 @@ export default function NewCoursePage() {
 
     setLoading(true);
     try {
-      await lecturerApi.createCourse({
+      const course = await lecturerApi.createCourse({
         ...formData,
         credit_hours: Number(formData.credit_hours),
       });
+
+      // Upload notes if any
+      if (courseNotes.length > 0) {
+        toast.info(`Uploading ${courseNotes.length} course notes...`);
+        for (const file of courseNotes) {
+          const uploadData = new FormData();
+          uploadData.append("file", file);
+          uploadData.append("course_id", course.id);
+          uploadData.append("material_category", "LECTURE_NOTES");
+          uploadData.append("is_student_visible", "true");
+          await lecturerApi.uploadMaterial(uploadData);
+        }
+      }
+
       toast.success("Course created successfully");
       router.push("/lecturer/courses");
     } catch (err: any) {
@@ -77,6 +93,17 @@ export default function NewCoursePage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files) {
+      const newFiles = Array.from(e.target.files);
+      setCourseNotes(prev => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setCourseNotes(prev => prev.filter((_, i) => i !== index));
   };
 
   if (fetchingMetadata) {
@@ -190,6 +217,53 @@ export default function NewCoursePage() {
                 value={formData.credit_hours}
                 onChange={e => setFormData(prev => ({ ...prev, credit_hours: Number(e.target.value) }))}
               />
+            </div>
+
+            <div className="pt-4 border-t space-y-4">
+              <Label>Course Notes / Materials (Optional)</Label>
+              <div className="flex items-center gap-4">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => document.getElementById("file-upload")?.click()}
+                  className="gap-2"
+                >
+                  <Upload className="size-4" /> Select Files
+                </Button>
+                <input
+                  id="file-upload"
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={handleFileChange}
+                />
+                <span className="text-xs text-muted-foreground">
+                  Upload PDF, DOCX, or TXT notes for this course.
+                </span>
+              </div>
+
+              {courseNotes.length > 0 && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+                  {courseNotes.map((file, i) => (
+                    <div key={i} className="flex items-center justify-between p-3 bg-muted/50 rounded-lg border text-sm">
+                      <div className="flex items-center gap-2 truncate">
+                        <FileText className="size-4 text-primary shrink-0" />
+                        <span className="truncate font-medium">{file.name}</span>
+                        <span className="text-[10px] text-muted-foreground">({(file.size / 1024).toFixed(0)} KB)</span>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7 text-muted-foreground hover:text-destructive"
+                        onClick={() => removeFile(i)}
+                      >
+                        <X className="size-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
           <CardFooter className="flex justify-between border-t pt-6">

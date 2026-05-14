@@ -237,6 +237,8 @@ class Assessment(AuditedBaseModel, table=True):
     randomize_questions: bool = Field(default=False, nullable=False)
     randomize_options: bool = Field(default=False, nullable=False)
     is_group_assessment: bool = Field(default=False, nullable=False)
+    max_group_size: Optional[int] = Field(default=None, nullable=True)
+    group_formation_mode: Optional[str] = Field(default=None, nullable=True, max_length=50)
 
     # ── UI & AI flags ─────────────────────────────────────────────────────────
 

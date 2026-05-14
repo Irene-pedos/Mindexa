@@ -56,7 +56,7 @@ export function ForgotPasswordForm({
               Reset your password
             </TypographyH2>
             <p className="text-muted-foreground text-sm">
-              Enter your email address and we'll send you instructions to reset
+              Enter your email address and we&apos;ll send you instructions to reset
               your password.
             </p>
           </div>
@@ -109,13 +109,13 @@ export function ForgotPasswordForm({
               <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded">
                 <p className="font-semibold mb-2">Check your email</p>
                 <p className="text-sm">
-                  We've sent password reset instructions to{" "}
+                  We&apos;ve sent password reset instructions to{" "}
                   <strong>{email}</strong>
                 </p>
               </div>
 
               <p className="text-sm text-muted-foreground text-center">
-                If you don't see the email, check your spam folder or{" "}
+                If you don&apos;t see the email, check your spam folder or{" "}
                 <button
                   onClick={() => {
                     setSubmitted(false);
