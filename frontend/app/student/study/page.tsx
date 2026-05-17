@@ -1,7 +1,7 @@
 // app/(student)/study/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -22,33 +22,33 @@ import {
   BookOpen,
   ArrowRight,
   ShieldCheck,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const recentTopics = [
-  "ACID Properties in Databases",
-  "Time Complexity Analysis",
-  "Normalization Techniques",
-  "OSI Model Layers",
-  "Query Optimization Strategies",
-];
-
-const uploadedResources = [
-  { name: "Lecture Notes - Week 7.pdf", size: "2.4 MB", date: "Mar 25" },
-  { name: "Past Papers - Algorithms 2025.pdf", size: "1.8 MB", date: "Mar 20" },
-  { name: "Summary - Operating Systems.pdf", size: "890 KB", date: "Mar 18" },
-  {
-    name: "Weak Topics Analysis - Mar 2026.docx",
-    size: "340 KB",
-    date: "Mar 26",
-  },
-];
+import { studentApi, StudentResourceResponse } from "@/lib/api/student";
+import Link from "next/link";
 
 export default function StudentStudySupportPage() {
   const [prompt, setPrompt] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [response, setResponse] = useState("");
+  const [resources, setResources] = useState<StudentResourceResponse[]>([]);
   const [selectedResource, setSelectedResource] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const resData = await studentApi.getPersonalResources();
+        setResources(resData);
+      } catch (err) {
+        console.error("Failed to load study data", err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, []);
 
   const handleAskAI = async () => {
     if (!prompt.trim()) return;
@@ -69,6 +69,14 @@ export default function StudentStudySupportPage() {
       setIsThinking(false);
     }, 1350);
   };
+
+  if (loading) {
+     return (
+        <div className="flex h-[60vh] items-center justify-center">
+           <Loader2 className="size-10 animate-spin text-muted-foreground" />
+        </div>
+     );
+  }
 
   return (
     <div className="space-y-8">
@@ -125,27 +133,6 @@ export default function StudentStudySupportPage() {
                   </CardContent>
                 </Card>
               )}
-
-              {/* Quick Prompts */}
-              <div>
-                <p className="text-sm font-medium text-muted-foreground mb-3">
-                  Quick starters:
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {recentTopics.map((topic, i) => (
-                    <Button
-                      key={i}
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        setPrompt(`Help me revise and understand ${topic}`)
-                      }
-                    >
-                      {topic}
-                    </Button>
-                  ))}
-                </div>
-              </div>
             </CardContent>
           </Card>
         </div>
@@ -157,35 +144,46 @@ export default function StudentStudySupportPage() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-lg">
-                  <Upload className="size-5" /> My Personal Study Resources
+                  <FileText className="size-5" /> My Personal Study Resources
                 </CardTitle>
-                <Button size="sm" variant="outline">
-                  <Upload className="mr-2 size-4" /> Upload
+                <Button size="sm" variant="outline" asChild>
+                  <Link href="/student/resources">
+                    Manage
+                  </Link>
                 </Button>
               </div>
             </CardHeader>
             <CardContent className="space-y-3">
-              {uploadedResources.map((file, i) => (
-                <div
-                  key={i}
-                  className={cn(
-                    "flex items-center gap-3 rounded-xl border p-4 hover:bg-muted/50 cursor-pointer transition-colors",
-                    selectedResource === file.name &&
-                      "border-violet-500 bg-violet-950/30",
-                  )}
-                  onClick={() => setSelectedResource(file.name)}
-                >
-                  <FileText className="size-5 text-muted-foreground" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium truncate">
-                      {file.name}
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-0.5">
-                      {file.size} • {file.date}
+              {resources.length === 0 ? (
+                 <div className="py-8 text-center border-2 border-dashed rounded-xl px-4">
+                    <p className="text-sm text-muted-foreground mb-4">No study resources uploaded yet. Upload files to improve AI context.</p>
+                    <Button variant="outline" size="sm" asChild>
+                       <Link href="/student/resources">Upload Now</Link>
+                    </Button>
+                 </div>
+              ) : (
+                resources.slice(0, 4).map((file, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "flex items-center gap-3 rounded-xl border p-4 hover:bg-muted/50 cursor-pointer transition-colors",
+                      selectedResource === file.id &&
+                        "border-violet-500 bg-violet-950/30",
+                    )}
+                    onClick={() => setSelectedResource(file.id)}
+                  >
+                    <FileText className="size-5 text-muted-foreground" />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium truncate">
+                        {file.display_name || file.original_filename}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {file.file_extension} • {(file.file_size_bytes / 1024).toFixed(0)} KB
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                ))
+              )}
             </CardContent>
           </Card>
 
@@ -201,8 +199,7 @@ export default function StudentStudySupportPage() {
               <div className="flex gap-3">
                 <Target className="size-5 text-emerald-500 mt-0.5 flex-shrink-0" />
                 <div>
-                  Normalization shows as a recurring weak area. Focus here
-                  before the next CAT.
+                  No weak areas identified yet. Complete more assessments to get personalized tips.
                 </div>
               </div>
               <div className="flex gap-3">

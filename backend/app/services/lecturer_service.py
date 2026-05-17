@@ -9,7 +9,7 @@ from sqlalchemy import select, func, cast, Date
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.assessment import Assessment
 from app.db.models.integrity import IntegrityEvent
-from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode
+from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.grading_repo import GradingRepository
@@ -25,7 +25,18 @@ from app.schemas.lecturer import (
     LecturerCourseRosterItem,
 )
 
-from app.db.models.academic import Course, ClassSection, StudentEnrollment, LecturerCourseAssignment, Institution, AcademicPeriod
+from app.db.models.academic import (
+    Course, 
+    ClassSection, 
+    StudentEnrollment, 
+    LecturerCourseAssignment, 
+    Institution, 
+    AcademicPeriod,
+    CourseDepartment,
+    CourseOption,
+    Option,
+    ClassGroup
+)
 from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.auth import UserRepository
 from app.db.schemas.academic import CourseCreate, CourseResponse
@@ -181,7 +192,6 @@ class LecturerService:
         # Create the course
         course = Course(
             institution_id=data.institution_id,
-            department_id=data.department_id,
             academic_period_id=data.academic_period_id,
             name=data.title,
             code=data.code,
@@ -191,7 +201,36 @@ class LecturerService:
         )
         await self.course_repo.create(course)
 
-        # Automatically assign the creator as the primary lecturer
+        # 1. Assign Departments
+        if data.department_ids:
+            for dept_id in data.department_ids:
+                cd = CourseDepartment(course_id=course.id, department_id=dept_id)
+                self.db.add(cd)
+        
+        # 2. Assign Options
+        if data.option_ids:
+            for opt_id in data.option_ids:
+                co = CourseOption(course_id=course.id, option_id=opt_id)
+                self.db.add(co)
+
+        # 3. Create Class Sections from Class Groups
+        if data.class_group_ids:
+            for cg_id in data.class_group_ids:
+                # Fetch group name
+                stmt = select(ClassGroup).where(ClassGroup.id == cg_id)
+                res = await self.db.execute(stmt)
+                cg = res.scalars().first()
+                if cg:
+                    section = ClassSection(
+                        course_id=course.id,
+                        class_group_id=cg.id,
+                        name=cg.name,
+                        capacity=50,
+                        is_active=True
+                    )
+                    self.db.add(section)
+
+        # 4. Automatically assign the creator as the primary lecturer
         from app.db.enums import LecturerAssignmentRole
         assignment = LecturerCourseAssignment(
             lecturer_id=lecturer_id,
@@ -201,20 +240,13 @@ class LecturerService:
         )
         self.db.add(assignment)
         
-        # Create a default "Section A" for the course
-        section = ClassSection(
-            course_id=course.id,
-            name="Section A",
-            capacity=50,
-            is_active=True
-        )
-        self.db.add(section)
-        
         await self.db.commit()
         return course
 
     async def get_dashboard_data(self, lecturer_id: uuid.UUID) -> LecturerDashboardResponse:
         from app.db.models.academic import LecturerCourseAssignment, ClassSection
+        from app.db.models.assessment import Assessment
+        from app.db.models.integrity import IntegrityEvent
         # 1. Summary Stats
         # Active Classes (Sections of courses assigned to this lecturer)
         class_stmt = (
@@ -237,8 +269,12 @@ class LecturerService:
         )
         
         # Pending Grading (Items in queue for this lecturer's assessments)
-        pending_items, total_pending = await self.grading_repo.list_queue(
-            status=GradingQueueStatus.PENDING
+        from app.services.grading_service import GradingService
+        grading_svc = GradingService(self.db)
+        queue_items, total_pending = await grading_svc.get_grading_queue(
+            lecturer_id=lecturer_id,
+            status=GradingQueueStatus.PENDING,
+            page_size=100
         )
         
         # Flagged Integrity Events for this lecturer's assessments
@@ -258,11 +294,6 @@ class LecturerService:
         )
 
         # 2. Pending Queue (Grouped by Assessment for the UI)
-        queue_items, _ = await self.grading_repo.list_queue(
-            status=GradingQueueStatus.PENDING,
-            page_size=100
-        )
-        
         pending_items_data = []
         assessment_counts = {}
         for item in queue_items:
@@ -271,7 +302,7 @@ class LecturerService:
             
         for aid, count in assessment_counts.items():
             ass = await self.assessment_repo.get_by_id_simple(aid)
-            if ass and ass.created_by_id == lecturer_id:
+            if ass:
                 pending_items_data.append(LecturerPendingItem(
                     id=uuid.uuid4(),
                     assessment_id=aid,
@@ -339,16 +370,132 @@ class LecturerService:
                 ai=ai_map.get(d, 0)
             ))
 
+        # 5. Recent Integrity Alerts
+        from app.db.models.auth import User, UserProfile
+        alert_stmt = (
+            select(IntegrityEvent, UserProfile, Assessment.title)
+            .join(Assessment, Assessment.id == IntegrityEvent.assessment_id)
+            .join(User, User.id == IntegrityEvent.student_id)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .where(
+                Assessment.created_by_id == lecturer_id,
+                IntegrityEvent.created_at >= datetime.now(UTC) - timedelta(hours=24)
+            )
+            .order_by(IntegrityEvent.created_at.desc())
+            .limit(5)
+        )
+        alert_res = await self.db.execute(alert_stmt)
+        recent_alerts = []
+        for event, profile, ass_title in alert_res.all():
+            severity = "low"
+            risk_score = 10
+            if event.event_type in ["DEVTOOLS_DETECTED", "SUSPICIOUS_DEVICE"]:
+                severity = "high"
+                risk_score = 80
+            elif event.event_type in ["COPY_ATTEMPT", "FULLSCREEN_EXIT", "TAB_SWITCH"]:
+                severity = "medium"
+                risk_score = 40
+
+            from app.schemas.lecturer import LecturerIntegrityAlert
+            recent_alerts.append(LecturerIntegrityAlert(
+                id=event.id,
+                student_name=f"{profile.first_name} {profile.last_name}",
+                student_id=profile.student_id or "N/A",
+                assessment_title=ass_title,
+                event_type=event.event_type,
+                created_at=event.created_at,
+                risk_score=risk_score,
+                severity=severity
+            ))
+
         return LecturerDashboardResponse(
             summary=summary,
             pending_queue=pending_items_data,
             recent_submissions=recent_submissions_data,
-            chart_data=chart_data
+            chart_data=chart_data,
+            recent_alerts=recent_alerts
         )
 
+    async def list_lecturer_courses(
+        self, lecturer_id: uuid.UUID, page: int = 1, page_size: int = 20
+    ) -> tuple[list[AdminCourseListItem], int]:
+        """List courses assigned to a specific lecturer."""
+        from app.db.models.academic import Course, LecturerCourseAssignment
+        from app.schemas.admin import AdminCourseListItem
+
+        # 1. Total count for this lecturer
+        count_stmt = (
+            select(func.count(Course.id))
+            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
+            .where(
+                LecturerCourseAssignment.lecturer_id == lecturer_id,
+                Course.is_deleted == False
+            )
+        )
+        count_res = await self.db.execute(count_stmt)
+        total = count_res.scalar_one()
+
+        # 2. Paginated list
+        stmt = (
+            select(Course)
+            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
+            .where(
+                LecturerCourseAssignment.lecturer_id == lecturer_id,
+                Course.is_deleted == False
+            )
+            .order_by(Course.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        res = await self.db.execute(stmt)
+        courses = res.scalars().all()
+        items = []
+        for c in courses:
+            student_count = await self.course_repo.get_student_count(c.id)
+            
+            # Calculate real performance average
+            from app.db.models.result import AssessmentResult
+            from app.db.models.attempt import AssessmentAttempt
+            from app.db.models.assessment import Assessment
+            
+            perf_stmt = (
+                select(func.avg(AssessmentResult.percentage))
+                .join(AssessmentAttempt, AssessmentAttempt.id == AssessmentResult.attempt_id)
+                .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+                .where(
+                    Assessment.course_id == c.id,
+                    AssessmentResult.is_deleted == False
+                )
+            )
+            perf_res = await self.db.execute(perf_stmt)
+            avg_perf = perf_res.scalar() or 0.0
+
+            items.append(AdminCourseListItem(
+                id=c.id,
+                code=c.code,
+                title=c.name,
+                lecturer_name="Primary Lecturer", # We know it's them
+                student_count=student_count,
+                status="Active" if not c.is_deleted else "Deleted",
+                performance_avg=float(avg_perf)
+            ))
+
+        return items, total
+
     async def get_course_detail(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> LecturerCourseDetail:
-        from app.db.models.academic import Course, ClassSection, StudentEnrollment
+        from app.db.models.academic import (
+            Course, 
+            ClassSection, 
+            StudentEnrollment, 
+            Department, 
+            Option, 
+            CourseDepartment, 
+            CourseOption
+        )
         from app.db.models.auth import User, UserProfile
+        from app.db.models.result import AssessmentResult
+        from app.db.models.attempt import AssessmentAttempt
+        from app.db.models.assessment import Assessment
 
         # 1. Fetch Course
         stmt = select(Course).where(Course.id == course_id, Course.is_deleted == False)
@@ -380,22 +527,90 @@ class LecturerService:
 
         roster = []
         for user, profile in rows:
+            # Calculate student progress in this course
+            # Progress = (completed assessments / total assessments in course) * 100
+            total_ass_stmt = select(func.count(Assessment.id)).where(Assessment.course_id == course_id, Assessment.is_deleted == False)
+            total_ass_res = await self.db.execute(total_ass_stmt)
+            total_ass_count = total_ass_res.scalar_one() or 1
+            
+            comp_ass_stmt = (
+                select(func.count(AssessmentAttempt.id))
+                .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+                .where(
+                    Assessment.course_id == course_id,
+                    AssessmentAttempt.student_id == user.id,
+                    AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
+                    AssessmentAttempt.is_deleted == False
+                )
+            )
+            comp_ass_res = await self.db.execute(comp_ass_stmt)
+            comp_ass_count = comp_ass_res.scalar_one() or 0
+            
+            progress = int((comp_ass_count / total_ass_count) * 100)
+
             roster.append(LecturerCourseRosterItem(
                 id=user.id,
                 student_id=profile.student_id or "N/A",
                 name=f"{profile.first_name} {profile.last_name}",
                 email=user.email,
-                progress=80, # Mocked
-                last_submission="Yesterday" # Mocked
+                progress=progress,
+                last_submission="N/A" # Default
             ))
+
+        # 4. Fetch sections
+        sections_stmt = select(ClassSection).where(ClassSection.course_id == course_id, ClassSection.is_deleted == False)
+        sections_res = await self.db.execute(sections_stmt)
+        sections = [s.name for s in sections_res.scalars().all()]
+
+        # 5. Aggregate Department and Option names if not set
+        dept_name = course.department_name
+        if not dept_name:
+            dept_stmt = (
+                select(Department.name)
+                .join(CourseDepartment, CourseDepartment.department_id == Department.id)
+                .where(CourseDepartment.course_id == course_id)
+            )
+            dept_res = await self.db.execute(dept_stmt)
+            dept_names = dept_res.scalars().all()
+            if dept_names:
+                dept_name = ", ".join(dept_names)
+
+        opt_name = course.option_name
+        if not opt_name:
+            opt_stmt = (
+                select(Option.name)
+                .join(CourseOption, CourseOption.option_id == Option.id)
+                .where(CourseOption.course_id == course_id)
+            )
+            opt_res = await self.db.execute(opt_stmt)
+            opt_names = opt_res.scalars().all()
+            if opt_names:
+                opt_name = ", ".join(opt_names)
+
+        # 6. Calculate real performance average
+        perf_stmt = (
+            select(func.avg(AssessmentResult.percentage))
+            .join(AssessmentAttempt, AssessmentAttempt.id == AssessmentResult.attempt_id)
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .where(
+                Assessment.course_id == course_id,
+                AssessmentResult.is_deleted == False
+            )
+        )
+        perf_res = await self.db.execute(perf_stmt)
+        avg_perf = perf_res.scalar() or 0.0
 
         return LecturerCourseDetail(
             id=course.id,
             code=course.code,
-            title=course.name, # Use name from model
+            title=course.name,
+            description=course.description,
             student_count=count,
-            performance_avg=82, # Mocked
-            roster=roster
+            performance_avg=float(avg_perf),
+            roster=roster,
+            department_name=dept_name,
+            option_name=opt_name,
+            sections=sections
         )
 
     async def delete_course(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> bool:

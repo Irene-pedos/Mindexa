@@ -85,6 +85,11 @@ class UserRegisterRequest(MindexaSchema):
     level: str | None = Field(default=None, max_length=20)
     year: str | None = Field(default=None, max_length=20)
 
+    # Multi-select fields for lecturers
+    institution_ids: list[uuid.UUID] | None = Field(default=None, description="Institutions the lecturer is associated with.")
+    department_ids: list[uuid.UUID] | None = Field(default=None, description="Departments the lecturer is associated with.")
+    option_ids: list[uuid.UUID] | None = Field(default=None, description="Options the lecturer is associated with.")
+
     @field_validator("role")
     @classmethod
     def restrict_self_registration_roles(cls, v: UserRole) -> UserRole:

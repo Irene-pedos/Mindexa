@@ -341,6 +341,26 @@ class GradingService:
                 code="GRADE_ALREADY_FINAL",
             )
 
+        # 0. Authorization: Verify lecturer is assigned to this assessment's course
+        from app.db.models.academic import LecturerCourseAssignment, Course
+        from app.db.models.assessment import Assessment
+        from sqlalchemy import select
+        from app.core.exceptions import AuthorizationError
+
+        auth_stmt = (
+            select(LecturerCourseAssignment.id)
+            .join(Course, Course.id == LecturerCourseAssignment.course_id)
+            .join(Assessment, Assessment.course_id == Course.id)
+            .where(
+                LecturerCourseAssignment.lecturer_id == lecturer_id,
+                Assessment.id == existing.assessment_id,
+                LecturerCourseAssignment.is_active == True
+            )
+        )
+        auth_res = await self.db.execute(auth_stmt)
+        if not auth_res.scalars().first():
+            raise AuthorizationError("You are not authorized to grade responses for this course")
+
         # Determine final score
         if accept_ai_suggestion:
             if existing.ai_suggested_score is None:
@@ -459,6 +479,66 @@ class GradingService:
                 counts["queued"] += 1
 
         return counts
+
+    # -----------------------------------------------------------------------
+    # GET GRADING QUEUE
+    # -----------------------------------------------------------------------
+
+    async def get_grading_queue(
+        self,
+        lecturer_id: uuid.UUID,
+        assessment_id: uuid.UUID | None = None,
+        status: str | None = None,
+        priority: str | None = None,
+        page: int = 1,
+        page_size: int = 30,
+    ) -> tuple[list[GradingQueueItem], int]:
+        """
+        Fetch items from the grading queue, filtered by assessments the lecturer teaches.
+        
+        Logic:
+            1. Find all courses the lecturer is assigned to.
+            2. Find all assessments belonging to those courses.
+            3. Filter the queue by those assessment IDs.
+        """
+        from app.db.models.academic import LecturerCourseAssignment, Course
+        from app.db.models.assessment import Assessment
+        from sqlalchemy import select
+
+        # 1. Find lecturer's assessment IDs
+        stmt = (
+            select(Assessment.id)
+            .join(Course, Course.id == Assessment.course_id)
+            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
+            .where(LecturerCourseAssignment.lecturer_id == lecturer_id)
+        )
+        res = await self.db.execute(stmt)
+        allowed_assessment_ids = res.scalars().all()
+
+        if not allowed_assessment_ids:
+            return [], 0
+
+        # 2. List queue with allowed assessment filter
+        # If assessment_id is provided, ensure it's in the allowed list
+        if assessment_id and assessment_id not in allowed_assessment_ids:
+            return [], 0
+            
+        # Default status: show only active queue items if not specified
+        statuses = [status] if status else [
+            GradingQueueStatus.PENDING,
+            GradingQueueStatus.ASSIGNED,
+            GradingQueueStatus.IN_PROGRESS
+        ]
+
+        items, total = await self.grading_repo.list_queue(
+            assessment_ids=allowed_assessment_ids if not assessment_id else [assessment_id],
+            statuses=statuses,
+            priority=priority,
+            page=page,
+            page_size=page_size,
+        )
+        
+        return items, total
 
     # -----------------------------------------------------------------------
     # INTERNAL: COMPUTE AUTO SCORE

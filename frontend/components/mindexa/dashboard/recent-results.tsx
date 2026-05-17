@@ -26,8 +26,13 @@ export function RecentResults({ results }: { results: StudentRecentResult[] }) {
                 <div className="font-medium text-sm">
                   {res.assessment_title}
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  {new Date(res.released_at).toLocaleDateString()}
+                <div className="text-[10px] text-muted-foreground flex items-center gap-2">
+                  <span>{new Date(res.released_at).toLocaleDateString()}</span>
+                  {res.course_code && (
+                    <span className="font-mono bg-muted px-1 py-0.5 rounded">
+                      {res.course_code}
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="text-right">

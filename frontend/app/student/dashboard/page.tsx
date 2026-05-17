@@ -24,6 +24,7 @@ export default function StudentDashboard() {
   const [data, setData] = useState<StudentDashboardResponse | null>(null)
   const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(null)
   const [notifications, setNotifications] = useState<NotificationListResponse | null>(null)
+  const [resources, setResources] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -31,14 +32,16 @@ export default function StudentDashboard() {
     async function loadDashboard() {
       try {
         setLoadError(null)
-        const [dashboardData, scheduleData, notificationData] = await Promise.all([
+        const [dashboardData, scheduleData, notificationData, resourcesData] = await Promise.all([
           studentApi.getDashboard(),
           studentApi.getSchedule(),
-          notificationApi.getNotifications(false, 1, 5) // Get latest 5
+          notificationApi.getNotifications(false, 1, 5), // Get latest 5
+          studentApi.getPersonalResources()
         ])
         setData(dashboardData)
         setSchedule(scheduleData)
         setNotifications(notificationData)
+        setResources(resourcesData)
       } catch (err: any) {
         setLoadError(err.message || "Failed to load dashboard data")
       } finally {
@@ -160,7 +163,7 @@ export default function StudentDashboard() {
         <div className="xl:col-span-5 space-y-6">
           <PerformanceChart data={data?.performance_trend} />
           <RecentResults results={data?.recent_results ?? []} />
-          <StudyResources />
+          <StudyResources resources={resources} />
           <AiStudyEntry />
         </div>
       </div>

@@ -2,7 +2,8 @@
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import Link from "next/link";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,19 +22,17 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
   Award,
   Plus,
   Loader2,
-  Mail,
   Calendar,
   ExternalLink,
   Upload,
   FileText,
   Trash2,
-  Link,
+  Database,
+  Users,
 } from "lucide-react";
 import {
   lecturerApi,
@@ -43,6 +42,7 @@ import {
 } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { format } from "date-fns";
+import { Progress } from "@/components/ui/progress";
 
 export default function LecturerCourseDetail() {
   const params = useParams();
@@ -52,11 +52,6 @@ export default function LecturerCourseDetail() {
   const [course, setCourse] = useState<ICourseDetail | null>(null);
   const [materials, setMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [loading, setLoading] = useState(true);
-
-  // Add Student State
-  const [addDialogOpen, setAddDialogOpen] = useState(false);
-  const [studentEmail, setStudentEmail] = useState("");
-  const [adding, setAdding] = useState(false);
 
   // Material Upload State
   const [uploading, setUploading] = useState(false);
@@ -75,6 +70,27 @@ export default function LecturerCourseDetail() {
   // Delete Course State
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const loadCourse = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [courseData, materialsData] = await Promise.all([
+        lecturerApi.getCourseDetail(id),
+        lecturerApi.getCourseMaterials(id),
+      ]);
+      setCourse(courseData);
+      setMaterials(materialsData);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Failed to load course details";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => {
+    loadCourse();
+  }, [loadCourse]);
 
   const handleDeleteCourse = async () => {
     setDeleting(true);
@@ -115,46 +131,6 @@ export default function LecturerCourseDetail() {
     }
   };
 
-  const loadCourse = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [courseData, materialsData] = await Promise.all([
-        lecturerApi.getCourseDetail(id),
-        lecturerApi.getCourseMaterials(id),
-      ]);
-      setCourse(courseData);
-      setMaterials(materialsData);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load course details";
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [id]);
-
-  useEffect(() => {
-    loadCourse();
-  }, [loadCourse]);
-
-  const handleAddStudent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!studentEmail) return;
-
-    setAdding(true);
-    try {
-      await lecturerApi.enrollStudent(id, studentEmail);
-      toast.success("Student added successfully");
-      setStudentEmail("");
-      setAddDialogOpen(false);
-      loadCourse(); // Refresh roster
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to add student";
-      toast.error(msg);
-    } finally {
-      setAdding(false);
-    }
-  };
-
   const openRecord = async (studentId: string, name: string) => {
     setSelectedStudent({ id: studentId, name });
     setRecordDialogOpen(true);
@@ -175,8 +151,25 @@ export default function LecturerCourseDetail() {
 
   if (loading) {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="size-10 animate-spin text-muted-foreground" />
+      <div className="space-y-8">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Loader2 className="size-10 animate-spin text-primary" />
+            <div>
+              <div className="h-8 w-64 bg-muted animate-pulse rounded-md" />
+              <div className="h-4 w-48 bg-muted animate-pulse rounded-md mt-2" />
+            </div>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="lg:col-span-8 space-y-8">
+            <div className="h-32 w-full bg-muted animate-pulse rounded-xl" />
+            <div className="h-64 w-full bg-muted animate-pulse rounded-xl" />
+          </div>
+          <div className="lg:col-span-4 space-y-6">
+            <div className="h-48 w-full bg-muted animate-pulse rounded-xl" />
+          </div>
+        </div>
       </div>
     );
   }
@@ -185,6 +178,9 @@ export default function LecturerCourseDetail() {
     return (
       <div className="text-center py-20">
         <h2 className="text-xl font-medium">Course not found</h2>
+        <Button asChild variant="outline" className="mt-4">
+          <Link href="/lecturer/courses">Back to My Courses</Link>
+        </Button>
       </div>
     );
   }
@@ -196,9 +192,26 @@ export default function LecturerCourseDetail() {
           <h1 className="text-3xl font-semibold tracking-tight">
             {course.title}
           </h1>
-          <p className="text-muted-foreground">
+          <p className="text-muted-foreground mt-1">
             {course.code} • {course.student_count} students enrolled
           </p>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {course.department_name && (
+              <Badge variant="outline" className="bg-primary/5">
+                {course.department_name}
+              </Badge>
+            )}
+            {course.option_name && (
+              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                {course.option_name}
+              </Badge>
+            )}
+            {course.sections?.map(section => (
+              <Badge key={section} variant="secondary">
+                {section}
+              </Badge>
+            ))}
+          </div>
         </div>
         <div className="flex gap-3">
           <Button
@@ -208,130 +221,169 @@ export default function LecturerCourseDetail() {
           >
             <Trash2 className="mr-2 size-5" /> Delete Course
           </Button>
-          <Button onClick={() => setAddDialogOpen(true)}>
-            <Plus className="mr-2 size-5" /> Add Student
+          <Button asChild>
+             <Link href="/lecturer/assessments/new">
+               <Plus className="mr-2 size-5" /> New Assessment
+             </Link>
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        <Card className="lg:col-span-8">
-          <CardHeader>
-            <CardTitle>Student Roster</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Student ID</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Email</TableHead>
-                  <TableHead>Progress</TableHead>
-                  <TableHead>Last Submission</TableHead>
-                  <TableHead></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {course.roster.length === 0 ? (
+        {/* Main Content Area */}
+        <div className="lg:col-span-8 space-y-8">
+          {/* Performance Overview */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Award className="size-5 text-amber-500" /> Average Performance
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-2 flex justify-between text-sm">
+                <span className="text-muted-foreground">Course Wide Average</span>
+                <span className="font-semibold">{course.performance_avg.toFixed(1)}%</span>
+              </div>
+              <Progress value={course.performance_avg} className="h-3" />
+            </CardContent>
+          </Card>
+
+          {/* Description */}
+          {course.description && (
+            <Card>
+              <CardHeader>
+                <CardTitle>Course Description</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-muted-foreground leading-relaxed">
+                  {course.description}
+                </p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Student Roster */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Student Roster</CardTitle>
+                  <CardDescription>Performance tracking for enrolled students</CardDescription>
+                </div>
+                <Badge variant="outline" className="font-mono">{course.student_count} Enrolled</Badge>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
                   <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className="text-center py-10 text-muted-foreground"
-                    >
-                      No students enrolled in this course yet.
-                    </TableCell>
+                    <TableHead>Student ID</TableHead>
+                    <TableHead>Name</TableHead>
+                    <TableHead>Email</TableHead>
+                    <TableHead>Progress</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
                   </TableRow>
-                ) : (
-                  course.roster.map((student) => (
-                    <TableRow key={student.id}>
-                      <TableCell className="font-mono">
-                        {student.student_id}
-                      </TableCell>
-                      <TableCell className="font-medium">
-                        {student.name}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {student.email}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-emerald-600 rounded-full"
-                              style={{ width: `${student.progress}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-medium">
-                            {student.progress}%
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm">
-                        {student.last_submission || "Never"}
-                      </TableCell>
-                      <TableCell>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openRecord(student.id, student.name)}
-                        >
-                          View Record
-                        </Button>
+                </TableHeader>
+                <TableBody>
+                  {course.roster.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="text-center py-10 text-muted-foreground"
+                      >
+                        No students enrolled in this course yet.
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <div className="lg:col-span-4 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Course Overview</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground">Enrolled Students</span>
-                <span className="font-semibold text-lg">
-                  {course.student_count}
-                </span>
-              </div>
-              <div>
-                <div className="flex justify-between text-sm mb-2 font-medium">
-                  <span className="text-muted-foreground">
-                    Overall Performance
-                  </span>
-                  <span>{course.performance_avg}%</span>
-                </div>
-                <div className="h-2.5 bg-muted rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-primary rounded-full"
-                    style={{ width: `${course.performance_avg}%` }}
-                  />
-                </div>
-              </div>
+                  ) : (
+                    course.roster.map((student) => (
+                      <TableRow key={student.id}>
+                        <TableCell className="font-mono text-sm">
+                          {student.student_id}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {student.name}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {student.email}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className="h-full bg-primary rounded-full transition-all"
+                                style={{ width: `${student.progress}%` }}
+                              />
+                            </div>
+                            <span className="text-xs font-medium">
+                              {student.progress}%
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openRecord(student.id, student.name)}
+                          >
+                            View Record
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
+        </div>
 
+        {/* Sidebar Info Area */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* Quick Actions Card */}
           <Card>
             <CardHeader>
-              <CardTitle>Quick Links</CardTitle>
+              <CardTitle>Lecturer Actions</CardTitle>
+              <CardDescription>Administrative workflows for this course</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              <Button asChild className="w-full" size="lg">
-                <Link href="/lecturer/assessments">Create Assessment</Link>
+              <Button asChild className="w-full justify-start" size="lg">
+                <Link href="/lecturer/assessments/new">
+                  <Plus className="mr-2 size-4" /> Create Assessment
+                </Link>
               </Button>
-              <Button asChild variant="outline" className="w-full" size="lg">
-                <Link href="/lecturer/question-bank">Question Bank</Link>
+              <Button asChild variant="outline" className="w-full justify-start" size="lg">
+                <Link href="/lecturer/question-bank">
+                  <Database className="mr-2 size-4" /> Question Bank
+                </Link>
               </Button>
             </CardContent>
           </Card>
 
+          {/* Quick Info Card */}
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-base font-semibold">Course Materials</CardTitle>
+            <CardHeader>
+              <CardTitle>Quick Info</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground flex items-center gap-2"><Users className="size-4" /> Enrolled Students</span>
+                <span className="font-medium">{course.student_count}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground flex items-center gap-2"><Plus className="size-4" /> Course Sections</span>
+                <span className="font-medium">{course.sections?.length || 0}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-4" /> Course Code</span>
+                <span className="font-medium">{course.code}</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Learning Materials Card */}
+          <Card>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle>Course Materials</CardTitle>
               <Button
                 variant="ghost"
                 size="icon"
@@ -352,7 +404,7 @@ export default function LecturerCourseDetail() {
               {materials.length === 0 ? (
                 <div className="text-center py-6 border-2 border-dashed rounded-lg">
                   <FileText className="size-8 mx-auto text-muted-foreground/50 mb-2" />
-                  <p className="text-xs text-muted-foreground">No materials uploaded yet.</p>
+                  <p className="text-sm text-muted-foreground">No materials uploaded yet.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -363,14 +415,14 @@ export default function LecturerCourseDetail() {
                           <FileText className="size-4" />
                         </div>
                         <div className="truncate">
-                          <p className="text-xs font-medium truncate">{m.display_name || m.original_filename}</p>
-                          <p className="text-[10px] text-muted-foreground">
+                          <p className="text-sm font-medium truncate">{m.display_name || m.original_filename}</p>
+                          <p className="text-xs text-muted-foreground">
                             {(m.file_size_bytes / 1024).toFixed(0)} KB • {m.file_extension.toUpperCase()}
                           </p>
                         </div>
                       </div>
                       <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ExternalLink className="size-3" />
+                        <ExternalLink className="size-4" />
                       </Button>
                     </div>
                   ))}
@@ -380,56 +432,6 @@ export default function LecturerCourseDetail() {
           </Card>
         </div>
       </div>
-
-      {/* Add Student Dialog */}
-      <Dialog open={addDialogOpen} onOpenChange={setAddDialogOpen}>
-        <DialogContent>
-          <form onSubmit={handleAddStudent}>
-            <DialogHeader>
-              <DialogTitle>Add Student to Course</DialogTitle>
-              <DialogDescription>
-                Enter the student&apos;s email address to enroll them in{" "}
-                {course.title}.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="py-6 space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Student Email</Label>
-                <div className="relative">
-                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-                  <Input
-                    id="email"
-                    type="email"
-                    placeholder="student@mindexa.dev"
-                    className="pl-9"
-                    value={studentEmail}
-                    onChange={(e) => setStudentEmail(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setAddDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={adding}>
-                {adding ? (
-                  <>
-                    <Loader2 className="mr-2 size-4 animate-spin" /> Adding...
-                  </>
-                ) : (
-                  "Enroll Student"
-                )}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       {/* Student Record Dialog */}
       <Dialog open={recordDialogOpen} onOpenChange={setRecordDialogOpen}>
@@ -450,19 +452,19 @@ export default function LecturerCourseDetail() {
               {/* Header Info */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                  <p className="text-xs uppercase font-medium text-muted-foreground">
                     Student ID
                   </p>
                   <p className="text-sm font-mono">{record.student_id}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                  <p className="text-xs uppercase font-medium text-muted-foreground">
                     Email
                   </p>
                   <p className="text-sm truncate">{record.email}</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                  <p className="text-xs uppercase font-medium text-muted-foreground">
                     Enrolled
                   </p>
                   <p className="text-sm">
@@ -470,7 +472,7 @@ export default function LecturerCourseDetail() {
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                  <p className="text-xs uppercase font-medium text-muted-foreground">
                     Course Progress
                   </p>
                   <p className="text-sm font-semibold text-emerald-600">
@@ -516,7 +518,6 @@ export default function LecturerCourseDetail() {
                                   ? "secondary"
                                   : "outline"
                               }
-                              className="text-[10px] py-0 h-4"
                             >
                               {att.status}
                             </Badge>
@@ -528,7 +529,7 @@ export default function LecturerCourseDetail() {
                               <p className="text-sm font-bold">
                                 {att.percentage}%
                               </p>
-                              <p className="text-[10px] text-muted-foreground">
+                              <p className="text-xs text-muted-foreground">
                                 {att.score} / {att.max_score}
                               </p>
                             </div>

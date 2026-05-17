@@ -92,12 +92,67 @@ class SubjectResponse(BaseAuditedResponse):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# DEPARTMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+class DepartmentCreate(MindexaSchema):
+    institution_id: uuid.UUID
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=2, max_length=20)
+
+
+class DepartmentResponse(BaseAuditedResponse):
+    institution_id: uuid.UUID
+    name: str
+    code: str
+    is_active: bool
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OPTION
+# ─────────────────────────────────────────────────────────────────────────────
+
+class OptionCreate(MindexaSchema):
+    department_id: uuid.UUID
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=2, max_length=20)
+
+
+class OptionResponse(BaseAuditedResponse):
+    department_id: uuid.UUID
+    name: str
+    code: str
+    is_active: bool
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CLASS GROUP
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ClassGroupCreate(MindexaSchema):
+    option_id: uuid.UUID
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=2, max_length=20)
+    level: int | None = None
+
+
+class ClassGroupResponse(BaseAuditedResponse):
+    option_id: uuid.UUID
+    name: str
+    code: str
+    level: int | None
+    is_active: bool
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # COURSE
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CourseCreate(MindexaSchema):
     institution_id: uuid.UUID
-    department_id: uuid.UUID | None = None
+    department_ids: list[uuid.UUID] | None = Field(default=None, description="Departments this course is offered to")
+    option_ids: list[uuid.UUID] | None = Field(default=None, description="Options this course is offered to")
+    class_group_ids: list[uuid.UUID] | None = Field(default=None, description="Classes this course is offered to")
     academic_period_id: uuid.UUID
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=255)
@@ -110,17 +165,22 @@ class CourseUpdate(MindexaSchema):
     description: str | None = None
     credit_hours: int | None = Field(default=None, ge=1, le=30)
     is_active: bool | None = None
+    department_ids: list[uuid.UUID] | None = None
+    option_ids: list[uuid.UUID] | None = None
+    class_group_ids: list[uuid.UUID] | None = None
 
 
 class CourseResponse(BaseAuditedResponse):
     institution_id: uuid.UUID
-    department_id: uuid.UUID | None
     academic_period_id: uuid.UUID
     code: str
     title: str = Field(validation_alias="name")
     description: str | None
     credit_hours: int | None
     is_active: bool
+    department_ids: list[uuid.UUID] = []
+    option_ids: list[uuid.UUID] = []
+    class_group_ids: list[uuid.UUID] = []
 
 
 class CourseSummaryResponse(MindexaSchema):

@@ -33,11 +33,22 @@ class LecturerChartDataPoint(BaseModel):
     manual: int
     ai: int
 
+class LecturerIntegrityAlert(BaseModel):
+    id: uuid.UUID
+    student_name: str
+    student_id: str
+    assessment_title: str
+    event_type: str
+    created_at: datetime
+    risk_score: int
+    severity: str
+
 class LecturerDashboardResponse(BaseModel):
     summary: LecturerDashboardSummary
     pending_queue: list[LecturerPendingItem]
     recent_submissions: list[LecturerRecentSubmission]
     chart_data: List[LecturerChartDataPoint] = []
+    recent_alerts: List[LecturerIntegrityAlert] = []
 
 class LecturerCourseRosterItem(BaseModel):
     id: uuid.UUID
@@ -52,8 +63,11 @@ class LecturerCourseDetail(BaseModel):
     code: str
     title: str
     student_count: int
-    performance_avg: int
-    roster: list[LecturerCourseRosterItem]
+    performance_avg: float
+    roster: List[LecturerCourseRosterItem]
+    department_name: Optional[str] = None
+    option_name: Optional[str] = None
+    sections: List[str] = []
 
 
 # -- Add Student & Record Viewing ---------------------------------------------

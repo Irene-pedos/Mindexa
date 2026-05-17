@@ -2,9 +2,17 @@
 import { apiClient } from "./client";
 
 export const assessmentApi = {
-  getAssessments: (params?: Record<string, string | number>) => {
-    const query = params ? new URLSearchParams(params as Record<string, string>).toString() : "";
-    return apiClient(query ? `/assessments?${query}` : "/assessments");
+  getAssessments: (params?: Record<string, any>) => {
+    const query = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null) {
+          query.append(key, value.toString());
+        }
+      });
+    }
+    const queryString = query.toString();
+    return apiClient(queryString ? `/assessments?${queryString}` : "/assessments");
   },
   getAssessmentById: (id: string) => apiClient(`/assessments/${id}`),
   createAssessment: (data: Record<string, unknown>) => apiClient("/assessments", { method: "POST", body: JSON.stringify(data) }),

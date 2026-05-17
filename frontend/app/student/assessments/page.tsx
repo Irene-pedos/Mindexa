@@ -130,9 +130,9 @@ export default function StudentAssessmentsPage() {
               <CardTitle className="text-lg font-medium tracking-tight">
                 {assessment.title}
               </CardTitle>
-              <CardDescription className="flex items-center gap-2">
-                <BookOpen className="size-4" />
-                {assessment.id.slice(0, 8)}
+              <CardDescription className="flex items-center gap-2 text-xs">
+                <BookOpen className="size-3.5" />
+                {assessment.course_name ? `${assessment.course_name} (${assessment.course_code})` : "General Assessment"}
               </CardDescription>
             </div>
             <Badge variant={status.variant} className={status.color}>
@@ -148,12 +148,12 @@ export default function StudentAssessmentsPage() {
               <div>
                 <div className="font-medium">
                   {assessment.window_start
-                    ? new Date(assessment.window_start).toLocaleDateString()
+                    ? `${new Date(assessment.window_start).toLocaleDateString()} ${new Date(assessment.window_start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                     : "Anytime"}
                 </div>
                 <div className="text-muted-foreground">
                   {assessment.window_end
-                    ? `Until ${new Date(assessment.window_end).toLocaleDateString()}`
+                    ? `Until ${new Date(assessment.window_end).toLocaleDateString()} ${new Date(assessment.window_end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
                     : "No deadline"}
                 </div>
               </div>

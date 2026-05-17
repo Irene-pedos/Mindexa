@@ -74,10 +74,10 @@ export default function LecturerCoursesPage() {
                 <div>
                   <div className="flex justify-between text-sm mb-2">
                     <span className="text-muted-foreground">Overall Performance</span>
-                    <span>82%</span> {/* Mocked average for now */}
+                    <span className="font-medium">{course.performance_avg}%</span>
                   </div>
-                  <div className="h-2 bg-muted rounded-full">
-                    <div className="h-full bg-primary rounded-full" style={{ width: `82%` }} />
+                  <div className="h-2 bg-muted rounded-full overflow-hidden">
+                    <div className="h-full bg-primary rounded-full transition-all" style={{ width: `${course.performance_avg}%` }} />
                   </div>
                 </div>
 

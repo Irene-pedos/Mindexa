@@ -259,46 +259,60 @@ export default function LecturerDashboard() {
               <Eye className="size-5" /> Live Supervision Alerts
             </CardTitle>
             <CardDescription>
-              Real-time suspicious behavior (last 30 minutes)
+              Real-time suspicious behavior (last 24 hours)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Keeping the mocked alerts for now as requested for rich visuals */}
-            <div className="rounded-xl border border-red-200 bg-red-50 dark:bg-red-950/30 p-5">
-              <div className="flex items-start gap-4">
-                <AlertTriangle className="size-6 text-red-600 mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-medium">S3921 – Jordan Lee</div>
-                  <div className="text-sm">
-                    Tab switching detected 3 times during Database CAT
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    14:32 • Risk Score: 85%
+            {data?.recent_alerts.length === 0 ? (
+              <p className="text-sm text-muted-foreground py-8 text-center border rounded-xl border-dashed">
+                No alerts in the last 24 hours.
+              </p>
+            ) : (
+              data?.recent_alerts.map((alert) => (
+                <div
+                  key={alert.id}
+                  className={`rounded-xl border p-5 ${
+                    alert.severity === "high"
+                      ? "border-red-200 bg-red-50 dark:bg-red-950/30"
+                      : alert.severity === "medium"
+                        ? "border-amber-200 bg-amber-50 dark:bg-amber-950/30"
+                        : "bg-muted/30"
+                  }`}
+                >
+                  <div className="flex items-start gap-4">
+                    <AlertTriangle
+                      className={`size-6 mt-0.5 ${
+                        alert.severity === "high"
+                          ? "text-red-600"
+                          : alert.severity === "medium"
+                            ? "text-amber-600"
+                            : "text-muted-foreground"
+                      }`}
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        {alert.student_id} – {alert.student_name}
+                      </div>
+                      <div className="text-sm">
+                        {alert.event_type.replace(/_/g, " ")} detected during{" "}
+                        {alert.assessment_title}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        {new Date(alert.created_at).toLocaleTimeString()} • Risk
+                        Score: {alert.risk_score}%
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant={alert.severity === "high" ? "destructive" : "outline"}
+                      asChild
+                    >
+                      <Link href="/lecturer/supervision">View</Link>
+                    </Button>
                   </div>
                 </div>
-                <Button size="sm" variant="destructive">
-                  View Log
-                </Button>
-              </div>
-            </div>
-
-            <div className="rounded-xl border p-5">
-              <div className="flex items-start gap-4">
-                <AlertTriangle className="size-6 text-amber-600 mt-0.5" />
-                <div className="flex-1">
-                  <div className="font-medium">S2847 – Taylor Kim</div>
-                  <div className="text-sm">
-                    Extended inactivity (4.5 min) in Algorithms Quiz
-                  </div>
-                  <div className="text-xs text-muted-foreground mt-2">
-                    14:15 • Risk Score: 62%
-                  </div>
-                </div>
-                <Button size="sm" variant="outline">
-                  Dismiss
-                </Button>
-              </div>
-            </div>
+              ))
+            )}
           </CardContent>
         </Card>
       </div>

@@ -145,13 +145,13 @@ export default function LecturerGradingQueue() {
         <Card className="bg-emerald-50/50 border-emerald-100">
           <CardHeader className="pb-2">
             <CardDescription className="text-emerald-700 font-medium">
-              Auto-Graded
+              AI Evaluated (Pending)
             </CardDescription>
-            <CardTitle className="text-3xl">18</CardTitle>
+            <CardTitle className="text-3xl">{data.filter(d => d.ai_pre_graded).length}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-emerald-600">
-              Closed questions finalized
+              Closed questions & AI suggestions
             </p>
           </CardContent>
         </Card>
@@ -161,7 +161,7 @@ export default function LecturerGradingQueue() {
               Pending Review
             </CardDescription>
             <CardTitle className="text-3xl">
-              {data.filter((d) => d.status !== "COMPLETED").length}
+              {data.filter((d) => d.status !== "COMPLETED" && d.status !== "APPEALED").length}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -175,7 +175,7 @@ export default function LecturerGradingQueue() {
             <CardDescription className="text-blue-700 font-medium">
               Appeals
             </CardDescription>
-            <CardTitle className="text-3xl">2</CardTitle>
+            <CardTitle className="text-3xl">{data.filter(d => d.status === "APPEALED").length}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-xs text-blue-600">Student review requests</p>

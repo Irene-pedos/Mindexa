@@ -140,6 +140,23 @@ interface FetchOptions extends RequestInit {
   requireAuth?: boolean;
 }
 
+/**
+ * Helper to get current token from memory or storage.
+ */
+export const getToken = () => {
+  // 1. Check memory first (fastest and most up-to-date in current session)
+  if (accessToken) return accessToken;
+
+  // 2. Fallback to localStorage if in browser
+  if (typeof window !== "undefined") {
+    const token = localStorage.getItem("accessToken");
+    if (token && token !== "null" && token !== "undefined") {
+      return token;
+    }
+  }
+  return null;
+};
+
 export async function apiClient(endpoint: string, options: FetchOptions = {}) {
   const { requireAuth = true, headers, ...customConfig } = options;
 
@@ -158,21 +175,6 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
       ...config.headers,
     };
   }
-
-  // Helper to get current token from memory or storage
-  const getToken = () => {
-    // 1. Check memory first (fastest and most up-to-date in current session)
-    if (accessToken) return accessToken;
-
-    // 2. Fallback to localStorage if in browser
-    if (typeof window !== "undefined") {
-      const token = localStorage.getItem("accessToken");
-      if (token && token !== "null" && token !== "undefined") {
-        return token;
-      }
-    }
-    return null;
-  };
 
   const currentToken = getToken();
 
@@ -277,6 +279,12 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
   }
 
   if (!response.ok) {
+    // If we still have a 401 and it's a required auth request, 
+    // it means the refresh flow failed or didn't happen correctly.
+    if (response.status === 401 && requireAuth) {
+      notifySessionInvalidated();
+    }
+
     let errorData;
     try {
       errorData = await response.json();

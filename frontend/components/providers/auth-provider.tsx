@@ -11,6 +11,7 @@ import React, {
 import { authApi } from "@/lib/api/auth";
 import { useRouter } from "next/navigation";
 import { setAccessToken } from "@/lib/api/client";
+import { toast } from "sonner";
 
 type AuthUser = {
   id: string;
@@ -24,6 +25,11 @@ type AuthUser = {
     student_id?: string | null;
     staff_id?: string | null;
     phone_number?: string | null;
+    college?: string | null;
+    department?: string | null;
+    option?: string | null;
+    level?: string | null;
+    year?: string | null;
   } | null;
 };
 
@@ -54,6 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // isInitializing stays true until the first localStorage read is done
   const [isInitializing, setIsInitializing] = useState(true);
   const router = useRouter();
+  const [sessionExpiredToastShown, setSessionExpiredToastShown] = useState(false);
 
   const clearSession = useCallback(() => {
     setUser(null);
@@ -135,7 +142,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearSession();
       setIsInitializing(false);
       setLoading(false);
-      // No automatic redirect here, let the layout guards handle it
+
+      if (!sessionExpiredToastShown) {
+        toast.error("Your session has expired", {
+          description: "Please log in again to continue.",
+          id: "session-expired",
+        });
+        setSessionExpiredToastShown(true);
+        // Reset after 5 seconds to allow showing it again if it happens later
+        setTimeout(() => setSessionExpiredToastShown(false), 5000);
+      }
+      
+      // Proactively redirect to login if we are on a protected route.
+      // RoleGuard also handles this, but a direct redirect here is more robust
+      // especially when multiple API calls fail simultaneously.
+      if (typeof window !== "undefined") {
+        const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/reset-password"];
+        const isPublic = publicRoutes.some(route => 
+          window.location.pathname === route || window.location.pathname.startsWith(route + "/")
+        );
+        
+        if (!isPublic) {
+          router.replace("/login");
+        }
+      }
     };
 
     window.addEventListener(

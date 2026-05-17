@@ -184,15 +184,15 @@ class QuestionSummaryResponse(BaseModel):
     question_type: str
     difficulty: str
     grading_mode: str
-    status: str
-    subject: str | None
+    status: str | None = None
+    subject: str | None = None
     topic: str | None = Field(None, validation_alias="topic_tag")
-    bloom_level: str | None
+    bloom_level: str | None = None
     suggested_marks: int | None = Field(None, alias="marks")
     is_active: bool
     source_type: str
     version_number: int = Field(1, validation_alias="version")
-    parent_question_id: uuid.UUID | None
+    parent_question_id: uuid.UUID | None = None
     created_by_id: uuid.UUID
     created_at: datetime
 
@@ -204,30 +204,30 @@ class QuestionDetailResponse(BaseModel):
 
     id: uuid.UUID
     content: str
-    explanation: str | None
-    hint: str | None
+    explanation: str | None = None
+    hint: str | None = None
     question_type: str
     difficulty: str
     grading_mode: str
-    status: str
+    status: str | None = None
     source_type: str
-    subject: str | None
+    subject: str | None = None
     topic: str | None = Field(None, validation_alias="topic_tag")
-    bloom_level: str | None
+    bloom_level: str | None = None
     suggested_marks: int | None = Field(None, alias="marks")
-    estimated_time_minutes: int | None
-    fill_blank_template: str | None
-    correct_order_json: str | None
+    estimated_time_minutes: int | None = None
+    fill_blank_template: str | None = None
+    correct_order_json: str | None = None
     is_active: bool
     version_number: int = Field(1, validation_alias="version")
-    parent_question_id: uuid.UUID | None
+    parent_question_id: uuid.UUID | None = None
     created_by_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
     options: list[QuestionOptionResponse] = []
     tags: list[QuestionTagResponse] = []
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class QuestionListResponse(BaseModel):

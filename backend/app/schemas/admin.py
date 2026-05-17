@@ -40,6 +40,7 @@ class AdminCourseListItem(BaseModel):
     lecturer_name: str
     student_count: int
     status: str
+    performance_avg: float = 0.0
 
 class AdminCourseListResponse(BaseModel):
     items: List[AdminCourseListItem]

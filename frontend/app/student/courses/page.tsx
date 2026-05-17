@@ -13,12 +13,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { BookOpen, Users, Calendar, Award } from "lucide-react";
 import Link from "next/link";
-import { studentApi } from "@/lib/api/student";
-import { AdminCourseListItem } from "@/lib/api/admin";
+import { studentApi, StudentCourseListItem } from "@/lib/api/student";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function StudentCoursesPage() {
-  const [courses, setCourses] = useState<AdminCourseListItem[]>([]);
+  const [courses, setCourses] = useState<StudentCourseListItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -82,12 +81,12 @@ export default function StudentCoursesPage() {
                 <div>
                   <div className="flex justify-between text-sm mb-2">
                     <span>Course Progress</span>
-                    <span className="font-medium">75%</span> {/* Mocked */}
+                    <span className="font-medium">{course.progress}%</span>
                   </div>
                   <div className="h-2 bg-muted rounded-full overflow-hidden">
                     <div
                       className="h-full bg-primary rounded-full transition-all"
-                      style={{ width: `75%` }}
+                      style={{ width: `${course.progress}%` }}
                     />
                   </div>
                 </div>

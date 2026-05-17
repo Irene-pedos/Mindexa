@@ -257,18 +257,18 @@ class GradingRepository:
 
     async def list_queue(
         self,
-        assessment_id: uuid.UUID | None = None,
-        status: str | None = None,
+        assessment_ids: list[uuid.UUID] | None = None,
+        statuses: list[str] | None = None,
         assigned_to_id: uuid.UUID | None = None,
         priority: str | None = None,
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[GradingQueueItem], int]:
-        filters = []
-        if assessment_id:
-            filters.append(GradingQueueItem.assessment_id == assessment_id)
-        if status:
-            filters.append(GradingQueueItem.status == status)
+        filters = [GradingQueueItem.is_deleted == False]
+        if assessment_ids:
+            filters.append(GradingQueueItem.assessment_id.in_(assessment_ids))
+        if statuses:
+            filters.append(GradingQueueItem.status.in_(statuses))
         if assigned_to_id:
             filters.append(GradingQueueItem.assigned_to_id == assigned_to_id)
         if priority:

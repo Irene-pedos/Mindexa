@@ -1,7 +1,7 @@
 // app/(student)/resources/page.tsx
 "use client"
 
-import React, { useState } from "react"
+import React, { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
@@ -15,21 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { format } from "date-fns"
 import { toast } from "sonner"
-
-interface Resource {
-  id: number
-  name: string
-  type: string
-  size: string
-  date: string
-  subject: string
-  url?: string
-}
-
-const initialResources: Resource[] = [
-  { id: 1, name: "Lecture Notes - Database Systems Week 7.pdf", type: "PDF", size: "2.4 MB", date: "Mar 25, 2026", subject: "Database Systems" },
-  { id: 2, name: "Past Exam Papers - Algorithms 2025.pdf", type: "PDF", size: "1.8 MB", date: "Mar 20, 2026", subject: "Algorithms" },
-]
+import { studentApi, StudentResourceResponse } from "@/lib/api/student"
 
 interface UploadingFile {
   id: number
@@ -39,85 +25,83 @@ interface UploadingFile {
 }
 
 export default function StudentResourcesPage() {
-  const [resources, setResources] = useState(initialResources)
+  const [resources, setResources] = useState<StudentResourceResponse[]>([])
+  const [loading, setLoading] = useState(true)
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
-  const [viewingResource, setViewingResource] = useState<Resource | null>(null)
+  const [viewingResource, setViewingResource] = useState<StudentResourceResponse | null>(null)
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  useEffect(() => {
+    loadResources()
+  }, [])
+
+  const loadResources = async () => {
+    try {
+      const data = await studentApi.getPersonalResources()
+      setResources(data)
+    } catch (err) {
+      toast.error("Failed to load resources")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files
     if (!files) return
 
-    Array.from(files).forEach((file, index) => {
-      const uploadId = Date.now() + index
+    for (const file of Array.from(files)) {
+      const uploadId = Date.now()
       const newUpload = {
         id: uploadId,
         name: file.name,
-        progress: 0,
+        progress: 10,
         size: (file.size / (1024 * 1024)).toFixed(1) + " MB",
       }
 
       setUploadingFiles((prev) => [...prev, newUpload])
 
-      // Simulate real upload progress
-      let progress = 0
-      const interval = setInterval(() => {
-        progress += Math.random() * 25
-        if (progress > 100) progress = 100
+      try {
+        const formData = new FormData()
+        formData.append("file", file)
 
-        setUploadingFiles((prev) =>
-          prev.map((item) =>
-            item.id === uploadId ? { ...item, progress } : item
-          )
-        )
-
-        if (progress >= 100) {
-          clearInterval(interval)
-          setTimeout(() => {
-            const newResource: Resource = {
-              id: Date.now(),
-              name: file.name,
-              type: file.name.split(".").pop()?.toUpperCase() || "FILE",
-              size: newUpload.size,
-              date: format(new Date(), "MMM d, yyyy"),
-              subject: "General",
-              url: URL.createObjectURL(file),
-            }
-            setResources((prev) => [newResource, ...prev])
-            setUploadingFiles((prev) => prev.filter((item) => item.id !== uploadId))
-            toast.success(`${file.name} uploaded successfully`)
-          }, 600)
-        }
-      }, 300)
-    })
+        await studentApi.uploadPersonalResource(formData)
+        toast.success(`${file.name} uploaded successfully`)
+        loadResources()
+      } catch (err) {
+        toast.error(`Failed to upload ${file.name}`)
+      } finally {
+        setUploadingFiles((prev) => prev.filter((item) => item.id !== uploadId))
+      }
+    }
 
     // Reset input
     e.target.value = ""
   }
 
-  const deleteResource = (id: number) => {
-    setResources(resources.filter((r) => r.id !== id))
-    toast.info("Resource removed")
+  const deleteResource = async (id: string) => {
+    try {
+      await studentApi.deletePersonalResource(id)
+      setResources(resources.filter((r) => r.id !== id))
+      toast.info("Resource removed")
+    } catch (err) {
+      toast.error("Failed to delete resource")
+    }
   }
 
-  const handleDownload = (resource: Resource) => {
-    if (!resource.url) {
-      toast.error("Download not available for this mock resource")
-      return
-    }
-    const link = document.createElement("a")
-    link.href = resource.url
-    link.download = resource.name
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
+  const handleDownload = (resource: StudentResourceResponse) => {
+    toast.error("Download for personal resources not yet implemented in this view")
   }
 
-  const handleView = (resource: Resource) => {
-    if (!resource.url) {
-      toast.error("Preview not available for this mock resource")
-      return
-    }
-    setViewingResource(resource)
+  const handleView = (resource: StudentResourceResponse) => {
+    toast.error("Preview for personal resources not yet implemented in this view")
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-[60vh] items-center justify-center">
+        <Loader2 className="size-10 animate-spin text-muted-foreground" />
+      </div>
+    )
   }
 
   return (
@@ -171,7 +155,7 @@ export default function StudentResourcesPage() {
       <Card>
         <CardHeader>
           <CardTitle>All Resources ({resources.length})</CardTitle>
-          <CardDescription>Private study materials only</CardDescription>
+          <CardDescription>Private study materials only. These are never visible to lecturers.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
@@ -188,11 +172,18 @@ export default function StudentResourcesPage() {
                       <FileText className="size-6 text-muted-foreground" />
                     </div>
                     <div>
-                      <div className="font-medium">{resource.name}</div>
+                      <div className="font-medium">{resource.display_name || resource.original_filename}</div>
                       <div className="text-sm text-muted-foreground flex items-center gap-3">
-                        <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 h-5">{resource.type}</Badge>
-                        <span>{resource.subject}</span> • <span>{resource.size}</span> • <span>{resource.date}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 h-5">{resource.file_extension}</Badge>
+                        <span>{resource.subject_tag || "General"}</span> • <span>{(resource.file_size_bytes / (1024 * 1024)).toFixed(1)} MB</span> • <span>{format(new Date(resource.created_at), "MMM d, yyyy")}</span>
                       </div>
+                      {resource.processing_status !== "COMPLETED" && (
+                         <div className="mt-1 flex items-center gap-2">
+                            <Badge variant="secondary" className="text-[9px] h-4">
+                               {resource.processing_status === "PROCESSING" ? "INDEXING FOR AI..." : resource.processing_status}
+                            </Badge>
+                         </div>
+                      )}
                     </div>
                   </div>
 
@@ -219,7 +210,7 @@ export default function StudentResourcesPage() {
         <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-4 border-b">
             <div className="flex items-center justify-between pr-8">
-              <DialogTitle className="truncate">{viewingResource?.name}</DialogTitle>
+              <DialogTitle className="truncate">{viewingResource?.display_name || viewingResource?.original_filename}</DialogTitle>
               <div className="flex items-center gap-2">
                 <Button variant="outline" size="sm" onClick={() => viewingResource && handleDownload(viewingResource)}>
                   <Download className="size-4 mr-2" /> Download
@@ -227,20 +218,15 @@ export default function StudentResourcesPage() {
               </div>
             </div>
           </DialogHeader>
-          <div className="flex-1 bg-muted/30">
-            {viewingResource?.url ? (
-              <iframe
-                src={viewingResource.url}
-                className="w-full h-full border-none"
-                title={viewingResource.name}
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-12 text-center">
-                <X className="size-12 mb-4 opacity-20" />
-                <p>Preview not available for this resource type or mock file.</p>
-                <p className="text-sm mt-2">Try downloading the file instead.</p>
-              </div>
-            )}
+          <div className="flex-1 bg-muted/30 flex items-center justify-center">
+             <div className="text-center p-8 max-w-md">
+                <FileText className="size-16 mx-auto text-muted-foreground/20 mb-4" />
+                <h3 className="text-lg font-medium mb-2">Preview Unavailable</h3>
+                <p className="text-sm text-muted-foreground">
+                   Secure preview for personal study materials is currently restricted. 
+                   Please download the file to view its contents.
+                </p>
+             </div>
           </div>
         </DialogContent>
       </Dialog>

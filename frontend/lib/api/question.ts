@@ -17,7 +17,8 @@ export interface QuestionBankItem {
   hint?: string;
   question_type: string;
   difficulty: string;
-  marks: number;
+  suggested_marks: number;
+  marks: number; // Keep for backward compatibility in UI
   subject?: string;
   topic?: string;
   bloom_level?: string;
@@ -59,12 +60,23 @@ export const questionApi = {
     if (params.page) query.append("page", params.page.toString());
     if (params.page_size) query.append("page_size", params.page_size.toString());
     
-    return apiClient(`/questions?${query.toString()}`);
+    const res = await apiClient(`/questions?${query.toString()}`);
+    // Map suggested_marks to marks for UI
+    if (res.items) {
+      res.items = res.items.map((item: any) => ({
+        ...item,
+        marks: item.suggested_marks || 1
+      }));
+    }
+    return res;
   },
   
   getQuestion: async (id: string): Promise<QuestionBankItem> => {
-    return apiClient(`/questions/${id}`);
+    const res = await apiClient(`/questions/${id}`);
+    res.marks = res.suggested_marks || 1;
+    return res;
   },
+
 
   createQuestion: async (data: QuestionCreateRequest): Promise<QuestionBankItem> => {
     return apiClient("/questions", {

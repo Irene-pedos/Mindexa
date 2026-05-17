@@ -21,11 +21,15 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TypographyH2 } from "@/components/ui/typography";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { toast } from "sonner";
 import { authApi } from "@/lib/api/auth";
+import { lecturerApi, InstitutionResponse, DepartmentResponse, OptionResponse } from "@/lib/api/lecturer";
 import { validateSignupForm } from "@/lib/validation";
 import Image from "next/image";
+import { Checkbox } from "./ui/checkbox";
+import { ScrollArea } from "./ui/scroll-area";
+import { Loader2, Check } from "lucide-react";
 
 export function SignupForm({
   className,
@@ -35,8 +39,14 @@ export function SignupForm({
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [role, setRole] = useState<"STUDENT" | "LECTURER">("STUDENT");
-  const [customCollege, setCustomCollege] = useState(false);
-  const [customDepartment, setCustomDepartment] = useState(false);
+  
+  // Metadata states
+  const [institutions, setInstitutions] = useState<InstitutionResponse[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<DepartmentResponse[]>([]);
+  const [availableOptions, setAvailableOptions] = useState<OptionResponse[]>([]);
+  
+  const [fetchingDepts, setFetchingDepts] = useState(false);
+  const [fetchingOptions, setFetchingOptions] = useState(false);
 
   const [formData, setFormData] = useState({
     firstName: "",
@@ -45,12 +55,122 @@ export function SignupForm({
     password: "",
     confirmPassword: "",
     regNumber: "",
-    college: "",
-    department: "",
-    option: "",
+    college: "", // Used for students (string)
+    department: "", // Used for students (string)
+    option: "", // Used for students (string)
     level: "",
     year: "",
   });
+
+  // Multi-select states for lecturers
+  const [selectedInstitutionIds, setSelectedInstitutionIds] = useState<string[]>([]);
+  const [selectedDepartmentIds, setSelectedDeptIds] = useState<string[]>([]);
+  const [selectedOptionIds, setSelectedOptionIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    async function loadInstitutions() {
+      try {
+        const data = await lecturerApi.getInstitutions();
+        setInstitutions(data);
+      } catch (err) {
+        console.error("Failed to load institutions", err);
+      }
+    }
+    loadInstitutions();
+  }, []);
+
+  const handleInstitutionChange = async (id: string) => {
+    if (role === "STUDENT") {
+      // Students usually belong to one institution
+      setSelectedInstitutionIds([id]);
+      setFetchingDepts(true);
+      try {
+        const depts = await lecturerApi.getDepartments(id);
+        setAvailableDepartments(depts);
+      } catch (err) {
+        toast.error("Failed to load departments");
+      } finally {
+        setFetchingDepts(false);
+      }
+    } else {
+      // Lecturers can teach in many institutions
+      const newSelected = selectedInstitutionIds.includes(id)
+        ? selectedInstitutionIds.filter(i => i !== id)
+        : [...selectedInstitutionIds, id];
+      setSelectedInstitutionIds(newSelected);
+      
+      // Refresh departments
+      if (newSelected.length > 0) {
+        setFetchingDepts(true);
+        try {
+          const allDepts = await Promise.all(
+            newSelected.map(instId => lecturerApi.getDepartments(instId))
+          );
+          setAvailableDepartments(allDepts.flat());
+        } catch (err) {
+          toast.error("Failed to load departments");
+        } finally {
+          setFetchingDepts(false);
+        }
+      } else {
+        setAvailableDepartments([]);
+        setSelectedDeptIds([]);
+      }
+    }
+  };
+
+  const handleDeptToggle = async (id: string) => {
+    if (role === "STUDENT") {
+      setSelectedDeptIds([id]);
+      // Students pick one department, so we can set the formData string too
+      const dept = availableDepartments.find(d => d.id === id);
+      if (dept) setFormData(p => ({ ...p, department: dept.name }));
+
+      setFetchingOptions(true);
+      try {
+        const options = await lecturerApi.getOptions(id);
+        setAvailableOptions(options);
+      } catch (err) {
+        toast.error("Failed to load options");
+      } finally {
+        setFetchingOptions(false);
+      }
+    } else {
+      const newSelected = selectedDepartmentIds.includes(id)
+        ? selectedDepartmentIds.filter(i => i !== id)
+        : [...selectedDepartmentIds, id];
+      setSelectedDeptIds(newSelected);
+
+      if (newSelected.length > 0) {
+        setFetchingOptions(true);
+        try {
+          const allOptions = await Promise.all(
+            newSelected.map(dId => lecturerApi.getOptions(dId))
+          );
+          setAvailableOptions(allOptions.flat());
+        } catch (err) {
+          toast.error("Failed to load options");
+        } finally {
+          setFetchingOptions(false);
+        }
+      } else {
+        setAvailableOptions([]);
+        setSelectedOptionIds([]);
+      }
+    }
+  };
+
+  const handleOptionToggle = (id: string) => {
+    if (role === "STUDENT") {
+      setSelectedOptionIds([id]);
+      const opt = availableOptions.find(o => o.id === id);
+      if (opt) setFormData(p => ({ ...p, option: opt.name }));
+    } else {
+      setSelectedOptionIds(prev =>
+        prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+      );
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
@@ -64,21 +184,15 @@ export function SignupForm({
     }
   };
 
-  const handleSelectChange = (name: string, value: string) => {
-    setFormData((prev) => ({ ...prev, [name]: value }));
-    if (errors[name]) {
-      setErrors((prev) => {
-        const newErrors = { ...prev };
-        delete newErrors[name];
-        return newErrors;
-      });
-    }
-  };
-
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const validation = validateSignupForm({ ...formData, role });
+    const validation = validateSignupForm({ 
+      ...formData, 
+      role,
+      institution_ids: selectedInstitutionIds,
+      department_ids: selectedDepartmentIds
+    });
     if (!validation.isValid) {
       setErrors(validation.errors);
       toast.error("Please fix the errors in the form");
@@ -101,6 +215,10 @@ export function SignupForm({
         option: role === "STUDENT" ? formData.option : undefined,
         level: role === "STUDENT" ? formData.level : undefined,
         year: role === "STUDENT" ? formData.year : undefined,
+        // Structured fields
+        institution_ids: role === "LECTURER" ? selectedInstitutionIds : [selectedInstitutionIds[0]],
+        department_ids: role === "LECTURER" ? selectedDepartmentIds : [selectedDepartmentIds[0]],
+        option_ids: role === "LECTURER" ? selectedOptionIds : [selectedOptionIds[0]],
       });
 
       toast.success(
@@ -140,8 +258,15 @@ export function SignupForm({
 
               <div className="mb-6">
                 <Tabs
-                  defaultValue="STUDENT"
-                  onValueChange={(v) => setRole(v as "STUDENT" | "LECTURER")}
+                  value={role}
+                  onValueChange={(v) => {
+                    setRole(v as "STUDENT" | "LECTURER");
+                    setSelectedInstitutionIds([]);
+                    setSelectedDeptIds([]);
+                    setSelectedOptionIds([]);
+                    setAvailableDepartments([]);
+                    setAvailableOptions([]);
+                  }}
                   className="w-full"
                 >
                   <TabsList className="grid w-full grid-cols-2">
@@ -235,154 +360,95 @@ export function SignupForm({
                 </Field>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <Field>
-                  <FieldLabel htmlFor="college">
-                    College <span className="text-red-500">*</span>
-                  </FieldLabel>
-                  {customCollege ? (
-                    <div className="flex gap-2">
-                      <Input
-                        id="college"
-                        name="college"
-                        placeholder="Type college name"
-                        value={formData.college}
-                        onChange={handleChange}
-                        required
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="px-2 text-xs"
-                        onClick={() => {
-                          setCustomCollege(false);
-                          setFormData((p) => ({ ...p, college: "" }));
-                        }}
-                      >
-                        List
-                      </Button>
-                    </div>
-                  ) : (
-                    <Select
-                      value={formData.college}
-                      onValueChange={(v) => {
-                        if (v === "other") {
-                          setCustomCollege(true);
-                          setFormData((p) => ({ ...p, college: "" }));
-                        } else {
-                          handleSelectChange("college", v);
-                        }
-                      }}
-                      required
+              {/* Institutions */}
+              <Field>
+                <FieldLabel>
+                  {role === "STUDENT" ? "Institution" : "Institutions (Select all you teach in)"}
+                </FieldLabel>
+                <div className="grid grid-cols-1 gap-2 mt-1">
+                  {institutions.map(inst => (
+                    <div 
+                      key={inst.id} 
+                      onClick={() => handleInstitutionChange(inst.id)}
+                      className={cn(
+                        "flex items-center justify-between p-2 rounded-md border cursor-pointer transition-colors text-xs",
+                        selectedInstitutionIds.includes(inst.id) 
+                          ? "bg-primary/10 border-primary text-primary" 
+                          : "hover:bg-muted"
+                      )}
                     >
-                      <SelectTrigger id="college">
-                        <SelectValue placeholder="Select College" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CST">
-                          Science & Technology
-                        </SelectItem>
-                        <SelectItem value="CBE">
-                          Business & Economics
-                        </SelectItem>
-                        <SelectItem value="CASS">
-                          Arts & Social Sciences
-                        </SelectItem>
-                        <SelectItem value="other">
-                          Other (Type manually)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {errors.college && (
-                    <FieldDescription className="text-red-500 text-xs mt-1">
-                      {errors.college}
-                    </FieldDescription>
-                  )}
-                </Field>
-                <Field>
-                  <FieldLabel htmlFor="department">Department</FieldLabel>
-                  {customDepartment ? (
-                    <div className="flex gap-2">
-                      <Input
-                        id="department"
-                        name="department"
-                        placeholder="Type department"
-                        value={formData.department}
-                        onChange={handleChange}
-                        className="flex-1"
-                      />
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="px-2 text-xs"
-                        onClick={() => {
-                          setCustomDepartment(false);
-                          setFormData((p) => ({ ...p, department: "" }));
-                        }}
-                      >
-                        List
-                      </Button>
+                      <span>{inst.name} ({inst.code})</span>
+                      {selectedInstitutionIds.includes(inst.id) && <Check className="size-3" />}
                     </div>
-                  ) : (
-                    <Select
-                      value={formData.department}
-                      onValueChange={(v) => {
-                        if (v === "other") {
-                          setCustomDepartment(true);
-                          setFormData((p) => ({ ...p, department: "" }));
-                        } else {
-                          handleSelectChange("department", v);
-                        }
-                      }}
-                    >
-                      <SelectTrigger id="department">
-                        <SelectValue placeholder="Select Dept" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CS">Computer Science</SelectItem>
-                        <SelectItem value="IT">
-                          Information Technology
-                        </SelectItem>
-                        <SelectItem value="SE">Software Engineering</SelectItem>
-                        <SelectItem value="other">
-                          Other (Type manually)
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  {errors.department && (
-                    <FieldDescription className="text-red-500 text-xs mt-1">
-                      {errors.department}
-                    </FieldDescription>
-                  )}
-                </Field>
-              </div>
+                  ))}
+                </div>
+              </Field>
 
-              {role === "STUDENT" && (
+              {/* Departments */}
+              {selectedInstitutionIds.length > 0 && (
                 <Field>
-                  <FieldLabel htmlFor="option">Option</FieldLabel>
-                  <Select
-                    value={formData.option}
-                    onValueChange={(v) => handleSelectChange("option", v)}
-                  >
-                    <SelectTrigger id="option">
-                      <SelectValue placeholder="Select Option" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="networking">Networking</SelectItem>
-                      <SelectItem value="software">
-                        Software Engineering
-                      </SelectItem>
-                      <SelectItem value="embedded">Embedded Systems</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  {errors.option && (
-                    <FieldDescription className="text-red-500 text-xs mt-1">
-                      {errors.option}
-                    </FieldDescription>
-                  )}
+                  <div className="flex items-center justify-between mb-2">
+                    <FieldLabel>
+                      {role === "STUDENT" ? "Department" : "Departments"}
+                    </FieldLabel>
+                    {fetchingDepts && <Loader2 className="size-3 animate-spin" />}
+                  </div>
+                  <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/20">
+                    <div className="space-y-2">
+                      {availableDepartments.map(dept => (
+                        <div key={dept.id} className="flex items-center space-x-2">
+                          <Checkbox 
+                            id={`dept-${dept.id}`} 
+                            checked={selectedDepartmentIds.includes(dept.id)}
+                            onCheckedChange={() => handleDeptToggle(dept.id)}
+                          />
+                          <label 
+                            htmlFor={`dept-${dept.id}`} 
+                            className="text-xs font-medium leading-none cursor-pointer"
+                          >
+                            {dept.name}
+                          </label>
+                        </div>
+                      ))}
+                      {availableDepartments.length === 0 && !fetchingDepts && (
+                        <p className="text-[10px] text-muted-foreground p-2">No departments found.</p>
+                      )}
+                    </div>
+                  </ScrollArea>
+                </Field>
+              )}
+
+              {/* Options */}
+              {selectedDepartmentIds.length > 0 && (
+                <Field>
+                   <div className="flex items-center justify-between mb-2">
+                    <FieldLabel>
+                      {role === "STUDENT" ? "Option" : "Options / Specializations"}
+                    </FieldLabel>
+                    {fetchingOptions && <Loader2 className="size-3 animate-spin" />}
+                  </div>
+                  <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/20">
+                    <div className="space-y-2">
+                      {availableOptions.map(opt => (
+                        <div key={opt.id} className="flex items-center space-x-2">
+                          <Checkbox 
+                            id={`opt-${opt.id}`} 
+                            checked={selectedOptionIds.includes(opt.id)}
+                            onCheckedChange={() => handleOptionToggle(opt.id)}
+                          />
+                          <label 
+                            htmlFor={`opt-${opt.id}`} 
+                            className="text-xs font-medium leading-none cursor-pointer"
+                          >
+                            {opt.name}
+                          </label>
+                        </div>
+                      ))}
+                       {availableOptions.length === 0 && !fetchingOptions && (
+                        <p className="text-[10px] text-muted-foreground p-2">No options found.</p>
+                      )}
+                    </div>
+                  </ScrollArea>
                 </Field>
               )}
 
@@ -392,7 +458,7 @@ export function SignupForm({
                     <FieldLabel htmlFor="level">Level</FieldLabel>
                     <Select
                       value={formData.level}
-                      onValueChange={(v) => handleSelectChange("level", v)}
+                      onValueChange={(v) => setFormData(p => ({ ...p, level: v }))}
                     >
                       <SelectTrigger id="level">
                         <SelectValue placeholder="Level" />
@@ -409,7 +475,7 @@ export function SignupForm({
                     <FieldLabel htmlFor="year">Year</FieldLabel>
                     <Select
                       value={formData.year}
-                      onValueChange={(v) => handleSelectChange("year", v)}
+                      onValueChange={(v) => setFormData(p => ({ ...p, year: v }))}
                     >
                       <SelectTrigger id="year">
                         <SelectValue placeholder="Year" />

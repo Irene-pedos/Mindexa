@@ -282,6 +282,9 @@ async def register(
         level=body.level,
         year=body.year,
         ip_address=ip,
+        institution_ids=body.institution_ids,
+        department_ids=body.department_ids,
+        option_ids=body.option_ids,
     )
 
     # ── EMAIL SENDING HOOK ────────────────────────────────────────────────────

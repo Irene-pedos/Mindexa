@@ -224,18 +224,17 @@ async def get_attempt_grading_summary(
 async def list_queue(
     assessment_id: uuid.UUID | None = Query(default=None),
     status: str | None = Query(default=None),
-    assigned_to_id: uuid.UUID | None = Query(default=None),
     priority: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
     current_user=Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> GradingQueueListResponse:
-    repo = GradingRepository(db)
-    items, total = await repo.list_queue(
+    service = GradingService(db)
+    items, total = await service.get_grading_queue(
+        lecturer_id=current_user.id,
         assessment_id=assessment_id,
         status=status,
-        assigned_to_id=assigned_to_id,
         priority=priority,
         page=page,
         page_size=page_size,

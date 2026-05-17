@@ -18,6 +18,9 @@ export interface SignupData {
   option?: string;
   level?: string;
   year?: string;
+  institution_ids?: string[];
+  department_ids?: string[];
+  option_ids?: string[];
 }
 
 export interface ForgotPasswordData {

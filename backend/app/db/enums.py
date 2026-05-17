@@ -76,7 +76,7 @@ class GradingMode(str, Enum):
 
 class ResultReleaseMode(str, Enum):
     IMMEDIATE = "IMMEDIATE"
-    DELAYED = "DELAYED"
+    MANUAL = "MANUAL"
     SCHEDULED = "SCHEDULED"
 
 

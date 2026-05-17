@@ -239,13 +239,19 @@ class QuestionService:
         if user_role == UserRole.STUDENT.value:
             raise AuthorizationError("Students cannot access the question bank.")
 
+        # Only filter by created_by_id if the user is a LECTURER.
+        # Admins can see all questions.
+        created_by_id = None
+        if user_role == UserRole.LECTURER.value:
+            created_by_id = current_user.id
+
         items, total = await self._repo.search(
             q=params.q,
             question_type=params.question_type,
             difficulty=params.difficulty,
             topic_tag=params.topic,
             source_type=params.source_type,
-            created_by_id=None,
+            created_by_id=created_by_id,
             page=params.page,
             page_size=params.page_size,
         )

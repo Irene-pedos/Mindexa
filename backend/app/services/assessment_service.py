@@ -207,8 +207,6 @@ class AssessmentService:
                 ) from e
         if data.subject is not None:
             update_fields["subject"] = data.subject
-        if data.target_class is not None:
-            update_fields["target_class"] = data.target_class
         if data.total_marks is not None:
             update_fields["total_marks"] = data.total_marks
         if data.passing_marks is not None:
@@ -474,7 +472,7 @@ class AssessmentService:
             return FinalizeAssessmentResponse(
                 id=assessment.id,
                 title=assessment.title,
-                status=assessment.status,
+                status=assessment.status.value if hasattr(assessment.status, 'value') else str(assessment.status),
                 is_finalized=True,
                 finalized_at=assessment.published_at,
                 validation_passed=False,
@@ -519,7 +517,7 @@ class AssessmentService:
             return FinalizeAssessmentResponse(
                 id=assessment.id,
                 title=assessment.title,
-                status=assessment.status,
+                status=assessment.status.value if hasattr(assessment.status, 'value') else str(assessment.status),
                 is_finalized=False,
                 finalized_at=None,
                 validation_passed=False,
@@ -575,6 +573,7 @@ class AssessmentService:
         assessment_type: str | None = None,
         page: int = 1,
         page_size: int = 20,
+        sort: str = "newest",
     ):
         """Paginated list of assessments (role-aware)."""
         db_status = None
@@ -603,6 +602,7 @@ class AssessmentService:
                 assessment_type=db_type,
                 page=page,
                 page_size=page_size,
+                sort=sort,
             )
         elif current_user.role == UserRole.LECTURER.value:
             items, total = await self._repo.list_by_creator(
@@ -611,16 +611,27 @@ class AssessmentService:
                 assessment_type=db_type,
                 page=page,
                 page_size=page_size,
+                sort=sort,
             )
         else:
             # Students and others
             items, total = await self._repo.list_available_for_student(
+                student_id=current_user.id,
                 page=page,
                 page_size=page_size,
+                sort=sort,
             )
 
+        summary_items = []
+        for a in items:
+            summary = AssessmentSummaryResponse.model_validate(a)
+            if hasattr(a, "course") and a.course:
+                summary.course_name = a.course.name
+                summary.course_code = a.course.code
+            summary_items.append(summary)
+
         return AssessmentListResponse(
-            items=[AssessmentSummaryResponse.model_validate(a) for a in items],
+            items=summary_items,
             total=total,
             page=page,
             page_size=page_size,
@@ -632,12 +643,19 @@ class AssessmentService:
         assessment_id: uuid.UUID,
         current_user: User,
     ) -> None:
-        assessment = await self._get_and_validate(assessment_id, current_user)
-        if assessment.draft_is_complete and current_user.role != UserRole.ADMIN.value:
+        assessment = await self._repo.get_by_id_simple(assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.")
+        
+        self._assert_can_edit(assessment, current_user)
+        
+        # Only block if it's currently ACTIVE (being taken by students)
+        if assessment.status == DbAssessmentStatus.ACTIVE and current_user.role != UserRole.ADMIN.value:
             raise ConflictError(
-                "Finalized assessments cannot be deleted. Contact an admin.",
-                code="CANNOT_DELETE_FINALIZED",
+                "Active assessments currently being taken cannot be deleted. Archive them instead or contact an admin.",
+                code="CANNOT_DELETE_ACTIVE",
             )
+            
         await self._repo.soft_delete(assessment_id, deleted_by_id=current_user.id)
 
     # ─── Internal Helpers ─────────────────────────────────────────────────────
@@ -676,7 +694,7 @@ class AssessmentService:
         return FinalizeAssessmentResponse(
             id=assessment.id,
             title=assessment.title,
-            status=assessment.status.value,
+            status=assessment.status.value if hasattr(assessment.status, 'value') else str(assessment.status),
             is_finalized=False,
             finalized_at=None,
             validation_passed=True,
@@ -707,37 +725,44 @@ class AssessmentService:
             instructions += f"\n\nAdditional Instructions:\n{data.metadata.customInstructions}"
 
         # Calculate window start/end
-        # data.metadata.date is the day. startTime/endTime are strings like "09:00" or "07:45 PM"
-        window_start = None
-        window_end = None
-        if data.metadata.date:
+        window_start = data.metadata.windowStart
+        window_end = data.metadata.windowEnd
+        if window_start is None and data.metadata.date and data.metadata.startTime:
             def parse_time(t_str: str) -> datetime | None:
                 formats = ["%H:%M", "%I:%M %p", "%I:%M%p", "%H:%M:%S"]
                 for fmt in formats:
                     try:
                         t = datetime.strptime(t_str, fmt).time()
-                        return datetime.combine(data.metadata.date.date(), t).replace(tzinfo=UTC)
+                        # Use the date from metadata, but preserve timezone if present
+                        dt = datetime.combine(data.metadata.date.date(), t)
+                        if data.metadata.date.tzinfo:
+                            dt = dt.replace(tzinfo=data.metadata.date.tzinfo)
+                            return dt.astimezone(UTC)
+                        return dt.replace(tzinfo=UTC)
                     except ValueError:
                         continue
                 return None
 
             window_start = parse_time(data.metadata.startTime)
-            window_end = parse_time(data.metadata.endTime)
+            if data.metadata.endTime:
+                window_end = parse_time(data.metadata.endTime)
 
-        # 2. Create Assessment
-        from sqlalchemy import or_, select
+        # 2. Get or Create Assessment
+        from sqlalchemy import or_, select, update
         from app.db.models.academic import Course
+        from app.db.enums import AssessmentStatus as DbAssessmentStatus
         
         course_id = None
+        subject_id = None
         try:
-            course_id = uuid.UUID(data.metadata.course)
-        except (ValueError, TypeError):
+            course_id = uuid.UUID(str(data.metadata.course_id))
+        except (ValueError, TypeError, AttributeError):
             # Try to find course by name or code
             res = await self.db.execute(
                 select(Course).where(
                     or_(
-                        Course.name == data.metadata.course,
-                        Course.code == data.metadata.course
+                        Course.name == str(data.metadata.course_id),
+                        Course.code == str(data.metadata.course_id)
                     )
                 )
             )
@@ -750,29 +775,88 @@ class AssessmentService:
             if course:
                 course_id = course.id
             else:
-                raise ValidationError(f"Course '{data.metadata.course}' not found.")
+                raise ValidationError(f"Course '{data.metadata.course_id}' not found.")
 
-        assessment = await self._repo.create(
-            title=data.metadata.title,
-            assessment_type=DbAssessmentType(assessment_type),
-            course_id=course_id,
-            created_by_id=current_user.id,
-            grading_mode=GradingMode.MANUAL,
-            result_release_mode=ResultReleaseMode.DELAYED if data.rules.resultRelease == "delayed" else ResultReleaseMode.IMMEDIATE,
-            total_marks=sum(s.marks for s in data.blueprint),
-            instructions=instructions,
-            duration_minutes=data.metadata.durationMinutes,
-            is_group_assessment=is_group,
-            max_group_size=data.metadata.maxGroupSize if is_group else None,
-            group_formation_mode=data.metadata.groupFormation if is_group else None,
-        )
+        # Derived fields from course if not explicitly provided
+        if data.metadata.subject_id:
+            try:
+                subject_id = uuid.UUID(str(data.metadata.subject_id))
+            except (ValueError, TypeError):
+                pass
+
+        if not subject_id and course_id:
+            from app.db.models.academic import CourseSubject
+            res = await self.db.execute(
+                select(CourseSubject.subject_id).where(CourseSubject.course_id == course_id).limit(1)
+            )
+            subject_id = res.scalar_one_or_none()
+
+        if data.id:
+            assessment = await self._repo.get_by_id_simple(data.id)
+            if not assessment:
+                raise NotFoundError("Assessment to update not found.")
+            
+            # Check permissions
+            self._assert_can_edit(assessment, current_user)
+            
+            # Update basic fields
+            update_data = {
+                "title": data.metadata.title,
+                "description": data.metadata.description,
+                "assessment_type": DbAssessmentType(assessment_type),
+                "course_id": course_id,
+                "subject_id": subject_id,
+                "grading_mode": GradingMode.MANUAL,
+                "result_release_mode": ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
+                "total_marks": sum(s.marks for s in data.blueprint),
+                "passing_marks": data.metadata.passing_marks,
+                "instructions": instructions,
+                "duration_minutes": data.metadata.durationMinutes,
+                "is_group_assessment": is_group,
+                "max_group_size": data.metadata.maxGroupSize if is_group else None,
+                "group_formation_mode": data.metadata.groupFormation if is_group else None,
+            }
+            if data.rules.autosaveToken:
+                update_data["autosave_token"] = data.rules.autosaveToken
+
+            await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **update_data)
+            
+            # Clear existing sections and questions to rebuild them
+            await self._repo.clear_sections_and_questions(assessment.id)
+        else:
+            assessment = await self._repo.create(
+                title=data.metadata.title,
+                description=data.metadata.description,
+                assessment_type=DbAssessmentType(assessment_type),
+                course_id=course_id,
+                subject_id=subject_id,
+                created_by_id=current_user.id,
+                grading_mode=GradingMode.MANUAL,
+                result_release_mode=ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
+                total_marks=sum(s.marks for s in data.blueprint),
+                passing_marks=data.metadata.passing_marks,
+                instructions=instructions,
+                duration_minutes=data.metadata.durationMinutes,
+                window_start=window_start,
+                window_end=window_end,
+                result_release_at=data.rules.resultReleaseAt,
+                max_attempts=data.rules.attempts,
+                is_group_assessment=is_group,
+                max_group_size=data.metadata.maxGroupSize if is_group else None,
+                group_formation_mode=data.metadata.groupFormation if is_group else None,
+                late_penalty_percent=data.rules.latePenaltyPercent,
+                grace_period_minutes=data.rules.gracePeriodMinutes,
+                autosave_token=data.rules.autosaveToken,
+            )
 
         # 3. Update Security Settings
         security_fields = {
             "max_attempts": data.rules.attempts,
             "window_start": window_start,
             "window_end": window_end,
-            "is_password_protected": False,
+            "result_release_at": data.rules.resultReleaseAt,
+            "is_password_protected": data.rules.passwordProtected,
+            "access_password_hash": hash_password(data.rules.accessPassword) if data.rules.passwordProtected and data.rules.accessPassword else None,
             "fullscreen_required": data.rules.browserRestricted,
             "is_supervised": data.rules.supervised,
             "ai_assistance_allowed": data.rules.aiAllowed,
@@ -780,8 +864,42 @@ class AssessmentService:
             "integrity_monitoring_enabled": True,
             "randomize_questions": data.rules.shuffleQuestions,
             "randomize_options": data.rules.shuffleOptions,
+            "late_penalty_percent": data.rules.latePenaltyPercent,
+            "grace_period_minutes": data.rules.gracePeriodMinutes,
         }
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
+
+        # 3.1. Target Classes (Many-to-Many)
+        from app.db.models.academic import ClassSection
+        from app.db.models.assessment import AssessmentTargetSection
+        
+        # Clear existing targets for re-publish/update
+        await self.db.execute(
+            update(AssessmentTargetSection)
+            .where(AssessmentTargetSection.assessment_id == assessment.id)
+            .values(is_deleted=True, deleted_at=datetime.now(UTC))
+        )
+
+        if data.metadata.class_group_ids:
+            for cg_id in data.metadata.class_group_ids:
+                # Find the ClassSection for this course and this class group
+                res = await self.db.execute(
+                    select(ClassSection.id).where(
+                        ClassSection.course_id == course_id,
+                        ClassSection.class_group_id == cg_id,
+                        ClassSection.is_deleted == False
+                    )
+                )
+                section_id = res.scalar_one_or_none()
+                if section_id:
+                    target = AssessmentTargetSection(
+                        assessment_id=assessment.id,
+                        class_section_id=section_id,
+                        added_by_id=current_user.id
+                    )
+                    self.db.add(target)
+        
+        await self.db.flush()
 
         # 4. Create Sections & Questions
         section_id_map = {}

@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useMemo, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import {
   Card,
   CardContent,
@@ -44,7 +44,9 @@ import {
   GripVertical,
   Database,
   Loader2 as LoaderCircleIcon,
+  Calendar as CalendarIcon,
 } from "lucide-react";
+import { format } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
 
 import {
@@ -71,8 +73,18 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
+import { 
+  lecturerApi, 
+  AdminCourseListItem,
+  InstitutionResponse,
+  DepartmentResponse,
+  OptionResponse,
+  ClassGroupResponse 
+} from "@/lib/api/lecturer";
 import { QuestionBankSelector } from "@/components/mindexa/assessment/question-bank-selector";
 import { QuestionBankItem } from "@/lib/api/question";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 type AssessmentMode = "Practice" | "Formative" | "Homework" | "CAT" | "Summative" | "Groupwork";
 type Difficulty = "Easy" | "Medium" | "Hard";
@@ -124,52 +136,6 @@ const PREDEFINED_INSTRUCTIONS = [
   "Formula sheet provided",
 ];
 
-const TEACHING_SCOPE = {
-  colleges: [
-    {
-      id: "CST",
-      name: "College of Science and Technology",
-      departments: [
-        {
-          id: "ALL",
-          name: "All Departments",
-          courses: [
-            {
-              id: "BIT211",
-              name: "Database Systems",
-              classes: [
-                { id: "Y2_IT", name: "Y2 IT" },
-                { id: "Y3_IT", name: "Y3 IT" },
-              ],
-            },
-            {
-              id: "CS101",
-              name: "Introduction to Computer Science",
-              classes: [
-                { id: "Y1_CS", name: "Y1 CS" },
-              ],
-            },
-            {
-              id: "VET301",
-              name: "Animal Anatomy",
-              classes: [
-                { id: "Y2_VET", name: "Y2 Veterinary" },
-              ],
-            },
-            {
-              id: "MAT101",
-              name: "Business Mathematics",
-              classes: [
-                { id: "Y1_BUS", name: "Y1 Business" },
-              ],
-            },
-          ],
-        },
-      ],
-    },
-  ],
-};
-
 const STEPS = [
   { title: "Metadata", icon: FileText },
   { title: "Blueprint", icon: Layout },
@@ -180,32 +146,55 @@ const STEPS = [
 
 export default function NewAssessmentBuilder() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const draftId = searchParams.get("draft");
 
   const [activeStep, setActiveStep] = useState(1);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
+  const [courses, setCourses] = useState<AdminCourseListItem[]>([]);
+  const [isLoadingCourses, setIsLoadingCourses] = useState(true);
 
   // Step 1: Metadata
   const [metadata, setMetadata] = useState({
     title: "",
+    description: "",
     mode: "CAT" as AssessmentMode,
-    college: "",
-    department: "",
-    course: "",
-    targetClass: "",
+    institution_id: "",
+    department_ids: [] as string[],
+    option_ids: [] as string[],
+    class_group_ids: [] as string[],
+    course_id: "",
+    subject_id: "",
     date: undefined as Date | undefined,
     startTime: "09:00",
     endTime: "11:00",
     durationMinutes: 120,
-    selectedInstructions: [] as string[],
+    passing_marks: 70,
+    selectedInstructions: [
+      "Fullscreen required",
+      "No tab switching",
+      "No external materials allowed",
+      "Time strictly enforced",
+    ] as string[],
     customInstructions: "",
     maxGroupSize: 4,
     groupFormation: "self_enrol" as "self_enrol" | "manual",
   });
 
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
+
+  // Metadata dropdown options
+  const [institutions, setInstitutions] = useState<InstitutionResponse[]>([]);
+  const [availableDepartments, setAvailableDepartments] = useState<DepartmentResponse[]>([]);
+  const [availableOptions, setAvailableOptions] = useState<OptionResponse[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<ClassGroupResponse[]>([]);
+  
+  const [fetchingMetadata, setFetchingMetadata] = useState(true);
+  const [fetchingDepts, setFetchingDepts] = useState(false);
+  const [fetchingOptions, setFetchingOptions] = useState(false);
+  const [fetchingClasses, setFetchingClasses] = useState(false);
 
   // Step 2: Blueprint & Rules
   const [blueprint, setBlueprint] = useState<BlueprintSection[]>([
@@ -227,16 +216,146 @@ export default function NewAssessmentBuilder() {
     browserRestricted: true,
     shuffleQuestions: true,
     shuffleOptions: true,
-    resultRelease: "delayed" as "immediate" | "delayed",
+    resultRelease: "manual" as "immediate" | "manual",
     attempts: 1,
+    passwordProtected: false,
+    accessPassword: "",
+    latePenaltyPercent: 0,
+    gracePeriodMinutes: 0,
+    autosaveToken: typeof window !== 'undefined' ? crypto.randomUUID() : undefined,
   });
 
   // Step 3: Question Creation
   const [questions, setQuestions] = useState<Question[]>([]);
 
-  const selectedCourseObj = useMemo(() => {
-    return TEACHING_SCOPE.colleges[0].departments[0].courses.find(c => c.id === metadata.course);
-  }, [metadata.course]);
+  // Update result release mode based on question types
+  useEffect(() => {
+    const hasOpenQuestions = questions.some(q => 
+      ["essay", "shortanswer", "computational", "casestudy"].includes(q.type)
+    );
+    setRules(prev => ({
+      ...prev,
+      resultRelease: hasOpenQuestions ? "delayed" : "immediate"
+    }));
+  }, [questions]);
+
+  // Set default late penalty for homework
+  useEffect(() => {
+    if (metadata.mode === "Homework") {
+      setRules(prev => ({ ...prev, latePenaltyPercent: 20 }));
+    } else {
+      setRules(prev => ({ ...prev, latePenaltyPercent: 0 }));
+    }
+  }, [metadata.mode]);
+
+  useEffect(() => {
+    async function fetchCourses() {
+      setIsLoadingCourses(true);
+      try {
+        const response = await lecturerApi.getCourses();
+        setCourses(response.items);
+      } catch (error) {
+        console.error("Failed to fetch courses", error);
+        toast.error("Failed to load your courses. Please try again.");
+      } finally {
+        setIsLoadingCourses(false);
+      }
+    }
+    fetchCourses();
+  }, []);
+
+  useEffect(() => {
+    async function loadMetadata() {
+      try {
+        const insts = await lecturerApi.getMyInstitutions();
+        setInstitutions(insts);
+        
+        // Auto-select if there is exactly one institution
+        if (insts.length === 1) {
+          handleInstitutionChange(insts[0].id);
+        }
+      } catch (err: any) {
+        console.error("Failed to fetch institutions", err);
+        toast.error("Failed to load metadata");
+      } finally {
+        setFetchingMetadata(false);
+      }
+    }
+    loadMetadata();
+  }, []);
+
+  const handleInstitutionChange = async (val: string) => {
+    setMetadata(prev => ({ ...prev, institution_id: val, department_ids: [], option_ids: [], class_group_ids: [] }));
+    setAvailableDepartments([]);
+    setAvailableOptions([]);
+    setAvailableClasses([]);
+    
+    setFetchingDepts(true);
+    try {
+      const depts = await lecturerApi.getMyDepartments(val);
+      setAvailableDepartments(depts);
+    } catch (err) {
+      toast.error("Failed to load departments");
+    } finally {
+      setFetchingDepts(false);
+    }
+  };
+
+  const toggleDept = async (id: string) => {
+    const newSelected = metadata.department_ids.includes(id) 
+      ? metadata.department_ids.filter(i => i !== id)
+      : [...metadata.department_ids, id];
+    
+    setMetadata(p => ({ ...p, department_ids: newSelected, option_ids: [], class_group_ids: [] }));
+    setAvailableOptions([]);
+    setAvailableClasses([]);
+    
+    if (newSelected.length > 0) {
+      setFetchingOptions(true);
+      try {
+        const allOptions = await Promise.all(
+          newSelected.map(dId => lecturerApi.getMyOptions(dId))
+        );
+        setAvailableOptions(allOptions.flat());
+      } catch (err) {
+        toast.error("Failed to load options");
+      } finally {
+        setFetchingOptions(false);
+      }
+    }
+  };
+
+  const toggleOption = async (id: string) => {
+    const newSelected = metadata.option_ids.includes(id)
+      ? metadata.option_ids.filter(i => i !== id)
+      : [...metadata.option_ids, id];
+    
+    setMetadata(p => ({ ...p, option_ids: newSelected, class_group_ids: [] }));
+    setAvailableClasses([]);
+    
+    if (newSelected.length > 0) {
+      setFetchingClasses(true);
+      try {
+        const allClasses = await Promise.all(
+          newSelected.map(oId => lecturerApi.getMyClasses(oId))
+        );
+        setAvailableClasses(allClasses.flat());
+      } catch (err) {
+        toast.error("Failed to load classes");
+      } finally {
+        setFetchingClasses(false);
+      }
+    }
+  };
+
+  const toggleClass = (id: string) => {
+    setMetadata(p => ({
+      ...p,
+      class_group_ids: p.class_group_ids.includes(id) 
+        ? p.class_group_ids.filter(i => i !== id) 
+        : [...p.class_group_ids, id]
+    }));
+  };
 
   useEffect(() => {
     if (draftId) {
@@ -265,15 +384,19 @@ export default function NewAssessmentBuilder() {
 
       setMetadata({
         title: res.title || "",
+        description: res.description || "",
         mode: modeMap[res.assessment_type] || "CAT",
-        college: "", 
-        department: "",
-        course: res.course_id || "",
-        targetClass: res.target_class || "",
+        institution_id: "", 
+        department_ids: [],
+        option_ids: [],
+        class_group_ids: [],
+        course_id: res.course_id || "",
+        subject_id: res.subject_id || "",
         date: res.window_start ? new Date(res.window_start) : undefined,
         startTime: res.window_start ? formatTime(res.window_start) : "09:00",
         endTime: res.window_end ? formatTime(res.window_end) : "11:00",
         durationMinutes: res.duration_minutes || 120,
+        passing_marks: res.passing_marks || 50,
         selectedInstructions: [], // instructions are merged in backend, we'll put them in custom
         customInstructions: res.instructions || "",
         maxGroupSize: res.max_group_size || 4,
@@ -302,7 +425,13 @@ export default function NewAssessmentBuilder() {
         shuffleQuestions: res.randomise_questions,
         shuffleOptions: res.randomise_options,
         resultRelease: res.result_release_mode === "immediate" ? "immediate" : "delayed",
-        attempts: res.max_attempts,
+        resultReleaseAt: res.result_release_at ? new Date(res.result_release_at) : undefined,
+        attempts: res.max_attempts || 1,
+        passwordProtected: res.is_password_protected || false,
+        accessPassword: "", // Hashed in backend
+        latePenaltyPercent: res.late_penalty_percent || 0,
+        gracePeriodMinutes: res.grace_period_minutes || 0,
+        autosaveToken: res.autosave_token || crypto.randomUUID(),
       });
 
       // Map Questions
@@ -429,38 +558,105 @@ export default function NewAssessmentBuilder() {
     ]);
   };
 
-  const handleBankSelect = (qBank: QuestionBankItem, sectionId: string) => {
-    const mappedType = qBank.question_type.toLowerCase().replace("_", "") as QuestionType;
-    
-    setQuestions([
-      ...questions,
-      {
-        id: `q-bank-${qBank.id}-${Date.now()}`,
-        sectionId,
-        text: qBank.content,
-        type: mappedType,
-        marks: qBank.marks,
-        options: qBank.options.map(opt => ({
-          option_text: opt.option_text,
-          option_text_right: opt.option_text_right,
-          is_correct: opt.is_correct,
-          order_index: opt.order_index
-        })),
-        aiGenerated: false,
-      },
-    ]);
-    toast.success("Question added from bank");
+  const handleBankSelect = async (qBankSummary: QuestionBankItem, sectionId: string) => {
+    try {
+      const qBank = await questionApi.getQuestion(qBankSummary.id);
+      const mappedType = qBank.question_type.toLowerCase().replace("_", "") as QuestionType;
+      
+      setQuestions((prev) => [
+        ...prev,
+        {
+          id: `q-bank-${qBank.id}-${Date.now()}`,
+          sectionId,
+          text: qBank.content,
+          type: mappedType,
+          marks: qBank.marks,
+          options: (qBank.options || []).map((opt) => ({
+            option_text: opt.option_text,
+            option_text_right: opt.option_text_right,
+            is_correct: opt.is_correct,
+            order_index: opt.order_index,
+          })),
+          aiGenerated: false,
+        },
+      ]);
+      toast.success("Question added from bank");
+    } catch (err) {
+      toast.error("Failed to fetch full question details from bank.");
+    }
+  };
+
+  const preparePayload = () => {
+    const payload = { 
+      id: draftId || undefined, 
+      metadata: { ...metadata }, 
+      blueprint, 
+      questions, 
+      rules 
+    };
+
+    const parseTimeString = (timeStr: string, baseDate: Date) => {
+      const d = new Date(baseDate);
+      let [time, modifier] = timeStr.trim().split(/\s+/);
+      const [h, m] = time.split(':');
+      let hours = parseInt(h);
+      const minutes = parseInt(m);
+      
+      if (modifier) {
+        modifier = modifier.toLowerCase();
+        if (modifier === 'pm' && hours < 12) hours += 12;
+        if (modifier === 'am' && hours === 12) hours = 0;
+      } else if (timeStr.toLowerCase().includes('pm')) {
+        if (hours < 12) hours += 12;
+      } else if (timeStr.toLowerCase().includes('am')) {
+        if (hours === 12) hours = 0;
+      }
+      
+      d.setHours(hours, minutes, 0, 0);
+      return d;
+    };
+
+    // Fix AM/PM issue by combining date and time on frontend
+    if (metadata.date && metadata.startTime) {
+      const start = parseTimeString(metadata.startTime, metadata.date);
+      (payload.metadata as any).windowStart = start.toISOString();
+    }
+
+    if (metadata.date && metadata.endTime) {
+      const end = parseTimeString(metadata.endTime, metadata.date);
+      (payload.metadata as any).windowEnd = end.toISOString();
+    }
+
+    return payload;
+  };
+
+  const formatDisplayTime = (timeStr: string) => {
+    if (!timeStr) return "";
+    try {
+      const [h, m] = timeStr.split(':');
+      const d = new Date();
+      d.setHours(parseInt(h), parseInt(m));
+      return format(d, "h:mm a");
+    } catch (e) {
+      return timeStr;
+    }
   };
 
   const handleSaveDraft = async () => {
     if (isSavingDraft || isPublishing) return;
     setIsSavingDraft(true);
     try {
-      await apiClient("/assessments/draft", {
+      const res = await apiClient("/assessments/draft", {
         method: "POST",
-        body: JSON.stringify({ metadata, blueprint, questions, rules }),
-      });
+        body: JSON.stringify(preparePayload()),
+      }) as { assessment_id: string };
+      
       toast.success("Draft saved successfully");
+      
+      // If this was a new assessment, update the URL to include the draft ID
+      if (!draftId && res.assessment_id) {
+        router.replace(`/lecturer/assessments/new?draft=${res.assessment_id}`);
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to save draft";
       toast.error(msg);
@@ -533,7 +729,7 @@ export default function NewAssessmentBuilder() {
       await questionApi.createQuestion({
         content: q.text,
         question_type: typeMap[q.type] || "SHORT_ANSWER",
-        difficulty: "medium",
+        difficulty: "MEDIUM",
         suggested_marks: q.marks,
         options: q.options.map((opt) => ({
           option_text: opt.option_text,
@@ -561,13 +757,15 @@ export default function NewAssessmentBuilder() {
     }
     setIsPublishing(true);
     try {
+      const payload = preparePayload();
       const result = await apiClient("/assessments/publish", {
         method: "POST",
-        body: JSON.stringify({ metadata, blueprint, questions, rules }),
+        body: JSON.stringify(payload),
       }) as { validation_passed: boolean; errors?: string[] };
       
       if (result.validation_passed) {
         toast.success("Assessment published successfully!");
+        router.push("/lecturer/assessments");
       } else {
         toast.error(`Publishing failed: ${result.errors?.join(", ") || "Validation failed"}`);
       }
@@ -579,11 +777,13 @@ export default function NewAssessmentBuilder() {
     }
   };
 
-  if (isLoadingDraft) {
+  if (isLoadingDraft || isLoadingCourses) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <LoaderCircleIcon className="size-12 animate-spin text-primary" />
-        <p className="text-muted-foreground animate-pulse">Loading draft assessment...</p>
+        <p className="text-muted-foreground animate-pulse">
+          {isLoadingDraft ? "Loading draft assessment..." : "Loading courses..."}
+        </p>
       </div>
     );
   }
@@ -654,221 +854,266 @@ export default function NewAssessmentBuilder() {
                   Core identity and scheduling details
                 </CardDescription>
               </CardHeader>
-              <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-5 p-5">
-                <div className="space-y-2 md:col-span-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Title</Label>
-                  <Input
-                    value={metadata.title}
-                    onChange={(e) =>
-                      setMetadata({ ...metadata, title: e.target.value })
-                    }
-                    placeholder="e.g. Mid-Semester CAT – Database Systems"
-                    className="h-10 text-base border"
-                  />
-                </div>
+              <CardContent className="space-y-6 p-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Title</Label>
+                    <Input
+                      value={metadata.title}
+                      onChange={(e) =>
+                        setMetadata({ ...metadata, title: e.target.value })
+                      }
+                      placeholder="e.g. Mid-Semester CAT – Database Systems"
+                      className="h-10 text-base border"
+                    />
+                  </div>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Mode</Label>
-                  <Select
-                    value={metadata.mode}
-                    onValueChange={(v: AssessmentMode) =>
-                      setMetadata({ ...metadata, mode: v })
-                    }
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Practice">Practice Mode</SelectItem>
-                      <SelectItem value="Formative">Formative Assessment</SelectItem>
-                      <SelectItem value="Homework">Homework / Assignment</SelectItem>
-                      <SelectItem value="CAT">Continuous Assessment Test (CAT)</SelectItem>
-                      <SelectItem value="Summative">Summative Examination</SelectItem>
-                      <SelectItem value="Groupwork">Group Work Assessment</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Course / Module</Label>
-                  <Select
-                    value={metadata.course}
-                    onValueChange={(v) => setMetadata({ ...metadata, course: v, targetClass: "" })}
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue placeholder="Select course" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {TEACHING_SCOPE.colleges[0].departments[0].courses.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.name} ({c.id})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Target Class</Label>
-                  <Select
-                    value={metadata.targetClass}
-                    onValueChange={(v) => setMetadata({ ...metadata, targetClass: v })}
-                  >
-                    <SelectTrigger className="h-9 text-sm">
-                      <SelectValue placeholder="Select Class" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {selectedCourseObj ? (
-                        selectedCourseObj.classes.map((cl) => (
-                          <SelectItem key={cl.id} value={cl.id}>
-                            {cl.name}
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Course / Module</Label>
+                    <Select
+                      value={metadata.course_id}
+                      onValueChange={(v) => setMetadata({ ...metadata, course_id: v })}
+                    >
+                      <SelectTrigger className="h-10">
+                        <SelectValue placeholder="Select course" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {courses.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.title} ({c.code})
                           </SelectItem>
-                        ))
-                      ) : (
-                        <SelectItem value="none" disabled>Select a course first</SelectItem>
-                      )}
-                    </SelectContent>
-                  </Select>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Duration (Minutes)</Label>
-                  <Input
-                    type="number"
-                    value={metadata.durationMinutes}
+                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Description</Label>
+                  <Textarea
+                    value={metadata.description}
                     onChange={(e) =>
-                      setMetadata({
-                        ...metadata,
-                        durationMinutes: parseInt(e.target.value),
-                      })
+                      setMetadata({ ...metadata, description: e.target.value })
                     }
-                    className="h-9 text-sm"
+                    placeholder="Brief overview of the assessment goals and coverage..."
+                    className="min-h-[80px]"
                   />
                 </div>
 
-                {metadata.mode === "Groupwork" && (
-                  <div className="md:col-span-2 p-5 border-2 border-primary/20 bg-primary/5 rounded-2xl space-y-4 animate-in fade-in slide-in-from-top-4 duration-500">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center">
-                        <Plus className="size-4 text-primary" />
-                      </div>
-                      <h3 className="font-bold text-sm uppercase tracking-tight">Group Work Configuration</h3>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Mode</Label>
+                    <Select
+                      value={metadata.mode}
+                      onValueChange={(v: AssessmentMode) =>
+                        setMetadata({ ...metadata, mode: v })
+                      }
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CAT">CAT</SelectItem>
+                        <SelectItem value="Summative">Summative</SelectItem>
+                        <SelectItem value="Homework">Homework</SelectItem>
+                        <SelectItem value="Formative">Formative</SelectItem>
+                        <SelectItem value="Practice">Practice</SelectItem>
+                        <SelectItem value="Groupwork">Groupwork</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Date</Label>
+                    <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant={"outline"}
+                          className={cn(
+                            "w-full justify-start text-left font-normal h-9 px-3",
+                            !metadata.date && "text-muted-foreground"
+                          )}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {metadata.date ? format(metadata.date, "PPP") : <span>Pick a date</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={metadata.date}
+                          onSelect={(d) => {
+                            setMetadata({ ...metadata, date: d });
+                            setDatePopoverOpen(false);
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Start Time</Label>
+                    <Input
+                      type="time"
+                      value={metadata.startTime}
+                      onChange={(e) => setMetadata({ ...metadata, startTime: e.target.value })}
+                      className="h-9"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">End Time</Label>
+                    <Input
+                      type="time"
+                      value={metadata.endTime}
+                      onChange={(e) => setMetadata({ ...metadata, endTime: e.target.value })}
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t">
+                  <div className="flex items-center justify-between mb-4">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Target Academic Hierarchy</Label>
+                    {fetchingMetadata || fetchingDepts || fetchingOptions || fetchingClasses ? (
+                      <LoaderCircleIcon className="size-4 animate-spin text-primary" />
+                    ) : null}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <Label className="text-[10px] text-muted-foreground">Departments</Label>
+                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
+                        <div className="space-y-1">
+                          {availableDepartments.map(dept => (
+                            <div key={dept.id} className="flex items-center space-x-2">
+                              <Checkbox 
+                                id={`dept-${dept.id}`} 
+                                checked={metadata.department_ids.includes(dept.id)}
+                                onCheckedChange={() => toggleDept(dept.id)}
+                              />
+                              <label htmlFor={`dept-${dept.id}`} className="text-[11px] cursor-pointer truncate">
+                                {dept.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+                    <div className="space-y-2">
+                      <Label className="text-[10px] text-muted-foreground">Options</Label>
+                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
+                        <div className="space-y-1">
+                          {availableOptions.map(opt => (
+                            <div key={opt.id} className="flex items-center space-x-2">
+                              <Checkbox 
+                                id={`opt-${opt.id}`} 
+                                checked={metadata.option_ids.includes(opt.id)}
+                                onCheckedChange={() => toggleOption(opt.id)}
+                              />
+                              <label htmlFor={`opt-${opt.id}`} className="text-[11px] cursor-pointer truncate">
+                                {opt.name}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-[10px] text-muted-foreground">Classes</Label>
+                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
+                        <div className="space-y-1">
+                          {availableClasses.map(cls => (
+                            <div 
+                              key={cls.id} 
+                              onClick={() => toggleClass(cls.id)}
+                              className={cn(
+                                "flex items-center justify-between p-1.5 px-2 rounded border cursor-pointer text-[11px]",
+                                metadata.class_group_ids.includes(cls.id) 
+                                  ? "bg-primary/10 border-primary text-primary" 
+                                  : "hover:bg-muted"
+                              )}
+                            >
+                              <span className="truncate">{cls.name}</span>
+                              {metadata.class_group_ids.includes(cls.id) && <Check className="size-3" />}
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Instructions</Label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {availableInstructions.map((instr) => (
+                        <div
+                          key={instr}
+                          className={cn(
+                            "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-colors hover:bg-muted/30",
+                            metadata.selectedInstructions.includes(instr) &&
+                              "border-primary bg-primary/5",
+                          )}
+                          onClick={() => {
+                            const current = metadata.selectedInstructions;
+                            setMetadata({
+                              ...metadata,
+                              selectedInstructions: current.includes(instr)
+                                ? current.filter((i) => i !== instr)
+                                : [...current, instr],
+                            });
+                          }}
+                        >
+                          <Checkbox checked={metadata.selectedInstructions.includes(instr)} className="size-3" />
+                          <span className="text-[10px] font-medium">{instr}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label className="text-[10px] font-bold uppercase text-muted-foreground">Max Group Size</Label>
+                        <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Passing Marks</Label>
                         <Input
                           type="number"
-                          value={metadata.maxGroupSize}
-                          onChange={(e) => setMetadata({ ...metadata, maxGroupSize: parseInt(e.target.value) || 1 })}
-                          className="h-9 border-primary/20"
-                          min={2}
-                          max={50}
+                          value={metadata.passing_marks}
+                          onChange={(e) =>
+                            setMetadata({
+                              ...metadata,
+                              passing_marks: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="h-9"
                         />
-                        <p className="text-[10px] text-muted-foreground">Maximum number of students per group.</p>
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-[10px] font-bold uppercase text-muted-foreground">Formation Strategy</Label>
-                        <Select
-                          value={metadata.groupFormation}
-                          onValueChange={(v: "self_enrol" | "manual") => setMetadata({ ...metadata, groupFormation: v })}
-                        >
-                          <SelectTrigger className="h-9 border-primary/20">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="self_enrol">Student Self-Enrollment</SelectItem>
-                            <SelectItem value="manual">Lecturer Manual Assignment</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-[10px] text-muted-foreground">How students will be assigned to groups.</p>
+                        <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Total Duration (Min)</Label>
+                        <Input
+                          type="number"
+                          value={metadata.durationMinutes}
+                          onChange={(e) =>
+                            setMetadata({
+                              ...metadata,
+                              durationMinutes: parseInt(e.target.value) || 0,
+                            })
+                          }
+                          className="h-9"
+                        />
                       </div>
                     </div>
-                  </div>
-                )}
-
-                <div className="md:col-span-2 space-y-3">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Instructions</Label>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                    {availableInstructions.map((instr) => (
-                      <div
-                        key={instr}
-                        className={cn(
-                          "flex items-center space-x-2 border rounded-lg p-2.5 cursor-pointer transition-colors hover:bg-muted/30",
-                          metadata.selectedInstructions.includes(instr) &&
-                            "border-primary bg-primary/5",
-                        )}
-                        onClick={() => {
-                          const current = metadata.selectedInstructions;
-                          setMetadata({
-                            ...metadata,
-                            selectedInstructions: current.includes(instr)
-                              ? current.filter((i) => i !== instr)
-                              : [...current, instr],
-                          });
-                        }}
-                      >
-                        <Checkbox checked={metadata.selectedInstructions.includes(instr)} className="size-3.5" />
-                        <span className="text-[11px] font-medium">{instr}</span>
-                      </div>
-                    ))}
-                  </div>
-                  <Textarea
-                    placeholder="Additional custom instructions..."
-                    value={metadata.customInstructions}
-                    onChange={(e) =>
-                      setMetadata({ ...metadata, customInstructions: e.target.value })
-                    }
-                    className="min-h-[80px] text-xs border"
-                  />
-                </div>
-
-                <div className="md:col-span-2 space-y-3 border-t pt-5 mt-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Schedule</Label>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="date" className="text-[10px] uppercase font-bold text-muted-foreground">Date</Label>
-                      <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-                        <PopoverTrigger asChild>
-                          <Button
-                            variant="outline"
-                            id="date"
-                            className="w-full justify-between font-normal h-9 text-xs"
-                          >
-                            {metadata.date ? metadata.date.toLocaleDateString() : "Select date"}
-                            <ChevronDown className="size-3.5 opacity-50" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start">
-                          <Calendar
-                            mode="single"
-                            selected={metadata.date}
-                            onSelect={(d) => {
-                              setMetadata({ ...metadata, date: d });
-                              setDatePopoverOpen(false);
-                            }}
-                          />
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="time-from" className="text-[10px] uppercase font-bold text-muted-foreground">From</Label>
-                      <Input
-                        type="time"
-                        id="time-from"
-                        value={metadata.startTime}
-                        onChange={(e) => setMetadata({ ...metadata, startTime: e.target.value })}
-                        className="h-9 text-xs"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label htmlFor="time-to" className="text-[10px] uppercase font-bold text-muted-foreground">To</Label>
-                      <Input
-                        type="time"
-                        id="time-to"
-                        value={metadata.endTime}
-                        onChange={(e) => setMetadata({ ...metadata, endTime: e.target.value })}
-                        className="h-9 text-xs"
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Custom Instructions</Label>
+                      <Textarea 
+                        placeholder="Any additional rules not covered by the presets..."
+                        className="min-h-[80px]"
+                        value={metadata.customInstructions}
+                        onChange={(e) => setMetadata({ ...metadata, customInstructions: e.target.value })}
                       />
                     </div>
                   </div>
@@ -981,17 +1226,106 @@ export default function NewAssessmentBuilder() {
               </div>
               <div className="space-y-6">
                 <Card>
-                  <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Shield className="size-5 text-primary" /> Environment</CardTitle></CardHeader>
-                  <CardContent className="space-y-4">
-                    {[
-                      { key: "supervised", label: "Proctored", desc: "Live monitoring enabled" },
-                      { key: "browserRestricted", label: "Safe Browser", desc: "Forces fullscreen" },
-                    ].map((item) => (
-                      <div key={item.key} className="flex items-start justify-between gap-4">
-                        <div className="space-y-0.5"><Label>{item.label}</Label><p className="text-xs text-muted-foreground">{item.desc}</p></div>
-                        <Switch checked={(rules as any)[item.key]} onCheckedChange={(v) => setRules({ ...rules, [item.key]: v })} />
+                  <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Shield className="size-5 text-primary" /> Environment & Policy</CardTitle></CardHeader>
+                  <CardContent className="space-y-6">
+                    <div className="space-y-4">
+                      {[
+                        { key: "supervised", label: "Proctored", desc: "Live monitoring enabled" },
+                        { key: "browserRestricted", label: "Safe Browser", desc: "Forces fullscreen" },
+                      ].map((item) => (
+                        <div key={item.key} className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>{item.label}</Label><p className="text-xs text-muted-foreground">{item.desc}</p></div>
+                          <Switch checked={(rules as any)[item.key]} onCheckedChange={(v) => setRules({ ...rules, [item.key]: v })} />
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="space-y-3 pt-4 border-t">
+                      <Label className="text-xs uppercase text-muted-foreground">Result Release Mode</Label>
+                      <Select
+                        value={rules.resultRelease}
+                        onValueChange={(v: "immediate" | "delayed") => setRules({ ...rules, resultRelease: v })}
+                      >
+                        <SelectTrigger className="h-9">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="immediate">Immediate (Auto-grade)</SelectItem>
+                          <SelectItem value="delayed">Manual (Upload after grading)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground italic">
+                        {rules.resultRelease === "delayed" 
+                          ? "Students will be notified when you finalize the grading." 
+                          : "Results released as soon as student submits."}
+                      </p>
+                    </div>
+
+                    <div className="pt-4 border-t">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 mb-4">
+                        Additional Configuration <ChevronDown className="size-3" />
+                      </Label>
+                      <div className="space-y-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>AI Allowed</Label><p className="text-[10px] text-muted-foreground">Allow LLM tools during exam</p></div>
+                          <Switch checked={rules.aiAllowed} onCheckedChange={(v) => setRules({ ...rules, aiAllowed: v })} />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>Open Book</Label><p className="text-[10px] text-muted-foreground">Reference materials allowed</p></div>
+                          <Switch checked={rules.openBook} onCheckedChange={(v) => setRules({ ...rules, openBook: v })} />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>Randomize Questions</Label><p className="text-[10px] text-muted-foreground">Shuffle order per student</p></div>
+                          <Switch checked={rules.shuffleQuestions} onCheckedChange={(v) => setRules({ ...rules, shuffleQuestions: v })} />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>Randomize Options</Label><p className="text-[10px] text-muted-foreground">Shuffle MCQ options</p></div>
+                          <Switch checked={rules.shuffleOptions} onCheckedChange={(v) => setRules({ ...rules, shuffleOptions: v })} />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5"><Label>Password Protected</Label><p className="text-[10px] text-muted-foreground">Require code to start</p></div>
+                          <Switch checked={rules.passwordProtected} onCheckedChange={(v) => setRules({ ...rules, passwordProtected: v })} />
+                        </div>
+                        
+                        {rules.passwordProtected && (
+                          <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                            <Input 
+                              type="text" 
+                              placeholder="Access code..." 
+                              value={rules.accessPassword}
+                              onChange={(e) => setRules({ ...rules, accessPassword: e.target.value })}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-2 gap-4 pt-2">
+                          <div className="space-y-2">
+                            <Label className="text-[10px] uppercase text-muted-foreground">Max Attempts</Label>
+                            <Input 
+                              type="number" 
+                              min={1}
+                              value={rules.attempts}
+                              onChange={(e) => setRules({ ...rules, attempts: parseInt(e.target.value) || 1 })}
+                              className="h-8 text-xs"
+                            />
+                          </div>
+                          {metadata.mode === "Homework" && (
+                            <div className="space-y-2">
+                              <Label className="text-[10px] uppercase text-muted-foreground">Late Penalty %</Label>
+                              <Input 
+                                type="number" 
+                                min={0}
+                                max={100}
+                                value={rules.latePenaltyPercent}
+                                onChange={(e) => setRules({ ...rules, latePenaltyPercent: parseFloat(e.target.value) || 0 })}
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    ))}
+                    </div>
                   </CardContent>
                 </Card>
                 <div className="flex gap-4">
@@ -1288,11 +1622,26 @@ export default function NewAssessmentBuilder() {
             {/* STEP 4: Review */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
               <div className="lg:col-span-2 space-y-8">
-                <div className="space-y-2">
-                  <h2 className="text-3xl font-bold">{metadata.title || "Untitled Assessment"}</h2>
-                  <div className="flex gap-4 text-sm text-muted-foreground">
-                    <span className="flex items-center gap-1"><Clock className="size-4" /> {metadata.durationMinutes} mins</span>
-                    <span className="flex items-center gap-1"><FileText className="size-4" /> {metadata.mode}</span>
+                <div className="space-y-4">
+                  <div className="space-y-1">
+                    <h2 className="text-3xl font-bold">{metadata.title || "Untitled Assessment"}</h2>
+                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                      <span className="flex items-center gap-1"><CalendarIcon className="size-4" /> {metadata.date ? format(metadata.date, "PPP") : "No date set"}</span>
+                      <span className="flex items-center gap-1"><Clock className="size-4" /> {formatDisplayTime(metadata.startTime)} - {formatDisplayTime(metadata.endTime)} ({metadata.durationMinutes} mins)</span>
+                      <span className="flex items-center gap-1"><FileText className="size-4" /> {metadata.mode}</span>
+                    </div>
+                  </div>
+                  
+                  {/* Target Groups Summary */}
+                  <div className="flex flex-wrap gap-2">
+                    {metadata.class_group_ids.map(id => {
+                      const cls = availableClasses.find(c => c.id === id);
+                      return cls ? (
+                        <Badge key={id} variant="secondary" className="bg-primary/5 text-primary border-primary/10">
+                          {cls.name}
+                        </Badge>
+                      ) : null;
+                    })}
                   </div>
                 </div>
                 <Separator />
@@ -1370,7 +1719,19 @@ export default function NewAssessmentBuilder() {
               <Shield className="size-16 text-primary" />
               <div className="max-w-md space-y-4">
                 <h2 className="text-3xl font-bold">Ready to Publish?</h2>
-                <p className="text-muted-foreground">Scheduled for <strong>{metadata.date?.toDateString()}</strong> at <strong>{metadata.startTime}</strong>.</p>
+                <p className="text-muted-foreground">
+                  Scheduled for <strong>{metadata.date ? format(metadata.date, "PPP") : "Unscheduled"}</strong> 
+                  <br />
+                  From <strong>{formatDisplayTime(metadata.startTime)}</strong> to <strong>{formatDisplayTime(metadata.endTime)}</strong>.
+                </p>
+                {metadata.mode === "Homework" && rules.latePenaltyPercent > 0 && (
+                  <p className="text-xs text-amber-600 font-medium">
+                    Late submission penalty of {rules.latePenaltyPercent}% enabled.
+                  </p>
+                )}
+                <p className="text-xs text-muted-foreground">
+                  Passing Marks: <strong>{metadata.passing_marks}</strong> • Mode: <strong>{rules.resultRelease === 'immediate' ? 'Immediate' : 'Manual'}</strong>
+                </p>
               </div>
               <div className="flex flex-col gap-4 w-full max-w-sm">
                 <Button size="lg" className="h-14 rounded-full" onClick={handlePublish} disabled={isPublishing}>Publish Now</Button>

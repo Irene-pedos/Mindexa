@@ -627,7 +627,7 @@ async def seed_assessment(
         subject_id=subject_id,
         created_by_id=lecturer_id,
         grading_mode=GradingMode.AUTO,
-        result_release_mode=ResultReleaseMode.DELAYED,
+        result_release_mode=ResultReleaseMode.MANUAL,
         total_marks=25,
         instructions=(
             "Closed Book. No AI assistance allowed. Complete all sections within the time limit."

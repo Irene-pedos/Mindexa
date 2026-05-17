@@ -100,14 +100,14 @@ class AssessmentQuestionResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     question_id: uuid.UUID
-    section_id: uuid.UUID | None
-    marks: int
+    section_id: uuid.UUID | None = Field(None, validation_alias="assessment_section_id")
+    marks: int = Field(..., validation_alias="marks_override")
     order_index: int
     added_via: str
     is_required: bool
     question: QuestionDetailResponse | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 # ─── Assessment Draft Progress Schema ─────────────────────────────────────────
@@ -226,9 +226,6 @@ class AssessmentGeneralUpdate(BaseModel):
     assessment_type: str | None = None
     grading_mode: str | None = None
     result_release_mode: str | None = None
-    subject: str | None = Field(default=None, max_length=200)
-    subject_id: uuid.UUID | None = None
-    target_class: str | None = Field(default=None, max_length=200)
     total_marks: int | None = Field(default=None, ge=1, le=10000)
     passing_marks: int | None = Field(default=None, ge=0)
     duration_minutes: int | None = Field(default=None, ge=1, le=1440)
@@ -261,8 +258,10 @@ class AssessmentSummaryResponse(BaseModel):
     is_finalized: bool
     draft_step: int | None
     created_by_id: uuid.UUID
-    subject: str | None
-    target_class: str | None
+    subject: str | None = None
+    course_name: str | None = None
+    course_code: str | None = None
+    target_class: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -303,8 +302,6 @@ class AssessmentDetailResponse(BaseModel):
     draft_step: int | None
     is_finalized: bool
     finalized_at: datetime | None
-    subject: str | None
-    target_class: str | None
     created_by_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
@@ -370,13 +367,21 @@ class BulkAssessmentQuestion(BaseModel):
 
 class BulkAssessmentMetadata(BaseModel):
     title: str = Field(..., min_length=2, max_length=300)
+    description: str | None = None
     mode: str
-    course: str
-    targetClass: str
+    institution_id: str | uuid.UUID | None = None
+    department_ids: list[uuid.UUID] = []
+    option_ids: list[uuid.UUID] = []
+    class_group_ids: list[uuid.UUID] = []
+    course_id: str | uuid.UUID | None = None
+    subject_id: str | uuid.UUID | None = None
     date: datetime | None = None
-    startTime: str
-    endTime: str
+    startTime: str | None = None
+    endTime: str | None = None
+    windowStart: datetime | None = None
+    windowEnd: datetime | None = None
     durationMinutes: int = Field(..., ge=1)
+    passing_marks: int | None = Field(default=None, ge=0)
     selectedInstructions: list[str] = []
     customInstructions: str | None = None
     maxGroupSize: int | None = Field(default=None, ge=1)
@@ -390,11 +395,18 @@ class BulkAssessmentRules(BaseModel):
     browserRestricted: bool = True
     shuffleQuestions: bool = True
     shuffleOptions: bool = True
-    resultRelease: str = "delayed"
+    resultRelease: str = "manual"
+    resultReleaseAt: datetime | None = None
     attempts: int = Field(default=1, ge=1)
+    passwordProtected: bool = False
+    accessPassword: str | None = None
+    latePenaltyPercent: float | None = Field(default=None, ge=0, le=100)
+    gracePeriodMinutes: int | None = Field(default=None, ge=0)
+    autosaveToken: uuid.UUID | None = None
 
 
 class BulkAssessmentPublishRequest(BaseModel):
+    id: uuid.UUID | None = None
     metadata: BulkAssessmentMetadata
     blueprint: list[BulkAssessmentSection]
     questions: list[BulkAssessmentQuestion]

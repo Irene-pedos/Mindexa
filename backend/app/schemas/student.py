@@ -22,6 +22,8 @@ class StudentActiveAttempt(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     assessment_title: str
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
     status: AttemptStatus
     started_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -31,6 +33,8 @@ class StudentRecentResult(BaseModel):
     id: uuid.UUID
     assessment_title: str
     assessment_type: AssessmentType
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
     score: float
     total_marks: float
     percentage: float
@@ -42,6 +46,8 @@ class StudentUpcomingAssessment(BaseModel):
     id: uuid.UUID
     title: str
     type: AssessmentType
+    course_code: Optional[str] = None
+    course_name: Optional[str] = None
     window_start: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     total_marks: Optional[int] = None
@@ -69,6 +75,15 @@ class StudentScheduleEvent(BaseModel):
 class StudentScheduleResponse(BaseModel):
     """Aggregated schedule data."""
     events: list[StudentScheduleEvent] = []
+
+class StudentCourseListItem(BaseModel):
+    """Simplified course info for student listing with progress."""
+    id: uuid.UUID
+    code: str
+    title: str
+    lecturer_name: str
+    status: str
+    progress: int = 0
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""

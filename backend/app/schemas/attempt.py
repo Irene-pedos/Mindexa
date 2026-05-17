@@ -1,10 +1,10 @@
+from __future__ import annotations
 """
 app/schemas/attempt.py
 
 Pydantic schemas for AssessmentAttempt endpoints.
 """
 
-from __future__ import annotations
 
 import uuid
 from datetime import datetime
@@ -167,6 +167,7 @@ class AttemptSupervisorView(BaseModel):
     ip_address: str | None = None
 
 # Rebuild models to resolve deferred type evaluation
+AttemptQuestionOption.model_rebuild()
 AttemptQuestionResponse.model_rebuild()
 AttemptResponse.model_rebuild()
 AttemptListResponse.model_rebuild()

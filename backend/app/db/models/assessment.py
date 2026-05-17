@@ -49,7 +49,7 @@ from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
-from app.db.base import AuditedBaseModel, BaseModel, utcnow
+from app.db.base import AuditedBaseModel, BaseModel, AppendOnlyModel, utcnow
 from app.db.enums import (
     AssessmentStatus,
     AssessmentType,
@@ -61,7 +61,12 @@ from app.db.enums import (
     SupervisorRole,
 )
 from app.db.mixins import (
-    composite_index,
+    fk_uuid, 
+    optional_fk_uuid, 
+    composite_index, 
+    unique_composite_index, 
+    positive_int, 
+    bool_field
 )
 from app.db.models.integrity import SupervisionSession
 
@@ -142,6 +147,14 @@ class Assessment(AuditedBaseModel, table=True):
         """Alias for published_at for API schema alignment."""
         return self.published_at
 
+    @property
+    def course_name(self) -> str | None:
+        return self.course.name if self.course else None
+
+    @property
+    def course_code(self) -> str | None:
+        return self.course.code if self.course else None
+
     # ── Core references ───────────────────────────────────────────────────────
 
     course_id: Optional[uuid.UUID] = Field(
@@ -176,8 +189,6 @@ class Assessment(AuditedBaseModel, table=True):
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None, nullable=True)
     instructions: Optional[str] = Field(default=None, nullable=True)
-    subject: Optional[str] = Field(default=None, nullable=True, max_length=200)
-    target_class: Optional[str] = Field(default=None, nullable=True, max_length=200)
     assessment_type: AssessmentType = Field(nullable=False, index=True)
     status: AssessmentStatus = Field(
         default=AssessmentStatus.DRAFT,
@@ -209,7 +220,7 @@ class Assessment(AuditedBaseModel, table=True):
         nullable=False,
     )
     result_release_mode: ResultReleaseMode = Field(
-        default=ResultReleaseMode.DELAYED,
+        default=ResultReleaseMode.MANUAL,
         nullable=False,
     )
     result_release_at: Optional[datetime] = Field(
@@ -286,6 +297,20 @@ class Assessment(AuditedBaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     course: Optional["Course"] = Relationship(back_populates="assessments")
+    subject_rel: Optional["Subject"] = Relationship(
+        sa_relationship_kwargs={"primaryjoin": "Assessment.subject_id == Subject.id"}
+    )
+
+    @property
+    def subject(self) -> str | None:
+        """Friendly name for subject/course to display in lists."""
+        # If explicitly linked to a subject, use its name
+        if self.subject_rel:
+            return self.subject_rel.name
+        # Fallback to course title/code
+        if self.course:
+            return f"{self.course.code} - {self.course.title}"
+        return None
 
     target_sections: List["AssessmentTargetSection"] = Relationship(
         back_populates="assessment"
@@ -327,7 +352,7 @@ class Assessment(AuditedBaseModel, table=True):
 # ASSESSMENT TARGET SECTION (junction)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class AssessmentTargetSection(BaseModel, table=True):
+class AssessmentTargetSection(AuditedBaseModel, table=True):
     """
     Junction table: Assessment ↔ ClassSection (many-to-many).
 

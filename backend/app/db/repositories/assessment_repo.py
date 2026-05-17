@@ -73,7 +73,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, update, or_
+from sqlalchemy import delete, func, update, or_, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -94,7 +94,7 @@ from app.db.models.assessment import (
     AssessmentSupervisor,
     AssessmentTargetSection,
 )
-from app.db.models.question import AssessmentQuestion
+from app.db.models.question import AssessmentQuestion, Question
 
 # ---------------------------------------------------------------------------
 # INTERNAL HELPERS
@@ -140,9 +140,16 @@ class AssessmentRepository:
         instructions: str | None = None,
         passing_marks: int | None = None,
         duration_minutes: int | None = None,
+        window_start: datetime | None = None,
+        window_end: datetime | None = None,
+        result_release_at: datetime | None = None,
+        max_attempts: int = 1,
         is_group_assessment: bool = False,
         max_group_size: int | None = None,
         group_formation_mode: str | None = None,
+        late_penalty_percent: float | None = None,
+        grace_period_minutes: int | None = None,
+        autosave_token: uuid.UUID | None = None,
     ) -> Assessment:
         """
         Create a new Assessment row.
@@ -163,14 +170,21 @@ class AssessmentRepository:
             updated_by_id=created_by_id,
             grading_mode=grading_mode,
             result_release_mode=result_release_mode,
+            result_release_at=result_release_at,
             total_marks=total_marks,
             status=AssessmentStatus.DRAFT,
             instructions=instructions,
             passing_marks=passing_marks,
             duration_minutes=duration_minutes,
+            window_start=window_start,
+            window_end=window_end,
+            max_attempts=max_attempts,
             is_group_assessment=is_group_assessment,
             max_group_size=max_group_size,
             group_formation_mode=group_formation_mode,
+            late_penalty_percent=late_penalty_percent,
+            grace_period_minutes=grace_period_minutes,
+            autosave_token=autosave_token,
             draft_step=1,
             draft_is_complete=False,
         )
@@ -188,23 +202,26 @@ class AssessmentRepository:
 
         Eagerly loads:
             sections, blueprint_rules, draft_progress,
-            assessment_questions (with nested question), supervisors,
+            assessment_questions (with nested question, options, and tags), supervisors,
             target_sections, publish_validations
 
         Excludes soft-deleted records.
         """
+        from app.db.models.question import AssessmentQuestion, Question
+
         result = await self.db.execute(
             select(Assessment)
             .options(
+                selectinload(Assessment.course),
                 selectinload(Assessment.sections),
                 selectinload(Assessment.blueprint_rules),
                 selectinload(Assessment.draft_progress),
                 selectinload(Assessment.supervisors),
                 selectinload(Assessment.target_sections),
                 selectinload(Assessment.publish_validations),
-                selectinload(Assessment.assessment_questions).selectinload(
-                    AssessmentQuestion.question
-                ),
+                selectinload(Assessment.assessment_questions)
+                .selectinload(AssessmentQuestion.question)
+                .selectinload(Question.options),
             )
             .where(
                 col(Assessment.id) == assessment_id,
@@ -238,6 +255,7 @@ class AssessmentRepository:
         assessment_type: AssessmentType | None = None,
         page: int = 1,
         page_size: int = 20,
+        sort: str = "newest",
     ) -> tuple[list[Assessment], int]:
         """
         Paginated list of assessments owned by a given user.
@@ -257,10 +275,20 @@ class AssessmentRepository:
         )
         total = count_result.scalar_one()
 
+        order_by = col(Assessment.created_at).desc()
+        if sort == "oldest":
+            order_by = col(Assessment.created_at).asc()
+        elif sort == "title":
+            order_by = col(Assessment.title).asc()
+
         result = await self.db.execute(
             select(Assessment)
+            .options(
+                selectinload(Assessment.course),
+                selectinload(Assessment.subject_rel),
+            )
             .where(*filters)
-            .order_by(col(Assessment.created_at).desc())
+            .order_by(order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -274,6 +302,7 @@ class AssessmentRepository:
         course_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
+        sort: str = "newest",
     ) -> tuple[list[Assessment], int]:
         """
         Paginated list of all assessments (admin use).
@@ -292,10 +321,20 @@ class AssessmentRepository:
         )
         total = count_result.scalar_one()
 
+        order_by = col(Assessment.created_at).desc()
+        if sort == "oldest":
+            order_by = col(Assessment.created_at).asc()
+        elif sort == "title":
+            order_by = col(Assessment.title).asc()
+
         result = await self.db.execute(
             select(Assessment)
+            .options(
+                selectinload(Assessment.course),
+                selectinload(Assessment.subject_rel),
+            )
             .where(*filters)
-            .order_by(col(Assessment.created_at).desc())
+            .order_by(order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
@@ -1186,11 +1225,34 @@ class AssessmentRepository:
         )
         return result.scalar_one_or_none() is not None
 
+    async def clear_sections_and_questions(self, assessment_id: uuid.UUID) -> None:
+        """
+        Delete all sections and assessment-question links for an assessment.
+        Used before rebuilding an assessment during a bulk update.
+        """
+        from sqlalchemy import delete
+        from app.db.models.assessment import AssessmentSection
+        from app.db.models.question import AssessmentQuestion, Question
+
+        await self.db.execute(
+            delete(AssessmentSection).where(
+                col(AssessmentSection.assessment_id) == assessment_id
+            )
+        )
+        await self.db.execute(
+            delete(AssessmentQuestion).where(
+                col(AssessmentQuestion.assessment_id) == assessment_id
+            )
+        )
+        await self.db.flush()
+
     async def list_available_for_student(
         self,
         *,
+        student_id: uuid.UUID,
         page: int = 1,
         page_size: int = 20,
+        sort: str = "newest",
     ) -> tuple[list[Assessment], int]:
         """
         List all assessments that a student can currently see or take.
@@ -1198,11 +1260,13 @@ class AssessmentRepository:
         Filters:
             - status NOT IN (DRAFT, ARCHIVED)
             - is_deleted = False
-        
-        Future: will filter by student's class_section_id / course enrollment.
+            - Student is enrolled in a class section targeted by this assessment
+              OR (no targets defined AND student enrolled in assessment's course)
         """
-        from app.db.models.academic import Course
+        from app.db.models.academic import Course, StudentEnrollment, ClassSection
         now = _utcnow()
+        
+        # Base filters
         filters = [
             col(Assessment.status).in_([
                 AssessmentStatus.PUBLISHED,
@@ -1215,16 +1279,57 @@ class AssessmentRepository:
             ),
         ]
 
+        # Targeted sections subquery
+        targeted_stmt = (
+            select(Assessment.id)
+            .join(AssessmentTargetSection, AssessmentTargetSection.assessment_id == Assessment.id)
+            .join(StudentEnrollment, StudentEnrollment.class_section_id == AssessmentTargetSection.class_section_id)
+            .where(
+                StudentEnrollment.student_id == student_id,
+                StudentEnrollment.is_deleted == False,
+                AssessmentTargetSection.is_deleted == False
+            )
+        )
+
+        # Course enrollment subquery (if no target sections defined)
+        # We check if assessment has ANY target sections
+        has_targets_stmt = select(AssessmentTargetSection.assessment_id).where(AssessmentTargetSection.is_deleted == False)
+
+        course_stmt = (
+            select(Assessment.id)
+            .join(Course, Course.id == Assessment.course_id)
+            .join(ClassSection, ClassSection.course_id == Course.id)
+            .join(StudentEnrollment, StudentEnrollment.class_section_id == ClassSection.id)
+            .where(
+                StudentEnrollment.student_id == student_id,
+                StudentEnrollment.is_deleted == False,
+                not_(Assessment.id.in_(has_targets_stmt))
+            )
+        )
+
+        # Combined availability
+        availability_filter = or_(
+            Assessment.id.in_(targeted_stmt),
+            Assessment.id.in_(course_stmt)
+        )
+        filters.append(availability_filter)
+
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
+        order_by = col(Assessment.published_at).desc()
+        if sort == "oldest":
+            order_by = col(Assessment.published_at).asc()
+        elif sort == "title":
+            order_by = col(Assessment.title).asc()
+
         result = await self.db.execute(
             select(Assessment)
             .options(selectinload(Assessment.course))
             .where(*filters)
-            .order_by(col(Assessment.published_at).desc())
+            .order_by(order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )

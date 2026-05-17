@@ -14,7 +14,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer, require_verified_email
-from app.db.schemas.resource import LecturerMaterialResponse, LecturerMaterialCreate
+from app.db.schemas.resource import (
+    LecturerMaterialResponse, 
+    LecturerMaterialCreate,
+    StudentResourceResponse
+)
 from app.services.resource_service import ResourceService
 from app.services.student_service import StudentService
 from app.db.enums import ResourceCategory, UserRole
@@ -133,3 +137,64 @@ async def download_material(
         filename=material.original_filename,
         media_type=material.mime_type,
     )
+
+
+# ── Student Resources ──────────────────────────────────────────────────
+
+@router.post(
+    "/student-resources",
+    response_model=StudentResourceResponse,
+    summary="Upload a personal study resource",
+)
+async def upload_student_resource(
+    subject_tag: str = Form(None),
+    file: UploadFile = File(...),
+    current_user=Depends(require_verified_email),
+    db: AsyncSession = Depends(get_db),
+) -> StudentResourceResponse:
+    """
+    Upload a personal file for study support.
+    Only available to the logged-in student.
+    """
+    service = ResourceService(db)
+    resource = await service.upload_student_resource(
+        current_user.id, file, subject_tag
+    )
+    return StudentResourceResponse.model_validate(resource)
+
+
+@router.get(
+    "/student-resources",
+    response_model=List[StudentResourceResponse],
+    summary="List your personal study resources",
+)
+async def list_student_resources(
+    current_user=Depends(require_verified_email),
+    db: AsyncSession = Depends(get_db),
+) -> List[StudentResourceResponse]:
+    """
+    Returns all personal study materials uploaded by the current student.
+    """
+    service = ResourceService(db)
+    resources = await service.list_student_resources(current_user.id)
+    return [StudentResourceResponse.model_validate(r) for r in resources]
+
+
+@router.delete(
+    "/student-resources/{resource_id}",
+    summary="Delete a personal study resource",
+)
+async def delete_student_resource(
+    resource_id: uuid.UUID,
+    current_user=Depends(require_verified_email),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Soft-deletes a personal study resource.
+    """
+    service = ResourceService(db)
+    success = await service.delete_student_resource(current_user.id, resource_id)
+    if not success:
+        raise NotFoundError("Resource not found or unauthorized")
+    
+    return {"success": True, "message": "Resource deleted successfully"}

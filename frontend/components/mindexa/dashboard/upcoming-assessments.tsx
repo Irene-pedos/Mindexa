@@ -75,6 +75,11 @@ export function UpcomingAssessments({
                      <span className="flex items-center gap-1 font-medium text-primary">
                         {item.status === 'PAUSED' ? 'Paused - Ready to resume' : 'Active session'}
                      </span>
+                     {item.course_code && (
+                       <span className="font-mono bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
+                         {item.course_code}
+                       </span>
+                     )}
                   </div>
                 </div>
 
@@ -110,6 +115,11 @@ export function UpcomingAssessments({
                     <span className="flex items-center gap-1">
                       <Clock className="size-3.5" /> {item.duration_minutes || 90} min
                     </span>
+                    {item.course_code && (
+                       <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[10px]">
+                         {item.course_code}
+                       </span>
+                    )}
                     <Badge variant="outline" className="text-[9px] h-4 uppercase font-bold">
                       {item.type}
                     </Badge>
@@ -154,6 +164,11 @@ export function UpcomingAssessments({
                         ? new Date(item.window_start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                         : "TBD"}
                     </span>
+                    {item.course_code && (
+                       <span className="font-mono bg-muted/50 px-1.5 py-0.5 rounded text-[10px]">
+                         {item.course_code}
+                       </span>
+                    )}
                   </div>
                 </div>
 

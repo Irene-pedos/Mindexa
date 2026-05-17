@@ -13,18 +13,22 @@ Mindexa is a secure academic integrity platform designed to provide ultra-secure
 ## Building and Running
 
 ### Development
+
 ```bash
 npm run dev
 ```
+
 Starts the development server on `http://localhost:3000`.
 
 ### Production
+
 ```bash
 npm run build
 npm run start
 ```
 
 ### Linting
+
 ```bash
 npm run lint
 ```
@@ -49,25 +53,31 @@ npm run lint
 ## Development Conventions
 
 ### 1. Type Safety
+
 - Always use TypeScript for new files.
 - Define interfaces for API responses and component props in their respective files or a shared `types` folder if it grows.
 
 ### 2. API Communication
+
 - Use `apiClient` from `@/lib/api/client` for all backend requests.
 - It handles JWT injection, 401 token refreshing, and standard error handling.
 - Base URL is configured via `NEXT_PUBLIC_API_URL` (default: `http://localhost:8000/api/v1`).
 
 ### 3. Styling
+
 - Use Tailwind CSS 4 utility classes.
 - Follow the existing design system which prioritizes a clean, academic look (light mode by default).
 - For animations, use `framer-motion` or the `motion` library.
+- Use skeleton loading for data fetching every where on our app.
 
 ### 4. Authentication & Authorization
+
 - Auth state is managed by `AuthProvider` (`@/components/providers/auth-provider`).
 - Role-based access is enforced via `RoleGuard` in `app/layout.tsx`.
 - Protected routes are grouped by role in the `app/` directory.
 
 ### 5. Form Validation
+
 - Prefer using the validation logic in `lib/validation.ts` or `zod` for complex forms.
 - Ensure all user inputs are validated client-side before submission.
 

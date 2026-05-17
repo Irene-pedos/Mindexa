@@ -147,6 +147,9 @@ class AuthService:
         level: str | None = None,
         year: str | None = None,
         ip_address: str | None = None,
+        institution_ids: list[uuid.UUID] | None = None,
+        department_ids: list[uuid.UUID] | None = None,
+        option_ids: list[uuid.UUID] | None = None,
     ) -> tuple:
         """
         Create a new user account with profile and issue a verification token.
@@ -157,8 +160,9 @@ class AuthService:
             3. Hash password
             4. Create User row (status based on role)
             5. Create UserProfile row with new academic fields
-            6. If student, generate email verification token
-            7. Record security event (best-effort)
+            6. If lecturer, populate junction tables for multi-association
+            7. If student, generate email verification token
+            8. Record security event (best-effort)
 
         Returns:
             (User, raw_verification_token or None)
@@ -212,6 +216,23 @@ class AuthService:
         await self._users.create(user)
         user_profile.user_id = user.id
         self.db.add(user_profile)
+        
+        # Multi-association for Lecturers
+        if role_value == UserRole.LECTURER.value:
+            from app.db.models.academic import LecturerInstitution, LecturerDepartment, LecturerOption
+            
+            if institution_ids:
+                for inst_id in institution_ids:
+                    self.db.add(LecturerInstitution(lecturer_id=user.id, institution_id=inst_id))
+            
+            if department_ids:
+                for dept_id in department_ids:
+                    self.db.add(LecturerDepartment(lecturer_id=user.id, department_id=dept_id))
+                    
+            if option_ids:
+                for opt_id in option_ids:
+                    self.db.add(LecturerOption(lecturer_id=user.id, option_id=opt_id))
+
         await self.db.flush()
 
         raw_token = None

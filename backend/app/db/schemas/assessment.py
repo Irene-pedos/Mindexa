@@ -45,7 +45,7 @@ class AssessmentStep1Request(MindexaSchema):
     window_end: datetime | None = None
     max_attempts: int = Field(default=1, ge=1, le=5)
     grading_mode: GradingMode = GradingMode.RUBRIC
-    result_release_mode: ResultReleaseMode = ResultReleaseMode.DELAYED
+    result_release_mode: ResultReleaseMode = ResultReleaseMode.MANUAL
     result_release_at: datetime | None = None
 
     @model_validator(mode="after")

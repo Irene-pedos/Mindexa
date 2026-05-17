@@ -30,11 +30,23 @@ export interface LecturerChartDataPoint {
   ai: number;
 }
 
+export interface LecturerIntegrityAlert {
+  id: string;
+  student_name: string;
+  student_id: string;
+  assessment_title: string;
+  event_type: string;
+  created_at: string;
+  risk_score: number;
+  severity: "low" | "medium" | "high";
+}
+
 export interface LecturerDashboardResponse {
   summary: LecturerDashboardSummary;
   pending_queue: LecturerPendingItem[];
   recent_submissions: LecturerRecentSubmission[];
   chart_data: LecturerChartDataPoint[];
+  recent_alerts: LecturerIntegrityAlert[];
 }
 
 export interface AdminCourseListItem {
@@ -44,6 +56,7 @@ export interface AdminCourseListItem {
   lecturer_name: string;
   student_count: number;
   status: string;
+  performance_avg: number;
 }
 
 export interface AdminCourseListResponse {
@@ -67,6 +80,9 @@ export interface LecturerCourseDetail {
   student_count: number;
   performance_avg: number;
   roster: LecturerCourseRosterItem[];
+  department_name?: string;
+  option_name?: string;
+  sections?: string[];
 }
 
 export interface LecturerMaterialResponse {
@@ -93,6 +109,25 @@ export interface InstitutionResponse {
   code: string;
 }
 
+export interface DepartmentResponse {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface OptionResponse {
+  id: string;
+  name: string;
+  code: string;
+}
+
+export interface ClassGroupResponse {
+  id: string;
+  name: string;
+  code: string;
+  level?: number;
+}
+
 export interface AcademicPeriodResponse {
   id: string;
   name: string;
@@ -101,7 +136,9 @@ export interface AcademicPeriodResponse {
 
 export interface CourseCreateRequest {
   institution_id: string;
-  department_id?: string;
+  department_ids?: string[];
+  option_ids?: string[];
+  class_group_ids?: string[];
   academic_period_id: string;
   code: string;
   title: string;
@@ -168,6 +205,27 @@ export const lecturerApi = {
   },
   getInstitutions: async (): Promise<InstitutionResponse[]> => {
     return apiClient("/lecturers/institutions");
+  },
+  getMyInstitutions: async (): Promise<InstitutionResponse[]> => {
+    return apiClient("/lecturers/me/institutions");
+  },
+  getDepartments: async (institutionId: string): Promise<DepartmentResponse[]> => {
+    return apiClient(`/lecturers/departments?institution_id=${institutionId}`);
+  },
+  getMyDepartments: async (institutionId: string): Promise<DepartmentResponse[]> => {
+    return apiClient(`/lecturers/me/departments?institution_id=${institutionId}`);
+  },
+  getOptions: async (departmentId: string): Promise<OptionResponse[]> => {
+    return apiClient(`/lecturers/options?department_id=${departmentId}`);
+  },
+  getMyOptions: async (departmentId: string): Promise<OptionResponse[]> => {
+    return apiClient(`/lecturers/me/options?department_id=${departmentId}`);
+  },
+  getClasses: async (optionId: string): Promise<ClassGroupResponse[]> => {
+    return apiClient(`/lecturers/classes?option_id=${optionId}`);
+  },
+  getMyClasses: async (optionId: string): Promise<ClassGroupResponse[]> => {
+    return apiClient(`/lecturers/me/classes?option_id=${optionId}`);
   },
   getPeriods: async (): Promise<AcademicPeriodResponse[]> => {
     return apiClient("/lecturers/academic-periods");

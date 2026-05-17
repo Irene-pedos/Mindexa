@@ -154,7 +154,7 @@ class IntegrityRepository:
             select(func.count(AssessmentAttempt.id))
             .where(
                 AssessmentAttempt.assessment_id == assessment_id,
-                AssessmentAttempt.status == AttemptStatus.ACTIVE
+                AssessmentAttempt.status == AttemptStatus.IN_PROGRESS
             )
         )
         online_count = online_result.scalar_one()

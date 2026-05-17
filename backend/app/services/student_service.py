@@ -6,9 +6,11 @@ from datetime import UTC, datetime
 from sqlalchemy import select, func, and_, not_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.enums import AttemptStatus, AssessmentType
+from app.db.enums import AttemptStatus, AssessmentType, AssessmentStatus
 from app.db.models.academic import Course
+from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
+from app.db.models.resource import LecturerMaterial
 from app.db.models.result import AssessmentResult
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -23,6 +25,7 @@ from app.schemas.student import (
     StudentScheduleResponse,
     StudentUpcomingAssessment,
     PerformanceTrendItem,
+    StudentCourseListItem,
 )
 
 
@@ -63,11 +66,14 @@ class StudentService:
         active_attempts_data = []
         for a in all_active:
             assessment = await self.assessment_repo.get_by_id_simple(a.assessment_id)
+            course = await self.db.get(Course, assessment.course_id) if assessment else None
             active_attempts_data.append(
                 StudentActiveAttempt(
                     id=a.id,
                     assessment_id=a.assessment_id,
                     assessment_title=assessment.title if assessment else "Unknown Assessment",
+                    course_code=course.code if course else None,
+                    course_name=course.name if course else None,
                     status=a.status,
                     started_at=a.started_at,
                     expires_at=a.expires_at,
@@ -98,11 +104,14 @@ class StudentService:
         recent_results_data = []
         for r in results[:5]:  # Take top 5 recent
             assessment = r.attempt.assessment if r.attempt else None
+            course = assessment.course if assessment else None
             recent_results_data.append(
                 StudentRecentResult(
                     id=r.id,
                     assessment_title=assessment.title if assessment else "Unknown",
                     assessment_type=assessment.assessment_type if assessment else AssessmentType.CAT,
+                    course_code=course.code if course else None,
+                    course_name=course.name if course else None,
                     score=r.total_score or 0.0,
                     total_marks=r.max_score or 100.0,
                     percentage=r.percentage or 0.0,
@@ -113,6 +122,7 @@ class StudentService:
 
         # 5. Upcoming Assessments (Available but not attempted yet)
         available_assessments, _ = await self.assessment_repo.list_available_for_student(
+            student_id=student_id,
             page_size=10
         )
 
@@ -120,11 +130,14 @@ class StudentService:
         for ass in available_assessments:
             count = await self.attempt_repo.count_attempts_by_student(student_id, ass.id)
             if count == 0:
+                course = await self.db.get(Course, ass.course_id)
                 upcoming_data.append(
                     StudentUpcomingAssessment(
                         id=ass.id,
                         title=ass.title,
                         type=ass.assessment_type,
+                        course_code=course.code if course else None,
+                        course_name=course.name if course else None,
                         window_start=ass.window_start,
                         duration_minutes=ass.duration_minutes,
                         total_marks=ass.total_marks,
@@ -176,7 +189,10 @@ class StudentService:
         )
 
     async def get_schedule_data(self, student_id: uuid.UUID) -> StudentScheduleResponse:
-        assessments, _ = await self.assessment_repo.list_available_for_student(page_size=100)
+        assessments, _ = await self.assessment_repo.list_available_for_student(
+            student_id=student_id,
+            page_size=100
+        )
 
         events = []
         for ass in assessments:
@@ -202,12 +218,55 @@ class StudentService:
 
         return StudentScheduleResponse(events=events)
 
-    async def list_courses(self, student_id: uuid.UUID) -> list[Course]:
-        """List all courses the student is enrolled in."""
-        return await self.course_repo.list_by_student(student_id)
+    async def list_courses(self, student_id: uuid.UUID) -> list[StudentCourseListItem]:
+        """List all courses the student is enrolled in with progress."""
+        from app.db.models.academic import LecturerCourseAssignment
+        from app.db.models.auth import User, UserProfile
+
+        courses = await self.course_repo.list_by_student(student_id)
+        
+        items = []
+        for c in courses:
+            progress = await self._calculate_course_progress(student_id, c.id)
+            
+            # Fetch primary lecturer name
+            lecturer_stmt = (
+                select(UserProfile.first_name, UserProfile.last_name, UserProfile.display_name)
+                .join(User, User.id == UserProfile.user_id)
+                .join(LecturerCourseAssignment, LecturerCourseAssignment.lecturer_id == User.id)
+                .where(
+                    LecturerCourseAssignment.course_id == c.id,
+                    LecturerCourseAssignment.is_active == True,
+                    LecturerCourseAssignment.is_deleted == False
+                )
+                .limit(1)
+            )
+            lecturer_res = await self.db.execute(lecturer_stmt)
+            lecturer_row = lecturer_res.first()
+            
+            lecturer_name = "Unknown Lecturer"
+            if lecturer_row:
+                fname, lname, dname = lecturer_row
+                if fname and lname:
+                    lecturer_name = f"{fname} {lname}"
+                else:
+                    lecturer_name = dname or "Lecturer"
+
+            items.append(StudentCourseListItem(
+                id=c.id,
+                code=c.code,
+                title=c.name,
+                lecturer_name=lecturer_name,
+                status="Active",
+                progress=progress
+            ))
+        return items
 
     async def get_course_detail(self, student_id: uuid.UUID, course_id: uuid.UUID) -> dict:
         """Get detailed information for a specific course."""
+        from app.db.models.academic import LecturerCourseAssignment
+        from app.db.models.auth import User, UserProfile
+
         stmt = select(Course).where(Course.id == course_id, Course.is_deleted == False)
         result = await self.db.execute(stmt)
         course = result.scalar_one_or_none()
@@ -216,16 +275,103 @@ class StudentService:
             return None
 
         student_count = await self.course_repo.get_student_count(course_id)
+        progress = await self._calculate_course_progress(student_id, course_id)
+        
+        # Get counts
+        materials_stmt = select(func.count(LecturerMaterial.id)).where(
+            and_(
+                LecturerMaterial.course_id == course_id,
+                LecturerMaterial.is_student_visible == True,
+                LecturerMaterial.is_deleted == False
+            )
+        )
+        materials_exec = await self.db.execute(materials_stmt)
+        materials_count = materials_exec.scalar_one()
+
+        assessments_stmt = select(func.count(Assessment.id)).where(
+            and_(
+                Assessment.course_id == course_id,
+                Assessment.status == AssessmentStatus.PUBLISHED,
+                Assessment.is_deleted == False
+            )
+        )
+        assessments_exec = await self.db.execute(assessments_stmt)
+        assessments_count = assessments_exec.scalar_one()
+
+        # Fetch primary lecturer name
+        lecturer_stmt = (
+            select(UserProfile.first_name, UserProfile.last_name, UserProfile.display_name)
+            .join(User, User.id == UserProfile.user_id)
+            .join(LecturerCourseAssignment, LecturerCourseAssignment.lecturer_id == User.id)
+            .where(
+                LecturerCourseAssignment.course_id == course.id,
+                LecturerCourseAssignment.is_active == True,
+                LecturerCourseAssignment.is_deleted == False
+            )
+            .limit(1)
+        )
+        lecturer_res = await self.db.execute(lecturer_stmt)
+        lecturer_row = lecturer_res.first()
+        
+        lecturer_name = "Unknown Lecturer"
+        if lecturer_row:
+            fname, lname, dname = lecturer_row
+            if fname and lname:
+                lecturer_name = f"{fname} {lname}"
+            else:
+                lecturer_name = dname or "Lecturer"
 
         return {
             "id": str(course.id),
             "code": course.code,
             "title": course.name,
-            "lecturer": "Primary Lecturer",
+            "lecturer": lecturer_name,
             "description": course.description or "No description available.",
-            "progress": 75,
+            "progress": progress,
             "enrolled": student_count,
             "nextAssessment": "Upcoming assessment info...",
-            "materials": 0,
-            "assessments": 0,
+            "materials": materials_count,
+            "assessments": assessments_count,
         }
+
+    async def _calculate_course_progress(self, student_id: uuid.UUID, course_id: uuid.UUID) -> int:
+        """
+        Calculate automatic progress for a course.
+        Current logic: (Completed Assessments / Total Published Assessments) * 100
+        """
+        # Get total published assessments for this course
+        total_stmt = select(func.count(Assessment.id)).where(
+            and_(
+                Assessment.course_id == course_id,
+                Assessment.status == AssessmentStatus.PUBLISHED,
+                Assessment.is_deleted == False
+            )
+        )
+        total_exec = await self.db.execute(total_stmt)
+        total_count = total_exec.scalar_one()
+        
+        if total_count == 0:
+            return 0
+            
+        # Get completed assessments (at least one submitted/graded attempt)
+        # We check if student has any attempt for each assessment in the course
+        completed_stmt = select(func.count(func.distinct(AssessmentAttempt.assessment_id))).where(
+            and_(
+                AssessmentAttempt.student_id == student_id,
+                AssessmentAttempt.assessment_id.in_(
+                    select(Assessment.id).where(
+                        and_(
+                            Assessment.course_id == course_id,
+                            Assessment.status == AssessmentStatus.PUBLISHED,
+                            Assessment.is_deleted == False
+                        )
+                    )
+                ),
+                AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
+                AssessmentAttempt.is_deleted == False
+            )
+        )
+        completed_exec = await self.db.execute(completed_stmt)
+        completed_count = completed_exec.scalar_one()
+        
+        return int((completed_count / total_count) * 100)

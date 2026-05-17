@@ -26,6 +26,7 @@ export default function CourseDetailPage() {
   const [course, setCourse] = useState<StudentCourseDetail | null>(null);
   const [materials, setMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [loading, setLoading] = useState(true);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
     async function loadCourse() {
@@ -45,6 +46,19 @@ export default function CourseDetailPage() {
     }
     loadCourse();
   }, [courseId]);
+
+  const handleDownload = async (m: LecturerMaterialResponse) => {
+    try {
+      setDownloadingId(m.id);
+      await studentApi.downloadMaterial(m.id, m.original_filename);
+      toast.success("Download started");
+    } catch (err) {
+      console.error("Download failed", err);
+      toast.error("Failed to download material");
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   if (loading) {
     return (
@@ -157,14 +171,17 @@ export default function CourseDetailPage() {
                         </div>
                       </div>
                     </div>
-                    <Button variant="outline" size="sm" asChild>
-                      <a 
-                        href={`${process.env.NEXT_PUBLIC_API_URL || ""}/resources/download/${m.id}`} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                      >
-                        Download
-                      </a>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={() => handleDownload(m)}
+                      disabled={downloadingId === m.id}
+                    >
+                      {downloadingId === m.id ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        "Download"
+                      )}
                     </Button>
                   </div>
                 ))
@@ -184,6 +201,10 @@ export default function CourseDetailPage() {
               <CardTitle>Quick Info</CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Trainers</span>
+                <span className="font-medium">{course.lecturer}</span>
+              </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Enrolled Students</span>
                 <span className="font-medium flex items-center gap-1">

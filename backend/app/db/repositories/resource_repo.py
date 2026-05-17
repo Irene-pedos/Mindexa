@@ -18,6 +18,8 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
     def __init__(self, db: AsyncSession) -> None:
         super().__init__(LecturerMaterial, db)
 
+    # ── Lecturer Materials ──────────────────────────────────────────────────
+
     async def list_materials_by_course(
         self, course_id: uuid.UUID, is_current: bool = True
     ) -> List[LecturerMaterial]:
@@ -66,3 +68,41 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
             .values(is_current=False)
         )
         await self.db.execute(stmt)
+
+    # ── Student Resources ────────────────────────────────────────────────────
+
+    async def create_student_resource(self, resource: StudentResource) -> StudentResource:
+        self.db.add(resource)
+        await self.db.flush()
+        return resource
+
+    async def get_student_resource(self, resource_id: uuid.UUID) -> Optional[StudentResource]:
+        stmt = select(StudentResource).where(
+            and_(
+                StudentResource.id == resource_id,
+                StudentResource.is_deleted == False,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def list_student_resources(self, student_id: uuid.UUID) -> List[StudentResource]:
+        stmt = select(StudentResource).where(
+            and_(
+                StudentResource.student_id == student_id,
+                StudentResource.is_deleted == False,
+            )
+        ).order_by(StudentResource.created_at.desc())
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def delete_student_resource(self, resource_id: uuid.UUID) -> bool:
+        from sqlalchemy import update
+        stmt = (
+            update(StudentResource)
+            .where(StudentResource.id == resource_id)
+            .values(is_deleted=True, deleted_at=func.now())
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount > 0
+

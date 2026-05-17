@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, Shield, Bell, Loader2 } from "lucide-react";
+import { User, Mail, Phone, Shield, Bell, Loader2, BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
 import { toast } from "sonner";
@@ -208,6 +208,62 @@ export default function ProfileSettingsPage() {
                 className="bg-muted"
               />
             </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold flex items-center gap-2">
+              <BookOpen className="size-4 text-primary" /> Academic Information
+            </h3>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="space-y-2">
+                <Label>College / Institution</Label>
+                <Input
+                  value={user?.profile?.college || "N/A"}
+                  readOnly
+                  className="bg-muted"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Department</Label>
+                <Input
+                  value={user?.profile?.department || "N/A"}
+                  readOnly
+                  className="bg-muted"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Option / Specialization</Label>
+                <Input
+                  value={user?.profile?.option || "N/A"}
+                  readOnly
+                  className="bg-muted"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Level</Label>
+                  <Input
+                    value={user?.profile?.level || "N/A"}
+                    readOnly
+                    className="bg-muted text-center"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Academic Year</Label>
+                  <Input
+                    value={user?.profile?.year || "N/A"}
+                    readOnly
+                    className="bg-muted text-center"
+                  />
+                </div>
+              </div>
+            </div>
+            <p className="text-[10px] text-muted-foreground italic">
+              * To request a change to your academic assignment, please contact your faculty administrator.
+            </p>
           </div>
         </CardContent>
       </Card>

@@ -113,6 +113,11 @@ export default function StudentResultsPage() {
                     <div className="font-medium text-lg">{result.assessment_title}</div>
                     <div className="text-sm text-muted-foreground flex items-center gap-4 mt-1">
                       <Badge variant="outline" className="uppercase text-[10px]">{result.assessment_type}</Badge>
+                      {result.course_code && (
+                        <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">
+                          {result.course_code}
+                        </span>
+                      )}
                       <span className="flex items-center gap-1">
                         <Calendar className="size-4" /> {new Date(result.released_at).toLocaleDateString()}
                       </span>

@@ -6,8 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
 from app.dependencies.auth import require_student
-from app.schemas.admin import AdminCourseListItem
-from app.schemas.student import StudentDashboardResponse, StudentScheduleResponse
+from app.schemas.student import StudentDashboardResponse, StudentScheduleResponse, StudentCourseListItem
 from app.services.student_service import StudentService
 
 router = APIRouter(prefix="/students", tags=["Students"])
@@ -34,28 +33,16 @@ async def get_student_dashboard(
 
 @router.get(
     "/me/courses",
-    response_model=list[AdminCourseListItem],
+    response_model=list[StudentCourseListItem],
     summary="List student's enrolled courses",
 )
 async def list_my_courses(
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
-) -> list[AdminCourseListItem]:
+) -> list[StudentCourseListItem]:
     """Returns a list of all courses the current student is enrolled in."""
     service = StudentService(db)
-    courses = await service.list_courses(current_user.id)
-    
-    items = []
-    for c in courses:
-        items.append(AdminCourseListItem(
-            id=c.id,
-            code=c.code,
-            title=c.name,
-            lecturer_name="Primary Lecturer", # Simplified for now
-            student_count=0, # Not needed for student view
-            status="Active"
-        ))
-    return items
+    return await service.list_courses(current_user.id)
 
 
 @router.get(

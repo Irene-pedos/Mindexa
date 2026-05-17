@@ -137,6 +137,8 @@ export function validateSignupForm(data: {
   option?: string;
   level?: string;
   year?: string;
+  institution_ids?: string[];
+  department_ids?: string[];
 }): SignupValidationResult {
   const errors: Record<string, string> = {};
 
@@ -161,13 +163,13 @@ export function validateSignupForm(data: {
   }
 
   // Role-specific validation
-  const collegeError = validateRequired(data.college || "", "College", "college");
-  if (collegeError) errors.college = collegeError.message;
-
-  const departmentError = validateRequired(data.department || "", "Department", "department");
-  if (departmentError) errors.department = departmentError.message;
-
   if (data.role === "STUDENT") {
+    const collegeError = validateRequired(data.college || "", "College", "college");
+    if (collegeError) errors.college = collegeError.message;
+
+    const departmentError = validateRequired(data.department || "", "Department", "department");
+    if (departmentError) errors.department = departmentError.message;
+
     const regError = validateRequired(data.regNumber || "", "Registration Number", "regNumber");
     if (regError) errors.regNumber = regError.message;
 
@@ -179,6 +181,14 @@ export function validateSignupForm(data: {
 
     const yearError = validateRequired(data.year || "", "Year", "year");
     if (yearError) errors.year = yearError.message;
+  } else {
+    // Lecturer validation
+    if (!data.institution_ids || data.institution_ids.length === 0) {
+      errors.institutions = "Please select at least one institution";
+    }
+    if (!data.department_ids || data.department_ids.length === 0) {
+      errors.departments = "Please select at least one department";
+    }
   }
 
   return {
