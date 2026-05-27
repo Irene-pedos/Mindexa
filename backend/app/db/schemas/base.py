@@ -173,3 +173,12 @@ class ErrorResponse(MindexaSchema):
     message: str
     errors: list[ErrorDetail] = Field(default_factory=list)
     request_id: str | None = None
+
+MindexaSchema.model_rebuild()
+BaseResponse.model_rebuild()
+BaseAuditedResponse.model_rebuild()
+PaginatedResponse.model_rebuild()
+PaginationParams.model_rebuild()
+MessageResponse.model_rebuild()
+ErrorDetail.model_rebuild()
+ErrorResponse.model_rebuild()

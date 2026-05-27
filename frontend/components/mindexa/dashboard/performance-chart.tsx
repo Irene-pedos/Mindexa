@@ -81,9 +81,6 @@ export function PerformanceChart({
         </ChartContainer>
       </CardContent>
       <CardFooter className="flex-col items-start gap-2 text-sm">
-        <div className="flex gap-2 leading-none font-medium text-emerald-500">
-          Trending up by 8.4% this semester <TrendingUp className="h-4 w-4" />
-        </div>
         <div className="leading-none text-muted-foreground">
           Based on your recently released results and class statistics
         </div>

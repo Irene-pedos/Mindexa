@@ -51,11 +51,18 @@ export default function LecturerNotificationsPage() {
 
   const getIcon = (type: string) => {
     switch (type) {
-      case "NEW_SUBMISSION": return <FileText className="size-6 text-blue-600" />
-      case "GRADING_REMINDER": return <Calendar className="size-6 text-amber-600" />
-      case "APPEAL_SUBMITTED": return <AlertTriangle className="size-6 text-red-600" />
-      case "COURSE_UPDATE": return <Users className="size-6 text-emerald-600" />
-      default: return <Bell className="size-6 text-muted-foreground" />
+      case "NEW_SUBMISSION":
+      case "SUBMISSION_RECEIVED":
+        return <FileText className="size-6 text-blue-600" />
+      case "GRADING_REMINDER":
+        return <Calendar className="size-6 text-amber-600" />
+      case "APPEAL_SUBMITTED":
+      case "GROUP_APPEAL_REQUEST":
+        return <AlertTriangle className="size-6 text-red-600" />
+      case "COURSE_UPDATE":
+        return <Users className="size-6 text-emerald-600" />
+      default:
+        return <Bell className="size-6 text-muted-foreground" />
     }
   }
 

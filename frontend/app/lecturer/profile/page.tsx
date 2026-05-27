@@ -16,9 +16,10 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, Shield, Bell, Loader2 } from "lucide-react";
+import { User, Mail, Phone, Shield, Bell, Loader2, GraduationCap } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
+import { academicApi } from "@/lib/api/academic";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 
@@ -26,6 +27,7 @@ export default function LecturerProfilePage() {
   const { user, checkAuth } = useAuth();
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
+  const [assignments, setAssignments] = useState<any[]>([]);
 
   const [formData, setFormData] = useState({
     first_name: "",
@@ -34,14 +36,25 @@ export default function LecturerProfilePage() {
   });
 
   useEffect(() => {
-    if (user) {
-      setFormData({
-        first_name: user.profile?.first_name || "",
-        last_name: user.profile?.last_name || "",
-        phone_number: user.profile?.phone_number || "",
-      });
-      setInitialLoading(false);
+    async function loadData() {
+      if (user) {
+        setFormData({
+          first_name: user.profile?.first_name || "",
+          last_name: user.profile?.last_name || "",
+          phone_number: user.profile?.phone_number || "",
+        });
+        
+        try {
+          const assData = await academicApi.getMyAssignments();
+          setAssignments(assData);
+        } catch (e) {
+          console.error("Failed to load assignments", e);
+        }
+        
+        setInitialLoading(false);
+      }
     }
+    loadData();
   }, [user]);
 
   const handleSave = async () => {
@@ -134,7 +147,7 @@ export default function LecturerProfilePage() {
                   className="relative overflow-hidden h-9"
                   disabled={loading}
                 >
-                  {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                  {loading ? <div className="size-4 rounded-full bg-primary/20 animate-pulse mr-2" /> : null}
                   Change Photo
                   <input
                     type="file"
@@ -150,7 +163,7 @@ export default function LecturerProfilePage() {
               </p>
             </div>
           </div>
-...
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
               <Label htmlFor="firstName">First Name</Label>
@@ -212,6 +225,86 @@ export default function LecturerProfilePage() {
         </CardContent>
       </Card>
 
+      {/* Academic Assignments */}
+      <Card className="border shadow-none rounded-xl overflow-hidden">
+        <CardHeader className="bg-muted/5 border-b py-4">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+                <CardTitle className="text-base font-semibold flex items-center gap-2">
+                    <GraduationCap className="size-4 text-primary" /> Institutional Assignments
+                </CardTitle>
+                <CardDescription className="text-[10px] uppercase font-bold tracking-wider">Verified Teaching Responsibilities</CardDescription>
+            </div>
+            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 rounded-full h-5 text-[10px]">
+                {assignments.length} ACTIVE
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {assignments.length === 0 ? (
+            <div className="p-8 text-center space-y-3">
+                <div className="size-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto text-muted-foreground/30">
+                    <Shield className="size-6" />
+                </div>
+                <div className="space-y-1">
+                    <p className="text-sm font-semibold">No active assignments found.</p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                        Your teaching permissions will appear here once an institutional administrator finalizes your department and course roles.
+                    </p>
+                </div>
+            </div>
+          ) : (
+            <div className="divide-y">
+                {assignments.map((ass) => (
+                    <div key={ass.id} className="p-6 space-y-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">University / Institution</Label>
+                                <Input value={ass.institution_name || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Academic Year</Label>
+                                <Input value={ass.academic_year || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Campus</Label>
+                                <Input value={ass.campus_name || "Not applicable"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">College / Faculty</Label>
+                                <Input value={ass.college_name || "Not applicable"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Department</Label>
+                                <Input value={ass.department_name || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Assigned Role</Label>
+                                <div className="flex items-center gap-3 h-9 px-4 rounded-full bg-primary/5 border border-primary/10 w-full">
+                                    <Shield className="size-3.5 text-primary" />
+                                    <span className="text-xs font-bold text-primary uppercase tracking-tight">
+                                        {ass.role.replace(/_/g, " ")}
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="space-y-1.5">
+                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Program / Specialization</Label>
+                                <Input value={ass.option_name || "General Departmental Assignment"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium italic" />
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Security & Preferences */}
       <Card>
         <CardHeader>
@@ -252,8 +345,7 @@ export default function LecturerProfilePage() {
 
       <div className="flex justify-end">
         <Button size="lg" onClick={handleSave} disabled={loading}>
-          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save Changes
+          {loading ? "Saving Changes..." : "Save Changes"}
         </Button>
       </div>
     </div>

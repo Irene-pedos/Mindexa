@@ -70,6 +70,7 @@ export interface AdminCourseListItem {
   lecturer_name: string;
   student_count: number;
   status: string;
+  academic_year?: string;
 }
 
 export interface AdminCourseListResponse {
@@ -127,6 +128,20 @@ export interface AdminUserCreate {
   department?: string;
 }
 
+export interface AdminCourseCreate {
+  institution_id: string;
+  department_ids?: string[];
+  option_ids?: string[];
+  class_group_ids?: string[];
+  academic_period_id?: string;
+  academic_year: string;
+  code: string;
+  title: string;
+  description?: string;
+  credit_hours?: number;
+  primary_lecturer_id?: string;
+}
+
 export const adminApi = {
   getDashboard: async (): Promise<AdminDashboardResponse> => {
     return apiClient("/admin/dashboard");
@@ -155,8 +170,31 @@ export const adminApi = {
       body: JSON.stringify(data),
     });
   },
+  getLecturers: async (): Promise<UserResponse[]> => {
+    return apiClient("/admin/lecturers");
+  },
   getCourses: async (page = 1, pageSize = 20): Promise<AdminCourseListResponse> => {
     return apiClient(`/admin/courses?page=${page}&page_size=${pageSize}`);
+  },
+  getCourse: async (id: string): Promise<any> => {
+    return apiClient(`/admin/courses/${id}`);
+  },
+  createCourse: async (data: AdminCourseCreate): Promise<any> => {
+    return apiClient("/admin/courses", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateCourse: async (id: string, data: any): Promise<any> => {
+    return apiClient(`/admin/courses/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  deleteCourse: async (courseId: string): Promise<any> => {
+    return apiClient(`/admin/courses/${courseId}`, {
+      method: "DELETE",
+    });
   },
   approveUser: async (user_id: string, status: string): Promise<UserResponse> => {
     return apiClient(`/admin/users/${user_id}/approve`, {
@@ -174,6 +212,35 @@ export const adminApi = {
     return apiClient(`/admin/users/${user_id}/courses`, {
       method: "POST",
       body: JSON.stringify({ course_ids }),
+    });
+  },
+  bulkApproveUsers: async (user_ids: string[], status = "ACTIVE"): Promise<{ message: string; count: number }> => {
+    return apiClient("/admin/users/bulk-approve", {
+      method: "PATCH",
+      body: JSON.stringify({ user_ids, status }),
+    });
+  },
+  bulkUpdateUserStatus: async (user_ids: string[], status: string): Promise<{ message: string; count: number }> => {
+    return apiClient("/admin/users/bulk-status", {
+      method: "PATCH",
+      body: JSON.stringify({ user_ids, status }),
+    });
+  },
+
+  // Institution Management
+  getInstitutions: async (): Promise<any[]> => {
+    return apiClient("/admin/institutions");
+  },
+  createInstitution: async (data: any): Promise<any> => {
+    return apiClient("/admin/institutions", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  updateInstitution: async (id: string, data: any): Promise<any> => {
+    return apiClient(`/admin/institutions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
     });
   },
 };

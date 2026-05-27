@@ -1,9 +1,15 @@
-// app/lecturer/courses/[id]/page.tsx
+// app/(lecturer)/courses/[id]/page.tsx
 "use client";
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -33,30 +39,31 @@ import {
   Trash2,
   Database,
   Users,
+  ArrowRight,
 } from "lucide-react";
 import {
   lecturerApi,
-  LecturerCourseDetail as ICourseDetail,
   StudentCourseRecordResponse,
   LecturerMaterialResponse,
+  WorkspaceDetail,
 } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
 
-export default function LecturerCourseDetail() {
+export default function LecturerWorkspaceDetail() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
-  const [course, setCourse] = useState<ICourseDetail | null>(null);
+  const [workspace, setWorkspace] = useState<WorkspaceDetail | null>(null);
   const [materials, setMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Material Upload State
   const [uploading, setUploading] = useState(false);
 
-  // View Record State
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<{
     id: string;
@@ -67,21 +74,21 @@ export default function LecturerCourseDetail() {
   );
   const [loadingRecord, setLoadingRecord] = useState(false);
 
-  // Delete Course State
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
-  const loadCourse = useCallback(async () => {
+  const loadWorkspace = useCallback(async () => {
     try {
       setLoading(true);
-      const [courseData, materialsData] = await Promise.all([
-        lecturerApi.getCourseDetail(id),
-        lecturerApi.getCourseMaterials(id),
+      const [workspaceData, materialsData] = await Promise.all([
+        lecturerApi.getWorkspaceDetail(id),
+        lecturerApi.getWorkspaceMaterials(id),
       ]);
-      setCourse(courseData);
+      setWorkspace(workspaceData);
       setMaterials(materialsData);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load course details";
+      const msg =
+        err instanceof Error ? err.message : "Failed to load workspace details";
       toast.error(msg);
     } finally {
       setLoading(false);
@@ -89,24 +96,26 @@ export default function LecturerCourseDetail() {
   }, [id]);
 
   useEffect(() => {
-    loadCourse();
-  }, [loadCourse]);
+    loadWorkspace();
+  }, [loadWorkspace]);
 
-  const handleDeleteCourse = async () => {
-    setDeleting(true);
+  const handleArchiveWorkspace = async () => {
+    setArchiving(true);
     try {
-      await lecturerApi.deleteCourse(id);
-      toast.success("Course deleted successfully");
+      await lecturerApi.archiveWorkspace(id);
+      toast.success("Workspace archived successfully");
       router.push("/lecturer/courses");
     } catch (err: any) {
-      toast.error(err.message || "Failed to delete course");
-      setDeleteDialogOpen(false);
+      toast.error(err.message || "Failed to archive workspace");
+      setArchiveDialogOpen(false);
     } finally {
-      setDeleting(false);
+      setArchiving(false);
     }
   };
 
-  const handleUploadMaterial = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadMaterial = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     if (!e.target.files?.[0]) return;
     const file = e.target.files[0];
 
@@ -114,15 +123,14 @@ export default function LecturerCourseDetail() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("course_id", id);
+      formData.append("teaching_workspace_id", id);
       formData.append("material_category", "LECTURE_NOTES");
       formData.append("is_student_visible", "true");
 
       await lecturerApi.uploadMaterial(formData);
       toast.success("Material uploaded successfully");
 
-      // Refresh materials
-      const materialsData = await lecturerApi.getCourseMaterials(id);
+      const materialsData = await lecturerApi.getWorkspaceMaterials(id);
       setMaterials(materialsData);
     } catch (err: any) {
       toast.error(err.message || "Failed to upload material");
@@ -141,7 +149,8 @@ export default function LecturerCourseDetail() {
       const data = await lecturerApi.getStudentRecord(id, studentId);
       setRecord(data);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load student record";
+      const msg =
+        err instanceof Error ? err.message : "Failed to load student record";
       toast.error(msg);
       setRecordDialogOpen(false);
     } finally {
@@ -151,181 +160,210 @@ export default function LecturerCourseDetail() {
 
   if (loading) {
     return (
-      <div className="space-y-8">
+      <div className="max-w-7xl mx-auto space-y-6 p-6">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Loader2 className="size-10 animate-spin text-primary" />
-            <div>
-              <div className="h-8 w-64 bg-muted animate-pulse rounded-md" />
-              <div className="h-4 w-48 bg-muted animate-pulse rounded-md mt-2" />
+          <div className="flex items-center gap-4">
+            <Skeleton className="size-12 rounded-xl" />
+            <div className="space-y-1.5">
+              <Skeleton className="h-7 w-64 rounded-md" />
+              <Skeleton className="h-3.5 w-48 rounded-md opacity-60" />
             </div>
           </div>
-        </div>
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-8 space-y-8">
-            <div className="h-32 w-full bg-muted animate-pulse rounded-xl" />
-            <div className="h-64 w-full bg-muted animate-pulse rounded-xl" />
+          <div className="flex gap-3">
+            <Skeleton className="h-9 w-24 rounded-lg" />
+            <Skeleton className="h-9 w-32 rounded-lg" />
           </div>
-          <div className="lg:col-span-4 space-y-6">
-            <div className="h-48 w-full bg-muted animate-pulse rounded-xl" />
+        </div>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-9 space-y-4">
+            <Skeleton className="h-24 w-full rounded-xl" />
+            <Skeleton className="h-[350px] w-full rounded-xl" />
+          </div>
+          <div className="lg:col-span-3 space-y-4">
+            <Skeleton className="h-44 w-full rounded-xl" />
+            <Skeleton className="h-56 w-full rounded-xl" />
           </div>
         </div>
       </div>
     );
   }
 
-  if (!course) {
+  if (!workspace) {
     return (
-      <div className="text-center py-20">
-        <h2 className="text-xl font-medium">Course not found</h2>
-        <Button asChild variant="outline" className="mt-4">
-          <Link href="/lecturer/courses">Back to My Courses</Link>
+      <div className="py-24 text-center max-w-xl mx-auto">
+        <h2 className="text-xl font-semibold tracking-tight text-foreground/80 uppercase">
+          Workspace not found
+        </h2>
+        <Button
+          asChild
+          variant="outline"
+          className="mt-6 rounded-lg h-9 px-8 font-semibold text-xs"
+        >
+          <Link href="/lecturer/courses">Back to My Workspaces</Link>
         </Button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            {course.title}
+    <div className="max-w-7xl mx-auto space-y-5 p-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        <div className="min-w-0 space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground/90 truncate">
+            {workspace.title}
           </h1>
-          <p className="text-muted-foreground mt-1">
-            {course.code} • {course.student_count} students enrolled
+          <p className="text-muted-foreground text-[15px] font-medium uppercase tracking-tight opacity-70">
+            {workspace.code} • {workspace.academic_year} •{" "}
+            {workspace.student_count} registered nodes
           </p>
-          <div className="flex flex-wrap gap-2 mt-2">
-            {course.department_name && (
-              <Badge variant="outline" className="bg-primary/5">
-                {course.department_name}
+          <div className="flex flex-wrap gap-2 pt-1">
+            <Badge
+              variant="outline"
+              className="bg-primary/5 uppercase font-semibold text-[10px] h-5 px-2.5 border-primary/10 text-primary/80"
+            >
+              {workspace.institution_name}
+            </Badge>
+            {workspace.department_name && (
+              <Badge
+                variant="outline"
+                className="bg-muted/50 font-semibold text-[10px] h-5 px-2.5 uppercase tracking-tighter"
+              >
+                {workspace.department_name}
               </Badge>
             )}
-            {course.option_name && (
-              <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                {course.option_name}
-              </Badge>
-            )}
-            {course.sections?.map(section => (
-              <Badge key={section} variant="secondary">
-                {section}
-              </Badge>
-            ))}
+            <Badge
+              variant="secondary"
+              className="rounded-full h-5 px-3 text-[10px] font-bold uppercase tracking-tight bg-muted/60 border-none"
+            >
+              {workspace.class_name}
+            </Badge>
           </div>
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-3 shrink-0">
           <Button
-            variant="outline"
-            onClick={() => setDeleteDialogOpen(true)}
-            className="text-destructive hover:bg-destructive/10 border-destructive/20"
+            variant="ghost"
+            onClick={() => setArchiveDialogOpen(true)}
+            className="text-destructive hover:bg-destructive/5 h-10 px-4 font-semibold text-xs uppercase rounded-xl border border-destructive/10"
           >
-            <Trash2 className="mr-2 size-5" /> Delete Course
+            <Trash2 className="mr-2 size-4" /> Archive
           </Button>
-          <Button asChild>
-             <Link href="/lecturer/assessments/new">
-               <Plus className="mr-2 size-5" /> New Assessment
-             </Link>
+          <Button
+            asChild
+            className="h-10 px-6 font-bold text-xs uppercase rounded-xl shadow-none"
+          >
+            <Link href="/lecturer/assessments/new">
+              <Plus className="mr-2 size-4" /> New Assessment
+            </Link>
           </Button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         {/* Main Content Area */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-9 space-y-5">
           {/* Performance Overview */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Award className="size-5 text-amber-500" /> Average Performance
+          <Card className="shadow-none border rounded-xl overflow-hidden bg-background hover:border-primary/20 transition-all">
+            <CardHeader className="bg-muted/5 border-b py-3 px-5">
+              <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-2.5">
+                <Award className="size-4 text-primary" /> Performance Index
               </CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="mb-2 flex justify-between text-sm">
-                <span className="text-muted-foreground">Course Wide Average</span>
-                <span className="font-semibold">{course.performance_avg.toFixed(1)}%</span>
+            <CardContent className="py-6 px-6">
+              <div className="mb-3 flex justify-between text-sm font-semibold uppercase tracking-tight">
+                <span className="text-muted-foreground/70">
+                  Class Weighted Average
+                </span>
+                <span className="text-primary font-bold">
+                  {workspace.performance_avg.toFixed(1)}%
+                </span>
               </div>
-              <Progress value={course.performance_avg} className="h-3" />
+              <Progress value={workspace.performance_avg} className="h-2" />
             </CardContent>
           </Card>
 
-          {/* Description */}
-          {course.description && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Course Description</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground leading-relaxed">
-                  {course.description}
-                </p>
-              </CardContent>
-            </Card>
-          )}
-
           {/* Student Roster */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle>Student Roster</CardTitle>
-                  <CardDescription>Performance tracking for enrolled students</CardDescription>
-                </div>
-                <Badge variant="outline" className="font-mono">{course.student_count} Enrolled</Badge>
+          <Card className="shadow-none border rounded-xl overflow-hidden bg-background hover:border-primary/20 transition-all">
+            <CardHeader className="bg-muted/5 border-b py-3 px-5 flex flex-row items-center justify-between">
+              <div>
+                <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Student Roster
+                </CardTitle>
               </div>
+              <Badge
+                variant="outline"
+                className="font-bold bg-background text-[10px] h-5 px-2 border-muted/20 uppercase text-muted-foreground/60"
+              >
+                {workspace.student_count} Nodes
+              </Badge>
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-0">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Student ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Email</TableHead>
-                    <TableHead>Progress</TableHead>
-                    <TableHead className="text-right">Action</TableHead>
+                <TableHeader className="bg-muted/5">
+                  <TableRow className="h-12 hover:bg-transparent border-none">
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider pl-6">
+                      Reg ID
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider">
+                      Account Holder
+                    </TableHead>
+                    <TableHead className="text-[11px] font-bold uppercase tracking-wider">
+                      Syllabus Progress
+                    </TableHead>
+                    <TableHead className="text-right text-[11px] font-bold uppercase tracking-wider pr-6">
+                      Control
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {course.roster.length === 0 ? (
+                  {workspace.roster.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={5}
-                        className="text-center py-10 text-muted-foreground"
+                        colSpan={4}
+                        className="text-center py-20 text-muted-foreground text-sm font-medium italic opacity-50"
                       >
-                        No students enrolled in this course yet.
+                        No nodes identified in this workspace.
                       </TableCell>
                     </TableRow>
                   ) : (
-                    course.roster.map((student) => (
-                      <TableRow key={student.id}>
-                        <TableCell className="font-mono text-sm">
+                    workspace.roster.map((student) => (
+                      <TableRow
+                        key={student.id}
+                        className="h-14 hover:bg-muted/5 transition-colors border-muted/10"
+                      >
+                        <TableCell className="font-mono text-xs font-semibold pl-6 opacity-60">
                           {student.student_id}
                         </TableCell>
-                        <TableCell className="font-medium">
-                          {student.name}
-                        </TableCell>
-                        <TableCell className="text-muted-foreground">
-                          {student.email}
+                        <TableCell>
+                          <div className="flex flex-col">
+                            <span className="font-semibold text-[15px] uppercase tracking-tight text-foreground/80 leading-none">
+                              {student.name}
+                            </span>
+                            <span className="text-xs text-muted-foreground font-medium mt-1">
+                              {student.email}
+                            </span>
+                          </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div className="w-24 h-2 bg-muted rounded-full overflow-hidden">
+                          <div className="flex items-center gap-4">
+                            <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden shrink-0">
                               <div
-                                className="h-full bg-primary rounded-full transition-all"
+                                className="h-full bg-primary/70 transition-all"
                                 style={{ width: `${student.progress}%` }}
                               />
                             </div>
-                            <span className="text-xs font-medium">
+                            <span className="text-xs font-bold tabular-nums opacity-80">
                               {student.progress}%
                             </span>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right">
+                        <TableCell className="text-right pr-6">
                           <Button
-                            variant="outline"
+                            variant="dim"
                             size="sm"
+                            className="rounded-lg h-8 px-4 text-[10px] font-bold uppercase tracking-tight border-none"
                             onClick={() => openRecord(student.id, student.name)}
                           >
-                            View Record
+                            Audit
                           </Button>
                         </TableCell>
                       </TableRow>
@@ -338,60 +376,66 @@ export default function LecturerCourseDetail() {
         </div>
 
         {/* Sidebar Info Area */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="lg:col-span-3 space-y-5">
           {/* Quick Actions Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Lecturer Actions</CardTitle>
-              <CardDescription>Administrative workflows for this course</CardDescription>
+          <Card className="shadow-none border rounded-xl overflow-hidden bg-background hover:border-primary/20 transition-all">
+            <CardHeader className="bg-muted/5 border-b py-3 px-5">
+              <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Workflow Core
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <Button asChild className="w-full justify-start" size="lg">
+            <CardContent className="p-4 space-y-2">
+              <Button
+                asChild
+                variant="dim"
+                className="w-full justify-between h-10 px-4 text-xs font-semibold uppercase rounded-xl border border-primary/5 shadow-none"
+                size="sm"
+              >
                 <Link href="/lecturer/assessments/new">
-                  <Plus className="mr-2 size-4" /> Create Assessment
+                  <div className="flex items-center gap-2.5">
+                    <Plus className="size-4 text-primary" />
+                    Create Evaluation
+                  </div>
+                  <ExternalLink className="size-3 opacity-20" />
                 </Link>
               </Button>
-              <Button asChild variant="outline" className="w-full justify-start" size="lg">
+              <Button
+                asChild
+                variant="dim"
+                className="w-full justify-between h-10 px-4 text-xs font-semibold uppercase rounded-xl border border-primary/5 shadow-none"
+                size="sm"
+              >
                 <Link href="/lecturer/question-bank">
-                  <Database className="mr-2 size-4" /> Question Bank
+                  <div className="flex items-center gap-2.5">
+                    <Database className="size-4 text-primary" />
+                    Registry Bank
+                  </div>
+                  <ExternalLink className="size-3 opacity-20" />
                 </Link>
               </Button>
-            </CardContent>
-          </Card>
-
-          {/* Quick Info Card */}
-          <Card>
-            <CardHeader>
-              <CardTitle>Quick Info</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground flex items-center gap-2"><Users className="size-4" /> Enrolled Students</span>
-                <span className="font-medium">{course.student_count}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground flex items-center gap-2"><Plus className="size-4" /> Course Sections</span>
-                <span className="font-medium">{course.sections?.length || 0}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-muted-foreground flex items-center gap-2"><Calendar className="size-4" /> Course Code</span>
-                <span className="font-medium">{course.code}</span>
-              </div>
             </CardContent>
           </Card>
 
           {/* Learning Materials Card */}
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between pb-2">
-              <CardTitle>Course Materials</CardTitle>
+          <Card className="shadow-none border rounded-xl overflow-hidden bg-background hover:border-primary/20 transition-all">
+            <CardHeader className="flex flex-row items-center justify-between py-2.5 bg-muted/5 border-b px-5">
+              <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Library Vault
+              </CardTitle>
               <Button
-                variant="ghost"
-                size="icon"
-                className="size-8"
+                variant="dim"
+                size="sm"
+                className="size-8 rounded-full border border-primary/10 shadow-sm"
                 disabled={uploading}
-                onClick={() => document.getElementById("material-upload")?.click()}
+                onClick={() =>
+                  document.getElementById("material-upload")?.click()
+                }
               >
-                {uploading ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
+                {uploading ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Upload className="size-4" />
+                )}
               </Button>
               <input
                 id="material-upload"
@@ -400,29 +444,41 @@ export default function LecturerCourseDetail() {
                 onChange={handleUploadMaterial}
               />
             </CardHeader>
-            <CardContent>
+            <CardContent className="p-4">
               {materials.length === 0 ? (
-                <div className="text-center py-6 border-2 border-dashed rounded-lg">
-                  <FileText className="size-8 mx-auto text-muted-foreground/50 mb-2" />
-                  <p className="text-sm text-muted-foreground">No materials uploaded yet.</p>
+                <div className="text-center py-16 border border-dashed rounded-xl bg-muted/5">
+                  <FileText className="size-10 mx-auto text-muted-foreground/10 mb-2" />
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/30">
+                    Registry Empty
+                  </p>
                 </div>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {materials.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-2 rounded-md hover:bg-muted/50 border transition-colors group">
+                    <div
+                      key={m.id}
+                      className="flex items-center justify-between p-3 rounded-xl hover:bg-muted/5 transition-all group"
+                    >
                       <div className="flex items-center gap-3 truncate">
-                        <div className="bg-primary/10 p-2 rounded text-primary">
-                          <FileText className="size-4" />
+                        <div className="bg-background border p-1.5 rounded-lg text-primary/60 group-hover:bg-primary group-hover:text-white group-hover:border-primary transition-all">
+                          <FileText className="size-4.5" />
                         </div>
                         <div className="truncate">
-                          <p className="text-sm font-medium truncate">{m.display_name || m.original_filename}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {(m.file_size_bytes / 1024).toFixed(0)} KB • {m.file_extension.toUpperCase()}
+                          <p className="text-sm font-semibold truncate uppercase tracking-tight text-foreground/70">
+                            {m.display_name || m.original_filename}
+                          </p>
+                          <p className="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-tighter leading-none mt-1.5">
+                            {(m.file_size_bytes / 1024).toFixed(0)} KB •{" "}
+                            {m.file_extension.toUpperCase()}
                           </p>
                         </div>
                       </div>
-                      <Button variant="ghost" size="icon" className="size-7 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <ExternalLink className="size-4" />
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity hover:bg-primary/5"
+                      >
+                        <ExternalLink className="size-3 text-primary/40" />
                       </Button>
                     </div>
                   ))}
@@ -435,157 +491,196 @@ export default function LecturerCourseDetail() {
 
       {/* Student Record Dialog */}
       <Dialog open={recordDialogOpen} onOpenChange={setRecordDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Academic Record</DialogTitle>
-            <DialogDescription>
-              Performance history for {selectedStudent?.name} in {course.title}
-            </DialogDescription>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto rounded-3xl shadow-2xl border-none p-0">
+          <DialogHeader className="p-8 border-b bg-muted/5">
+            <div className="flex flex-col gap-1">
+              <DialogTitle className="text-xl font-bold tracking-tight">
+                Audit Node: {selectedStudent?.name}
+              </DialogTitle>
+              <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">
+                Institutional Performance Trace
+              </DialogDescription>
+            </div>
           </DialogHeader>
 
-          {loadingRecord ? (
-            <div className="py-20 flex justify-center">
-              <Loader2 className="size-8 animate-spin text-primary" />
-            </div>
-          ) : record ? (
-            <div className="space-y-8 pt-4">
-              {/* Header Info */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="space-y-1">
-                  <p className="text-xs uppercase font-medium text-muted-foreground">
-                    Student ID
-                  </p>
-                  <p className="text-sm font-mono">{record.student_id}</p>
+          <div className="p-10 text-sm">
+            {loadingRecord ? (
+              <div className="py-12 space-y-8">
+                <div className="grid grid-cols-4 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <Skeleton key={i} className="h-12 w-full rounded-xl" />
+                  ))}
                 </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase font-medium text-muted-foreground">
-                    Email
-                  </p>
-                  <p className="text-sm truncate">{record.email}</p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase font-medium text-muted-foreground">
-                    Enrolled
-                  </p>
-                  <p className="text-sm">
-                    {format(new Date(record.enrolled_at), "MMM d, yyyy")}
-                  </p>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-xs uppercase font-medium text-muted-foreground">
-                    Course Progress
-                  </p>
-                  <p className="text-sm font-semibold text-emerald-600">
-                    {record.overall_progress}%
-                  </p>
+                <div className="space-y-2">
+                  {[1, 2, 3].map((i) => (
+                    <Skeleton key={i} className="h-16 w-full rounded-xl" />
+                  ))}
                 </div>
               </div>
+            ) : record ? (
+              <div className="space-y-8">
+                {/* Header Info */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6 p-6 rounded-2xl border bg-muted/5">
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                      Node ID
+                    </p>
+                    <p className="text-xs font-mono font-bold text-primary/70 uppercase">
+                      {record.student_id}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                      Registry Email
+                    </p>
+                    <p className="text-xs font-semibold truncate text-foreground/70">
+                      {record.email}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                      Entry Vector
+                    </p>
+                    <p className="text-xs font-semibold text-foreground/70">
+                      {format(new Date(record.enrolled_at), "MMM d, yyyy")}
+                    </p>
+                  </div>
+                  <div className="space-y-1 text-right">
+                    <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">
+                      Global Progress
+                    </p>
+                    <p className="text-sm font-bold text-emerald-600">
+                      {record.overall_progress}%
+                    </p>
+                  </div>
+                </div>
 
-              {/* Attempts List */}
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold flex items-center gap-2">
-                  <Award className="size-4 text-primary" /> Assessment History
-                </h3>
-                <div className="rounded-md border divide-y">
-                  {record.attempts.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-muted-foreground">
-                      No assessment attempts recorded for this student.
-                    </div>
-                  ) : (
-                    record.attempts.map((att) => (
-                      <div
-                        key={att.id}
-                        className="p-4 flex items-center justify-between"
-                      >
-                        <div className="space-y-1">
-                          <p className="text-sm font-medium">
-                            {att.assessment_title}
-                          </p>
-                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="size-3" />
-                              {att.submitted_at
-                                ? format(
-                                    new Date(att.submitted_at),
-                                    "MMM d, HH:mm",
-                                  )
-                                : "In Progress"}
-                            </span>
-                            <Badge
-                              variant={
-                                att.status === "SUBMITTED" ||
-                                att.status === "GRADED"
-                                  ? "secondary"
-                                  : "outline"
-                              }
-                            >
-                              {att.status}
-                            </Badge>
+                {/* Attempts List */}
+                <div className="space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2.5 text-muted-foreground/60">
+                    <Database className="size-4" /> Evaluation Registry History
+                  </h3>
+                  <div className="rounded-2xl border divide-y divide-muted/10 overflow-hidden shadow-sm">
+                    {record.attempts.length === 0 ? (
+                      <div className="p-20 text-center text-xs font-bold text-muted-foreground/30 uppercase italic bg-muted/5">
+                        No evaluation traces identified.
+                      </div>
+                    ) : (
+                      record.attempts.map((att) => (
+                        <div
+                          key={att.id}
+                          className="p-5 flex items-center justify-between hover:bg-muted/5 transition-colors"
+                        >
+                          <div className="space-y-1">
+                            <p className="text-sm font-bold uppercase tracking-tight text-foreground/80 leading-none">
+                              {att.assessment_title}
+                            </p>
+                            <div className="flex items-center gap-4 text-[9px] text-muted-foreground/50 font-bold uppercase tracking-tighter mt-1.5">
+                              <span className="flex items-center gap-1.5">
+                                <Calendar className="size-3 opacity-40" />
+                                {att.submitted_at
+                                  ? format(
+                                      new Date(att.submitted_at),
+                                      "MMM d, HH:mm",
+                                    )
+                                  : "IN_PROGRESS"}
+                              </span>
+                              <Badge
+                                variant={
+                                  att.status === "SUBMITTED" ||
+                                  att.status === "GRADED"
+                                    ? "secondary"
+                                    : "outline"
+                                }
+                                className="h-4 px-2 text-[8px] rounded-full font-bold uppercase border-none bg-muted/50"
+                              >
+                                {att.status}
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            {att.percentage !== null ? (
+                              <div className="space-y-0.5">
+                                <p className="text-base font-bold tabular-nums tracking-tighter text-primary">
+                                  {att.percentage}%
+                                </p>
+                                <p className="text-[9px] font-bold text-muted-foreground/30 uppercase tracking-widest">
+                                  {att.score} / {att.max_score}
+                                </p>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] font-bold text-muted-foreground/20 uppercase italic">
+                                PENDING_GRADE
+                              </span>
+                            )}
                           </div>
                         </div>
-                        <div className="text-right">
-                          {att.percentage !== null ? (
-                            <div className="space-y-0.5">
-                              <p className="text-sm font-bold">
-                                {att.percentage}%
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {att.score} / {att.max_score}
-                              </p>
-                            </div>
-                          ) : (
-                            <span className="text-xs text-muted-foreground italic">
-                              No result yet
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
+                      ))
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
 
-          <DialogFooter className="pt-4 border-t">
-            <Button variant="outline" onClick={() => setRecordDialogOpen(false)}>
-              Close
+          <DialogFooter className="p-8 border-t bg-muted/5 gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRecordDialogOpen(false)}
+              className="rounded-xl h-10 px-6 font-bold text-xs uppercase tracking-wider"
+            >
+              Close Audit
             </Button>
-            <Button className="gap-2">
-              <ExternalLink className="size-4" /> Full Report
+            <Button className="rounded-xl h-10 px-8 font-bold text-xs uppercase tracking-wider gap-2 shadow-none">
+              <ExternalLink className="size-4" /> Export Ledger
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Course Dialog */}
-      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete Course</DialogTitle>
-            <DialogDescription>
-              Are you sure you want to delete <strong>{course.title}</strong>? This action cannot be undone and will remove all student enrollments.
+      {/* Archive Workspace Dialog */}
+      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <DialogContent className="rounded-3xl border-none shadow-2xl p-0 overflow-hidden">
+          <DialogHeader className="p-8 border-b bg-muted/5">
+            <DialogTitle className="text-xl font-bold tracking-tight">
+              Archive Workspace
+            </DialogTitle>
+            <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40 mt-1">
+              Structural Preservation Protocol
             </DialogDescription>
           </DialogHeader>
-          <DialogFooter>
+          <div className="p-10">
+            <p className="text-sm text-muted-foreground leading-relaxed font-medium">
+              Initiating archival for{" "}
+              <span className="font-bold text-foreground">
+                {workspace.title}
+              </span>{" "}
+              will de-prioritize this node in your active index. All registry
+              data remains preserved for institutional audit.
+            </p>
+          </div>
+          <DialogFooter className="p-8 bg-muted/5 gap-3">
             <Button
-              variant="outline"
-              onClick={() => setDeleteDialogOpen(false)}
-              disabled={deleting}
+              variant="ghost"
+              size="sm"
+              className="rounded-xl h-10 px-6 font-bold text-xs uppercase tracking-wider"
+              onClick={() => setArchiveDialogOpen(false)}
+              disabled={archiving}
             >
-              Cancel
+              Abort
             </Button>
             <Button
               variant="destructive"
-              onClick={handleDeleteCourse}
-              disabled={deleting}
+              size="sm"
+              className="rounded-xl h-10 px-8 font-bold text-xs uppercase tracking-wider shadow-none"
+              onClick={handleArchiveWorkspace}
+              disabled={archiving}
             >
-              {deleting ? (
-                <>
-                  <Loader2 className="mr-2 size-4 animate-spin" /> Deleting...
-                </>
+              {archiving ? (
+                <Loader2 className="size-4 animate-spin" />
               ) : (
-                "Yes, Delete Course"
+                "Confirm Archival"
               )}
             </Button>
           </DialogFooter>

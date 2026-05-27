@@ -553,7 +553,7 @@ async def _ensure_lecturer_assignment(
     assignment = LecturerCourseAssignment(
         lecturer_id=lecturer_id,
         course_id=course_id,
-        assignment_role=LecturerAssignmentRole.PRIMARY,
+        assignment_role=LecturerAssignmentRole.MAIN_LECTURER,
         is_active=True,
     )
     session.add(assignment)

@@ -12,7 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { toast } from "sonner"
 import { assessmentApi } from "@/lib/api/assessment"
 import Link from "next/link"
-import { Loader2 } from "lucide-react"
+import { Loader2, ArrowLeft, Save, Shield } from "lucide-react"
+import { Skeleton } from "@/components/ui/interfaces-skeleton"
+import { Separator } from "@/components/ui/separator"
 
 export default function EditAssessmentPage() {
   const params = useParams()
@@ -70,77 +72,113 @@ export default function EditAssessmentPage() {
 
   if (loading) {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="size-10 animate-spin text-muted-foreground" />
+      <div className="max-w-4xl mx-auto space-y-10">
+        <div className="space-y-2">
+          <Skeleton variant="title" className="h-10 w-64" />
+          <Skeleton variant="title" className="h-4 w-96" />
+        </div>
+        <Card className="shadow-none border p-8 space-y-8">
+            <Skeleton variant="title" className="w-1/3" />
+            <Skeleton variant="media" className="h-12 w-full rounded-lg" />
+            <div className="grid grid-cols-2 gap-8">
+                <Skeleton variant="media" className="h-10 w-full rounded-lg" />
+                <Skeleton variant="media" className="h-10 w-full rounded-lg" />
+            </div>
+            <Separator />
+            <div className="space-y-4">
+                <Skeleton variant="title" className="w-40" />
+                <div className="flex justify-between">
+                    <Skeleton variant="text" className="w-1/2" />
+                    <Skeleton variant="title" className="w-10 h-6 rounded-full" />
+                </div>
+            </div>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">Edit Assessment</h1>
-        <p className="text-muted-foreground mt-1">Make changes to published or active assessment settings.</p>
+    <div className="max-w-4xl mx-auto space-y-6 pb-20">
+      <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => router.back()} className="rounded-xl border h-10 w-10">
+            <ArrowLeft className="size-4" />
+          </Button>
+          <div className="space-y-0.5">
+            <h1 className="text-2xl font-semibold tracking-tight text-foreground/90">Edit Assessment</h1>
+            <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-widest">Registry Sync • Protocol Coordination</p>
+          </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Assessment Settings</CardTitle>
-          <CardDescription>Adjust the basic metadata and security rules.</CardDescription>
+      <Card className="shadow-none border rounded-xl overflow-hidden">
+        <CardHeader className="border-b bg-muted/5 py-4 px-6">
+          <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Institutional Configuration</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-8">
+        <CardContent className="p-6 space-y-8">
           <div className="space-y-2">
-            <Label>Assessment Title</Label>
-            <Input value={form.title} onChange={(e) => setForm({...form, title: e.target.value})} />
+            <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground ml-0.5">Assessment Display Title</Label>
+            <Input 
+                value={form.title} 
+                onChange={(e) => setForm({...form, title: e.target.value})} 
+                className="h-10 font-medium text-sm rounded-lg"
+            />
           </div>
 
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-2">
-              <Label>Assessment Type</Label>
+              <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground ml-0.5">Protocol Vector</Label>
               <Select value={form.type} onValueChange={(v) => setForm({...form, type: v})}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-10 rounded-lg text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="CAT">Continuous Assessment Test (CAT)</SelectItem>
-                  <SelectItem value="SUMMATIVE">Summative Examination</SelectItem>
-                  <SelectItem value="FORMATIVE">Formative Assessment</SelectItem>
-                  <SelectItem value="HOMEWORK">Homework / Assignment</SelectItem>
-                  <SelectItem value="PRACTICE">Practice</SelectItem>
+                  <SelectItem value="CAT" className="text-sm">Continuous Assessment Test (CAT)</SelectItem>
+                  <SelectItem value="SUMMATIVE" className="text-sm">Summative Examination</SelectItem>
+                  <SelectItem value="FORMATIVE" className="text-sm">Formative Assessment</SelectItem>
+                  <SelectItem value="HOMEWORK" className="text-sm">Homework / Assignment</SelectItem>
+                  <SelectItem value="PRACTICE" className="text-sm">Practice</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Duration (minutes)</Label>
-              <Input type="number" min={1} value={form.duration} onChange={(e) => setForm({...form, duration: parseInt(e.target.value) || 0})} />
+              <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground ml-0.5">Session Duration (Minutes)</Label>
+              <Input 
+                type="number" 
+                min={1} 
+                value={form.duration} 
+                onChange={(e) => setForm({...form, duration: parseInt(e.target.value) || 0})} 
+                className="h-10 font-semibold text-sm rounded-lg"
+              />
             </div>
           </div>
 
-          <div className="space-y-6 pt-4 border-t">
-            <h3 className="font-semibold">Environment & Policy</h3>
-            <div className="flex justify-between items-center">
-              <div>
-                <Label className="text-base">Proctored Monitoring</Label>
-                <p className="text-sm text-muted-foreground">Live monitoring and webcam capture enabled</p>
-              </div>
-              <Switch checked={form.integrityMonitoring} onCheckedChange={(v) => setForm({...form, integrityMonitoring: v})} />
-            </div>
-            <div className="flex justify-between items-center">
-              <div>
-                <Label className="text-base">Safe Browser</Label>
-                <p className="text-sm text-muted-foreground">Forces fullscreen and detects tab switching</p>
-              </div>
-              <Switch checked={form.fullscreenRequired} onCheckedChange={(v) => setForm({...form, fullscreenRequired: v})} />
+          <div className="space-y-4 pt-6 border-t border-dashed">
+            <h3 className="text-[11px] font-semibold uppercase tracking-widest flex items-center gap-2 text-primary">
+                <Shield className="size-3.5" /> Integrity Guard Policy
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="flex justify-between items-center bg-muted/20 p-4 rounded-xl border hover:border-primary/10 transition-colors">
+                    <div>
+                        <Label className="text-sm font-semibold">Proctored Monitoring</Label>
+                        <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Live behavior auditing.</p>
+                    </div>
+                    <Switch checked={form.integrityMonitoring} onCheckedChange={(v) => setForm({...form, integrityMonitoring: v})} />
+                </div>
+                <div className="flex justify-between items-center bg-muted/20 p-4 rounded-xl border hover:border-primary/10 transition-colors">
+                    <div>
+                        <Label className="text-sm font-semibold">Safe Browser Forced</Label>
+                        <p className="text-[10px] text-muted-foreground font-medium mt-0.5">Lockdown environment.</p>
+                    </div>
+                    <Switch checked={form.fullscreenRequired} onCheckedChange={(v) => setForm({...form, fullscreenRequired: v})} />
+                </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end gap-4">
-        <Button variant="outline" size="lg" asChild>
-          <Link href="/lecturer/assessments">Close</Link>
+      <div className="flex justify-end gap-3 pt-2">
+        <Button variant="ghost" size="sm" asChild className="h-9 px-6 font-semibold rounded-lg text-xs uppercase tracking-tight">
+          <Link href="/lecturer/assessments">Abort Changes</Link>
         </Button>
-        <Button size="lg" onClick={handleSave} disabled={saving}>
-          {saving ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
-          Save Changes
+        <Button size="sm" onClick={handleSave} disabled={saving} className="h-9 px-8 font-semibold rounded-lg text-xs uppercase tracking-tight shadow-sm">
+          {saving ? <><Loader2 className="mr-2 size-3 animate-spin" /> Committing...</> : <><Save className="mr-2 size-3.5" /> Sync Registry</>}
         </Button>
       </div>
     </div>

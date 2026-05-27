@@ -9,13 +9,28 @@ export interface SupervisionStats {
 
 export interface SupervisionEvent {
   id: string;
+  attempt_id: string;
   student_id: string;
   student_name: string;
-  assessment_id: string;
   event_type: string;
-  created_at: string;
-  severity: "low" | "medium" | "high";
+  severity: "low" | "medium" | "high" | "critical";
   risk_score: number;
+  created_at: string;
+  metadata_json?: Record<string, any>;
+}
+
+export interface IntegrityFlag {
+  id: string;
+  attempt_id: string;
+  assessment_id: string;
+  student_id: string;
+  student_name?: string;
+  assessment_name?: string;
+  status: "OPEN" | "UNDER_REVIEW" | "CONFIRMED" | "DISMISSED" | "ESCALATED";
+  risk_level: "NONE" | "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  description: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export const supervisionApi = {
@@ -24,6 +39,9 @@ export const supervisionApi = {
   
   getEvents: (assessmentId: string): Promise<{ events: SupervisionEvent[] }> => 
     apiClient(`/integrity/events/assessment/${assessmentId}`),
+
+  getFlags: (assessmentId: string): Promise<{ flags: IntegrityFlag[] }> =>
+    apiClient(`/integrity/flags/assessment/${assessmentId}`),
   
   startSession: (assessmentId: string) => 
     apiClient(`/integrity/supervision/start`, { 
@@ -37,3 +55,4 @@ export const supervisionApi = {
       body: JSON.stringify({ assessment_id: assessmentId }) 
     }),
 };
+

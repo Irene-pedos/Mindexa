@@ -12,7 +12,9 @@ export interface SignupData {
   first_name: string;
   last_name: string;
   role?: string;
+  phone_number?: string;
   reg_number?: string;
+  staff_id?: string;
   college?: string;
   department?: string;
   option?: string;
@@ -80,6 +82,15 @@ export const authApi = {
     return apiClient("/auth/me");
   },
 
+  getUsers: async (params?: { role?: string; status?: string; page?: number; page_size?: number }) => {
+    const query = new URLSearchParams();
+    if (params?.role) query.append("role", params.role);
+    if (params?.status) query.append("status", params.status);
+    if (params?.page) query.append("page", params.page.toString());
+    if (params?.page_size) query.append("page_size", params.page_size.toString());
+    return apiClient(`/admin/users?${query.toString()}`);
+  },
+
   forgotPassword: async (data: ForgotPasswordData) => {
     return apiClient("/auth/forgot-password", {
       method: "POST",
@@ -114,6 +125,33 @@ export const authApi = {
   updateProfile: async (data: any) => {
     return apiClient("/auth/me", {
       method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+
+  completeStudentOnboarding: async (data: {
+    institution_id: string;
+    campus_id?: string;
+    college_id?: string;
+    department_id: string;
+    option_id: string;
+    level: string;
+    year: string;
+    class_section_id?: string;
+  }) => {
+    return apiClient("/auth/me/onboarding/student", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+
+  completeLecturerOnboarding: async (data: {
+    bio?: string;
+    profile_picture_url?: string;
+    phone_number?: string;
+  }) => {
+    return apiClient("/auth/me/onboarding/lecturer", {
+      method: "POST",
       body: JSON.stringify(data),
     });
   },

@@ -34,6 +34,10 @@
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary: var(--primary);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
   --color-popover-foreground: var(--popover-foreground);
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
@@ -111,6 +115,10 @@
   --brand: hsl(266 100% 50%);
   --brand-foreground: hsl(270 100% 98%);
   --destructive-foreground: oklch(1 0 0);
+  --success: oklch(0.627 0.265 149.213);
+  --success-foreground: oklch(1 0 0);
+  --warning: oklch(0.795 0.184 86.047);
+  --warning-foreground: oklch(0.2 0.02 86);
   --background: oklch(1 0 0);
   --foreground: oklch(0.148 0.004 228.8);
 }

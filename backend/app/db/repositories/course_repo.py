@@ -74,3 +74,17 @@ class CourseRepository:
         await self.db.flush()
         return course
 
+    async def get_by_id(self, course_id: uuid.UUID) -> Course | None:
+        result = await self.db.execute(
+            select(Course).where(Course.id == course_id, Course.is_deleted == False)
+        )
+        return result.scalar_one_or_none()
+
+    async def delete(self, course_id: uuid.UUID) -> bool:
+        course = await self.get_by_id(course_id)
+        if course:
+            course.soft_delete()
+            await self.db.flush()
+            return True
+        return False
+

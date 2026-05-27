@@ -32,17 +32,17 @@ async def get_student_dashboard(
 
 
 @router.get(
-    "/me/courses",
+    "/me/workspaces",
     response_model=list[StudentCourseListItem],
-    summary="List student's enrolled courses",
+    summary="List student's enrolled teaching workspaces",
 )
-async def list_my_courses(
+async def list_my_workspaces(
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> list[StudentCourseListItem]:
-    """Returns a list of all courses the current student is enrolled in."""
+    """Returns a list of all teaching workspaces the current student is enrolled in."""
     service = StudentService(db)
-    return await service.list_courses(current_user.id)
+    return await service.list_workspaces(current_user.id)
 
 
 @router.get(
@@ -62,21 +62,21 @@ async def get_student_schedule(
 
 
 @router.get(
-    "/me/courses/{course_id}",
+    "/me/workspaces/{workspace_id}",
     response_model=dict,
-    summary="Get detailed course information",
+    summary="Get detailed workspace information",
 )
-async def get_course_detail(
-    course_id: uuid.UUID,
+async def get_workspace_detail(
+    workspace_id: uuid.UUID,
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """Returns detailed information for a specific course."""
+    """Returns detailed operational data for a specific teaching workspace."""
     service = StudentService(db)
-    course = await service.get_course_detail(current_user.id, course_id)
-    if not course:
+    workspace = await service.get_workspace_detail(current_user.id, workspace_id)
+    if not workspace:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Course not found or not enrolled",
+            detail="Workspace not found or not enrolled",
         )
-    return course
+    return workspace

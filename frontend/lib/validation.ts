@@ -130,15 +130,9 @@ export function validateSignupForm(data: {
   email: string;
   password: string;
   confirmPassword: string;
-  role: "STUDENT" | "LECTURER";
+  role: "STUDENT" | "LECTURER" | "ADMIN";
   regNumber?: string;
-  college?: string;
-  department?: string;
-  option?: string;
-  level?: string;
-  year?: string;
-  institution_ids?: string[];
-  department_ids?: string[];
+  staffId?: string;
 }): SignupValidationResult {
   const errors: Record<string, string> = {};
 
@@ -164,31 +158,11 @@ export function validateSignupForm(data: {
 
   // Role-specific validation
   if (data.role === "STUDENT") {
-    const collegeError = validateRequired(data.college || "", "College", "college");
-    if (collegeError) errors.college = collegeError.message;
-
-    const departmentError = validateRequired(data.department || "", "Department", "department");
-    if (departmentError) errors.department = departmentError.message;
-
     const regError = validateRequired(data.regNumber || "", "Registration Number", "regNumber");
     if (regError) errors.regNumber = regError.message;
-
-    const optionError = validateRequired(data.option || "", "Option", "option");
-    if (optionError) errors.option = optionError.message;
-
-    const levelError = validateRequired(data.level || "", "Level", "level");
-    if (levelError) errors.level = levelError.message;
-
-    const yearError = validateRequired(data.year || "", "Year", "year");
-    if (yearError) errors.year = yearError.message;
-  } else {
-    // Lecturer validation
-    if (!data.institution_ids || data.institution_ids.length === 0) {
-      errors.institutions = "Please select at least one institution";
-    }
-    if (!data.department_ids || data.department_ids.length === 0) {
-      errors.departments = "Please select at least one department";
-    }
+  } else if (data.role === "LECTURER" || data.role === "ADMIN") {
+    const staffError = validateRequired(data.staffId || "", "Staff ID", "staffId");
+    if (staffError) errors.staffId = staffError.message;
   }
 
   return {

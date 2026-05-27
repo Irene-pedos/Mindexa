@@ -34,6 +34,7 @@ from app.schemas.grading import (
     ManualGradeRequest,
     QueueItemAssignRequest,
     SubmissionGradeResponse,
+    GroupGradingQueueListResponse,
 )
 from app.services.grading_service import GradingService
 
@@ -269,3 +270,31 @@ async def assign_queue_item(
         priority=body.priority,
     )
     return {"message": "Queue item assigned successfully", "item_id": str(item_id)}
+
+
+@router.get(
+    "/group-queue",
+    response_model=GroupGradingQueueListResponse,
+    summary="List pending group grading queue items",
+)
+async def list_group_queue(
+    assessment_id: uuid.UUID | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=30, ge=1, le=100),
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupGradingQueueListResponse:
+    from app.services.group_work_service import GroupWorkService
+    service = GroupWorkService(db)
+    items, total = await service.get_grading_queue(
+        lecturer_id=current_user.id,
+        assessment_id=assessment_id,
+        page=page,
+        page_size=page_size,
+    )
+    return GroupGradingQueueListResponse(
+        items=items,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )

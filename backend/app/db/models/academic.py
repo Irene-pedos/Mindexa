@@ -9,8 +9,8 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint, String
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlmodel import Field, Relationship
 
 from app.db.base import AuditedBaseModel, BaseModel, utcnow
@@ -19,6 +19,170 @@ from app.db.mixins import composite_index
 
 if TYPE_CHECKING:
     from app.db.models.assessment import Assessment, AssessmentTargetSection
+    from app.db.models.auth import User
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEACHING ASSIGNMENT
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TeachingAssignment(BaseModel, table=True):
+    """Official teaching assignment linking a lecturer to academic context."""
+
+    __tablename__ = "teaching_assignment"
+
+    lecturer_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    institution_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    campus_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("campus.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    college_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("college.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    department_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("department.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    option_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("option.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    course_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="CASCADE"),
+            nullable=True,
+        )
+    )
+    class_section_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("class_section.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+
+    academic_period_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_period.id", ondelete="CASCADE"),
+            nullable=True,
+        )
+    )
+    academic_year: str = Field(nullable=False, max_length=20)
+
+    role: LecturerAssignmentRole = Field(
+        default=LecturerAssignmentRole.MAIN_LECTURER,
+        sa_column=Column(String, nullable=False)
+    )
+    is_active: bool = Field(default=True, nullable=False)
+
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    lecturer: Optional["User"] = Relationship()
+    institution: Optional["Institution"] = Relationship()
+    campus: Optional["Campus"] = Relationship()
+    college: Optional["College"] = Relationship()
+    department: Optional["Department"] = Relationship()
+    option: Optional["Option"] = Relationship()
+    course: Optional["Course"] = Relationship()
+    class_section: Optional["ClassSection"] = Relationship()
+    academic_period: Optional["AcademicPeriod"] = Relationship()
+
+    workspaces: List["TeachingWorkspace"] = Relationship(back_populates="teaching_assignment")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TEACHING WORKSPACE
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TeachingWorkspace(AuditedBaseModel, table=True):
+    """
+    The operational teaching environment.
+    Isolated container where actual teaching happens (materials, assessments).
+    Generated automatically or manually based on an official TeachingAssignment.
+    """
+
+    __tablename__ = "teaching_workspace"
+
+    # -- Links to Official Structure --
+    teaching_assignment_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("teaching_assignment.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    course_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    class_section_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("class_section.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    academic_period_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_period.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+
+    # -- Customisation --
+    title: str = Field(nullable=False, max_length=255)
+    description: Optional[str] = Field(default=None)
+    
+    # Allows a lecturer to hide/archive a specific section workspace
+    status: str = Field(default="ACTIVE", max_length=20) 
+
+    # -- Relationships --
+    teaching_assignment: "TeachingAssignment" = Relationship(back_populates="workspaces")
+    course: "Course" = Relationship(back_populates="workspaces")
+    class_section: "ClassSection" = Relationship(back_populates="workspaces")
+    academic_period: "AcademicPeriod" = Relationship()
+
+    # Link operational content
+    assessments: List["Assessment"] = Relationship(back_populates="workspace")
+    materials: List["LecturerMaterial"] = Relationship(back_populates="workspace")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,15 +201,91 @@ class Institution(BaseModel, table=True):
 
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
-    logo_url: Optional[str] = Field(default=None, nullable=True, max_length=500)
+    logo_url: Optional[str] = Field(default=None, nullable=True)
     timezone: str = Field(default="UTC", nullable=False, max_length=64)
     is_active: bool = Field(default=True, nullable=False)
 
+    # ── Branding & Configuration ──────────────────────────────────────────────
+    settings: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=True))
+    integrations: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSONB, nullable=True))
+
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
+
     # ── Relationships ─────────────────────────────────────────────────────────
+    campuses: List["Campus"] = Relationship(back_populates="institution")
     departments: List["Department"] = Relationship(back_populates="institution")
     academic_periods: List["AcademicPeriod"] = Relationship(back_populates="institution")
-    subjects: List["Subject"] = Relationship(back_populates="institution")
-    courses: List["Course"] = Relationship(back_populates="institution")
+    subjects: List["Subject"] = Relationship(
+        back_populates="institution",
+        sa_relationship_kwargs={"primaryjoin": "Institution.id == Subject.institution_id"}
+    )
+    courses: List["Course"] = Relationship(
+        back_populates="institution",
+        sa_relationship_kwargs={"primaryjoin": "Institution.id == Course.institution_id"}
+    )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAMPUS
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class Campus(BaseModel, table=True):
+    """Geographic or organisational campus within an institution."""
+
+    __tablename__ = "campus"
+    __table_args__ = (
+        UniqueConstraint("institution_id", "code", name="uq_campus_inst_code"),
+        composite_index("campus", "institution_id"),
+    )
+
+    institution_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    name: str = Field(nullable=False, max_length=255)
+    code: str = Field(nullable=False, max_length=20)
+    is_active: bool = Field(default=True, nullable=False)
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    institution: Optional["Institution"] = Relationship(back_populates="campuses")
+    colleges: List["College"] = Relationship(back_populates="campus")
+    departments: List["Department"] = Relationship(back_populates="campus")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLLEGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class College(BaseModel, table=True):
+    """A college or faculty within a campus or institution."""
+
+    __tablename__ = "college"
+    __table_args__ = (
+        UniqueConstraint("campus_id", "code", name="uq_college_campus_code"),
+        composite_index("college", "campus_id"),
+    )
+
+    campus_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("campus.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    name: str = Field(nullable=False, max_length=255)
+    code: str = Field(nullable=False, max_length=20)
+    is_active: bool = Field(default=True, nullable=False)
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    campus: Optional["Campus"] = Relationship(back_populates="colleges")
+    departments: List["Department"] = Relationship(back_populates="college")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -54,7 +294,7 @@ class Institution(BaseModel, table=True):
 
 
 class Department(BaseModel, table=True):
-    """Organisational subdivision within an institution."""
+    """Organisational subdivision within a college, campus, or institution."""
 
     __tablename__ = "department"
     __table_args__ = (
@@ -69,13 +309,33 @@ class Department(BaseModel, table=True):
             nullable=False,
         )
     )
+    campus_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("campus.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    college_id: Optional[uuid.UUID] = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("college.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
     head_lecturer_id: Optional[uuid.UUID] = Field(default=None, nullable=True)
     is_active: bool = Field(default=True, nullable=False)
 
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
+
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="departments")
+    campus: Optional["Campus"] = Relationship(back_populates="departments")
+    college: Optional["College"] = Relationship(back_populates="departments")
     courses: List["Course"] = Relationship(back_populates="department")
     subjects: List["Subject"] = Relationship(back_populates="department")
     options: List["Option"] = Relationship(back_populates="department")
@@ -105,6 +365,10 @@ class Option(BaseModel, table=True):
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
     is_active: bool = Field(default=True, nullable=False, index=True)
+
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     department: Optional["Department"] = Relationship(back_populates="options")
@@ -136,6 +400,10 @@ class ClassGroup(BaseModel, table=True):
     code: str = Field(nullable=False, max_length=20)
     level: Optional[int] = Field(default=None, nullable=True) # e.g. Year 1, 2...
     is_active: bool = Field(default=True, nullable=False, index=True)
+
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     option: Optional["Option"] = Relationship(back_populates="class_groups")
@@ -245,37 +513,39 @@ class AcademicPeriod(BaseModel, table=True):
 
 
 class Subject(BaseModel, table=True):
-    """A named academic discipline."""
+    """Specific subject area within a department."""
 
     __tablename__ = "subject"
     __table_args__ = (
-        UniqueConstraint("institution_id", "title", name="uq_subject_inst_title"),
+        UniqueConstraint("institution_id", "code", name="uq_subject_inst_code"),
         composite_index("subject", "institution_id"),
+        composite_index("subject", "is_active"),
     )
 
     institution_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("institution.id", ondelete="RESTRICT"),
+            ForeignKey("institution.id", ondelete="CASCADE"),
             nullable=False,
         )
     )
-    department_id: Optional[uuid.UUID] = Field(
+    department_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("department.id", ondelete="SET NULL"),
-            nullable=True,
-            index=True,
+            ForeignKey("department.id", ondelete="CASCADE"),
+            nullable=False,
         )
     )
-    title: str = Field(nullable=False, max_length=255, index=True)
-    description: Optional[str] = Field(default=None, nullable=True)
-    is_active: bool = Field(default=True, nullable=False, index=True)
+    name: str = Field(nullable=False, max_length=255)
+    code: str = Field(nullable=False, max_length=20)
+    is_active: bool = Field(default=True, nullable=False)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="subjects")
     department: Optional["Department"] = Relationship(back_populates="subjects")
     course_subjects: List["CourseSubject"] = Relationship(back_populates="subject")
+    
+    assessments: List["Assessment"] = Relationship(back_populates="subject")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -310,13 +580,15 @@ class Course(BaseModel, table=True):
             index=True,
         )
     )
-    academic_period_id: uuid.UUID = Field(
+    academic_period_id: Optional[uuid.UUID] = Field(
+        default=None,
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("academic_period.id", ondelete="RESTRICT"),
-            nullable=False,
+            nullable=True,
         )
     )
+    academic_year: str = Field(nullable=False, max_length=20)
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
     description: Optional[str] = Field(default=None, nullable=True)
@@ -325,6 +597,10 @@ class Course(BaseModel, table=True):
     credit_hours: Optional[int] = Field(default=None, nullable=True)
     is_active: bool = Field(default=True, nullable=False, index=True)
 
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
+
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="courses")
     department: Optional["Department"] = Relationship(back_populates="courses")
@@ -332,6 +608,8 @@ class Course(BaseModel, table=True):
     class_sections: List["ClassSection"] = Relationship(back_populates="course")
     course_subjects: List["CourseSubject"] = Relationship(back_populates="course")
     lecturer_assignments: List["LecturerCourseAssignment"] = Relationship(back_populates="course")
+    
+    workspaces: List["TeachingWorkspace"] = Relationship(back_populates="course")
     assessments: List["Assessment"] = Relationship(back_populates="course")
 
 
@@ -420,11 +698,17 @@ class ClassSection(BaseModel, table=True):
     schedule_notes: Optional[str] = Field(default=None, nullable=True)
     is_active: bool = Field(default=True, nullable=False, index=True)
 
+    # ── External Integration ──────────────────────────────────────────────────
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
+
     # ── Relationships ─────────────────────────────────────────────────────────
     course: Optional["Course"] = Relationship(back_populates="class_sections")
     class_group: Optional["ClassGroup"] = Relationship(back_populates="class_sections")
     enrollments: List["StudentEnrollment"] = Relationship(back_populates="class_section")
     assessment_targets: List["AssessmentTargetSection"] = Relationship(back_populates="class_section")
+    
+    workspaces: List["TeachingWorkspace"] = Relationship(back_populates="class_section")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

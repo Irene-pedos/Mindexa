@@ -55,7 +55,9 @@ from app.db.enums import (
     AssessmentType,
     BlueprintRuleType,
     DifficultyLevel,
+    GroupAssignmentMode,
     GradingMode,
+    QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
     SupervisorRole,
@@ -75,7 +77,12 @@ ASSESSMENT_WIZARD_STEPS: int = 6
 
 if TYPE_CHECKING:
     from app.db.models.academic import ClassSection, Course
-    from app.db.models.attempt import AssessmentAttempt
+    from app.db.models.attempt import (
+        AssessmentAttempt,
+        GroupAssessmentMaterial,
+        GroupSubmission,
+        StudentGroup,
+    )
     from app.db.models.integrity import (
         SupervisionSession,
     )
@@ -90,45 +97,14 @@ class Assessment(AuditedBaseModel, table=True):
     """
     Core assessment entity — every configuration decision lives here.
 
-    Inherits AuditedBaseModel because:
-        - created_by_id → the lecturer who created the assessment
-        - updated_by_id → the last lecturer or admin to modify it
-        Academic integrity requires knowing who authored and last changed
-        an assessment at all times.
-
-    subject_id:
-        Selected by the lecturer from a dropdown. Populated by querying
-        subjects linked to the lecturer's assigned courses via course_subject.
-
-    class_section_id is NOT on this table — assessments target sections via
-    the assessment_target_section junction table (supports multi-section targeting).
-
-    draft_step:
-        Tracks which wizard step the lecturer last completed.
-        NULL when the assessment is published (wizard is no longer relevant).
-        Values: 1–6 matching ASSESSMENT_WIZARD_STEPS.
-
-    access_password_hash:
-        bcrypt hash of the access code. Only populated when
-        is_password_protected = True. Never stored in plain text.
-
-    reassessment_of_id:
-        Self-referential FK. NULL for normal assessments. Set for
-        reassessments to link back to the original assessment.
-        Depth is limited to 1 at the service layer (no reassessment
-        of a reassessment).
-
-    autosave_token:
-        A UUID generated when a lecturer opens a draft assessment.
-        Used to detect stale autosave snapshots when the same draft
-        is opened in multiple browser tabs simultaneously.
+    Now linked to TeachingWorkspace instead of directly to Course.
     """
 
     __tablename__ = "assessment"
 
     __table_args__ = (
-        composite_index("assessment", "course_id", "status"),
-        composite_index("assessment", "course_id", "assessment_type"),
+        composite_index("assessment", "teaching_workspace_id", "status"),
+        composite_index("assessment", "teaching_workspace_id", "assessment_type"),
         composite_index("assessment", "subject_id", "status"),
         composite_index("assessment", "status", "window_start"),
         composite_index("assessment", "created_by_id", "status"),
@@ -155,18 +131,26 @@ class Assessment(AuditedBaseModel, table=True):
     def course_code(self) -> str | None:
         return self.course.code if self.course else None
 
-    # ── Core references ───────────────────────────────────────────────────────
+    # -- Links to Context --
 
-    course_id: Optional[uuid.UUID] = Field(
-        default=None,
+    teaching_workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("teaching_workspace.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+
+    # Official course back-reference for aggregated reporting/analytics
+    course_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("course.id", ondelete="RESTRICT"),
-            nullable=True,
+            nullable=False,
         )
     )
+
     subject_id: Optional[uuid.UUID] = Field(
-        default=None,
         sa_column=Column(
             UUID(as_uuid=True),
             ForeignKey("subject.id", ondelete="SET NULL"),
@@ -183,6 +167,7 @@ class Assessment(AuditedBaseModel, table=True):
             nullable=True,
         )
     )
+    academic_year: str = Field(nullable=False, max_length=20)
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
@@ -250,6 +235,19 @@ class Assessment(AuditedBaseModel, table=True):
     is_group_assessment: bool = Field(default=False, nullable=False)
     max_group_size: Optional[int] = Field(default=None, nullable=True)
     group_formation_mode: Optional[str] = Field(default=None, nullable=True, max_length=50)
+    group_assignment_mode: Optional[GroupAssignmentMode] = Field(default=None, nullable=True)
+    question_distribution_mode: Optional[QuestionDistributionMode] = Field(default=None, nullable=True)
+    require_all_member_approval: bool = Field(default=False, nullable=False)
+    require_all_member_participation: bool = Field(default=False, nullable=False)
+    appeal_window_days: Optional[int] = Field(default=None, nullable=True)
+    group_invalidated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    group_membership_locked_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     # ── UI & AI flags ─────────────────────────────────────────────────────────
 
@@ -284,32 +282,24 @@ class Assessment(AuditedBaseModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
-    @property
-    def is_finalized(self) -> bool:
-        """Alias for draft_is_complete for schema alignment."""
-        return self.draft_is_complete
-
-    @property
-    def finalized_at(self) -> datetime | None:
-        """Alias for published_at for schema alignment."""
-        return self.published_at
-
     # ── Relationships ─────────────────────────────────────────────────────────
 
+    workspace: "TeachingWorkspace" = Relationship(back_populates="assessments")
     course: Optional["Course"] = Relationship(back_populates="assessments")
-    subject_rel: Optional["Subject"] = Relationship(
+    subject: Optional["Subject"] = Relationship(
+        back_populates="assessments",
         sa_relationship_kwargs={"primaryjoin": "Assessment.subject_id == Subject.id"}
     )
 
     @property
-    def subject(self) -> str | None:
+    def subject_name(self) -> str | None:
         """Friendly name for subject/course to display in lists."""
         # If explicitly linked to a subject, use its name
-        if self.subject_rel:
-            return self.subject_rel.name
-        # Fallback to course title/code
+        if self.subject:
+            return self.subject.name
+        # Fallback to course name/code
         if self.course:
-            return f"{self.course.code} - {self.course.title}"
+            return f"{self.course.code} - {self.course.name}"
         return None
 
     target_sections: List["AssessmentTargetSection"] = Relationship(
@@ -337,6 +327,15 @@ class Assessment(AuditedBaseModel, table=True):
         back_populates="assessment"
     )
     attempts: List["AssessmentAttempt"] = Relationship(
+        back_populates="assessment"
+    )
+    student_groups: List["StudentGroup"] = Relationship(
+        back_populates="assessment"
+    )
+    group_submissions: List["GroupSubmission"] = Relationship(
+        back_populates="assessment"
+    )
+    group_materials: List["GroupAssessmentMaterial"] = Relationship(
         back_populates="assessment"
     )
     ai_generation_batches: List["AIGenerationBatch"] = Relationship(

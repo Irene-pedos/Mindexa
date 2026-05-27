@@ -23,6 +23,9 @@ from app.schemas.lecturer import (
     LecturerRecentSubmission,
     LecturerCourseDetail,
     LecturerCourseRosterItem,
+    WorkspaceListItem,
+    WorkspaceDetail,
+    WorkspaceCreate,
 )
 
 from app.db.models.academic import (
@@ -35,9 +38,12 @@ from app.db.models.academic import (
     CourseDepartment,
     CourseOption,
     Option,
-    ClassGroup
+    ClassGroup,
+    TeachingAssignment,
+    TeachingWorkspace
 )
 from app.db.repositories.course_repo import CourseRepository
+from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.db.repositories.auth import UserRepository
 from app.db.schemas.academic import CourseCreate, CourseResponse
 from app.schemas.lecturer import (
@@ -54,52 +60,33 @@ class LecturerService:
         self.grading_repo = GradingRepository(db)
         self.integrity_repo = IntegrityRepository(db)
         self.course_repo = CourseRepository(db)
+        self.workspace_repo = WorkspaceRepository(db)
         self.user_repo = UserRepository(db)
 
-    async def add_student_to_course(self, lecturer_id: uuid.UUID, course_id: uuid.UUID, email: str) -> bool:
+    async def add_student_to_workspace(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID, email: str) -> bool:
         from app.db.models.auth import User
         from app.db.enums import UserRole, EnrollmentStatus
 
-        # 1. Verify lecturer is assigned to this course
-        assign_stmt = select(LecturerCourseAssignment).where(
-            LecturerCourseAssignment.lecturer_id == lecturer_id,
-            LecturerCourseAssignment.course_id == course_id,
-            LecturerCourseAssignment.is_active == True
-        )
-        assign_res = await self.db.execute(assign_stmt)
-        if not assign_res.scalars().first():
-            from app.core.exceptions import AuthorizationError
-            raise AuthorizationError("You are not authorized to manage students for this course")
+        # 1. Fetch Workspace
+        ws = await self.workspace_repo.get_by_id(workspace_id)
+        if not ws:
+            raise NotFoundError("Workspace", str(workspace_id))
 
-        # 2. Find student by email
+        # 2. Verify lecturer ownership
+        if ws.teaching_assignment.lecturer_id != lecturer_id:
+            from app.core.exceptions import AuthorizationError
+            raise AuthorizationError("You are not authorized to manage students for this workspace")
+
+        # 3. Find student by email
         user = await self.user_repo.get_by_email(email.lower())
         if not user or user.role != UserRole.STUDENT.value:
             from app.core.exceptions import ValidationError
             raise ValidationError(f"Student with email '{email}' not found")
 
-        # 3. Find the default section for the course
-        section_stmt = select(ClassSection).where(
-            ClassSection.course_id == course_id,
-            ClassSection.is_active == True,
-            ClassSection.is_deleted == False
-        ).order_by(ClassSection.created_at.asc())
-        section_res = await self.db.execute(section_stmt)
-        section = section_res.scalars().first()
-        if not section:
-            # Create a default section if none exists
-            section = ClassSection(
-                course_id=course_id,
-                name="Section A",
-                capacity=50,
-                is_active=True
-            )
-            self.db.add(section)
-            await self.db.flush()
-
-        # 4. Check if already enrolled
+        # 4. Check if already enrolled in the section
         enroll_stmt = select(StudentEnrollment).where(
             StudentEnrollment.student_id == user.id,
-            StudentEnrollment.class_section_id == section.id,
+            StudentEnrollment.class_section_id == ws.class_section_id,
             StudentEnrollment.is_deleted == False
         )
         enroll_res = await self.db.execute(enroll_stmt)
@@ -109,7 +96,7 @@ class LecturerService:
         # 5. Create enrollment
         enrollment = StudentEnrollment(
             student_id=user.id,
-            class_section_id=section.id,
+            class_section_id=ws.class_section_id,
             enrollment_status=EnrollmentStatus.ACTIVE,
             enrolled_at=datetime.now(UTC)
         )
@@ -117,40 +104,40 @@ class LecturerService:
         await self.db.commit()
         return True
 
-    async def get_student_course_record(self, lecturer_id: uuid.UUID, course_id: uuid.UUID, student_id: uuid.UUID) -> StudentCourseRecordResponse:
+    async def get_student_workspace_record(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID, student_id: uuid.UUID) -> StudentCourseRecordResponse:
         from app.db.models.auth import User, UserProfile
-        from app.db.models.academic import StudentEnrollment, ClassSection
-        from app.db.models.assessment import Assessment
-        from app.db.models.attempt import AssessmentAttempt
         from app.db.models.result import AssessmentResult
 
-        # 1. Fetch Student Profile and Enrollment
+        # 1. Fetch Workspace
+        ws = await self.workspace_repo.get_by_id(workspace_id)
+        if not ws:
+            raise NotFoundError("Workspace", str(workspace_id))
+
+        # 2. Fetch Student Profile and Enrollment in this section
         stmt = (
             select(User, UserProfile, StudentEnrollment)
             .join(UserProfile, UserProfile.user_id == User.id)
             .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
-            .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
             .where(
                 User.id == student_id,
-                ClassSection.course_id == course_id,
+                StudentEnrollment.class_section_id == ws.class_section_id,
                 StudentEnrollment.is_deleted == False
             )
         )
         res = await self.db.execute(stmt)
         row = res.first()
         if not row:
-            raise NotFoundError("Student enrollment not found in this course")
+            raise NotFoundError("Student enrollment not found in this workspace")
         
         user, profile, enrollment = row
 
-        # 2. Fetch all attempts for assessments in this course
-        # We find attempts for this student where the assessment is linked to this course
+        # 3. Fetch all attempts for assessments in this workspace
         attempts_stmt = (
             select(AssessmentAttempt, Assessment)
             .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
             .where(
                 AssessmentAttempt.student_id == student_id,
-                Assessment.course_id == course_id,
+                Assessment.teaching_workspace_id == workspace_id,
                 AssessmentAttempt.is_deleted == False
             )
             .order_by(AssessmentAttempt.started_at.desc())
@@ -160,14 +147,12 @@ class LecturerService:
 
         attempts_data = []
         for att, ass in attempt_rows:
-            # Check for released result
             res_stmt = select(AssessmentResult).where(
                 AssessmentResult.attempt_id == att.id,
                 AssessmentResult.is_released == True,
                 AssessmentResult.is_deleted == False
             )
-            res_exec = await self.db.execute(res_stmt)
-            result = res_exec.scalars().first()
+            result = (await self.db.execute(res_stmt)).scalars().first()
 
             attempts_data.append(StudentRecordAttempt(
                 id=att.id,
@@ -188,112 +173,243 @@ class LecturerService:
             attempts=attempts_data
         )
 
-    async def create_course(self, lecturer_id: uuid.UUID, data: CourseCreate) -> Course:
-        # Create the course
-        course = Course(
-            institution_id=data.institution_id,
-            academic_period_id=data.academic_period_id,
-            name=data.title,
-            code=data.code,
-            description=data.description,
-            credit_hours=data.credit_hours,
-            is_active=True
-        )
-        await self.course_repo.create(course)
-
-        # 1. Assign Departments
-        if data.department_ids:
-            for dept_id in data.department_ids:
-                cd = CourseDepartment(course_id=course.id, department_id=dept_id)
-                self.db.add(cd)
-        
-        # 2. Assign Options
-        if data.option_ids:
-            for opt_id in data.option_ids:
-                co = CourseOption(course_id=course.id, option_id=opt_id)
-                self.db.add(co)
-
-        # 3. Create Class Sections from Class Groups
-        if data.class_group_ids:
-            for cg_id in data.class_group_ids:
-                # Fetch group name
-                stmt = select(ClassGroup).where(ClassGroup.id == cg_id)
-                res = await self.db.execute(stmt)
-                cg = res.scalars().first()
-                if cg:
-                    section = ClassSection(
-                        course_id=course.id,
-                        class_group_id=cg.id,
-                        name=cg.name,
-                        capacity=50,
-                        is_active=True
-                    )
-                    self.db.add(section)
-
-        # 4. Automatically assign the creator as the primary lecturer
-        from app.db.enums import LecturerAssignmentRole
-        assignment = LecturerCourseAssignment(
-            lecturer_id=lecturer_id,
-            course_id=course.id,
-            assignment_role=LecturerAssignmentRole.PRIMARY,
-            is_active=True
-        )
-        self.db.add(assignment)
-        
-        await self.db.commit()
-        return course
-
-    async def get_dashboard_data(self, lecturer_id: uuid.UUID) -> LecturerDashboardResponse:
-        from app.db.models.academic import LecturerCourseAssignment, ClassSection
-        from app.db.models.assessment import Assessment
-        from app.db.models.integrity import IntegrityEvent
-        # 1. Summary Stats
-        # Active Classes (Sections of courses assigned to this lecturer)
-        class_stmt = (
-            select(func.count(ClassSection.id))
-            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == ClassSection.course_id)
+    async def list_workspaces(
+        self, lecturer_id: uuid.UUID, page: int = 1, page_size: int = 20
+    ) -> tuple[list[WorkspaceListItem], int]:
+        """List operational teaching workspaces assigned to a lecturer."""
+        stmt = (
+            select(TeachingWorkspace)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
             .where(
-                LecturerCourseAssignment.lecturer_id == lecturer_id,
-                LecturerCourseAssignment.is_active == True,
-                ClassSection.is_deleted == False
+                TeachingAssignment.lecturer_id == lecturer_id,
+                TeachingWorkspace.is_deleted == False
+            )
+            .order_by(TeachingWorkspace.created_at.desc())
+        )
+        
+        # Paginate
+        res = await self.db.execute(stmt)
+        workspaces = res.scalars().all()
+        total = len(workspaces)
+
+        items = []
+        for ws in workspaces:
+            # Refresh with relationships
+            ws = await self.workspace_repo.get_by_id(ws.id)
+            student_count = await self.workspace_repo.get_student_count(ws.id)
+            
+            # Performance avg
+            from app.db.models.result import AssessmentResult
+            perf_stmt = (
+                select(func.avg(AssessmentResult.percentage))
+                .join(AssessmentAttempt, AssessmentAttempt.id == AssessmentResult.attempt_id)
+                .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+                .where(
+                    Assessment.teaching_workspace_id == ws.id,
+                    AssessmentResult.is_deleted == False
+                )
+            )
+            avg_perf = (await self.db.execute(perf_stmt)).scalar() or 0.0
+
+            lect_p = ws.teaching_assignment.lecturer.profile
+            items.append(WorkspaceListItem(
+                id=ws.id,
+                title=ws.title,
+                code=ws.course.code,
+                academic_year=ws.academic_period.name,
+                student_count=student_count,
+                status=ws.status,
+                performance_avg=float(avg_perf),
+                lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
+                institution_name=ws.course.institution.name,
+                class_name=ws.class_section.name
+            ))
+
+        return items, total
+
+    async def get_workspace_detail(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID) -> WorkspaceDetail:
+        from app.db.models.auth import User, UserProfile
+        from app.db.models.result import AssessmentResult
+
+        ws = await self.workspace_repo.get_by_id(workspace_id)
+        if not ws:
+            raise NotFoundError("Workspace", str(workspace_id))
+
+        student_count = await self.workspace_repo.get_student_count(workspace_id)
+        
+        roster_stmt = (
+            select(User, UserProfile)
+            .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .where(
+                StudentEnrollment.class_section_id == ws.class_section_id,
+                StudentEnrollment.is_deleted == False
+            )
+            .order_by(UserProfile.last_name.asc())
+        )
+        rows = (await self.db.execute(roster_stmt)).all()
+
+        roster = []
+        for user, profile in rows:
+            total_ass_stmt = select(func.count(Assessment.id)).where(
+                Assessment.teaching_workspace_id == workspace_id, 
+                Assessment.status == AssessmentStatus.PUBLISHED,
+                Assessment.is_deleted == False
+            )
+            total_ass_count = (await self.db.execute(total_ass_stmt)).scalar_one() or 1
+            
+            comp_ass_stmt = (
+                select(func.count(AssessmentAttempt.id))
+                .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+                .where(
+                    Assessment.teaching_workspace_id == workspace_id,
+                    AssessmentAttempt.student_id == user.id,
+                    AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
+                    AssessmentAttempt.is_deleted == False
+                )
+            )
+            comp_ass_count = (await self.db.execute(comp_ass_stmt)).scalar_one() or 0
+            progress = int((comp_ass_count / total_ass_count) * 100)
+
+            roster.append(LecturerCourseRosterItem(
+                id=user.id,
+                student_id=profile.student_id or "N/A",
+                name=f"{profile.first_name} {profile.last_name}",
+                email=user.email,
+                progress=progress,
+                last_submission="N/A"
+            ))
+
+        perf_stmt = (
+            select(func.avg(AssessmentResult.percentage))
+            .join(AssessmentAttempt, AssessmentAttempt.id == AssessmentResult.attempt_id)
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .where(
+                Assessment.teaching_workspace_id == workspace_id,
+                AssessmentResult.is_deleted == False
             )
         )
-        class_res = await self.db.execute(class_stmt)
-        active_classes_count = class_res.scalar_one()
-        
-        # Upcoming Assessments (Published but not yet closed)
-        # We use PUBLISHED because SCHEDULED is not in DB
-        assessments, total_ass = await self.assessment_repo.list_by_creator(
-            created_by_id=lecturer_id,
-            status=AssessmentStatus.PUBLISHED
+        avg_perf = (await self.db.execute(perf_stmt)).scalar() or 0.0
+
+        lect_p = ws.teaching_assignment.lecturer.profile
+        return WorkspaceDetail(
+            id=ws.id,
+            title=ws.title,
+            code=ws.course.code,
+            description=ws.description or ws.course.description,
+            student_count=student_count,
+            performance_avg=float(avg_perf),
+            institution_name=ws.course.institution.name,
+            academic_year=ws.academic_period.name,
+            lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
+            status=ws.status,
+            class_name=ws.class_section.name,
+            roster=roster,
+            sections=[ws.class_section.name]
         )
-        
-        # Pending Grading (Items in queue for this lecturer's assessments)
+
+    async def initialize_workspace(self, lecturer_id: uuid.UUID, data: WorkspaceCreate) -> TeachingWorkspace:
+        """Initialize an operational workspace from an admin-assigned teaching assignment."""
+        stmt = select(TeachingAssignment).where(
+            TeachingAssignment.id == data.teaching_assignment_id,
+            TeachingAssignment.lecturer_id == lecturer_id,
+            TeachingAssignment.is_active == True
+        )
+        assignment = (await self.db.execute(stmt)).scalars().first()
+        if not assignment:
+            from app.core.exceptions import AuthorizationError
+            raise AuthorizationError("Valid teaching assignment not found.")
+
+        exists_stmt = select(TeachingWorkspace).where(
+            TeachingWorkspace.teaching_assignment_id == assignment.id,
+            TeachingWorkspace.is_deleted == False
+        )
+        if (await self.db.execute(exists_stmt)).scalars().first():
+            from app.core.exceptions import ValidationError
+            raise ValidationError("Workspace for this assignment already exists.")
+
+        course = await self.db.get(Course, assignment.course_id)
+        section = await self.db.get(ClassSection, assignment.class_section_id)
+
+        workspace = TeachingWorkspace(
+            teaching_assignment_id=assignment.id,
+            course_id=assignment.course_id,
+            class_section_id=assignment.class_section_id,
+            academic_period_id=assignment.academic_period_id,
+            title=data.title or f"{course.name} ({section.name})",
+            description=data.description or course.description,
+            status="ACTIVE",
+            created_by_id=lecturer_id
+        )
+        self.db.add(workspace)
+        await self.db.commit()
+        await self.db.refresh(workspace)
+        return workspace
+
+    async def get_dashboard_data(self, lecturer_id: uuid.UUID) -> LecturerDashboardResponse:
+        from app.db.models.integrity import IntegrityEvent
+        from app.schemas.lecturer import DashboardMetric
         from app.services.grading_service import GradingService
-        grading_svc = GradingService(self.db)
-        queue_items, total_pending = await grading_svc.get_grading_queue(
-            lecturer_id=lecturer_id,
-            status=GradingQueueStatus.PENDING,
-            page_size=100
-        )
-        
-        # Flagged Integrity Events for this lecturer's assessments
-        flag_stmt = (
-            select(func.count(IntegrityEvent.id))
-            .join(Assessment, Assessment.id == IntegrityEvent.assessment_id)
-            .where(Assessment.created_by_id == lecturer_id)
-        )
-        flag_res = await self.db.execute(flag_stmt)
-        flagged_events_count = flag_res.scalar_one()
+
+        now = datetime.now(UTC)
+        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        # 1. Summary Stats (Now based on Workspaces)
+        async def get_class_metric():
+            stmt = select(func.count(TeachingWorkspace.id)).join(TeachingAssignment).where(
+                TeachingAssignment.lecturer_id == lecturer_id,
+                TeachingWorkspace.status == "ACTIVE",
+                TeachingWorkspace.is_deleted == False
+            )
+            curr = (await self.db.execute(stmt)).scalar_one()
+            stmt_last = stmt.where(TeachingWorkspace.created_at < first_of_this_month)
+            last = (await self.db.execute(stmt_last)).scalar_one()
+            delta = round(((curr - last) / last * 100), 1) if last > 0 else 0
+            return DashboardMetric(value=curr, delta=delta, last_month=last, positive=curr >= last)
+
+        async def get_assessment_metric():
+            # Current (Published)
+            stmt = select(func.count(Assessment.id)).where(Assessment.created_by_id == lecturer_id, Assessment.status == AssessmentStatus.PUBLISHED, Assessment.is_deleted == False)
+            curr = (await self.db.execute(stmt)).scalar_one()
+            # Last Month
+            stmt_last = stmt.where(Assessment.created_at < first_of_this_month)
+            last = (await self.db.execute(stmt_last)).scalar_one()
+            delta = round(((curr - last) / last * 100), 1) if last > 0 else 0
+            return DashboardMetric(value=curr, delta=delta, last_month=last, positive=curr >= last)
+
+        async def get_grading_metric():
+            grading_svc = GradingService(self.db)
+            _, total_pending = await grading_svc.get_grading_queue(lecturer_id=lecturer_id, status=GradingQueueStatus.PENDING, page_size=1)
+            # Mock trend for grading as historical queue state isn't tracked easily
+            return DashboardMetric(value=total_pending, delta=0, last_month=total_pending, positive=True)
+
+        async def get_flag_metric():
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            yesterday_start = today_start - timedelta(days=1)
+            # Today
+            stmt_today = select(func.count(IntegrityEvent.id)).join(Assessment, Assessment.id == IntegrityEvent.assessment_id).where(Assessment.created_by_id == lecturer_id, IntegrityEvent.created_at >= today_start)
+            curr = (await self.db.execute(stmt_today)).scalar_one()
+            # Yesterday
+            stmt_yest = select(func.count(IntegrityEvent.id)).join(Assessment, Assessment.id == IntegrityEvent.assessment_id).where(
+                Assessment.created_by_id == lecturer_id, 
+                IntegrityEvent.created_at >= yesterday_start,
+                IntegrityEvent.created_at < today_start
+            )
+            last = (await self.db.execute(stmt_yest)).scalar_one()
+            delta = round(((curr - last) / last * 100), 1) if last > 0 else 0
+            return DashboardMetric(value=curr, delta=delta, last_month=last, positive=curr <= last)
 
         summary = LecturerDashboardSummary(
-            active_classes_count=active_classes_count,
-            upcoming_assessments_count=total_ass,
-            pending_grading_count=total_pending,
-            flagged_events_count=flagged_events_count
+            active_classes_count=await get_class_metric(),
+            upcoming_assessments_count=await get_assessment_metric(),
+            pending_grading_count=await get_grading_metric(),
+            flagged_events_count=await get_flag_metric()
         )
 
         # 2. Pending Queue (Grouped by Assessment for the UI)
+        grading_svc = GradingService(self.db)
+        queue_items, _ = await grading_svc.get_grading_queue(lecturer_id=lecturer_id, status=GradingQueueStatus.PENDING, page_size=100)
+
         pending_items_data = []
         assessment_counts = {}
         for item in queue_items:
@@ -419,38 +535,40 @@ class LecturerService:
     async def list_lecturer_courses(
         self, lecturer_id: uuid.UUID, page: int = 1, page_size: int = 20
     ) -> tuple[list[AdminCourseListItem], int]:
-        """List courses assigned to a specific lecturer."""
-        from app.db.models.academic import Course, LecturerCourseAssignment
+        """List courses assigned to a specific lecturer with their specific role."""
+        from app.db.models.academic import Course, TeachingAssignment
         from app.schemas.admin import AdminCourseListItem
 
         # 1. Total count for this lecturer
         count_stmt = (
             select(func.count(Course.id))
-            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
+            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
             .where(
-                LecturerCourseAssignment.lecturer_id == lecturer_id,
-                Course.is_deleted == False
+                TeachingAssignment.lecturer_id == lecturer_id,
+                Course.is_deleted == False,
+                TeachingAssignment.is_active == True
             )
         )
         count_res = await self.db.execute(count_stmt)
         total = count_res.scalar_one()
 
-        # 2. Paginated list
+        # 2. Paginated list with Role
         stmt = (
-            select(Course)
-            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
+            select(Course, TeachingAssignment.role)
+            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
             .where(
-                LecturerCourseAssignment.lecturer_id == lecturer_id,
-                Course.is_deleted == False
+                TeachingAssignment.lecturer_id == lecturer_id,
+                Course.is_deleted == False,
+                TeachingAssignment.is_active == True
             )
             .order_by(Course.created_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
         res = await self.db.execute(stmt)
-        courses = res.scalars().all()
+        rows = res.all()
         items = []
-        for c in courses:
+        for c, role in rows:
             student_count = await self.course_repo.get_student_count(c.id)
             
             # Calculate real performance average
@@ -470,14 +588,17 @@ class LecturerService:
             perf_res = await self.db.execute(perf_stmt)
             avg_perf = perf_res.scalar() or 0.0
 
+            role_label = str(role).replace("_", " ").title()
+
             items.append(AdminCourseListItem(
                 id=c.id,
                 code=c.code,
                 title=c.name,
-                lecturer_name="Primary Lecturer", # We know it's them
+                lecturer_name=role_label, # Use the role as the label
                 student_count=student_count,
                 status="Active" if not c.is_deleted else "Deleted",
-                performance_avg=float(avg_perf)
+                performance_avg=float(avg_perf),
+                academic_year=c.academic_year
             ))
 
         return items, total
@@ -607,6 +728,8 @@ class LecturerService:
             description=course.description,
             student_count=count,
             performance_avg=float(avg_perf),
+            institution_id=course.institution_id,
+            academic_year=course.academic_year,
             roster=roster,
             department_name=dept_name,
             option_name=opt_name,
@@ -623,7 +746,7 @@ class LecturerService:
         assign_stmt = select(LecturerCourseAssignment).where(
             LecturerCourseAssignment.lecturer_id == lecturer_id,
             LecturerCourseAssignment.course_id == course_id,
-            LecturerCourseAssignment.assignment_role == LecturerAssignmentRole.PRIMARY,
+            LecturerCourseAssignment.assignment_role == LecturerAssignmentRole.MAIN_LECTURER,
             LecturerCourseAssignment.is_active == True
         )
         assign_res = await self.db.execute(assign_stmt)
@@ -637,3 +760,23 @@ class LecturerService:
 
         await self.course_repo.delete(course_id)
         return True
+
+    async def list_lecturers(self) -> list[UserResponse]:
+        """Returns a list of all active lecturers for colleague selection."""
+        from app.db.models.auth import User, UserProfile
+        from app.db.enums import UserRole, UserStatus
+        from sqlalchemy.orm import selectinload
+
+        stmt = (
+            select(User)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .options(selectinload(User.profile))
+            .where(
+                User.role == UserRole.LECTURER.value,
+                User.status == UserStatus.ACTIVE.value,
+                User.is_deleted == False
+            )
+            .order_by(UserProfile.last_name.asc())
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())

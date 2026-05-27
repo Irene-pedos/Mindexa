@@ -37,10 +37,12 @@ import {
   Edit,
   Trash2,
   Loader2,
-  ChevronLeft,
   X,
   CheckCircle2,
   AlertCircle,
+  BrainCircuit,
+  Database,
+  ArrowRight,
 } from "lucide-react";
 import {
   questionApi,
@@ -50,6 +52,10 @@ import {
 } from "@/lib/api/question";
 import { toast } from "sonner";
 import { useDebounce } from "@/hooks/use-debounce";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 export default function LecturerQuestionBank() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -90,7 +96,6 @@ export default function LecturerQuestionBank() {
         difficulty: filterDifficulty === "all" ? undefined : filterDifficulty,
         page_size: 50,
       });
-      // Summaries don't have all data, but that's fine for the list
       setQuestions(response.items as any);
     } catch (error: any) {
       console.error("Failed to fetch questions", error);
@@ -134,6 +139,7 @@ export default function LecturerQuestionBank() {
         suggested_marks: data.marks,
         options: data.options.map((opt) => ({
           option_text: opt.option_text,
+          option_text_right: opt.option_text_right,
           is_correct: opt.is_correct,
           order_index: opt.order_index,
         })),
@@ -166,7 +172,6 @@ export default function LecturerQuestionBank() {
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    // Simple validation
     if (
       formData.question_type === "mcq" ||
       formData.question_type === "true_false"
@@ -182,7 +187,7 @@ export default function LecturerQuestionBank() {
     try {
       if (editingId) {
         await questionApi.updateQuestion(editingId, formData);
-        toast.success("Question updated successfully (new version created)");
+        toast.success("Question updated successfully");
       } else {
         await questionApi.createQuestion(formData);
         toast.success("Question created successfully");
@@ -237,12 +242,6 @@ export default function LecturerQuestionBank() {
     setFormData((prev) => {
       const newOptions = [...prev.options];
       newOptions[index] = { ...newOptions[index], [field]: value };
-
-      // If setting MCQ correct and only one should be correct (optional logic)
-      // if (field === 'is_correct' && value === true && prev.question_type === 'mcq') {
-      //   newOptions.forEach((o, i) => { if(i !== index) o.is_correct = false; });
-      // }
-
       return { ...prev, options: newOptions };
     });
   };
@@ -251,30 +250,26 @@ export default function LecturerQuestionBank() {
     <div className="space-y-8">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Question Bank
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Reusable, searchable, and AI-assisted question library
-          </p>
+          <h1 className="text-3xl font-semibold tracking-tight">Question Bank</h1>
+          <p className="text-muted-foreground mt-1">Manage and reuse your institutional question library</p>
         </div>
-        <Button size="lg" onClick={handleAdd}>
-          <Plus className="mr-2 size-5" /> Add New Question
+        <Button onClick={handleAdd} className="h-10 px-5 shadow-sm">
+          <Plus className="mr-2 size-4" /> New Question
         </Button>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-4">
+      <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-3 size-4 text-muted-foreground" />
+          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
           <Input
             placeholder="Search questions..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-10"
+            className="pl-9 h-10"
           />
         </div>
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-52">
+          <SelectTrigger className="w-52 h-10">
             <SelectValue placeholder="Question Type" />
           </SelectTrigger>
           <SelectContent>
@@ -287,7 +282,7 @@ export default function LecturerQuestionBank() {
           </SelectContent>
         </Select>
         <Select value={filterDifficulty} onValueChange={setFilterDifficulty}>
-          <SelectTrigger className="w-44">
+          <SelectTrigger className="w-44 h-10">
             <SelectValue placeholder="Difficulty" />
           </SelectTrigger>
           <SelectContent>
@@ -299,20 +294,28 @@ export default function LecturerQuestionBank() {
         </Select>
       </div>
 
-      <div className="grid gap-6">
+      <div className="grid gap-4">
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-            <Loader2 className="size-10 animate-spin" />
-            <p>Loading questions...</p>
+          <div className="space-y-4">
+             {[1, 2, 3, 4, 5].map(i => (
+                <Card key={i} className="shadow-none border p-6">
+                   <Skeleton variant="title" className="mb-4 w-3/4" />
+                   <div className="flex gap-2 mb-6">
+                      <Skeleton variant="title" className="w-20 h-5" />
+                      <Skeleton variant="title" className="w-20 h-5" />
+                   </div>
+                   <Skeleton variant="text" className="w-full" />
+                </Card>
+             ))}
           </div>
         ) : questions.length === 0 ? (
-          <Card className="border-dashed">
+          <Card className="border-dashed shadow-none">
             <CardContent className="flex flex-col items-center justify-center py-20 text-center">
-              <p className="text-muted-foreground">
-                No questions found in the bank.
-              </p>
+              <Database className="size-12 text-muted-foreground/30 mb-4" />
+              <p className="text-muted-foreground font-medium">No questions found matching your criteria.</p>
               <Button
                 variant="link"
+                className="mt-2 text-primary"
                 onClick={() => {
                   setSearchTerm("");
                   setFilterType("all");
@@ -325,35 +328,32 @@ export default function LecturerQuestionBank() {
           </Card>
         ) : (
           questions.map((q) => (
-            <Card key={q.id} className="hover:shadow-md transition-all group">
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <CardTitle className="text-lg leading-tight line-clamp-2">
+            <Card key={q.id} className="shadow-none border hover:border-primary/20 transition-all group">
+              <CardHeader className="pb-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="space-y-1.5 flex-1">
+                    <CardTitle className="text-base leading-snug line-clamp-2 font-medium">
                       {q.content}
                     </CardTitle>
-                    <div className="flex flex-wrap gap-2 pt-2">
-                      <Badge variant="outline" className="capitalize">
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="outline" className="capitalize text-[10px] font-medium text-muted-foreground">
                         {q.question_type.toLowerCase().replace("_", " ")}
                       </Badge>
-                      <Badge variant="secondary" className="capitalize">
+                      <Badge variant="secondary" className="capitalize text-[10px] font-medium">
                         {q.difficulty.toLowerCase()}
                       </Badge>
                       {q.topic && (
-                        <Badge
-                          variant="outline"
-                          className="bg-primary/5 border-primary/20 text-primary"
-                        >
+                        <Badge variant="outline" className="bg-primary/5 border-primary/20 text-primary text-[10px] font-medium">
                           {q.topic}
                         </Badge>
                       )}
                     </div>
                   </div>
-                  <div className="flex gap-2">
+                  <div className="flex gap-1">
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="text-muted-foreground hover:text-destructive h-8 w-8"
                       onClick={() => handleDelete(q.id)}
                     >
                       <Trash2 className="size-4" />
@@ -361,32 +361,34 @@ export default function LecturerQuestionBank() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between text-sm pt-2 border-t">
+              <CardContent className="pt-0">
+                <div className="flex items-center justify-between text-[11px] pt-3 border-t">
                   <div className="flex items-center gap-6">
-                    <div>
-                      <span className="text-muted-foreground">Marks:</span>{" "}
-                      {q.marks}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground font-medium uppercase tracking-wider">Marks:</span>
+                      <span className="font-bold">{q.marks}</span>
                     </div>
-                    <div>
-                      <span className="text-muted-foreground">Created:</span>{" "}
-                      {new Date(q.created_at).toLocaleDateString()}
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-muted-foreground font-medium uppercase tracking-wider">Created:</span>
+                      <span className="font-bold">{new Date(q.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
-                  <div className="flex gap-3">
+                  <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="sm"
+                      className="h-8 text-xs font-medium"
                       onClick={() => handlePreview(q.id)}
                     >
-                      <Eye className="mr-2 size-4" /> Preview
+                      <Eye className="mr-1.5 size-3.5" /> Preview
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
+                      className="h-8 text-xs font-medium"
                       onClick={() => handleEdit(q.id)}
                     >
-                      <Edit className="mr-2 size-4" /> Edit
+                      <Edit className="mr-1.5 size-3.5" /> Edit
                     </Button>
                   </div>
                 </div>
@@ -398,306 +400,283 @@ export default function LecturerQuestionBank() {
 
       {/* Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Question Preview</DialogTitle>
-            <DialogDescription>
-              Check how the question looks for students
-            </DialogDescription>
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-hidden flex flex-col p-0">
+          <DialogHeader className="p-6 pb-0">
+            <div className="flex items-center justify-between pr-8">
+              <div>
+                <DialogTitle>Question Preview</DialogTitle>
+                <DialogDescription>Institutional rendering for student evaluation</DialogDescription>
+              </div>
+              <Badge variant="outline" className="font-medium">{previewData?.marks} Marks</Badge>
+            </div>
           </DialogHeader>
 
-          {loadingDetail ? (
-            <div className="py-20 flex justify-center">
-              <Loader2 className="size-8 animate-spin text-primary" />
-            </div>
-          ) : previewData ? (
-            <div className="space-y-6 pt-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-muted-foreground font-medium uppercase tracking-wider">
-                  <span>Question Stem</span>
-                  <Badge variant="secondary">{previewData.marks} Marks</Badge>
-                </div>
-                <div className="text-lg font-medium border rounded-lg p-4 bg-muted/30">
-                  {previewData.content}
-                </div>
+          <ScrollArea className="flex-1 px-6 py-6">
+            {loadingDetail ? (
+              <div className="py-20 flex flex-col items-center justify-center gap-3">
+                <Skeleton variant="title" className="h-6 w-32" />
+                <Skeleton variant="media" className="h-32 w-full mt-4" />
+                <Skeleton variant="text" className="w-full mt-8" />
               </div>
-
-              {previewData.options && previewData.options.length > 0 && (
+            ) : previewData ? (
+              <div className="space-y-8">
                 <div className="space-y-3">
-                  <p className="text-xs font-bold text-muted-foreground uppercase">
-                    Options
-                  </p>
-                  <div className="grid gap-2">
-                    {previewData.options.map((opt, idx) => (
-                      <div
-                        key={idx}
-                        className={`flex items-center justify-between p-3 rounded-md border ${opt.is_correct ? "bg-emerald-50 border-emerald-200" : "bg-white"}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="size-6 rounded-full border flex items-center justify-center text-[10px] font-bold">
-                            {String.fromCharCode(65 + idx)}
-                          </div>
-                          <span className="text-sm">{opt.option_text}</span>
-                        </div>
-                        {opt.is_correct && (
-                          <CheckCircle2 className="size-4 text-emerald-600" />
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {previewData.explanation && (
-                <div className="p-4 rounded-lg bg-primary/5 border border-primary/10">
-                  <h4 className="text-sm font-semibold flex items-center gap-2 mb-1">
-                    <AlertCircle className="size-4 text-primary" /> Explanation
-                  </h4>
-                  <p className="text-sm text-muted-foreground">
-                    {previewData.explanation}
-                  </p>
-                </div>
-              )}
-            </div>
-          ) : null}
-
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPreviewOpen(false)}>
-              Close
-            </Button>
-            <Button onClick={() => previewData && handleEdit(previewData.id)}>
-              Edit Question
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Add/Edit Dialog */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-          <form onSubmit={handleFormSubmit}>
-            <DialogHeader>
-              <DialogTitle>
-                {editingId ? "Edit Question" : "Add New Question"}
-              </DialogTitle>
-              <DialogDescription>
-                Fill in the details for your reusable question bank item.
-              </DialogDescription>
-            </DialogHeader>
-
-            {formLoading && !formData.content ? (
-              <div className="py-20 flex justify-center">
-                <Loader2 className="size-8 animate-spin text-primary" />
-              </div>
-            ) : (
-              <div className="py-6 space-y-6">
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="content">Question Content</Label>
-                    <Textarea
-                      id="content"
-                      placeholder="Enter the main question text here..."
-                      className="min-h-[100px]"
-                      value={formData.content}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          content: e.target.value,
-                        }))
-                      }
-                      required
-                    />
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="type">Question Type</Label>
-                      <Select
-                        value={formData.question_type}
-                        onValueChange={(val) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            question_type: val as any,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="type">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="mcq">Multiple Choice</SelectItem>
-                          <SelectItem value="true_false">True/False</SelectItem>
-                          <SelectItem value="short_answer">
-                            Short Answer
-                          </SelectItem>
-                          <SelectItem value="essay">Essay</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="difficulty">Difficulty</Label>
-                      <Select
-                        value={formData.difficulty}
-                        onValueChange={(val) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            difficulty: val as any,
-                          }))
-                        }
-                      >
-                        <SelectTrigger id="difficulty">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="easy">Easy</SelectItem>
-                          <SelectItem value="medium">Medium</SelectItem>
-                          <SelectItem value="hard">Hard</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="marks">Suggested Marks</Label>
-                      <Input
-                        id="marks"
-                        type="number"
-                        min={1}
-                        value={formData.suggested_marks}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            suggested_marks: Number(e.target.value),
-                          }))
-                        }
-                      />
-                    </div>
-                    <div className="space-y-2 col-span-2">
-                      <Label htmlFor="topic">Topic / Tag</Label>
-                      <Input
-                        id="topic"
-                        placeholder="e.g. Thermodynamics, Algebra"
-                        value={formData.topic}
-                        onChange={(e) =>
-                          setFormData((prev) => ({
-                            ...prev,
-                            topic: e.target.value,
-                          }))
-                        }
-                      />
-                    </div>
+                  <Label className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Stem</Label>
+                  <div className="text-sm font-medium leading-relaxed p-4 rounded-lg border bg-muted/20">
+                    {previewData.content}
                   </div>
                 </div>
 
-                {/* Options Section */}
-                {(formData.question_type === "mcq" ||
-                  formData.question_type === "true_false") && (
+                {previewData.options && previewData.options.length > 0 && (
                   <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <Label className="text-base">Options</Label>
-                      {formData.question_type === "mcq" && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={addOption}
-                        >
-                          <Plus className="mr-2 size-4" /> Add Option
-                        </Button>
-                      )}
-                    </div>
-                    <div className="space-y-3">
-                      {formData.options.map((opt, idx) => (
+                    <Label className="text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Response Options</Label>
+                    <div className="grid gap-2">
+                      {previewData.options.map((opt, idx) => (
                         <div
                           key={idx}
-                          className="flex items-start gap-3 p-3 rounded-lg border bg-muted/20"
+                          className={cn(
+                            "flex items-center justify-between p-3 px-4 rounded-md border text-sm transition-colors",
+                            opt.is_correct ? "bg-primary/5 border-primary/20 text-primary" : "bg-background"
+                          )}
                         >
-                          <div className="pt-2">
-                            <Checkbox
-                              checked={opt.is_correct}
-                              onCheckedChange={(checked) =>
-                                updateOption(idx, "is_correct", !!checked)
-                              }
-                            />
+                          <div className="flex items-center gap-4">
+                            <div className="size-6 rounded border flex items-center justify-center text-[10px] font-medium bg-muted/30">
+                              {String.fromCharCode(65 + idx)}
+                            </div>
+                            <span className="font-medium">{opt.option_text}</span>
                           </div>
-                          <div className="flex-1 space-y-2">
-                            <Input
-                              placeholder={`Option ${idx + 1}`}
-                              value={opt.option_text}
-                              onChange={(e) =>
-                                updateOption(idx, "option_text", e.target.value)
-                              }
-                              required
-                            />
-                          </div>
-                          {formData.question_type === "mcq" &&
-                            formData.options.length > 2 && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => removeOption(idx)}
-                                className="text-destructive"
-                              >
-                                <X className="size-4" />
-                              </Button>
-                            )}
+                          {opt.is_correct && <CheckCircle2 className="size-4 text-primary" />}
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
 
-                <div className="space-y-4 border-t pt-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="explanation">Explanation (Optional)</Label>
-                    <Textarea
-                      id="explanation"
-                      placeholder="Visible to students after grading..."
-                      value={formData.explanation}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          explanation: e.target.value,
-                        }))
-                      }
-                    />
+                {(previewData.explanation || previewData.hint) && (
+                  <div className="space-y-4 pt-4 border-t border-dashed">
+                    {previewData.explanation && (
+                      <div className="p-4 rounded-md bg-muted/30 border">
+                        <h4 className="text-xs font-medium flex items-center gap-2 mb-1.5 text-foreground">
+                          <AlertCircle className="size-3.5" /> Explanation
+                        </h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed">
+                          {previewData.explanation}
+                        </p>
+                      </div>
+                    )}
+                    {previewData.hint && (
+                      <div className="p-4 rounded-md bg-muted/30 border">
+                        <h4 className="text-xs font-medium flex items-center gap-2 mb-1.5 text-foreground">
+                          <BrainCircuit className="size-3.5" /> Student Hint
+                        </h4>
+                        <p className="text-sm text-muted-foreground leading-relaxed italic">
+                          {previewData.hint}
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="hint">Hint (Optional)</Label>
-                    <Input
-                      id="hint"
-                      placeholder="Helpful nudge for students during attempt..."
-                      value={formData.hint}
-                      onChange={(e) =>
-                        setFormData((prev) => ({
-                          ...prev,
-                          hint: e.target.value,
-                        }))
-                      }
-                    />
+                )}
+              </div>
+            ) : null}
+          </ScrollArea>
+
+          <DialogFooter className="p-6 pt-2 border-t bg-muted/5">
+            <Button variant="ghost" onClick={() => setPreviewOpen(false)} className="font-medium">Close</Button>
+            <Button onClick={() => previewData && handleEdit(previewData.id)} className="font-medium">Edit Question</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add/Edit Dialog */}
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+          <form onSubmit={handleFormSubmit} className="flex flex-col h-full">
+            <DialogHeader className="p-6 pb-0">
+              <DialogTitle className="text-xl">{editingId ? "Modify Question" : "Library Addition"}</DialogTitle>
+              <DialogDescription>Define institutional grade assessment items</DialogDescription>
+            </DialogHeader>
+
+            <ScrollArea className="flex-1 px-6 py-6">
+              {formLoading && !formData.content ? (
+                <div className="py-20 flex flex-col items-center justify-center gap-3">
+                  <Skeleton variant="title" className="h-6 w-32" />
+                  <Skeleton variant="text" className="w-full mt-4" />
+                </div>
+              ) : (
+                <div className="space-y-8">
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="content" className="text-xs font-bold uppercase tracking-wider">Question Stem</Label>
+                      <Textarea
+                        id="content"
+                        placeholder="Enter the central question or instruction..."
+                        className="min-h-[120px] text-base"
+                        value={formData.content}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, content: e.target.value }))}
+                        required
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="type" className="text-xs font-bold uppercase tracking-wider">Type</Label>
+                        <Select
+                          value={formData.question_type}
+                          onValueChange={(val) => setFormData((prev) => ({ ...prev, question_type: val as any }))}
+                        >
+                          <SelectTrigger id="type" className="h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="mcq">Multiple Choice</SelectItem>
+                            <SelectItem value="true_false">True / False</SelectItem>
+                            <SelectItem value="short_answer">Short Answer</SelectItem>
+                            <SelectItem value="essay">Essay Response</SelectItem>
+                            <SelectItem value="matching">Matching Pairs</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="difficulty" className="text-xs font-bold uppercase tracking-wider">Difficulty</Label>
+                        <Select
+                          value={formData.difficulty}
+                          onValueChange={(val) => setFormData((prev) => ({ ...prev, difficulty: val as any }))}
+                        >
+                          <SelectTrigger id="difficulty" className="h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="easy">Easy Level</SelectItem>
+                            <SelectItem value="medium">Medium Level</SelectItem>
+                            <SelectItem value="hard">Hard Level</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="marks" className="text-xs font-bold uppercase tracking-wider">Marks</Label>
+                        <Input
+                          id="marks"
+                          type="number"
+                          min={1}
+                          className="h-10 font-bold"
+                          value={formData.suggested_marks}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, suggested_marks: Number(e.target.value) }))}
+                        />
+                      </div>
+                      <div className="space-y-2 col-span-2">
+                        <Label htmlFor="topic" className="text-xs font-bold uppercase tracking-wider">Topic Tag</Label>
+                        <Input
+                          id="topic"
+                          placeholder="e.g. Molecular Biology"
+                          className="h-10"
+                          value={formData.topic}
+                          onChange={(e) => setFormData((prev) => ({ ...prev, topic: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <Separator />
+
+                  {(formData.question_type === "mcq" || formData.question_type === "true_false" || formData.question_type === "matching" || formData.question_type === "ordering") && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">
+                          {formData.question_type === "matching" ? "Matching Pairs" : "Response Options / Sequence"}
+                        </Label>
+                        {formData.question_type !== "true_false" && (
+                          <Button type="button" variant="outline" size="sm" onClick={addOption} className="h-8">
+                            <Plus className="mr-1.5 size-3.5" /> Add {formData.question_type === "matching" ? "Pair" : "Item"}
+                          </Button>
+                        )}
+                      </div>
+                      <div className="space-y-3">
+                        {formData.options.map((opt, idx) => (
+                          <div key={idx} className="flex items-start gap-3 p-4 rounded-xl border bg-muted/5 transition-all focus-within:bg-background focus-within:ring-1 focus-within:ring-primary/20">
+                            <div className="pt-2.5 flex flex-col items-center gap-2">
+                              {(formData.question_type === "mcq" || formData.question_type === "true_false") ? (
+                                <Checkbox
+                                  checked={opt.is_correct}
+                                  onCheckedChange={(checked) => updateOption(idx, "is_correct", !!checked)}
+                                  className="size-5 rounded"
+                                />
+                              ) : (
+                                <div className="size-6 rounded-lg bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground">
+                                  {idx + 1}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex-1 flex gap-3">
+                              <Input
+                                placeholder={formData.question_type === "matching" ? "Left Item..." : `Option ${idx + 1} text...`}
+                                value={opt.option_text}
+                                onChange={(e) => updateOption(idx, "option_text", e.target.value)}
+                                className="border-none bg-transparent shadow-none px-0 h-10 font-medium focus-visible:ring-0"
+                                required
+                                disabled={formData.question_type === "true_false"}
+                              />
+                              {formData.question_type === "matching" && (
+                                <>
+                                  <ArrowRight className="size-4 text-muted-foreground/30 mt-3" />
+                                  <Input
+                                    placeholder="Right Match..."
+                                    value={opt.option_text_right || ""}
+                                    onChange={(e) => updateOption(idx, "option_text_right", e.target.value)}
+                                    className="border-none bg-transparent shadow-none px-0 h-10 font-medium focus-visible:ring-0"
+                                    required
+                                  />
+                                </>
+                              )}
+                            </div>
+                            {formData.question_type !== "true_false" && formData.options.length > 1 && (
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                onClick={() => removeOption(idx)}
+                                className="text-muted-foreground hover:text-destructive h-10 w-10 shrink-0"
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-6 pt-4 border-t border-dashed">
+                    <div className="space-y-2">
+                      <Label htmlFor="explanation" className="text-xs font-bold uppercase tracking-wider">Evaluation Rubric / Explanation</Label>
+                      <Textarea
+                        id="explanation"
+                        placeholder="Detail the reasoning or correct response path..."
+                        className="min-h-[100px] text-sm"
+                        value={formData.explanation}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, explanation: e.target.value }))}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="hint" className="text-xs font-bold uppercase tracking-wider text-amber-700">Student Hint (Optional)</Label>
+                      <Input
+                        id="hint"
+                        placeholder="Nudge students towards the correct approach..."
+                        className="h-10 text-sm border-amber-100 bg-amber-50/10 focus-visible:ring-amber-200"
+                        value={formData.hint}
+                        onChange={(e) => setFormData((prev) => ({ ...prev, hint: e.target.value }))}
+                      />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
+            </ScrollArea>
 
-            <DialogFooter>
-              <Button
-                variant="outline"
-                type="button"
-                onClick={() => setFormOpen(false)}
-              >
-                Cancel
+              <Button type="submit" disabled={formLoading} className="font-semibold min-w-[140px]">
+                {formLoading ? "Saving Changes..." : <><Database className="mr-2 size-4" /> {editingId ? "Update Item" : "Save to Bank"}</>}
               </Button>
-              <Button type="submit" disabled={formLoading}>
-                {formLoading ? (
-                  <Loader2 className="mr-2 size-4 animate-spin" />
-                ) : (
-                  "Save Question"
-                )}
-              </Button>
-            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>

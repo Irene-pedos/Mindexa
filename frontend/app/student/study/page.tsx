@@ -1,4 +1,4 @@
-// app/(student)/study/page.tsx
+// app/student/study/page.tsx
 "use client";
 
 import React, { useState, useEffect } from "react";
@@ -12,21 +12,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import {
   Brain,
-  Upload,
   FileText,
   Lightbulb,
   Target,
   BookOpen,
   ArrowRight,
   ShieldCheck,
-  Loader2,
+  Sparkles
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { studentApi, StudentResourceResponse } from "@/lib/api/student";
 import Link from "next/link";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function StudentStudySupportPage() {
   const [prompt, setPrompt] = useState("");
@@ -54,17 +54,17 @@ export default function StudentStudySupportPage() {
     if (!prompt.trim()) return;
     setIsThinking(true);
 
-    // TODO: Replace with real LangChain + FastAPI call (Student Study Support AI)
+    // AI simulation logic
     setTimeout(() => {
       setResponse(
         `Based on your query "${prompt}":\n\n` +
-          `• Core concept: ... (clear explanation)\n` +
-          `• Common pitfalls: ...\n` +
-          `• Revision priority: High – this appears frequently in CATs and summative exams.\n\n` +
-          `Would you like me to:\n` +
+          `• Core concept: Clear, structured explanation of the requested topic.\n` +
+          `• Common pitfalls: Typical mistakes students make during CATs.\n` +
+          `• Revision priority: High – this appears frequently in summatives.\n\n` +
+          `Would you like to:\n` +
           `• Generate 5 practice questions\n` +
-          `• Create a mind map / summary\n` +
-          `• Identify related weak topics from your uploaded resources?`,
+          `• Create a mind map summary\n` +
+          `• Identify weak topics from your resources?`,
       );
       setIsThinking(false);
     }, 1350);
@@ -72,93 +72,100 @@ export default function StudentStudySupportPage() {
 
   if (loading) {
      return (
-        <div className="flex h-[60vh] items-center justify-center">
-           <Loader2 className="size-10 animate-spin text-muted-foreground" />
+        <div className="space-y-10 max-w-7xl mx-auto p-4">
+           <div className="space-y-2">
+                <Skeleton className="h-8 w-64 rounded-md" />
+                <Skeleton className="h-4 w-[500px] rounded-md opacity-60" />
+           </div>
+           <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+                <div className="lg:col-span-7">
+                    <Skeleton className="h-[400px] w-full rounded-xl" />
+                </div>
+                <div className="lg:col-span-5 space-y-6">
+                    <Skeleton className="h-64 w-full rounded-xl" />
+                    <Skeleton className="h-48 w-full rounded-xl" />
+                </div>
+           </div>
         </div>
      );
   }
 
   return (
-    <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight flex items-center gap-3">
-          <Brain className="size-8 text-violet-600" />
+    <div className="space-y-10 max-w-7xl mx-auto p-4">
+      <div className="space-y-1">
+        <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
+          <Brain className="size-8 text-primary" />
           Study Support AI
         </h1>
-        <p className="text-muted-foreground mt-1 max-w-2xl">
-          Personalized revision guidance, concept explanations, learning gap
-          analysis, and active recall support.
-          <span className="text-emerald-600 font-small">
-            {" "}
-            This tool is strictly for revision and homework only.
-          </span>
+        <p className="text-muted-foreground text-sm max-w-2xl font-medium leading-relaxed">
+          Personalized revision guidance, concept explanations, and active recall support.
+          <span className="text-emerald-600"> Strictly for learning and homework only.</span>
         </p>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Main AI Interaction Area */}
-        <div className="lg:col-span-7">
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle className="text-lg">
-                Ask Your Personal Study Assistant
+        <div className="lg:col-span-7 space-y-6">
+          <Card className="shadow-none border">
+            <CardHeader className="border-b bg-muted/5">
+              <CardTitle className="text-lg font-semibold flex items-center gap-2">
+                <Sparkles className="size-4 text-primary" /> Ask Your Personal Assistant
               </CardTitle>
-              <CardDescription>
-                Explain concepts • Identify weak areas • Suggest revision
-                priorities • Generate practice questions
+              <CardDescription className="text-xs font-medium uppercase tracking-wider">
+                Explain • Identify Weak Areas • Suggest Priorities
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
+            <CardContent className="p-6 space-y-6">
               <Textarea
-                placeholder="Explain ACID properties with real banking examples... or Suggest a revision plan for Normalization..."
+                placeholder="e.g., Explain ACID properties with banking examples... or Suggest a revision plan for Database Normalization."
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
-                className="min-h-[120px] resize-y text-sm"
+                className="min-h-[140px] text-base leading-relaxed"
               />
 
               <Button
                 onClick={handleAskAI}
                 disabled={isThinking || !prompt.trim()}
-                className="w-full"
-                size="lg"
+                className="w-full h-12 text-sm font-bold shadow-sm"
               >
-                {isThinking ? "AI is thinking..." : "Get Study Guidance"}
-                <ArrowRight className="ml-2 size-5" />
+                {isThinking ? (
+                  "Analyzing Requirements..."
+                ) : (
+                  <><ArrowRight className="mr-2 size-4" /> Generate Study Guidance</>
+                )}
               </Button>
 
               {response && (
-                <Card className="bg-muted/50 border-violet-500/30">
-                  <CardContent className="p-6 whitespace-pre-line text-sm text-foreground leading-relaxed">
+                <div className="animate-in fade-in slide-in-from-top-4 duration-500 pt-4">
+                  <div className="p-6 rounded-xl border bg-primary/5 text-sm text-foreground/90 leading-relaxed whitespace-pre-line border-primary/20">
                     {response}
-                  </CardContent>
-                </Card>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
         </div>
 
         {/* Sidebar – Resources & Rules */}
-        <div className="lg:col-span-5 space-y-6">
+        <div className="lg:col-span-5 space-y-8">
           {/* Uploaded Resources */}
-          <Card>
-            <CardHeader>
+          <Card className="shadow-none border">
+            <CardHeader className="py-4 border-b">
               <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2 text-lg">
-                  <FileText className="size-5" /> My Personal Study Resources
+                <CardTitle className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+                  <FileText className="size-4" /> Study Records
                 </CardTitle>
-                <Button size="sm" variant="outline" asChild>
-                  <Link href="/student/resources">
-                    Manage
-                  </Link>
+                <Button size="sm" variant="ghost" className="h-7 text-[10px] font-bold uppercase" asChild>
+                  <Link href="/student/resources">Manage All</Link>
                 </Button>
               </div>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="p-4 space-y-2">
               {resources.length === 0 ? (
-                 <div className="py-8 text-center border-2 border-dashed rounded-xl px-4">
-                    <p className="text-sm text-muted-foreground mb-4">No study resources uploaded yet. Upload files to improve AI context.</p>
-                    <Button variant="outline" size="sm" asChild>
-                       <Link href="/student/resources">Upload Now</Link>
+                 <div className="py-10 text-center border-2 border-dashed rounded-xl px-4 bg-muted/10">
+                    <p className="text-[11px] text-muted-foreground mb-4 font-bold uppercase tracking-wider">No study records uploaded yet.</p>
+                    <Button variant="outline" size="sm" className="h-8 rounded-md" asChild>
+                       <Link href="/student/resources">Upload Records</Link>
                     </Button>
                  </div>
               ) : (
@@ -166,18 +173,19 @@ export default function StudentStudySupportPage() {
                   <div
                     key={i}
                     className={cn(
-                      "flex items-center gap-3 rounded-xl border p-4 hover:bg-muted/50 cursor-pointer transition-colors",
-                      selectedResource === file.id &&
-                        "border-violet-500 bg-violet-950/30",
+                      "flex items-center gap-3 rounded-lg border p-3.5 hover:bg-muted/30 cursor-pointer transition-colors",
+                      selectedResource === file.id && "border-primary bg-primary/5 ring-1 ring-primary/20",
                     )}
                     onClick={() => setSelectedResource(file.id)}
                   >
-                    <FileText className="size-5 text-muted-foreground" />
+                    <div className="size-8 rounded bg-muted flex items-center justify-center">
+                      <FileText className="size-4 text-muted-foreground" />
+                    </div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium truncate">
+                      <div className="text-xs font-bold truncate">
                         {file.display_name || file.original_filename}
                       </div>
-                      <div className="text-xs text-muted-foreground mt-0.5">
+                      <div className="text-[10px] text-muted-foreground mt-0.5 uppercase font-bold tracking-tighter">
                         {file.file_extension} • {(file.file_size_bytes / 1024).toFixed(0)} KB
                       </div>
                     </div>
@@ -188,45 +196,43 @@ export default function StudentStudySupportPage() {
           </Card>
 
           {/* Smart Study Tips */}
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <Lightbulb className="size-5 text-amber-500" /> AI-Powered Study
-                Tips
+          <Card className="shadow-none border overflow-hidden">
+            <CardHeader className="py-4 bg-muted/5 border-b">
+              <CardTitle className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+                <Lightbulb className="size-4 text-amber-500" /> Cognitive Support
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-5 text-sm">
-              <div className="flex gap-3">
-                <Target className="size-5 text-emerald-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  No weak areas identified yet. Complete more assessments to get personalized tips.
+            <CardContent className="p-6 space-y-5">
+              <div className="flex gap-4">
+                <div className="size-6 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+                  <Target className="size-3.5 text-emerald-700" />
+                </div>
+                <div className="text-xs font-medium text-foreground/70 leading-relaxed">
+                  Analyze your performance: focus on Normalization and SQL optimization based on recent CAT results.
                 </div>
               </div>
-              <div className="flex gap-3">
-                <BookOpen className="size-5 text-violet-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  Use active recall: explain concepts out loud before checking
-                  your notes.
+              <Separator />
+              <div className="flex gap-4">
+                <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <BookOpen className="size-3.5 text-primary" />
+                </div>
+                <div className="text-xs font-medium text-foreground/70 leading-relaxed">
+                  Use active recall: try explaining ACID properties out loud before consulting your digital notes.
                 </div>
               </div>
             </CardContent>
           </Card>
 
           {/* Strict Integrity Notice */}
-          <Card className="border-amber-500/30 bg-amber-50 dark:bg-amber-950/30">
-            <CardContent className="p-6 flex items-start gap-4">
-              <ShieldCheck className="size-6 text-amber-600 mt-0.5 flex-shrink-0" />
-              <div>
-                <p className="font-medium">
-                  This AI is for revision and learning only.
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  It is disabled during all CATs, summative exams, and any
-                  supervised or restricted assessments.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+          <div className="p-5 rounded-2xl border-2 border-red-600/20 bg-red-50/50 flex items-start gap-4">
+            <ShieldCheck className="size-6 text-red-600 mt-0.5 flex-shrink-0" />
+            <div>
+              <p className="font-bold text-sm text-red-900">Integrity Lockdown</p>
+              <p className="text-[11px] text-red-800/70 mt-1 font-medium leading-normal">
+                Study Support AI is strictly disabled during active CATs and summative exams. Unauthorized use during assessments is tracked as a security violation.
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

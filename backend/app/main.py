@@ -17,6 +17,7 @@ from app.api.v1.routes import (
     blueprint,
     gemini,
     grading,
+    group_work,
     health,
     integrity,
     lecturer,
@@ -26,9 +27,13 @@ from app.api.v1.routes import (
     result,
     student,
     submission,
-)
+    academic,
+    admin_academic,
+    )
+
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.handlers import register_exception_handlers
 
 logger = get_logger(__name__)
 
@@ -54,13 +59,16 @@ def create_app() -> FastAPI:
 
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
     app.include_router(auth.router, prefix=settings.API_V1_STR)
+    app.include_router(academic.router, prefix=settings.API_V1_STR)
     app.include_router(admin.router, prefix=settings.API_V1_STR)
+    app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)
     app.include_router(resource.router, prefix=settings.API_V1_STR)
     app.include_router(question.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.router, prefix=settings.API_V1_STR)
     app.include_router(attempt.router, prefix=settings.API_V1_STR)
+    app.include_router(group_work.router, prefix=settings.API_V1_STR)
     app.include_router(notification.router, prefix=settings.API_V1_STR)
     app.include_router(result.router, prefix=settings.API_V1_STR)
     app.include_router(grading.router, prefix=settings.API_V1_STR)
@@ -72,62 +80,7 @@ def create_app() -> FastAPI:
     app.include_router(health.router, prefix=settings.API_V1_STR)
 
     # ── EXCEPTION HANDLERS ───────────────────────────────────────────────────
-
-    @app.exception_handler(ValidationError)
-    async def pydantic_validation_exception_handler(request: Request, exc: ValidationError):
-        logger.warning("pydantic_validation_error", errors=exc.errors(), path=request.url.path)
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={
-                "error": {
-                    "code": "VALIDATION_ERROR",
-                    "message": "Data validation failed.",
-                    "details": exc.errors(),
-                }
-            },
-        )
-
-    @app.exception_handler(Exception)
-    async def unhandled_exception_handler(request: Request, exc: Exception):
-        """
-        Global fallback for all unhandled exceptions.
-        Logs the full traceback and returns a sanitized 500.
-        """
-        import traceback
-        import uuid as uuid_lib
-
-        request_id = str(uuid_lib.uuid4())
-        logger.error(
-            "unhandled_exception",
-            request_id=request_id,
-            error=str(exc),
-            path=request.url.path,
-            method=request.method,
-            traceback=traceback.format_exc(),
-        )
-
-        # In development, you might want to see the error details
-        if settings.ENVIRONMENT == "development":
-            return JSONResponse(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                content={
-                    "error": {
-                        "code": "INTERNAL_ERROR",
-                        "message": str(exc),
-                        "request_id": request_id,
-                        "traceback": traceback.format_exc().splitlines(),
-                    }
-                },
-            )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "An unexpected error occurred. Our team has been notified.",
-                }
-            },
-        )
+    register_exception_handlers(app)
 
     # ── MIDDLEWARE (reverse registration order = outermost first) ─────────────
 

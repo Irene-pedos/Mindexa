@@ -167,10 +167,10 @@ async def update_question(
     question = await svc.get_question(question.id)
     return _to_detail_response(question)
 
-
 @router.delete(
     "/{question_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Soft delete a question",
     description=(
         "Soft-deletes a question. Questions used in published assessments "

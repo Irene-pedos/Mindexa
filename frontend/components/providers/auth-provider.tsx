@@ -17,6 +17,7 @@ type AuthUser = {
   id: string;
   email: string;
   role: string;
+  onboarding_completed: boolean;
   profile?: {
     first_name?: string | null;
     last_name?: string | null;
@@ -25,6 +26,10 @@ type AuthUser = {
     student_id?: string | null;
     staff_id?: string | null;
     phone_number?: string | null;
+    institution_id?: string | null;
+    department_id?: string | null;
+    option_id?: string | null;
+    class_section_id?: string | null;
     college?: string | null;
     department?: string | null;
     option?: string | null;

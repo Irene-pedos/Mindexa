@@ -1,21 +1,27 @@
 // frontend/lib/api/student.ts
 import { AdminCourseListItem } from "./admin";
-import { apiClient, getToken } from "./client";
+import { apiClient, getToken, resolveApiUrl } from "./client";
 import { LecturerMaterialResponse } from "./lecturer";
 
+export interface DashboardMetric {
+  value: number;
+  delta: number;
+  last_month: number;
+  positive: bool;
+}
+
 export interface StudentDashboardSummary {
-  cgpa: number;
-  total_credits: number;
-  attendance_rate: number;
-  semesters_completed: number;
-  active_assessments_count: number;
-  pending_results_count: number;
+  cgpa: DashboardMetric;
+  active_assessments_count: DashboardMetric;
+  completed_assessments_count: DashboardMetric;
+  avg_performance_percent: DashboardMetric;
 }
 
 export interface StudentActiveAttempt {
   id: string;
   assessment_id: string;
   assessment_title: string;
+  assessment_type?: string;
   course_code?: string;
   course_name?: string;
   status: string;
@@ -29,6 +35,7 @@ export interface StudentRecentResult {
   assessment_type: string;
   course_code?: string;
   course_name?: string;
+  academic_year?: string;
   score: number;
   total_marks: number;
   percentage: number;
@@ -60,6 +67,8 @@ export interface StudentCourseListItem {
   lecturer_name: string;
   status: string;
   progress: number;
+  academic_year: string;
+  workspace_id: string;
 }
 
 export interface StudentDashboardResponse {
@@ -68,6 +77,7 @@ export interface StudentDashboardResponse {
   recent_results: StudentRecentResult[];
   upcoming_assessments: StudentUpcomingAssessment[];
   performance_trend: PerformanceTrendItem[];
+  workspaces: StudentCourseListItem[];
 }
 
 export interface StudentCourseDetail {
@@ -81,6 +91,7 @@ export interface StudentCourseDetail {
   nextAssessment: string;
   materials: number;
   assessments: number;
+  academic_year: string;
 }
 
 export interface StudentScheduleEvent {
@@ -121,14 +132,14 @@ export const studentApi = {
   getSchedule: async (): Promise<StudentScheduleResponse> => {
     return apiClient("/students/me/schedule");
   },
-  getCourses: async (): Promise<StudentCourseListItem[]> => {
-    return apiClient("/students/me/courses");
+  getWorkspaces: async (): Promise<StudentCourseListItem[]> => {
+    return apiClient("/students/me/workspaces");
   },
-  getCourseDetail: async (courseId: string): Promise<StudentCourseDetail> => {
-    return apiClient("/students/me/courses/" + courseId);
+  getWorkspaceDetail: async (workspaceId: string): Promise<StudentCourseDetail> => {
+    return apiClient("/students/me/workspaces/" + workspaceId);
   },
-  getCourseMaterials: async (courseId: string): Promise<LecturerMaterialResponse[]> => {
-    return apiClient(`/resources/courses/${courseId}/materials`);
+  getWorkspaceMaterials: async (workspaceId: string): Promise<LecturerMaterialResponse[]> => {
+    return apiClient(`/resources/workspaces/${workspaceId}/materials`);
   },
   getResults: async (): Promise<StudentRecentResult[]> => {
     const data: StudentDashboardResponse = await apiClient("/students/me/dashboard");
@@ -148,16 +159,64 @@ export const studentApi = {
       method: "DELETE",
     });
   },
-  downloadMaterial: async (materialId: string, filename: string): Promise<void> => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
-    // We can't use apiClient easily for blobs because it expects JSON by default
-    // Let's use fetch directly with the token
+  downloadPersonalResource: async (resourceId: string, filename: string): Promise<void> => {
+    const apiUrl = resolveApiUrl();
     const token = getToken();
+    if (!token) throw new Error("Authentication required");
+    
+    const response = await fetch(`${apiUrl}/resources/student-resources/download/${resourceId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to download resource");
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
+  getResourceBlob: async (resourceId: string, isPersonal: boolean = true): Promise<Blob> => {
+    const apiUrl = resolveApiUrl();
+    const token = getToken();
+    if (!token) throw new Error("Authentication required");
+
+    const endpoint = isPersonal 
+      ? `/resources/student-resources/download/${resourceId}`
+      : `/resources/download/${resourceId}`;
+    
+    const response = await fetch(`${apiUrl}${endpoint}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch resource content");
+    }
+
+    return response.blob();
+  },
+  downloadMaterial: async (materialId: string, filename: string): Promise<void> => {
+    const apiUrl = resolveApiUrl();
+    const token = getToken();
+    if (!token) throw new Error("Authentication required");
     
     const response = await fetch(`${apiUrl}/resources/download/${materialId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+      credentials: "include",
     });
 
     if (!response.ok) {

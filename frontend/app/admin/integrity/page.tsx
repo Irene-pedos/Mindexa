@@ -43,7 +43,7 @@ export default function AdminIntegrityPage() {
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" className="rounded-lg h-8" onClick={loadIntegrity} disabled={loading}>
-            {loading ? <Loader2 className="size-3.5 animate-spin mr-1.5" /> : <Clock className="size-3.5 mr-1.5" />}
+            {loading ? <div className="size-3 rounded-full bg-primary/20 animate-pulse mr-1.5" /> : <Clock className="size-3.5 mr-1.5" />}
             Refresh
           </Button>
           <Button size="sm" className="rounded-lg h-8 bg-red-600 hover:bg-red-700 text-xs px-4">
@@ -61,7 +61,9 @@ export default function AdminIntegrityPage() {
             </CardHeader>
             <CardContent className="p-4 space-y-3">
               {loading ? (
-                [1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full rounded-lg" />)
+                <div className="space-y-3">
+                   {[1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-xl" />)}
+                </div>
               ) : (
                 <>
                   <div className="flex items-center justify-between p-3 rounded-xl border border-red-100 bg-transparent">

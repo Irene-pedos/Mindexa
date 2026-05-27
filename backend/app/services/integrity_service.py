@@ -308,6 +308,27 @@ class IntegrityService:
             risk_level=risk_level,
             evidence_event_ids=evidence_event_ids,
         )
+
+        # Trigger notification to lecturer
+        try:
+            from app.db.repositories.notification_repo import NotificationRepository
+            from app.db.enums import NotificationType
+            
+            notif_repo = NotificationRepository(self.db)
+            attempt = await self.attempt_repo.get_by_id(attempt_id)
+            if attempt and attempt.assessment and attempt.assessment.created_by_id:
+                await notif_repo.create(
+                    recipient_id=attempt.assessment.created_by_id,
+                    notification_type=NotificationType.INTEGRITY_ALERT,
+                    title="Critical Integrity Alert",
+                    body=f"A student attempt for '{attempt.assessment.title}' has been flagged: {description}.",
+                    reference_id=flag.id,
+                    reference_type="integrity_flag",
+                    action_url=f"/lecturer/assessments/{attempt.assessment_id}/supervision"
+                )
+        except Exception as e:
+            print(f"FAILED to send integrity notification: {e}")
+
         return flag
 
     # -----------------------------------------------------------------------

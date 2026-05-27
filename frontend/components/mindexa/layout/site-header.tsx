@@ -4,7 +4,6 @@
 import {
   Bell,
   LogOut,
-  User,
   AlertTriangle,
   Award,
   Calendar,
@@ -19,6 +18,12 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import {
+  Avatar,
+  AvatarBadge,
+  AvatarFallback,
+  AvatarImage,
+} from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,7 +52,9 @@ import { formatDistanceToNow } from "date-fns";
 export function SiteHeader() {
   const pathname = usePathname();
   const { logout, user } = useAuth();
-  const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
+  const [notifications, setNotifications] = useState<NotificationResponse[]>(
+    [],
+  );
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
@@ -70,7 +77,7 @@ export function SiteHeader() {
         // Fetch last 10 notifications (both read and unread for the dropdown)
         const data = await notificationApi.getNotifications(false, 1, 10);
         setNotifications(data.items);
-        
+
         // Also fetch total unread count
         const unreadData = await notificationApi.getNotifications(true, 1, 1);
         setUnreadCount(unreadData.total);
@@ -90,29 +97,41 @@ export function SiteHeader() {
   const getIcon = (type: string) => {
     switch (type) {
       // Student
-      case "RESULT_RELEASED": return <Award className="size-4 text-emerald-600" />
-      case "DEADLINE_EXTENDED": return <Calendar className="size-4 text-amber-600" />
-      case "ASSESSMENT_PUBLISHED": return <Bell className="size-4 text-blue-600" />
-      
+      case "RESULT_RELEASED":
+        return <Award className="size-4 text-emerald-600" />;
+      case "DEADLINE_EXTENDED":
+        return <Calendar className="size-4 text-amber-600" />;
+      case "ASSESSMENT_PUBLISHED":
+        return <Bell className="size-4 text-blue-600" />;
+
       // Lecturer
-      case "NEW_SUBMISSION": return <FileText className="size-4 text-blue-600" />
-      case "GRADING_REMINDER": return <Calendar className="size-4 text-amber-600" />
-      case "APPEAL_SUBMITTED": return <AlertTriangle className="size-4 text-red-600" />
-      
+      case "NEW_SUBMISSION":
+        return <FileText className="size-4 text-blue-600" />;
+      case "GRADING_REMINDER":
+        return <Calendar className="size-4 text-amber-600" />;
+      case "APPEAL_SUBMITTED":
+        return <AlertTriangle className="size-4 text-red-600" />;
+
       // Admin
-      case "SYSTEM_ALERT": return <Server className="size-4 text-red-600" />
-      case "SECURITY_EVENT": return <Shield className="size-4 text-amber-600" />
-      case "NEW_USER_REQUEST": return <UserPlus className="size-4 text-blue-600" />
-      
-      default: return <Bell className="size-4 text-muted-foreground" />
+      case "SYSTEM_ALERT":
+        return <Server className="size-4 text-red-600" />;
+      case "SECURITY_EVENT":
+        return <Shield className="size-4 text-amber-600" />;
+      case "NEW_USER_REQUEST":
+        return <UserPlus className="size-4 text-blue-600" />;
+
+      default:
+        return <Bell className="size-4 text-muted-foreground" />;
     }
-  }
+  };
 
   const handleMarkRead = async (id: string) => {
     try {
       await notificationApi.markAsRead(id);
-      setNotifications(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n));
-      setUnreadCount(prev => Math.max(0, prev - 1));
+      setNotifications((prev) =>
+        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+      );
+      setUnreadCount((prev) => Math.max(0, prev - 1));
     } catch (err) {
       console.error("Failed to mark notification as read", err);
     }
@@ -163,6 +182,20 @@ export function SiteHeader() {
 
   const crumbs = getBreadcrumbs();
 
+  // Construct absolute profile picture URL
+  const backendBaseUrl =
+    process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") ||
+    "http://localhost:8000";
+  const profilePictureUrl = user?.profile?.profile_picture_url
+    ? `${backendBaseUrl}${user.profile.profile_picture_url}`
+    : undefined;
+
+  // Initials for fallback
+  const initials =
+    user?.profile?.first_name && user?.profile?.last_name
+      ? `${user.profile.first_name[0]}${user.profile.last_name[0]}`
+      : user?.email?.[0].toUpperCase() || "U";
+
   return (
     <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
       <SidebarTrigger className="-ml-1" />
@@ -210,7 +243,9 @@ export function SiteHeader() {
           <DropdownMenuContent align="end" className="w-80">
             <DropdownMenuLabel className="flex items-center justify-between">
               <span>Notifications</span>
-              {loading && <Loader2 className="size-3 animate-spin text-muted-foreground" />}
+              {loading && (
+                <Loader2 className="size-3 animate-spin text-muted-foreground" />
+              )}
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <ScrollArea className="h-72">
@@ -238,7 +273,9 @@ export function SiteHeader() {
                         {n.body}
                       </div>
                       <div className="text-[10px] text-muted-foreground mt-1">
-                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                        {formatDistanceToNow(new Date(n.created_at), {
+                          addSuffix: true,
+                        })}
                       </div>
                     </div>
                     {!n.is_read && (
@@ -249,26 +286,42 @@ export function SiteHeader() {
               )}
             </ScrollArea>
             <DropdownMenuSeparator />
-            <DropdownMenuItem asChild className="w-full justify-center py-2 cursor-pointer">
-              <Link href={`/${role.toLowerCase()}/notifications`} className="text-primary text-xs font-medium">
+            <DropdownMenuItem
+              asChild
+              className="w-full justify-center py-2 cursor-pointer"
+            >
+              <Link
+                href={`/${role.toLowerCase()}/notifications`}
+                className="text-primary text-xs font-medium"
+              >
                 View all notifications
               </Link>
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* User Menu */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
-              <User className="size-5" />
+            <Button variant="ghost" size="icon" className="rounded-full">
+              <Avatar className="size-7">
+                <AvatarImage
+                  src={profilePictureUrl}
+                  alt={user?.profile?.display_name || "User"}
+                />
+                <AvatarFallback className="bg-muted text-[10px] font-bold">
+                  {initials}
+                </AvatarFallback>
+                <AvatarBadge className="bg-green-600 dark:bg-green-800" />
+              </Avatar>
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuLabel>My Account</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href={`/${role.toLowerCase()}/profile`}>Profile Settings</Link>
+              <Link href={`/${role.toLowerCase()}/profile`}>
+                Profile Settings
+              </Link>
             </DropdownMenuItem>
             {role.toLowerCase() === "student" && (
               <DropdownMenuItem asChild>

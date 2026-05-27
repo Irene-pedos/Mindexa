@@ -58,12 +58,17 @@ from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
-from app.db.base import AuditedBaseModel, BaseModel, utcnow
+from app.db.base import AppendOnlyModel, AuditedBaseModel, BaseModel, utcnow
 from app.db.enums import (
     AIGradeDecision,
     AppealStatus,
     AttemptStatus,
+    GroupActivityType,
+    GroupAppealStatus,
+    GroupApprovalStatus,
+    GroupSubmissionStatus,
     GradingMode,
+    StudentGroupStatus,
     SubmissionStatus,
 )
 from app.db.mixins import composite_index, unique_composite_index
@@ -193,7 +198,6 @@ class AssessmentAttempt(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_group.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
 
@@ -377,20 +381,41 @@ class StudentGroup(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     name: str = Field(nullable=False, max_length=100)
     max_members: Optional[int] = Field(default=None, nullable=True)
+    status: StudentGroupStatus = Field(
+        default=StudentGroupStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
     is_locked: bool = Field(default=False, nullable=False, index=True)
+    locked_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    invalidated_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
+    assessment: Optional["Assessment"] = Relationship(
+        back_populates="student_groups"
+    )
     members: List["StudentGroupMember"] = Relationship(
         back_populates="group",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     attempts: List["AssessmentAttempt"] = Relationship(
+        back_populates="group"
+    )
+    submissions: List["GroupSubmission"] = Relationship(
+        back_populates="group"
+    )
+    materials: List["GroupAssessmentMaterial"] = Relationship(
         back_populates="group"
     )
 
@@ -453,6 +478,429 @@ class StudentGroupMember(BaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     group: Optional["StudentGroup"] = Relationship(back_populates="members")
+
+
+class GroupSubmission(BaseModel, table=True):
+    """Shared work product for one student group on one assessment."""
+
+    __tablename__ = "group_submission"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "assessment_id", "group_id",
+            name="uq_group_submission_assessment_group",
+        ),
+        composite_index("group_submission", "assessment_id", "status"),
+        composite_index("group_submission", "group_id", "status"),
+    )
+
+    assessment_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    group_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_group.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    status: GroupSubmissionStatus = Field(
+        default=GroupSubmissionStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    requested_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    submitted_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    graded_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    approval_requested_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    submitted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    graded_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    result_released_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    total_score: Optional[float] = Field(default=None, nullable=True)
+    max_score: Optional[float] = Field(default=None, nullable=True)
+    feedback: Optional[str] = Field(default=None, nullable=True)
+
+    assessment: Optional["Assessment"] = Relationship(
+        back_populates="group_submissions"
+    )
+    group: Optional["StudentGroup"] = Relationship(
+        back_populates="submissions"
+    )
+    answers: List["GroupSubmissionAnswer"] = Relationship(
+        back_populates="submission",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    comments: List["GroupSubmissionComment"] = Relationship(
+        back_populates="submission",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    approvals: List["GroupSubmissionApproval"] = Relationship(
+        back_populates="submission",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    activity_logs: List["GroupActivityLog"] = Relationship(
+        back_populates="submission",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+    appeals: List["GroupAppeal"] = Relationship(
+        back_populates="submission",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class GroupSubmissionAnswer(BaseModel, table=True):
+    """Shared answer state for one question inside a group submission."""
+
+    __tablename__ = "group_submission_answer"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id", "question_id",
+            name="uq_group_submission_answer_submission_question",
+        ),
+        composite_index("group_submission_answer", "submission_id"),
+        composite_index("group_submission_answer", "question_id"),
+    )
+
+    submission_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    question_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    last_edited_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    answer_content: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    notes_content: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    last_edited_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+    submission: Optional["GroupSubmission"] = Relationship(
+        back_populates="answers"
+    )
+
+
+class GroupSubmissionComment(AppendOnlyModel, table=True):
+    """Append-only collaboration comments tied to a group submission."""
+
+    __tablename__ = "group_submission_comment"
+
+    __table_args__ = (
+        composite_index("group_submission_comment", "submission_id", "created_at"),
+    )
+
+    submission_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    question_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    author_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    body: str = Field(nullable=False)
+
+    submission: Optional["GroupSubmission"] = Relationship(
+        back_populates="comments"
+    )
+
+
+class GroupSubmissionApproval(BaseModel, table=True):
+    """One member's approval state for final group submission."""
+
+    __tablename__ = "group_submission_approval"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "submission_id", "student_id",
+            name="uq_group_submission_approval_submission_student",
+        ),
+        composite_index("group_submission_approval", "submission_id", "status"),
+        composite_index("group_submission_approval", "student_id", "status"),
+    )
+
+    submission_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    student_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    status: GroupApprovalStatus = Field(
+        default=GroupApprovalStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    responded_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    note: Optional[str] = Field(default=None, nullable=True, max_length=2000)
+
+    submission: Optional["GroupSubmission"] = Relationship(
+        back_populates="approvals"
+    )
+
+
+class GroupActivityLog(AppendOnlyModel, table=True):
+    """Immutable audit trail for measurable group-work participation."""
+
+    __tablename__ = "group_activity_log"
+
+    __table_args__ = (
+        composite_index("group_activity_log", "submission_id", "created_at"),
+        composite_index("group_activity_log", "student_id", "activity_type"),
+    )
+
+    submission_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    student_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    activity_type: GroupActivityType = Field(nullable=False, index=True)
+    question_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    metadata_json: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+
+    submission: Optional["GroupSubmission"] = Relationship(
+        back_populates="activity_logs"
+    )
+
+
+class GroupAppeal(BaseModel, table=True):
+    """Group-level appeal opened by one member and approved by the rest."""
+
+    __tablename__ = "group_appeal"
+
+    __table_args__ = (
+        composite_index("group_appeal", "submission_id", "status"),
+        composite_index("group_appeal", "initiated_by_id", "status"),
+    )
+
+    submission_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    initiated_by_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    status: GroupAppealStatus = Field(
+        default=GroupAppealStatus.DRAFT,
+        nullable=False,
+        index=True,
+    )
+    statement: str = Field(nullable=False)
+    lecturer_decision: Optional[str] = Field(default=None, nullable=True, max_length=2000)
+    submitted_to_lecturer_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    resolved_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+
+    submission: Optional["GroupSubmission"] = Relationship(
+        back_populates="appeals"
+    )
+    approvals: List["GroupAppealApproval"] = Relationship(
+        back_populates="appeal",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class GroupAppealApproval(BaseModel, table=True):
+    """Per-member approval state for escalating a group appeal."""
+
+    __tablename__ = "group_appeal_approval"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "appeal_id", "student_id",
+            name="uq_group_appeal_approval_appeal_student",
+        ),
+        composite_index("group_appeal_approval", "appeal_id", "status"),
+        composite_index("group_appeal_approval", "student_id", "status"),
+    )
+
+    appeal_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_appeal.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    student_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="RESTRICT"),
+            nullable=False,
+        )
+    )
+    status: GroupApprovalStatus = Field(
+        default=GroupApprovalStatus.PENDING,
+        nullable=False,
+        index=True,
+    )
+    responded_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    note: Optional[str] = Field(default=None, nullable=True, max_length=2000)
+
+    appeal: Optional["GroupAppeal"] = Relationship(
+        back_populates="approvals"
+    )
+
+
+class GroupAssessmentMaterial(BaseModel, table=True):
+    """Attachment metadata published with a group-work assessment."""
+
+    __tablename__ = "group_assessment_material"
+
+    __table_args__ = (
+        composite_index("group_assessment_material", "assessment_id"),
+        composite_index("group_assessment_material", "group_id"),
+    )
+
+    assessment_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+    group_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_group.id", ondelete="CASCADE"),
+            nullable=True,
+        )
+    )
+    uploaded_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
+    title: str = Field(nullable=False, max_length=255)
+    description: Optional[str] = Field(default=None, nullable=True)
+    file_url: str = Field(nullable=False, max_length=2000)
+    is_required: bool = Field(default=False, nullable=False)
+
+    assessment: Optional["Assessment"] = Relationship(
+        back_populates="group_materials"
+    )
+    group: Optional["StudentGroup"] = Relationship(
+        back_populates="materials"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -563,7 +1011,6 @@ class StudentResponse(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     question_id: uuid.UUID = Field(
@@ -571,7 +1018,6 @@ class StudentResponse(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("question.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     assessment_question_id: Optional[uuid.UUID] = Field(
@@ -623,6 +1069,11 @@ class StudentResponse(BaseModel, table=True):
     saved_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    submitted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+        # Set when is_final transitions to True (at attempt submission)
     )
     is_final: bool = Field(default=False, nullable=False, index=True)
 
@@ -693,7 +1144,6 @@ class StudentResponseLog(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_response.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     attempt_id: uuid.UUID = Field(
@@ -701,7 +1151,6 @@ class StudentResponseLog(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     question_id: uuid.UUID = Field(
@@ -709,7 +1158,6 @@ class StudentResponseLog(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("question.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     change_type: str = Field(nullable=False)
@@ -830,7 +1278,6 @@ class SubmissionGrade(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_response.id", ondelete="CASCADE"),
             nullable=True,
-            index=True,
         )
     )
     attempt_id: uuid.UUID = Field(
@@ -838,7 +1285,6 @@ class SubmissionGrade(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     question_id: Optional[uuid.UUID] = Field(
@@ -847,7 +1293,6 @@ class SubmissionGrade(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("question.id", ondelete="RESTRICT"),
             nullable=True,
-            index=True,
         )
     )
     # Denormalised for fast query access without joining through attempt
@@ -856,7 +1301,6 @@ class SubmissionGrade(AuditedBaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     student_id: uuid.UUID = Field(
@@ -1013,7 +1457,6 @@ class RubricGrade(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("submission_grade.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     student_response_id: Optional[uuid.UUID] = Field(
@@ -1022,7 +1465,6 @@ class RubricGrade(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_response.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
         # Links this rubric grade to the specific question response being graded.
         # NULL for assessment-level rubric grading (entire submission graded as one).
@@ -1032,7 +1474,6 @@ class RubricGrade(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("rubric_criterion.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -1044,7 +1485,6 @@ class RubricGrade(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("rubric_criterion_level.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
     marks_awarded: float = Field(nullable=False)
@@ -1096,7 +1536,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("student_response.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     attempt_id: uuid.UUID = Field(
@@ -1104,7 +1543,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     assessment_id: uuid.UUID = Field(
@@ -1112,7 +1550,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     question_id: uuid.UUID = Field(
@@ -1120,7 +1557,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("question.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     student_id: uuid.UUID = Field(
@@ -1128,7 +1564,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="CASCADE"),
             nullable=False,
-            index=True,
         )
     )
     grading_mode: str = Field(nullable=False)
@@ -1141,7 +1576,6 @@ class GradingQueueItem(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
     assigned_at: Optional[datetime] = Field(
@@ -1226,7 +1660,6 @@ class ResultAppeal(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("submission_grade.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
     # Denormalised for fast access in the lecturer review queue
@@ -1235,7 +1668,6 @@ class ResultAppeal(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("assessment.id", ondelete="RESTRICT"),
             nullable=False,
-            index=True,
         )
     )
 
@@ -1270,7 +1702,6 @@ class ResultAppeal(BaseModel, table=True):
             UUID(as_uuid=True),
             ForeignKey("user.id", ondelete="SET NULL"),
             nullable=True,
-            index=True,
         )
     )
     review_started_at: Optional[datetime] = Field(

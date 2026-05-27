@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.constants import UserStatus
 from app.core.exceptions import NotFoundError
 from app.db.enums import LecturerAssignmentRole, UserRole
-from app.db.models.academic import Course, LecturerCourseAssignment
+from app.db.models.academic import Course, LecturerCourseAssignment, CourseDepartment, CourseOption, ClassSection, ClassGroup
 from app.db.models.assessment import Assessment
 from app.db.repositories.auth import UserRepository
 from app.db.repositories.course_repo import CourseRepository
@@ -29,7 +29,9 @@ from app.schemas.admin import (
     AdminDashboardSummary,
     AdminRecentActivity,
     SystemSettingsSchema,
+    AdminCourseCreate,
 )
+from app.db.schemas.academic import CourseResponse
 from app.services.auth_service import AuthService
 
 
@@ -105,6 +107,12 @@ class AdminService:
         hotspot_res = await self.db.execute(hotspot_stmt)
         integrity_hotspots = [{"course": row[0], "flags": row[1]} for row in hotspot_res.all()]
 
+        # AI Grading Stats
+        from app.db.enums import GradingMode
+        grading_stmt = select(Assessment.grading_mode, func.count(Assessment.id)).group_by(Assessment.grading_mode)
+        grading_res = await self.db.execute(grading_stmt)
+        ai_grading_stats = [{"mode": row[0], "count": row[1]} for row in grading_res.all()]
+
         key_insights = [
             "Peak system load identified during Mid-Semester weeks.",
             f"Integrity violations are {summary[3].trend} lower than previous period.",
@@ -116,6 +124,7 @@ class AdminService:
             user_distribution=user_distribution,
             assessment_trends=assessment_trends,
             integrity_hotspots=integrity_hotspots,
+            ai_grading_stats=ai_grading_stats,
             key_insights=key_insights
         )
 
@@ -155,22 +164,68 @@ class AdminService:
         )
 
     async def get_dashboard_data(self) -> AdminDashboardResponse:
-        # 1. Summary Stats
-        total_students = await self.user_repo.count_by_role(UserRole.STUDENT)
-        total_lecturers = await self.user_repo.count_by_role(UserRole.LECTURER)
-        active_courses = await self.course_repo.count_active()
+        from app.db.models.auth import User
+        from app.db.models.academic import Course
+        from app.db.models.integrity import IntegrityEvent
+        from app.core.constants import UserRole
+        from app.schemas.admin import DashboardMetric, AdminRecentActivity
 
-        # Integrity events today
-        today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-        flag_stmt = select(func.count(IntegrityEvent.id)).where(IntegrityEvent.created_at >= today_start)
-        flag_res = await self.db.execute(flag_stmt)
-        flagged_events_today = flag_res.scalar_one()
+        now = datetime.now(UTC)
+        first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        async def get_metric(model, role_filter=None):
+            # Current Total
+            stmt = select(func.count(model.id)).where(model.is_deleted == False)
+            if role_filter:
+                stmt = stmt.where(model.role == role_filter)
+            curr = (await self.db.execute(stmt)).scalar_one()
+
+            # Last Month Total (created before this month)
+            stmt_last = select(func.count(model.id)).where(model.is_deleted == False, model.created_at < first_of_this_month)
+            if role_filter:
+                stmt_last = stmt_last.where(model.role == role_filter)
+            last = (await self.db.execute(stmt_last)).scalar_one()
+
+            delta = 0
+            if last > 0:
+                delta = round(((curr - last) / last) * 100, 1)
+            
+            return DashboardMetric(value=curr, delta=delta, last_month=last, positive=curr >= last)
+
+        # 1. Summary Stats
+        total_students = await get_metric(User, UserRole.STUDENT.value)
+        total_lecturers = await get_metric(User, UserRole.LECTURER.value)
+        active_courses = await get_metric(Course)
+
+        # Integrity events today vs yesterday
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday_start = today_start - timedelta(days=1)
+        
+        stmt_today = select(func.count(IntegrityEvent.id)).where(IntegrityEvent.created_at >= today_start)
+        curr_flags = (await self.db.execute(stmt_today)).scalar_one()
+        
+        stmt_yesterday = select(func.count(IntegrityEvent.id)).where(
+            IntegrityEvent.created_at >= yesterday_start,
+            IntegrityEvent.created_at < today_start
+        )
+        last_flags = (await self.db.execute(stmt_yesterday)).scalar_one()
+        
+        delta_flags = 0
+        if last_flags > 0:
+            delta_flags = round(((curr_flags - last_flags) / last_flags) * 100, 1)
+        
+        flagged_events = DashboardMetric(
+            value=curr_flags, 
+            delta=delta_flags, 
+            last_month=last_flags, 
+            positive=curr_flags <= last_flags # fewer is better
+        )
 
         summary = AdminDashboardSummary(
             total_students=total_students,
             total_lecturers=total_lecturers,
             active_courses=active_courses,
-            flagged_events_today=flagged_events_today,
+            flagged_events_today=flagged_events,
             system_status="Healthy"
         )
 
@@ -220,9 +275,20 @@ class AdminService:
             chart_data=chart_data
         )
 
-    async def list_users(self, page: int = 1, page_size: int = 20) -> Tuple[List[UserResponse], int]:
+    async def list_users(
+        self, 
+        page: int = 1, 
+        page_size: int = 20,
+        role: Optional[str] = None,
+        status: Optional[str] = None
+    ) -> Tuple[List[UserResponse], int]:
         """List all users with their full profile and assigned courses for lecturers."""
-        users, total = await self.user_repo.list_all(page=page, page_size=page_size)
+        users, total = await self.user_repo.list_all(
+            page=page, 
+            page_size=page_size,
+            role=role,
+            status=status
+        )
 
         items = []
         for u in users:
@@ -274,16 +340,196 @@ class AdminService:
         items = []
         for c in courses:
             student_count = await self.course_repo.get_student_count(c.id)
+            
+            # Fetch primary lecturer name
+            from app.db.models.academic import TeachingAssignment
+            lecturer_stmt = (
+                select(TeachingAssignment)
+                .where(
+                    TeachingAssignment.course_id == c.id,
+                    TeachingAssignment.is_active == True,
+                    TeachingAssignment.is_deleted == False
+                )
+            )
+            lecturer_res = await self.db.execute(lecturer_stmt)
+            lecturer_assignment = lecturer_res.scalars().first()
+            
+            lecturer_name = "Not Assigned"
+            if lecturer_assignment:
+                lecturer = await self.user_repo.get_by_id(lecturer_assignment.lecturer_id)
+                if lecturer and lecturer.profile:
+                    p = lecturer.profile
+                    lecturer_name = f"{p.first_name} {p.last_name}" if p.first_name else p.display_name or lecturer.email
+
             items.append(AdminCourseListItem(
                 id=c.id,
                 code=c.code,
                 title=c.name,
-                lecturer_name="Primary Lecturer", # Needs more repo logic
+                lecturer_name=lecturer_name,
                 student_count=student_count,
-                status="Active" if not c.is_deleted else "Deleted"
+                status="Active" if not c.is_deleted else "Deleted",
+                academic_year=c.academic_year
             ))
 
         return items, total
+
+    async def create_course(self, data: AdminCourseCreate) -> Course:
+        """Create a new course with optional primary lecturer assignment."""
+        # Create the course
+        course = Course(
+            institution_id=data.institution_id,
+            academic_period_id=data.academic_period_id,
+            academic_year=data.academic_year,
+            code=data.code,
+            name=data.title,
+            description=data.description,
+            credit_hours=data.credit_hours,
+            is_active=True
+        )
+        await self.course_repo.create(course)
+
+        # 1. Assign Departments
+        if data.department_ids:
+            for dept_id in data.department_ids:
+                cd = CourseDepartment(course_id=course.id, department_id=dept_id)
+                self.db.add(cd)
+        
+        # 2. Assign Options
+        if data.option_ids:
+            for opt_id in data.option_ids:
+                co = CourseOption(course_id=course.id, option_id=opt_id)
+                self.db.add(co)
+
+        # 3. Create Class Sections from Class Groups
+        if data.class_group_ids:
+            for cg_id in data.class_group_ids:
+                stmt = select(ClassGroup).where(ClassGroup.id == cg_id)
+                res = await self.db.execute(stmt)
+                cg = res.scalars().first()
+                if cg:
+                    section = ClassSection(
+                        course_id=course.id,
+                        class_group_id=cg.id,
+                        name=cg.name,
+                        capacity=50,
+                        is_active=True
+                    )
+                    self.db.add(section)
+
+        # 4. Assign Primary Lecturer if provided
+        if data.primary_lecturer_id:
+            assignment = LecturerCourseAssignment(
+                lecturer_id=data.primary_lecturer_id,
+                course_id=course.id,
+                assignment_role=LecturerAssignmentRole.MAIN_LECTURER,
+                is_active=True
+            )
+            self.db.add(assignment)
+        
+        await self.db.commit()
+        return course
+
+    async def delete_course(self, course_id: uuid.UUID) -> None:
+        """Soft delete a course."""
+        deleted = await self.course_repo.delete(course_id)
+        if not deleted:
+            raise NotFoundError("Course", str(course_id))
+        await self.db.commit()
+
+    async def update_course(self, course_id: uuid.UUID, data: AdminCourseUpdate) -> Course:
+        """Update course metadata."""
+        course = await self.course_repo.get_by_id(course_id)
+        if not course:
+            raise NotFoundError("Course", str(course_id))
+
+        if data.title is not None:
+            course.name = data.title
+        if data.code is not None:
+            course.code = data.code
+        if data.credit_hours is not None:
+            course.credit_hours = data.credit_hours
+        if data.description is not None:
+            course.description = data.description
+        if data.is_active is not None:
+            course.is_active = data.is_active
+            if data.is_active:
+                course.is_deleted = False # Reactivation undoes soft delete
+        if data.institution_id is not None:
+            course.institution_id = data.institution_id
+        if data.academic_period_id is not None:
+            course.academic_period_id = data.academic_period_id
+        if data.academic_year is not None:
+            course.academic_year = data.academic_year
+
+        await self.db.commit()
+        await self.db.refresh(course)
+        return course
+
+    async def list_lecturers(self) -> List[UserResponse]:
+        """List all active lecturers for selection in course creation."""
+        from app.db.models.auth import User
+        stmt = select(User).where(
+            User.role == UserRole.LECTURER,
+            User.status == UserStatus.ACTIVE,
+            User.is_deleted == False
+        )
+        result = await self.db.execute(stmt)
+        users = result.scalars().all()
+        
+        items = []
+        for u in users:
+            items.append(await self._build_user_response_with_courses(u))
+        return items
+
+    # ── Institution Management ────────────────────────────────────────────────
+
+    async def create_institution(self, data: InstitutionCreate) -> Institution:
+        """Create a new institution."""
+        from app.db.models.academic import Institution
+        institution = Institution(
+            name=data.name,
+            code=data.code,
+            timezone=data.timezone,
+            logo_url=data.logo_url,
+            settings=data.settings or {},
+            integrations=data.integrations or {},
+            is_active=True
+        )
+        self.db.add(institution)
+        await self.db.commit()
+        await self.db.refresh(institution)
+        return institution
+
+    async def update_institution(self, institution_id: uuid.UUID, data: InstitutionUpdate) -> Institution:
+        """Update institution settings and branding."""
+        from app.db.models.academic import Institution
+        institution = await self.db.get(Institution, institution_id)
+        if not institution:
+            raise NotFoundError("Institution", str(institution_id))
+
+        if data.name is not None:
+            institution.name = data.name
+        if data.timezone is not None:
+            institution.timezone = data.timezone
+        if data.logo_url is not None:
+            institution.logo_url = data.logo_url
+        if data.is_active is not None:
+            institution.is_active = data.is_active
+        if data.settings is not None:
+            institution.settings = data.settings
+        if data.integrations is not None:
+            institution.integrations = data.integrations
+
+        await self.db.commit()
+        await self.db.refresh(institution)
+        return institution
+
+    async def list_institutions(self) -> List[Institution]:
+        """List all institutions."""
+        from app.db.models.academic import Institution
+        stmt = select(Institution).where(Institution.is_deleted == False)
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
 
     async def approve_user(self, user_id: uuid.UUID, data: UserApproveRequest) -> UserResponse:
         """Approve a user account and update its status."""
@@ -297,6 +543,33 @@ class AdminService:
 
         await self.user_repo.update(user)
         return await self._build_user_response_with_courses(user)
+
+    async def bulk_approve_users(self, user_ids: list[uuid.UUID], status: UserStatus) -> int:
+        """Approve multiple user accounts at once."""
+        count = 0
+        for u_id in user_ids:
+            user = await self.user_repo.get_by_id(u_id)
+            if user:
+                user.status = status
+                if status == UserStatus.ACTIVE:
+                    user.email_verified = True
+                await self.user_repo.update(user)
+                count += 1
+        return count
+
+    async def bulk_update_user_status(self, user_ids: list[uuid.UUID], status: UserStatus) -> int:
+        """Update status for multiple users at once."""
+        count = 0
+        for u_id in user_ids:
+            user = await self.user_repo.get_by_id(u_id)
+            if user:
+                # Enforce student-only graduated status
+                if status == UserStatus.GRADUATED and user.role != UserRole.STUDENT:
+                    continue
+                user.status = status
+                await self.user_repo.update(user)
+                count += 1
+        return count
 
     async def update_user_status(self, user_id: uuid.UUID, status: UserStatus) -> UserResponse:
         """Update any user status (SUSPENDED, ACTIVE, GRADUATED)."""
@@ -329,7 +602,7 @@ class AdminService:
             assignment = LecturerCourseAssignment(
                 lecturer_id=lecturer_id,
                 course_id=c_id,
-                assignment_role=LecturerAssignmentRole.PRIMARY,
+                assignment_role=LecturerAssignmentRole.MAIN_LECTURER,
                 is_active=True
             )
             self.db.add(assignment)

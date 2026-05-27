@@ -6,7 +6,6 @@ import {
   CardContent,
   CardDescription,
   CardHeader,
-  CardTitle,
 } from "@/components/ui/card";
 import { Calendar, Clock, Award, BookOpen } from "lucide-react";
 
@@ -19,58 +18,49 @@ export function StudentSummaryCards({
 }) {
   const stats = [
     {
-      title: "Upcoming Assessments",
-      value: summary?.active_assessments_count ?? "0",
+      title: "Assessments",
+      value: summary?.active_assessments_count.value ?? 0,
       description: "Available now",
       icon: Calendar,
-      trend: "",
-      color: "text-blue-600",
+      color: "text-primary",
     },
     {
-      title: "Pending Results",
-      value: summary?.pending_results_count ?? "0",
-      description: "Assessments taken",
+      title: "Completed",
+      value: summary?.completed_assessments_count.value ?? 0,
+      description: "Registry finalized",
       icon: Clock,
-      trend: "",
-      color: "text-amber-600",
+      color: "text-muted-foreground",
     },
     {
-      title: "Current GPA",
-      value: summary?.cgpa?.toFixed(2) ?? "0.00",
-      description: "Semester average",
+      title: "CGPA",
+      value: (summary?.cgpa.value ?? 0).toFixed(2),
+      description: "Academic average",
       icon: Award,
-      trend: "",
-      color: "text-emerald-600",
+      color: "text-primary",
     },
     {
-      title: "Credits Earned",
-      value: summary?.total_credits ?? "0",
-      description: "Total progress",
+      title: "Performance",
+      value: `${summary?.avg_performance_percent.value ?? 0}%`,
+      description: "Success rate",
       icon: BookOpen,
-      trend: "",
-      color: "text-violet-600",
+      color: "text-primary",
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-2 lg:grid-cols-4">
       {stats.map((stat, i) => (
-        <Card key={i} className="border shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardDescription>{stat.title}</CardDescription>
-            <stat.icon className={`size-5 ${stat.color}`} />
+        <Card key={i} className="shadow-none border border-border/50 overflow-hidden">
+          <CardHeader className="flex flex-row items-center justify-between pb-1 pt-3 px-4">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground truncate">{stat.title}</span>
+            <stat.icon className={`size-3.5 ${stat.color} opacity-70`} />
           </CardHeader>
-          <CardContent>
-            <div className="text-4xl font-semibold tabular-nums tracking-tighter">
+          <CardContent className="pb-3 px-4">
+            <div className="text-2xl font-bold tabular-nums tracking-tight text-foreground/90">
               {stat.value}
             </div>
-            <div className="mt-1 flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">{stat.description}</span>
-              {stat.trend && (
-                <span className="text-xs text-emerald-600 font-medium">
-                  {stat.trend}
-                </span>
-              )}
+            <div className="mt-0.5 text-[10px] font-medium text-muted-foreground truncate">
+              {stat.description}
             </div>
           </CardContent>
         </Card>

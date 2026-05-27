@@ -1,6 +1,6 @@
 // frontend/lib/api/client.ts
 
-function resolveApiUrl() {
+export function resolveApiUrl() {
   const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (configuredUrl) {
     const normalizedUrl = configuredUrl.replace(/\/$/, "");

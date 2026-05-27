@@ -23,9 +23,10 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Search, Plus, BookOpen, Loader2, Filter } from "lucide-react";
+import { Search, Plus, BookOpen, Loader2, Database } from "lucide-react";
 import { questionApi, QuestionBankItem } from "@/lib/api/question";
 import { toast } from "sonner";
+import { Separator } from "@/components/ui/separator";
 
 interface QuestionBankSelectorProps {
   onSelect: (question: QuestionBankItem) => void;
@@ -69,36 +70,37 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
       <SheetTrigger asChild>
         <Button 
           variant="outline" 
-          className="flex-1 h-16 border-2 border-muted hover:border-primary/50 hover:bg-primary/5 rounded-2xl"
+          className="flex-1 h-20 border-2 border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-1.5"
         >
-          <BookOpen className="mr-2 size-4" /> Import from Bank
+          <Database className="size-5 text-primary" />
+          <span className="font-bold uppercase text-[10px] tracking-wider">Import from Bank</span>
         </Button>
       </SheetTrigger>
-      <SheetContent className="sm:max-w-[600px] flex flex-col h-full">
-        <SheetHeader>
-          <SheetTitle>Question Bank</SheetTitle>
+      <SheetContent className="sm:max-w-[540px] flex flex-col h-full p-0">
+        <SheetHeader className="p-6 pb-0">
+          <SheetTitle className="text-xl">Institutional Question Bank</SheetTitle>
           <SheetDescription>
-            Browse and select questions to add to your assessment.
+            Search and select high-integrity items for your assessment.
           </SheetDescription>
         </SheetHeader>
 
-        <div className="space-y-4 my-6">
+        <div className="px-6 space-y-4 my-6">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+            <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
             <Input
-              placeholder="Search questions..."
-              className="pl-9 rounded-full"
+              placeholder="Search library..."
+              className="pl-9 h-10"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex gap-3">
             <div className="flex-1 space-y-1.5">
-              <Label className="text-xs uppercase text-muted-foreground">Type</Label>
+              <Label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">Type</Label>
               <Select value={type} onValueChange={setType}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="All Types" />
+                <SelectTrigger className="h-9">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Types</SelectItem>
@@ -106,14 +108,15 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
                   <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
                   <SelectItem value="ESSAY">Essay</SelectItem>
                   <SelectItem value="TRUE_FALSE">True/False</SelectItem>
+                  <SelectItem value="MATCHING">Matching</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex-1 space-y-1.5">
-              <Label className="text-xs uppercase text-muted-foreground">Difficulty</Label>
+              <Label className="text-[10px] font-bold uppercase text-muted-foreground tracking-wider px-1">Difficulty</Label>
               <Select value={difficulty} onValueChange={setDifficulty}>
-                <SelectTrigger className="rounded-xl">
-                  <SelectValue placeholder="All" />
+                <SelectTrigger className="h-9">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Levels</SelectItem>
@@ -126,31 +129,34 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
           </div>
         </div>
 
-        <ScrollArea className="flex-1 pr-4">
+        <Separator />
+
+        <ScrollArea className="flex-1 px-6">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-20 gap-3 text-muted-foreground">
-              <Loader2 className="size-8 animate-spin" />
-              <p>Searching bank...</p>
+              <Loader2 className="size-8 animate-spin text-primary" />
+              <p className="text-xs font-medium uppercase tracking-widest">Searching records...</p>
             </div>
           ) : questions.length === 0 ? (
             <div className="text-center py-20 text-muted-foreground">
-              <p>No questions found in the bank.</p>
+              <Database className="size-10 mx-auto opacity-20 mb-3" />
+              <p className="text-sm font-medium">No matching items in your library.</p>
             </div>
           ) : (
-            <div className="space-y-4 pb-8">
+            <div className="space-y-3 py-6 pb-12">
               {questions.map((q) => {
                 const isSelected = selectedIds.includes(q.id);
                 return (
                   <div
                     key={q.id}
-                    className="border rounded-2xl p-4 space-y-3 hover:bg-muted/30 transition-colors group relative"
+                    className="border rounded-lg p-4 space-y-3 hover:bg-muted/30 transition-colors group relative"
                   >
-                    <div className="flex justify-between items-start">
-                      <div className="flex gap-2">
-                        <Badge variant="outline" className="capitalize">
-                          {q.question_type}
+                    <div className="flex justify-between items-start gap-4">
+                      <div className="flex flex-wrap gap-1.5">
+                        <Badge variant="outline" className="capitalize text-[10px] font-bold">
+                          {q.question_type.toLowerCase().replace("_", " ")}
                         </Badge>
-                        <Badge variant="secondary" className="capitalize">
+                        <Badge variant="secondary" className="capitalize text-[10px] font-bold">
                           {q.difficulty.toLowerCase()}
                         </Badge>
                       </div>
@@ -159,15 +165,22 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
                         variant={isSelected ? "secondary" : "default"}
                         disabled={isSelected}
                         onClick={() => onSelect(q)}
-                        className="rounded-full"
+                        className="h-7 px-3 text-[11px] font-bold uppercase tracking-tight"
                       >
-                        {isSelected ? "Added" : <><Plus className="mr-1 size-3" /> Add</>}
+                        {isSelected ? "Added" : <><Plus className="mr-1.5 size-3" /> Add</>}
                       </Button>
                     </div>
-                    <p className="text-sm line-clamp-3">{q.content}</p>
-                    <div className="text-xs text-muted-foreground flex items-center gap-3">
-                      <span>{q.marks} Marks</span>
-                      {q.topic && <span>• {q.topic}</span>}
+                    <p className="text-sm leading-snug font-medium line-clamp-3 text-foreground/80">{q.content}</p>
+                    <div className="text-[10px] font-bold uppercase text-muted-foreground flex items-center gap-3 pt-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="size-1 rounded-full bg-primary" />
+                        {q.marks} Marks
+                      </span>
+                      {q.topic && (
+                        <span className="flex items-center gap-1.5 border-l pl-3 italic">
+                          {q.topic}
+                        </span>
+                      )}
                     </div>
                   </div>
                 );
@@ -176,8 +189,8 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
           )}
         </ScrollArea>
         
-        <SheetFooter className="pt-4 border-t mt-auto">
-          <Button variant="ghost" onClick={() => setIsOpen(false)}>Done</Button>
+        <SheetFooter className="p-6 pt-2 border-t bg-muted/10">
+          <Button variant="ghost" onClick={() => setIsOpen(false)} className="font-semibold w-full sm:w-auto">Finish Selection</Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>

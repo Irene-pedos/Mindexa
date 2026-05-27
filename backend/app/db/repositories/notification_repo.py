@@ -63,3 +63,8 @@ class NotificationRepository:
             .values(is_read=True, read_at=datetime.now(UTC))
         )
         return result.rowcount
+
+    async def create(self, **kwargs) -> Notification:
+        notification = Notification(**kwargs)
+        self.db.add(notification)
+        return notification

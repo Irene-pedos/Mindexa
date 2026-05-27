@@ -51,9 +51,11 @@ class SubmissionRepository:
             duplicate rows. The service layer must NOT call this after
             is_final=True — the constraint check is at service layer.
         """
-        existing = await self.get_response(attempt_id, question_id)
+        # We check for ANY row including deleted ones to avoid unique constraint collisions
+        existing = await self.get_response(attempt_id, question_id, include_deleted=True)
 
         if existing:
+            was_deleted = existing.is_deleted
             existing.answer_type = answer_type
             existing.answer_text = answer_text
             existing.selected_option_ids = selected_option_ids
@@ -65,8 +67,13 @@ class SubmissionRepository:
             if time_spent_seconds is not None:
                 existing.time_spent_seconds = time_spent_seconds
             existing.is_skipped = is_skipped
+            
+            # Re-activate if it was deleted
+            existing.is_deleted = False
+            existing.deleted_at = None
+            
             await self.db.flush()
-            return existing, False
+            return existing, not was_deleted # Mark as created if it was effectively gone
 
         response = StudentResponse(
             attempt_id=attempt_id,
@@ -92,15 +99,16 @@ class SubmissionRepository:
     # -----------------------------------------------------------------------
 
     async def get_response(
-        self, attempt_id: uuid.UUID, question_id: uuid.UUID
+        self, attempt_id: uuid.UUID, question_id: uuid.UUID, include_deleted: bool = False
     ) -> StudentResponse | None:
-        result = await self.db.execute(
-            select(StudentResponse).where(
-                StudentResponse.attempt_id == attempt_id,
-                StudentResponse.question_id == question_id,
-                StudentResponse.is_deleted == False,  # noqa: E712
-            )
+        stmt = select(StudentResponse).where(
+            StudentResponse.attempt_id == attempt_id,
+            StudentResponse.question_id == question_id,
         )
+        if not include_deleted:
+            stmt = stmt.where(StudentResponse.is_deleted == False)  # noqa: E712
+            
+        result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_response_by_id(self, response_id: uuid.UUID) -> StudentResponse | None:
@@ -117,9 +125,28 @@ class SubmissionRepository:
     ) -> list[StudentResponse]:
         result = await self.db.execute(
             select(StudentResponse)
-            .options(selectinload(StudentResponse.question))
+            .options(
+                selectinload(StudentResponse.question)
+                .selectinload(Question.options)
+            )
             .where(
                 StudentResponse.attempt_id == attempt_id,
+                StudentResponse.is_deleted == False,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
+    async def list_responses_for_group(
+        self, group_id: uuid.UUID
+    ) -> list[StudentResponse]:
+        """Return all responses from all members of a group."""
+        from app.db.models.attempt import AssessmentAttempt
+        result = await self.db.execute(
+            select(StudentResponse)
+            .join(AssessmentAttempt, AssessmentAttempt.id == StudentResponse.attempt_id)
+            .options(selectinload(StudentResponse.question))
+            .where(
+                AssessmentAttempt.group_id == group_id,
                 StudentResponse.is_deleted == False,  # noqa: E712
             )
         )

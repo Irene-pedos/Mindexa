@@ -57,8 +57,9 @@ def register_exception_handlers(app: FastAPI) -> None:
             message=exc.detail,
             request_id=request_id,
         )
-        if exc.headers:
-            for key, value in exc.headers.items():
+        headers = getattr(exc, "headers", None)
+        if headers:
+            for key, value in headers.items():
                 response.headers[key] = value
         return response
 
@@ -73,11 +74,16 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "message": error["msg"],
                 "type": error["type"],
             })
+        
+        # Enhanced message to help debugging
+        detail_messages = [f"{e['field']}: {e['message']}" for e in errors]
+        combined_msg = "Validation failed: " + " | ".join(detail_messages)
+            
         logger.info("validation_error", path=str(request.url), errors=errors, request_id=request_id)
         return _error_response(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             error_code="VALIDATION_ERROR",
-            message="The request data failed validation.",
+            message=combined_msg,
             request_id=request_id,
             validation_errors=errors,
         )
@@ -99,8 +105,9 @@ def register_exception_handlers(app: FastAPI) -> None:
             message=str(exc.detail) if exc.detail else "An error occurred.",
             request_id=request_id,
         )
-        if hasattr(exc, "headers") and exc.headers:
-            for key, value in exc.headers.items():
+        headers = getattr(exc, "headers", None)
+        if headers:
+            for key, value in headers.items():
                 response.headers[key] = value
         return response
 

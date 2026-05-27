@@ -127,6 +127,20 @@ class ResultService:
         # Generate per-question breakdown
         await self.generate_breakdown(result.id, attempt_id)
 
+        # Gate: Automatic Release for IMMEDIATE mode closed-question assessments
+        if assessment and assessment.result_release_mode == ResultReleaseMode.IMMEDIATE:
+            from app.services.grading_service import AUTO_GRADABLE
+            
+            # Load questions to check types
+            questions = await self.assessment_repo.list_assessment_questions(attempt.assessment_id)
+            has_open = any(q.question.question_type not in AUTO_GRADABLE for q in questions if q.question)
+            
+            # Only auto-release if it's fully graded (all responses have final grades)
+            # and there are no open-ended questions requiring manual review.
+            if not has_open and graded_count >= total_responses and total_responses > 0:
+                await self.result_repo.bulk_release([result.id], released_by_id=None)
+                result.is_released = True # Update local object for return
+
         return result, created
 
     # -----------------------------------------------------------------------
@@ -184,7 +198,7 @@ class ResultService:
         self,
         *,
         assessment_id: uuid.UUID,
-        released_by_id: uuid.UUID,
+        released_by_id: uuid.UUID | None = None,
         attempt_ids: list[uuid.UUID] | None = None,
     ) -> dict:
         """
@@ -238,10 +252,10 @@ class ResultService:
         *,
         attempt_id: uuid.UUID,
         student_id: uuid.UUID,
-    ) -> AssessmentResult:
+    ) -> dict:
         """
         Return a result for a student — only if is_released=True.
-        Raises NotFoundError if not released yet (prevents timing attacks).
+        Raises NotFoundError if not released yet.
         """
         attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
         if not attempt:
@@ -256,20 +270,95 @@ class ResultService:
                 "Result is not yet available",
                 code="RESULT_NOT_RELEASED",
             )
-        return result
+        
+        return await self._enrich_result_response(result)
 
     async def get_result_for_lecturer(
         self,
         *,
         attempt_id: uuid.UUID,
-    ) -> AssessmentResult:
+    ) -> dict:
         """
         Return a result for a lecturer/admin — no release check.
         """
         result = await self.result_repo.get_by_attempt_with_breakdowns(attempt_id)
         if not result:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
-        return result
+        
+        return await self._enrich_result_response(result)
+
+    async def _enrich_result_response(self, result: AssessmentResult) -> dict:
+        """Add question and answer text to breakdowns for UI review."""
+        from app.schemas.result import AssessmentResultResponse, ResultBreakdownItem
+        from app.db.models.assessment import Assessment
+        
+        resp = AssessmentResultResponse.model_validate(result)
+        
+        # Load assessment info
+        assessment = await self.db.get(Assessment, result.assessment_id)
+        if assessment:
+            resp.assessment_title = assessment.title
+            resp.academic_year = assessment.academic_year
+
+        # Load all questions and responses for this attempt
+        responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id)
+        response_map = {r.question_id: r for r in responses}
+        
+        for bd in resp.breakdowns:
+            response = response_map.get(bd.question_id)
+            if not response:
+                continue
+                
+            q = response.question
+            bd.question_text = q.content
+            
+            # Safe Enum to string conversion
+            q_type = q.question_type
+            if hasattr(q_type, "value"):
+                q_type = q_type.value
+            bd.question_type = str(q_type).lower().replace("_", "")
+            
+            # Format student answer
+            ans_type = response.answer_type
+            if hasattr(ans_type, "value"):
+                ans_type = ans_type.value
+            
+            if ans_type == "SINGLE_OPTION":
+                # Find the option text
+                opt_id = response.selected_option_ids[0] if response.selected_option_ids else None
+                if opt_id:
+                    opt = next((o for o in q.options if str(o.id) == str(opt_id)), None)
+                    bd.student_answer = opt.option_text if opt else "Unknown Option"
+            elif ans_type == "MULTI_OPTION":
+                bd.student_answer = ", ".join([
+                    next((o.option_text for o in q.options if str(o.id) == str(oid)), "Unknown")
+                    for oid in (response.selected_option_ids or [])
+                ])
+            elif ans_type == "MATCH_PAIRS":
+                bd.student_answer = str(response.match_pairs_json)
+            elif ans_type == "FILL_BLANKS":
+                bd.student_answer = str(response.fill_blank_answers)
+            else:
+                bd.student_answer = response.answer_text
+                
+            # Correct answer (for auto-gradable)
+            raw_q_type = q.question_type
+            if hasattr(raw_q_type, "value"):
+                raw_q_type = raw_q_type.value
+
+            if raw_q_type in ["MCQ", "TRUE_FALSE"]:
+                correct_opts = [o.option_text for o in q.options if o.is_correct]
+                bd.correct_answer = ", ".join(correct_opts)
+            elif raw_q_type == "MATCHING":
+                # Show matches
+                bd.correct_answer = ", ".join([f"{o.option_text} -> {o.option_text_right}" for o in q.options])
+            
+            bd.options = [
+                {"id": str(o.id), "text": o.option_text, "is_correct": o.is_correct}
+                for o in (q.options or [])
+            ]
+
+        return resp.model_dump()
 
     async def list_results_for_student(
         self,

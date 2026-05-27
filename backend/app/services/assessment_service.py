@@ -39,14 +39,23 @@ from app.db.enums import AssessmentStatus as DbAssessmentStatus
 from app.db.enums import AssessmentType as DbAssessmentType
 from app.db.enums import (
     DifficultyLevel,
+    GroupAssignmentMode,
     GradingMode,
+    GroupSubmissionStatus,
     QuestionAddedVia,
     QuestionSourceType,
+    QuestionDistributionMode,
     QuestionType as DbQuestionType,
     ResultReleaseMode,
+    AttemptStatus,
+    SupervisorRole,
 )
 from app.db.models.auth import User
+from app.db.models.assessment import AssessmentSupervisor
 from app.db.repositories.assessment_repo import AssessmentRepository
+from app.db.repositories.attempt_repo import AttemptRepository
+from app.db.repositories.group_repo import GroupRepository
+from app.db.repositories.notification_repo import NotificationRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.schemas.assessment import (
     AddQuestionToAssessmentRequest,
@@ -68,6 +77,9 @@ class AssessmentService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self._repo = AssessmentRepository(db)
+        self._attempt_repo = AttemptRepository(db)
+        self._group_repo = GroupRepository(db)
+        self._notification_repo = NotificationRepository(db)
         self._question_repo = QuestionRepository(db)
         self._blueprint_service = BlueprintService(db)
 
@@ -105,8 +117,19 @@ class AssessmentService:
         Creates the assessment record and an initial draft progress row.
         Returns the full assessment detail.
         """
-        if not data.course_id:
-            raise ValidationError("course_id is required to create an assessment.")
+        if not data.teaching_workspace_id:
+            raise ValidationError("teaching_workspace_id is required to create an assessment.")
+
+        from app.db.repositories.workspace_repo import WorkspaceRepository
+        ws_repo = WorkspaceRepository(self._repo.db)
+        workspace = await ws_repo.get_by_id(data.teaching_workspace_id)
+        if not workspace:
+            raise NotFoundError("Teaching Workspace", str(data.teaching_workspace_id))
+            
+        # Verify ownership
+        if workspace.teaching_assignment.lecturer_id != created_by.id and created_by.role != "ADMIN":
+            from app.core.exceptions import AuthorizationError
+            raise AuthorizationError("You do not have permission to create assessments in this workspace.")
 
         # Validate enum values
         try:
@@ -137,8 +160,10 @@ class AssessmentService:
             title=data.title,
             description=data.description,
             assessment_type=assessment_type,
-            course_id=data.course_id,
+            teaching_workspace_id=workspace.id,
+            course_id=workspace.course_id,
             subject_id=data.subject_id,
+            academic_year=workspace.academic_period.name,
             created_by_id=created_by.id,
             grading_mode=grading_mode,
             result_release_mode=result_release_mode,
@@ -149,6 +174,11 @@ class AssessmentService:
             is_group_assessment=data.is_group_assessment,
             max_group_size=data.max_group_size,
             group_formation_mode=data.group_formation_mode,
+            group_assignment_mode=GroupAssignmentMode(data.group_assignment_mode) if data.group_assignment_mode else None,
+            question_distribution_mode=QuestionDistributionMode(data.question_distribution_mode) if data.question_distribution_mode else None,
+            require_all_member_approval=data.require_all_member_approval,
+            require_all_member_participation=data.require_all_member_participation,
+            appeal_window_days=data.appeal_window_days,
         )
 
         # Initialize draft progress
@@ -219,12 +249,42 @@ class AssessmentService:
             update_fields["max_group_size"] = data.max_group_size
         if data.group_formation_mode is not None:
             update_fields["group_formation_mode"] = data.group_formation_mode
+        if data.group_assignment_mode is not None:
+            update_fields["group_assignment_mode"] = GroupAssignmentMode(data.group_assignment_mode)
+        if data.question_distribution_mode is not None:
+            update_fields["question_distribution_mode"] = QuestionDistributionMode(data.question_distribution_mode)
+        if data.require_all_member_approval is not None:
+            update_fields["require_all_member_approval"] = data.require_all_member_approval
+        if data.require_all_member_participation is not None:
+            update_fields["require_all_member_participation"] = data.require_all_member_participation
+        if data.appeal_window_days is not None:
+            update_fields["appeal_window_days"] = data.appeal_window_days
         if data.show_marks_per_question is not None:
             update_fields["show_marks_per_question"] = data.show_marks_per_question
         if data.show_feedback_after_submit is not None:
             update_fields["show_feedback_after_submit"] = data.show_feedback_after_submit
         if data.is_ai_generation_enabled is not None:
             update_fields["is_ai_generation_enabled"] = data.is_ai_generation_enabled
+            
+        # Security/Integrity additions
+        if data.max_attempts is not None:
+            update_fields["max_attempts"] = data.max_attempts
+        if data.is_password_protected is not None:
+            update_fields["is_password_protected"] = data.is_password_protected
+        if data.fullscreen_required is not None:
+            update_fields["fullscreen_required"] = data.fullscreen_required
+        if data.is_supervised is not None:
+            update_fields["is_supervised"] = data.is_supervised
+        if data.ai_assistance_allowed is not None:
+            update_fields["ai_assistance_allowed"] = data.ai_assistance_allowed
+        if data.is_open_book is not None:
+            update_fields["is_open_book"] = data.is_open_book
+        if data.integrity_monitoring_enabled is not None:
+            update_fields["integrity_monitoring_enabled"] = data.integrity_monitoring_enabled
+        if data.randomize_questions is not None:
+            update_fields["randomize_questions"] = data.randomize_questions
+        if data.randomize_options is not None:
+            update_fields["randomize_options"] = data.randomize_options
 
         # Advance wizard step if moving forward
         if step > (assessment.draft_step or 0):
@@ -512,6 +572,27 @@ class AssessmentService:
             # No blueprint defined — that's allowed
             pass
 
+        # Check 6: Group-work configuration must be complete before publish
+        if assessment.is_group_assessment:
+            groups = await self._group_repo.list_groups_by_assessment(assessment_id, include_members=True)
+            if not groups:
+                errors.append("Group work assessments must have groups created before finalizing.")
+            else:
+                if assessment.group_invalidated_at is not None:
+                    errors.append("Group assignments were invalidated and must be rebuilt before finalizing.")
+                
+                # Check for enrollment changes (Phase 12 rule)
+                from app.services.group_work_service import GroupWorkService
+                group_svc = GroupWorkService(self.db)
+                if await group_svc.check_enrollment_drift(assessment_id):
+                    errors.append("Class enrollment has changed. Group assignments are no longer valid and must be rebuilt.")
+
+                unlocked = [group for group in groups if not group.is_locked]
+                if unlocked:
+                    errors.append("All groups must be locked before finalizing the assessment.")
+                if assessment.question_distribution_mode is None:
+                    errors.append("Group work assessments must define a question distribution mode before finalizing.")
+
         # If any errors, don't finalize
         if errors:
             return FinalizeAssessmentResponse(
@@ -530,6 +611,24 @@ class AssessmentService:
 
         # Delete draft progress (no longer needed)
         await self._repo.delete_draft_progress(assessment_id)
+
+        # Notify students if it's a group assessment
+        if assessment.is_group_assessment:
+            from app.db.enums import NotificationType
+            groups = await self._group_repo.list_groups_by_assessment(assessment_id, include_members=True)
+            for group in groups:
+                for member in group.members:
+                    if member.is_deleted:
+                        continue
+                    await self._notification_repo.create(
+                        recipient_id=member.student_id,
+                        notification_type=NotificationType.GROUP_WORK_ASSIGNED,
+                        title="Group work assigned",
+                        body=f"You have been assigned to group '{group.name}' for assessment '{assessment.title}'.",
+                        reference_id=assessment.id,
+                        reference_type="assessment",
+                        action_url=f"/student/group-work/{assessment.id}",
+                    )
 
         return FinalizeAssessmentResponse(
             id=assessment.id,
@@ -628,6 +727,42 @@ class AssessmentService:
             if hasattr(a, "course") and a.course:
                 summary.course_name = a.course.name
                 summary.course_code = a.course.code
+            
+            # Populate student status if current user is a student
+            if current_user.role == UserRole.STUDENT.value:
+                attempts, _ = await self._attempt_repo.list_by_student(
+                    student_id=current_user.id,
+                    assessment_id=a.id
+                )
+                if not attempts:
+                    summary.student_status = "NOT_STARTED"
+                else:
+                    # Check if any attempt is submitted or in progress
+                    # Sort attempts by submitted_at desc to find the primary one
+                    submitted_attempts = [att for att in attempts if att.status in [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]]
+                    if submitted_attempts:
+                        summary.student_status = "SUBMITTED"
+                        # Use the most recent submitted attempt for the result link
+                        submitted_attempts.sort(key=lambda x: x.submitted_at or x.started_at, reverse=True)
+                        summary.student_attempt_id = submitted_attempts[0].id
+                    else:
+                        summary.student_status = "IN_PROGRESS"
+                        # For IN_PROGRESS, use the most recent active attempt
+                        summary.student_attempt_id = attempts[0].id
+
+                    # For group work, reflect group submission status
+                    if a.is_group_assessment and attempts[0].group_id:
+                        from app.db.models.attempt import GroupSubmission
+                        from sqlalchemy import select
+                        sub_stmt = select(GroupSubmission).where(
+                            GroupSubmission.assessment_id == a.id,
+                            GroupSubmission.group_id == attempts[0].group_id
+                        )
+                        sub_res = await self.db.execute(sub_stmt)
+                        submission = sub_res.scalar_one_or_none()
+                        if submission and submission.status in [GroupSubmissionStatus.SUBMITTED, GroupSubmissionStatus.APPROVED]:
+                             summary.student_status = "SUBMITTED"
+
             summary_items.append(summary)
 
         return AssessmentListResponse(
@@ -733,13 +868,24 @@ class AssessmentService:
                 for fmt in formats:
                     try:
                         t = datetime.strptime(t_str, fmt).time()
+                        # Ensure we have a datetime object to call .date() on
+                        base_date = data.metadata.date
+                        if isinstance(base_date, str):
+                            try:
+                                base_date = datetime.fromisoformat(base_date.replace("Z", "+00:00"))
+                            except ValueError:
+                                return None
+                        
+                        if not hasattr(base_date, "date"):
+                            return None
+
                         # Use the date from metadata, but preserve timezone if present
-                        dt = datetime.combine(data.metadata.date.date(), t)
-                        if data.metadata.date.tzinfo:
-                            dt = dt.replace(tzinfo=data.metadata.date.tzinfo)
+                        dt = datetime.combine(base_date.date(), t)
+                        if hasattr(base_date, "tzinfo") and base_date.tzinfo:
+                            dt = dt.replace(tzinfo=base_date.tzinfo)
                             return dt.astimezone(UTC)
                         return dt.replace(tzinfo=UTC)
-                    except ValueError:
+                    except (ValueError, AttributeError):
                         continue
                 return None
 
@@ -749,42 +895,90 @@ class AssessmentService:
 
         # 2. Get or Create Assessment
         from sqlalchemy import or_, select, update
-        from app.db.models.academic import Course
+        from app.db.models.academic import Course, TeachingWorkspace, ClassSection
+        from app.db.models.assessment import AssessmentTargetSection
         from app.db.enums import AssessmentStatus as DbAssessmentStatus
         
+        teaching_workspace_id = None
         course_id = None
         subject_id = None
-        try:
-            course_id = uuid.UUID(str(data.metadata.course_id))
-        except (ValueError, TypeError, AttributeError):
-            # Try to find course by name or code
+
+        # Determine Teaching Workspace & Course
+        # Strategy: 
+        # 1. If teaching_workspace_id is provided, use it and get course_id from it.
+        # 2. If course_id is provided, try to see if it's actually a workspace ID.
+        # 3. If it's a real course ID, find/default a workspace for this lecturer.
+
+        input_course_val = str(data.metadata.course_id) if data.metadata.course_id else None
+        input_workspace_val = str(data.metadata.teaching_workspace_id) if data.metadata.teaching_workspace_id else None
+
+        if input_workspace_val:
+            try:
+                teaching_workspace_id = uuid.UUID(input_workspace_val)
+                res = await self.db.execute(select(TeachingWorkspace).where(TeachingWorkspace.id == teaching_workspace_id))
+                workspace = res.scalars().first()
+                if workspace:
+                    course_id = workspace.course_id
+            except (ValueError, TypeError):
+                pass
+
+        if not teaching_workspace_id and input_course_val:
+            try:
+                potential_id = uuid.UUID(input_course_val)
+                # Check if it's a workspace
+                res = await self.db.execute(select(TeachingWorkspace).where(TeachingWorkspace.id == potential_id))
+                workspace = res.scalars().first()
+                if workspace:
+                    teaching_workspace_id = potential_id
+                    course_id = workspace.course_id
+                else:
+                    # It's a real course ID
+                    course_id = potential_id
+            except (ValueError, TypeError):
+                # Try search by code/name
+                res = await self.db.execute(
+                    select(Course).where(or_(Course.code == input_course_val, Course.name == input_course_val))
+                )
+                course = res.scalars().first()
+                if course:
+                    course_id = course.id
+
+        if not teaching_workspace_id and course_id:
+            # Find a workspace for this lecturer and this course
             res = await self.db.execute(
-                select(Course).where(
-                    or_(
-                        Course.name == str(data.metadata.course_id),
-                        Course.code == str(data.metadata.course_id)
-                    )
+                select(TeachingWorkspace).where(
+                    TeachingWorkspace.course_id == course_id,
+                    TeachingWorkspace.lecturer_id == current_user.id,
+                    TeachingWorkspace.is_active == True
                 )
             )
-            course = res.scalars().first()
-            if not course:
-                # Try partial match or just take the first one for demo safety
-                res = await self.db.execute(select(Course))
-                course = res.scalars().first()
-            
-            if course:
-                course_id = course.id
+            workspace = res.scalars().first()
+            if workspace:
+                teaching_workspace_id = workspace.id
             else:
-                raise ValidationError(f"Course '{data.metadata.course_id}' not found.")
+                # Fallback: Just take any active workspace for this course if admin, 
+                # or raise if lecturer can't be found
+                res = await self.db.execute(
+                    select(TeachingWorkspace).where(
+                        TeachingWorkspace.course_id == course_id,
+                        TeachingWorkspace.is_active == True
+                    ).limit(1)
+                )
+                workspace = res.scalars().first()
+                if workspace:
+                    teaching_workspace_id = workspace.id
 
-        # Derived fields from course if not explicitly provided
+        if not teaching_workspace_id or not course_id:
+            raise ValidationError("A valid Teaching Workspace and Course are required for assessment creation.")
+
+        # Derived subject if not explicitly provided
         if data.metadata.subject_id:
             try:
                 subject_id = uuid.UUID(str(data.metadata.subject_id))
             except (ValueError, TypeError):
                 pass
 
-        if not subject_id and course_id:
+        if not subject_id:
             from app.db.models.academic import CourseSubject
             res = await self.db.execute(
                 select(CourseSubject.subject_id).where(CourseSubject.course_id == course_id).limit(1)
@@ -804,8 +998,10 @@ class AssessmentService:
                 "title": data.metadata.title,
                 "description": data.metadata.description,
                 "assessment_type": DbAssessmentType(assessment_type),
+                "teaching_workspace_id": teaching_workspace_id,
                 "course_id": course_id,
                 "subject_id": subject_id,
+                "academic_year": data.metadata.academic_year,
                 "grading_mode": GradingMode.MANUAL,
                 "result_release_mode": ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
                 "total_marks": sum(s.marks for s in data.blueprint),
@@ -815,6 +1011,11 @@ class AssessmentService:
                 "is_group_assessment": is_group,
                 "max_group_size": data.metadata.maxGroupSize if is_group else None,
                 "group_formation_mode": data.metadata.groupFormation if is_group else None,
+                "group_assignment_mode": GroupAssignmentMode(data.metadata.groupAssignmentMode) if is_group and data.metadata.groupAssignmentMode else None,
+                "question_distribution_mode": QuestionDistributionMode(data.metadata.questionDistributionMode) if is_group and data.metadata.questionDistributionMode else None,
+                "require_all_member_approval": data.rules.requireAllMemberApproval if is_group else False,
+                "require_all_member_participation": data.rules.requireAllMemberParticipation if is_group else False,
+                "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
             }
             if data.rules.autosaveToken:
                 update_data["autosave_token"] = data.rules.autosaveToken
@@ -828,8 +1029,10 @@ class AssessmentService:
                 title=data.metadata.title,
                 description=data.metadata.description,
                 assessment_type=DbAssessmentType(assessment_type),
+                teaching_workspace_id=teaching_workspace_id,
                 course_id=course_id,
                 subject_id=subject_id,
+                academic_year=data.metadata.academic_year,
                 created_by_id=current_user.id,
                 grading_mode=GradingMode.MANUAL,
                 result_release_mode=ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
@@ -844,6 +1047,11 @@ class AssessmentService:
                 is_group_assessment=is_group,
                 max_group_size=data.metadata.maxGroupSize if is_group else None,
                 group_formation_mode=data.metadata.groupFormation if is_group else None,
+                group_assignment_mode=GroupAssignmentMode(data.metadata.groupAssignmentMode) if is_group and data.metadata.groupAssignmentMode else None,
+                question_distribution_mode=QuestionDistributionMode(data.metadata.questionDistributionMode) if is_group and data.metadata.questionDistributionMode else None,
+                require_all_member_approval=data.rules.requireAllMemberApproval if is_group else False,
+                require_all_member_participation=data.rules.requireAllMemberParticipation if is_group else False,
+                appeal_window_days=data.metadata.appealWindowDays if is_group else None,
                 late_penalty_percent=data.rules.latePenaltyPercent,
                 grace_period_minutes=data.rules.gracePeriodMinutes,
                 autosave_token=data.rules.autosaveToken,
@@ -870,9 +1078,6 @@ class AssessmentService:
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
         # 3.1. Target Classes (Many-to-Many)
-        from app.db.models.academic import ClassSection
-        from app.db.models.assessment import AssessmentTargetSection
-        
         # Clear existing targets for re-publish/update
         await self.db.execute(
             update(AssessmentTargetSection)
@@ -928,19 +1133,30 @@ class AssessmentService:
                 "fillblank": DbQuestionType.FILL_BLANK,
                 "computational": DbQuestionType.COMPUTATIONAL,
                 "ordering": DbQuestionType.ORDERING,
+                "casestudy": DbQuestionType.CASE_STUDY,
             }
-            db_q_type = q_type_map.get(q.type.lower(), DbQuestionType.SHORT_ANSWER)
+            raw_type = (q.type or "shortanswer").lower()
+            db_q_type = q_type_map.get(raw_type, DbQuestionType.SHORT_ANSWER)
 
             new_q = QuestionModel(
-                content=q.text,
+                content=q.text or "",
                 question_type=db_q_type,
-                marks=q.marks,
+                marks=q.marks or 0,
                 difficulty=DifficultyLevel.MEDIUM,
                 created_by_id=current_user.id,
                 is_approved=True,
                 is_in_question_bank=True,
                 source_type=QuestionSourceType.MANUAL,
+                grading_mode=GradingMode.MANUAL if db_q_type in [
+                    DbQuestionType.SHORT_ANSWER, 
+                    DbQuestionType.ESSAY, 
+                    DbQuestionType.COMPUTATIONAL, 
+                    DbQuestionType.CASE_STUDY
+                ] else GradingMode.AUTO
             )
+            if q.caseStudyContext:
+                new_q.case_study_context = q.caseStudyContext
+                
             self.db.add(new_q)
             await self.db.flush()
 
@@ -950,32 +1166,52 @@ class AssessmentService:
                     for opt in q.options:
                         await self._question_repo.add_option(
                             question_id=new_q.id,
-                            content=opt.option_text,
-                            order_index=opt.order_index,
+                            content=opt.option_text or "",
+                            order_index=opt.order_index or 0,
                             is_correct=opt.is_correct
                         )
                 elif db_q_type == DbQuestionType.MATCHING:
                     for opt in q.options:
                         await self._question_repo.add_option(
                             question_id=new_q.id,
-                            content=opt.option_text,
-                            order_index=opt.order_index,
+                            content=opt.option_text or "",
+                            order_index=opt.order_index or 0,
                             match_key=opt.option_text,
                             match_value=opt.option_text_right,
                             is_correct=True
                         )
                 elif db_q_type == DbQuestionType.FILL_BLANK:
-                    for idx, opt in enumerate(q.options):
-                        await self._question_repo.add_blank(
+                    blank_count = 0
+                    for opt in q.options:
+                        # 1. Create Option (Forms the student's draggable pool)
+                        await self._question_repo.add_option(
                             question_id=new_q.id,
-                            blank_index=idx,
-                            accepted_answers=[opt.option_text],
-                            case_sensitive=False
+                            content=opt.option_text or "",
+                            order_index=opt.order_index or 0,
+                            is_correct=opt.is_correct
                         )
-                elif db_q_type in [DbQuestionType.SHORT_ANSWER, DbQuestionType.ESSAY]:
+                        # 2. Create Blank (Target for grading logic)
+                        # blank_index corresponds to the n-th [blank] in the text
+                        if opt.is_correct:
+                            await self._question_repo.add_blank(
+                                question_id=new_q.id,
+                                blank_index=blank_count,
+                                accepted_answers=[opt.option_text or ""],
+                                case_sensitive=False
+                            )
+                            blank_count += 1
+                elif db_q_type in [DbQuestionType.SHORT_ANSWER, DbQuestionType.ESSAY, DbQuestionType.COMPUTATIONAL, DbQuestionType.CASE_STUDY]:
                     # Store sample answer in explanation if provided
-                    if q.options and q.options[0].option_text:
+                    if q.options and len(q.options) > 0 and q.options[0].option_text:
                         new_q.explanation = q.options[0].option_text
+
+            # Map Group ID safely
+            target_group_id = None
+            if q.groupId:
+                try:
+                    target_group_id = uuid.UUID(str(q.groupId))
+                except (ValueError, TypeError):
+                    pass
 
             await self._repo.add_question(
                 assessment_id=assessment.id,
@@ -983,7 +1219,37 @@ class AssessmentService:
                 order_index=i,
                 added_via=QuestionAddedVia.MANUAL_WRITE,
                 assessment_section_id=section_id_map.get(q.sectionId),
+                group_id=target_group_id,
                 marks_override=q.marks,
             )
+
+        # 5. Handle Supervisors
+        from sqlalchemy import delete
+        # Clear existing supervisors for updates
+        await self.db.execute(
+            delete(AssessmentSupervisor).where(AssessmentSupervisor.assessment_id == assessment.id)
+        )
+        
+        # Add creator as primary supervisor
+        creator_supervisor = AssessmentSupervisor(
+            assessment_id=assessment.id,
+            supervisor_id=current_user.id,
+            supervisor_role=SupervisorRole.PRIMARY,
+            assigned_by_id=current_user.id
+        )
+        self.db.add(creator_supervisor)
+        
+        # Add extra supervisors from payload
+        if data.rules.supervisor_ids:
+            for s_id in data.rules.supervisor_ids:
+                if str(s_id) == str(current_user.id):
+                    continue
+                extra_supervisor = AssessmentSupervisor(
+                    assessment_id=assessment.id,
+                    supervisor_id=s_id,
+                    supervisor_role=SupervisorRole.ASSISTANT,
+                    assigned_by_id=current_user.id
+                )
+                self.db.add(extra_supervisor)
 
         return assessment

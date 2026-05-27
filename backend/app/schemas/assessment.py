@@ -16,6 +16,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.constants import AssessmentType, GradingMode
+from app.db.enums import GroupAssignmentMode, QuestionDistributionMode
 from app.schemas.question import QuestionDetailResponse
 
 # ─── Assessment Section Schemas ───────────────────────────────────────────────
@@ -137,7 +138,7 @@ class AssessmentCreateRequest(BaseModel):
     description: str | None = None
     instructions: str | None = None
     assessment_type: str = Field(default=AssessmentType.FORMATIVE.value)
-    course_id: uuid.UUID | None = None
+    teaching_workspace_id: uuid.UUID | None = None
     subject_id: uuid.UUID | None = None
     grading_mode: str = Field(default=GradingMode.MANUAL.value)
     result_release_mode: str = Field(default="manual")
@@ -147,6 +148,11 @@ class AssessmentCreateRequest(BaseModel):
     is_group_assessment: bool = False
     max_group_size: int | None = Field(default=None, ge=1)
     group_formation_mode: str | None = None
+    group_assignment_mode: str | None = None
+    question_distribution_mode: str | None = None
+    require_all_member_approval: bool = False
+    require_all_member_participation: bool = False
+    appeal_window_days: int | None = Field(default=None, ge=1, le=365)
 
     @field_validator("assessment_type")
     @classmethod
@@ -177,6 +183,26 @@ class AssessmentCreateRequest(BaseModel):
         if self.passing_marks and self.passing_marks > self.total_marks:
             raise ValueError("passing_marks cannot exceed total_marks.")
         return self
+
+    @field_validator("group_assignment_mode")
+    @classmethod
+    def validate_group_assignment_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        allowed = {mode.value for mode in GroupAssignmentMode}
+        if v not in allowed:
+            raise ValueError(f"group_assignment_mode must be one of: {', '.join(sorted(allowed))}")
+        return v
+
+    @field_validator("question_distribution_mode")
+    @classmethod
+    def validate_question_distribution_mode(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        allowed = {mode.value for mode in QuestionDistributionMode}
+        if v not in allowed:
+            raise ValueError(f"question_distribution_mode must be one of: {', '.join(sorted(allowed))}")
+        return v
 
     model_config = {"str_strip_whitespace": True}
 
@@ -232,12 +258,29 @@ class AssessmentGeneralUpdate(BaseModel):
     is_group_assessment: bool | None = None
     max_group_size: int | None = None
     group_formation_mode: str | None = None
+    group_assignment_mode: str | None = None
+    question_distribution_mode: str | None = None
+    require_all_member_approval: bool | None = None
+    require_all_member_participation: bool | None = None
+    appeal_window_days: int | None = Field(default=None, ge=1, le=365)
     show_marks_per_question: bool | None = None
     show_feedback_after_submit: bool | None = None
     is_ai_generation_enabled: bool | None = None
+    
+    # Security/Integrity additions
+    max_attempts: int | None = Field(default=None, ge=1, le=10)
+    is_password_protected: bool | None = None
+    fullscreen_required: bool | None = None
+    is_supervised: bool | None = None
+    ai_assistance_allowed: bool | None = None
+    is_open_book: bool | None = None
+    integrity_monitoring_enabled: bool | None = None
+    randomize_questions: bool | None = Field(default=None, alias="randomise_questions")
+    randomize_options: bool | None = Field(default=None, alias="randomise_options")
+
     draft_step: int | None = Field(default=None, ge=1, le=6)
 
-    model_config = {"str_strip_whitespace": True}
+    model_config = {"str_strip_whitespace": True, "populate_by_name": True}
 
 
 # ─── Assessment Response Schemas ──────────────────────────────────────────────
@@ -255,6 +298,7 @@ class AssessmentSummaryResponse(BaseModel):
     duration_minutes: int | None
     window_start: datetime | None
     window_end: datetime | None
+    is_group_assessment: bool
     is_finalized: bool
     draft_step: int | None
     created_by_id: uuid.UUID
@@ -262,6 +306,8 @@ class AssessmentSummaryResponse(BaseModel):
     course_name: str | None = None
     course_code: str | None = None
     target_class: str | None = None
+    student_status: str | None = None  # NOT_STARTED, IN_PROGRESS, SUBMITTED
+    student_attempt_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -299,6 +345,13 @@ class AssessmentDetailResponse(BaseModel):
     is_ai_generation_enabled: bool
     show_marks_per_question: bool
     show_feedback_after_submit: bool
+    group_assignment_mode: str | None = None
+    question_distribution_mode: str | None = None
+    require_all_member_approval: bool = False
+    require_all_member_participation: bool = False
+    appeal_window_days: int | None = None
+    group_invalidated_at: datetime | None = None
+    group_membership_locked_at: datetime | None = None
     draft_step: int | None
     is_finalized: bool
     finalized_at: datetime | None
@@ -339,75 +392,142 @@ class FinalizeAssessmentResponse(BaseModel):
 
 class BulkAssessmentSection(BaseModel):
     id: str
-    section: str
+    section: str | None = "Section"
     topics: str | None = None
-    marks: int = Field(..., ge=0)
-    questions: int = Field(..., ge=0)
-    difficulty: str = "Medium"
-    allowedTypes: list[str] = []
+    marks: int | str | None = 0
+    questions: int | str | None = 0
+    difficulty: str | None = "Medium"
+    allowedTypes: list[str] | None = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def convert_numeric_fields(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            for field in ["marks", "questions"]:
+                val = data.get(field)
+                if val == "" or val is None:
+                    data[field] = 0
+                elif isinstance(val, str):
+                    try:
+                        data[field] = int(val)
+                    except ValueError:
+                        data[field] = 0
+        return data
 
 
 class BulkAssessmentOption(BaseModel):
-    option_text: str
-    is_correct: bool = False
-    order_index: int = 0
+    option_text: str | None = ""
+    is_correct: bool | None = False
+    order_index: int | None = 0
     option_text_right: str | None = None
 
 
 class BulkAssessmentQuestion(BaseModel):
     id: str
     sectionId: str
-    text: str
-    type: str
-    marks: int = Field(..., ge=0)
-    options: list[BulkAssessmentOption] | None = None
+    groupId: str | uuid.UUID | None = None
+    text: str | None = ""
+    type: str | None = "mcq"
+    marks: int = 0
+    options: list[BulkAssessmentOption] | None = []
     correctAnswer: str | None = None
-    aiGenerated: bool = False
+    aiGenerated: bool | None = False
+    imageUrl: str | None = None
+    computationalType: str | None = None
+    caseStudyContext: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def handle_numeric_marks(cls, data: dict) -> dict:
+        if isinstance(data, dict):
+            val = data.get("marks")
+            if val == "" or val is None:
+                data["marks"] = 0
+            elif isinstance(val, str):
+                try:
+                    data["marks"] = int(val)
+                except ValueError:
+                    data["marks"] = 0
+        return data
 
 
 class BulkAssessmentMetadata(BaseModel):
-    title: str = Field(..., min_length=2, max_length=300)
+    title: str | None = Field(default="Untitled Assessment")
     description: str | None = None
-    mode: str
+    mode: str | None = "CAT"
     institution_id: str | uuid.UUID | None = None
-    department_ids: list[uuid.UUID] = []
-    option_ids: list[uuid.UUID] = []
-    class_group_ids: list[uuid.UUID] = []
     course_id: str | uuid.UUID | None = None
+    department_ids: list[str | uuid.UUID] | None = []
+    option_ids: list[str | uuid.UUID] | None = []
+    class_group_ids: list[str | uuid.UUID] | None = []
+    teaching_workspace_id: str | uuid.UUID | None = None
     subject_id: str | uuid.UUID | None = None
     date: datetime | None = None
     startTime: str | None = None
     endTime: str | None = None
     windowStart: datetime | None = None
     windowEnd: datetime | None = None
-    durationMinutes: int = Field(..., ge=1)
-    passing_marks: int | None = Field(default=None, ge=0)
-    selectedInstructions: list[str] = []
+    durationMinutes: int = 0
+    passing_marks: int = 0
+    selectedInstructions: list[str] | None = []
     customInstructions: str | None = None
-    maxGroupSize: int | None = Field(default=None, ge=1)
+    maxGroupSize: int | None = None
     groupFormation: str | None = None
+    groupAssignmentMode: str | None = None
+    questionDistributionMode: str | None = None
+    appealWindowDays: int = 0
+    academic_year: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def ensure_numeric(cls, data: dict) -> dict:
+        if not isinstance(data, dict): return data
+        for f in ["durationMinutes", "passing_marks", "appealWindowDays", "maxGroupSize"]:
+            val = data.get(f)
+            if val == "" or val is None:
+                data[f] = 0 if f != "maxGroupSize" else None
+            elif isinstance(val, str):
+                try: data[f] = int(val)
+                except ValueError: data[f] = 0
+        return data
 
 
 class BulkAssessmentRules(BaseModel):
-    openBook: bool = False
-    supervised: bool = True
-    aiAllowed: bool = False
-    browserRestricted: bool = True
-    shuffleQuestions: bool = True
-    shuffleOptions: bool = True
-    resultRelease: str = "manual"
-    resultReleaseAt: datetime | None = None
-    attempts: int = Field(default=1, ge=1)
-    passwordProtected: bool = False
+    openBook: bool | None = False
+    supervised: bool | None = True
+    aiAllowed: bool | None = False
+    browserRestricted: bool | None = True
+    shuffleQuestions: bool | None = True
+    shuffleOptions: bool | None = True
+    resultRelease: str | None = "manual"
+    resultReleaseAt: datetime | str | None = None
+    attempts: int | str | None = 1
+    passwordProtected: bool | None = False
     accessPassword: str | None = None
-    latePenaltyPercent: float | None = Field(default=None, ge=0, le=100)
-    gracePeriodMinutes: int | None = Field(default=None, ge=0)
-    autosaveToken: uuid.UUID | None = None
+    latePenaltyPercent: float | str | None = 0
+    gracePeriodMinutes: int | str | None = 0
+    autosaveToken: str | uuid.UUID | None = None
+    requireAllMemberApproval: bool | None = False
+    requireAllMemberParticipation: bool | None = False
+    supervisor_ids: list[uuid.UUID] | None = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def ensure_numeric_rules(cls, data: dict) -> dict:
+        if not isinstance(data, dict): return data
+        for f in ["attempts", "latePenaltyPercent", "gracePeriodMinutes"]:
+            val = data.get(f)
+            if val == "" or val is None:
+                data[f] = 1 if f == "attempts" else 0
+            elif isinstance(val, str):
+                try: data[f] = float(val) if "." in val else int(val)
+                except ValueError: data[f] = 1 if f == "attempts" else 0
+        return data
 
 
 class BulkAssessmentPublishRequest(BaseModel):
-    id: uuid.UUID | None = None
+    id: str | uuid.UUID | None = None
     metadata: BulkAssessmentMetadata
-    blueprint: list[BulkAssessmentSection]
-    questions: list[BulkAssessmentQuestion]
+    blueprint: list[BulkAssessmentSection] | None = []
+    questions: list[BulkAssessmentQuestion] | None = []
     rules: BulkAssessmentRules

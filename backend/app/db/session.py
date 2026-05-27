@@ -6,6 +6,8 @@ Async SQLAlchemy engine, session factory, and FastAPI dependency.
 
 from __future__ import annotations
 
+import json
+import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -23,6 +25,17 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _custom_json_serializer(obj):
+    """Handle non-standard types for JSONB columns."""
+    if isinstance(obj, uuid.UUID):
+        return str(obj)
+    raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+
+def _json_dumps(obj):
+    return json.dumps(obj, default=_custom_json_serializer)
+
+
 def _build_engine() -> AsyncEngine:
     return create_async_engine(
         settings.DATABASE_ASYNC_URL,
@@ -34,6 +47,7 @@ def _build_engine() -> AsyncEngine:
         pool_timeout=30,
         pool_recycle=1800,
         poolclass=AsyncAdaptedQueuePool,
+        json_serializer=_json_dumps,
         connect_args={
             "server_settings": {
                 "application_name": settings.APP_NAME,

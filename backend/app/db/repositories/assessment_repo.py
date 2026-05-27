@@ -81,7 +81,9 @@ from sqlmodel import col, select
 from app.db.enums import (
     AssessmentStatus,
     AssessmentType,
+    GroupAssignmentMode,
     GradingMode,
+    QuestionDistributionMode,
     ResultReleaseMode,
 )
 from app.db.models.assessment import (
@@ -129,7 +131,9 @@ class AssessmentRepository:
         *,
         title: str,
         assessment_type: AssessmentType,
+        teaching_workspace_id: uuid.UUID,
         course_id: uuid.UUID,
+        academic_year: str,
         created_by_id: uuid.UUID,
         grading_mode: GradingMode,
         result_release_mode: ResultReleaseMode,
@@ -147,6 +151,11 @@ class AssessmentRepository:
         is_group_assessment: bool = False,
         max_group_size: int | None = None,
         group_formation_mode: str | None = None,
+        group_assignment_mode: GroupAssignmentMode | None = None,
+        question_distribution_mode: QuestionDistributionMode | None = None,
+        require_all_member_approval: bool = False,
+        require_all_member_participation: bool = False,
+        appeal_window_days: int | None = None,
         late_penalty_percent: float | None = None,
         grace_period_minutes: int | None = None,
         autosave_token: uuid.UUID | None = None,
@@ -163,7 +172,9 @@ class AssessmentRepository:
             title=title,
             description=description,
             assessment_type=assessment_type,
+            teaching_workspace_id=teaching_workspace_id,
             course_id=course_id,
+            academic_year=academic_year,
             subject_id=subject_id,
             reassessment_of_id=reassessment_of_id,
             created_by_id=created_by_id,
@@ -182,6 +193,11 @@ class AssessmentRepository:
             is_group_assessment=is_group_assessment,
             max_group_size=max_group_size,
             group_formation_mode=group_formation_mode,
+            group_assignment_mode=group_assignment_mode,
+            question_distribution_mode=question_distribution_mode,
+            require_all_member_approval=require_all_member_approval,
+            require_all_member_participation=require_all_member_participation,
+            appeal_window_days=appeal_window_days,
             late_penalty_percent=late_penalty_percent,
             grace_period_minutes=grace_period_minutes,
             autosave_token=autosave_token,
@@ -213,6 +229,7 @@ class AssessmentRepository:
             select(Assessment)
             .options(
                 selectinload(Assessment.course),
+                selectinload(Assessment.subject),
                 selectinload(Assessment.sections),
                 selectinload(Assessment.blueprint_rules),
                 selectinload(Assessment.draft_progress),
@@ -234,13 +251,15 @@ class AssessmentRepository:
         self, assessment_id: uuid.UUID
     ) -> Assessment | None:
         """
-        Lightweight load — no relationships.
-
-        Use for existence checks, permission checks, and field updates
-        where relationship data is not needed.
+        Lightweight load — minimal relationships for schema properties.
         """
+        from app.db.models.academic import TeachingWorkspace
         result = await self.db.execute(
-            select(Assessment).where(
+            select(Assessment)
+            .options(
+                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course)
+            )
+            .where(
                 col(Assessment.id) == assessment_id,
                 col(Assessment.is_deleted) == False,  # noqa: E712
             )
@@ -285,7 +304,7 @@ class AssessmentRepository:
             select(Assessment)
             .options(
                 selectinload(Assessment.course),
-                selectinload(Assessment.subject_rel),
+                selectinload(Assessment.subject),
             )
             .where(*filters)
             .order_by(order_by)
@@ -331,7 +350,7 @@ class AssessmentRepository:
             select(Assessment)
             .options(
                 selectinload(Assessment.course),
-                selectinload(Assessment.subject_rel),
+                selectinload(Assessment.subject),
             )
             .where(*filters)
             .order_by(order_by)
@@ -588,6 +607,7 @@ class AssessmentRepository:
         order_index: int,
         added_via: str,
         assessment_section_id: uuid.UUID | None = None,
+        group_id: uuid.UUID | None = None,
         marks_override: int | None = None,
         is_required: bool = True,
         ai_review_id: uuid.UUID | None = None,
@@ -612,6 +632,7 @@ class AssessmentRepository:
             assessment_id=assessment_id,
             question_id=question_id,
             assessment_section_id=assessment_section_id,
+            group_id=group_id,
             order_index=order_index,
             marks_override=marks_override,
             is_required=is_required,
@@ -673,12 +694,54 @@ class AssessmentRepository:
         )
         return list(result.scalars().all())
 
+    async def list_assessment_questions_for_group(
+        self,
+        assessment_id: uuid.UUID,
+        group_id: uuid.UUID | None = None,
+    ) -> list[AssessmentQuestion]:
+        stmt = (
+            select(AssessmentQuestion)
+            .options(
+                selectinload("question"),
+                selectinload("question.options"),
+            )
+            .where(col(AssessmentQuestion.assessment_id) == assessment_id)
+        )
+        if group_id is None:
+            stmt = stmt.where(col(AssessmentQuestion.group_id).is_(None))
+        else:
+            stmt = stmt.where(
+                (col(AssessmentQuestion.group_id) == group_id)
+                | (col(AssessmentQuestion.group_id).is_(None))
+            )
+        stmt = stmt.order_by(col(AssessmentQuestion.order_index))
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def count_questions(self, assessment_id: uuid.UUID) -> int:
         result = await self.db.execute(
             select(func.count(col(AssessmentQuestion.id))).where(
                 col(AssessmentQuestion.assessment_id) == assessment_id
             )
         )
+        return result.scalar_one()
+
+    async def count_questions_for_group(
+        self,
+        assessment_id: uuid.UUID,
+        group_id: uuid.UUID | None,
+    ) -> int:
+        stmt = select(func.count(col(AssessmentQuestion.id))).where(
+            col(AssessmentQuestion.assessment_id) == assessment_id
+        )
+        if group_id is None:
+            stmt = stmt.where(col(AssessmentQuestion.group_id).is_(None))
+        else:
+            stmt = stmt.where(
+                (col(AssessmentQuestion.group_id) == group_id)
+                | (col(AssessmentQuestion.group_id).is_(None))
+            )
+        result = await self.db.execute(stmt)
         return result.scalar_one()
 
     async def sum_marks(self, assessment_id: uuid.UUID) -> int:
@@ -1263,7 +1326,7 @@ class AssessmentRepository:
             - Student is enrolled in a class section targeted by this assessment
               OR (no targets defined AND student enrolled in assessment's course)
         """
-        from app.db.models.academic import Course, StudentEnrollment, ClassSection
+        from app.db.models.academic import Course, StudentEnrollment, ClassSection, TeachingWorkspace
         now = _utcnow()
         
         # Base filters
@@ -1327,7 +1390,11 @@ class AssessmentRepository:
 
         result = await self.db.execute(
             select(Assessment)
-            .options(selectinload(Assessment.course))
+            .options(
+                selectinload(Assessment.course),
+                selectinload(Assessment.subject),
+                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course)
+            )
             .where(*filters)
             .order_by(order_by)
             .offset((page - 1) * page_size)

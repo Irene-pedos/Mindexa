@@ -46,7 +46,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey, text
+from sqlalchemy import Column, DateTime, ForeignKey, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -261,10 +261,12 @@ class IntegrityWarning(BaseModel, table=True):
     issued_at: datetime = Field(
         default_factory=utcnow,
         nullable=False,
+        sa_type=DateTime(timezone=True),
     )
     acknowledged_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
     )
     # Link to triggering event (for audit)
     trigger_event_id: uuid.UUID | None = Field(
@@ -327,10 +329,12 @@ class SupervisionSession(BaseModel, table=True):
     started_at: datetime = Field(
         default_factory=utcnow,
         nullable=False,
+        sa_type=DateTime(timezone=True),
     )
     ended_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
     )
 
     # -- Relationships --------------------------------------------------------

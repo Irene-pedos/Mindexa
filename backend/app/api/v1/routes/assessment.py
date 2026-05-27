@@ -62,6 +62,7 @@ def _service(db: AsyncSession) -> AssessmentService:
 @router.post(
     "",
     status_code=status.HTTP_201_CREATED,
+    response_model=AssessmentDetailResponse,
     summary="Create a new assessment (wizard step 1)",
     description=(
         "Creates a draft assessment. This is the first step of the 6-step "
@@ -166,10 +167,10 @@ async def update_security_settings(
     )
     return AssessmentDetailResponse.model_validate(assessment)
 
-
 @router.delete(
     "/{assessment_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Soft delete an assessment",
     description=(
         "Soft-deletes a draft assessment. "
@@ -309,6 +310,7 @@ async def update_section(
 @router.delete(
     "/{assessment_id}/sections/{section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Delete a section",
 )
 async def delete_section(
@@ -356,6 +358,7 @@ async def add_question(
 @router.delete(
     "/{assessment_id}/questions/{question_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Remove a question from this assessment",
 )
 async def remove_question(

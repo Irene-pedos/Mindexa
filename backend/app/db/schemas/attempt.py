@@ -12,6 +12,7 @@ from typing import Any
 
 from pydantic import Field
 
+from app.db.enums import GroupSubmissionStatus, QuestionDistributionMode
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ class AttemptStartRequest(MindexaSchema):
     )
 
 
-class AttemptResponse(BaseAuditedResponse):
+class AttemptDBSchema(BaseAuditedResponse):
     """
     Returned to the student when an attempt is started or resumed.
     Includes server_deadline so the frontend can show an accurate timer.
@@ -43,6 +44,10 @@ class AttemptResponse(BaseAuditedResponse):
 
     student_id: uuid.UUID
     assessment_id: uuid.UUID
+    group_id: uuid.UUID | None = None
+    group_submission_id: uuid.UUID | None = None
+    group_submission_status: GroupSubmissionStatus | None = None
+    question_distribution_mode: QuestionDistributionMode | None = None
     attempt_number: int
     status: str
     started_at: datetime | None

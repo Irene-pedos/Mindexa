@@ -119,51 +119,63 @@ export default function AdminAnalyticsPage() {
         <Card className="lg:col-span-2 border shadow-none">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Shield className="size-4 text-muted-foreground" /> Integrity Hotspots
+              <Activity className="size-4 text-muted-foreground" /> AI Grading Adoption
             </CardTitle>
-            <CardDescription className="text-xs">Courses with highest recorded integrity flags</CardDescription>
+            <CardDescription className="text-xs">Distribution of assessments by AI grading mode</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {loading ? (
-                [1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full rounded-lg" />)
-              ) : data?.integrity_hotspots.map((item, idx) => (
-                <div key={idx} className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="text-xs font-bold text-muted-foreground w-4">{idx + 1}.</span>
-                    <span className="text-xs font-medium">{item.course}</span>
+                [1, 2, 3].map(i => <Skeleton key={i} className="h-24 rounded-2xl border" />)
+              ) : data?.ai_grading_stats.map((stat, idx) => (
+                <div key={idx} className="p-4 rounded-2xl bg-muted/30 border border-muted/50 flex flex-col justify-center items-center text-center gap-1">
+                  <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{stat.mode.replace(/_/g, ' ')}</div>
+                  <div className="text-2xl font-black">{stat.count}</div>
+                  <div className="text-[9px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                    {Math.round((stat.count / (data.ai_grading_stats.reduce((acc, curr) => acc + curr.count, 0) || 1)) * 100)}% Usage
                   </div>
-                  <div className="flex items-center gap-4 flex-1 max-w-[160px] px-4">
-                    <div className="h-1.5 flex-1 bg-muted rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-primary/60" 
-                        style={{ width: `${(item.flags / (data.integrity_hotspots[0]?.flags || 1)) * 100}%` }} 
-                      />
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="rounded-md px-2 py-0 h-5 text-[10px] font-bold">{item.flags} Flags</Badge>
                 </div>
               ))}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border shadow-none bg-muted/20">
+        <Card className="border shadow-none">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm">Key Insights</CardTitle>
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Shield className="size-4 text-muted-foreground" /> Integrity Hotspots
+            </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {loading ? (
-              [1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)
-            ) : data?.key_insights.map((insight, idx) => (
-              <div key={idx} className="p-3 rounded-xl bg-white border text-xs font-medium flex gap-2.5 items-start">
-                <div className="size-1.5 rounded-full bg-primary mt-1 shrink-0" />
-                {insight}
-              </div>
-            ))}
+          <CardContent>
+            <div className="space-y-4">
+              {loading ? (
+                [1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full rounded-lg" />)
+              ) : data?.integrity_hotspots.slice(0, 5).map((item, idx) => (
+                <div key={idx} className="flex items-center justify-between">
+                  <span className="text-xs font-medium truncate max-w-[120px]">{item.course}</span>
+                  <Badge variant="outline" className="rounded-md px-2 py-0 h-5 text-[10px] font-bold">{item.flags} Flags</Badge>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
       </div>
+
+      <Card className="border shadow-none bg-muted/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Key Insights</CardTitle>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {loading ? (
+            [1, 2, 3].map(i => <Skeleton key={i} className="h-12 w-full rounded-lg" />)
+          ) : data?.key_insights.map((insight, idx) => (
+            <div key={idx} className="p-3 rounded-xl bg-white border text-xs font-medium flex gap-2.5 items-start">
+              <div className="size-1.5 rounded-full bg-primary mt-1 shrink-0" />
+              {insight}
+            </div>
+          ))}
+        </CardContent>
+      </Card>
     </div>
   );
 }

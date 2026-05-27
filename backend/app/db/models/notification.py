@@ -72,7 +72,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, ForeignKey, UniqueConstraint, DateTime
 from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
@@ -108,6 +108,7 @@ class Notification(BaseModel, table=True):
         INTEGRITY_ALERT       → Lecturer: "Integrity flag raised on attempt."
         REASSESSMENT_REQUEST  → Lecturer: "Student requested reassessment."
         REVIEW_REQUEST        → Lecturer: "Student submitted an appeal."
+        TEACHING_ASSIGNMENT_CREATED → Lecturer: "New academic assignment."
         SYSTEM_ANNOUNCEMENT   → All roles: platform-level announcement.
 
     channel (NotificationChannel enum):
@@ -213,10 +214,7 @@ class Notification(BaseModel, table=True):
 
     reference_id: uuid.UUID | None = Field(
         default=None,
-        nullable=True,
-        # Plain UUID — the referenced object's PK. No FK declared because
-        # reference_type determines which table this points to and SQLAlchemy
-        # does not support polymorphic FK references natively.
+        sa_column=Column(UUID(as_uuid=True), nullable=True),
     )
     reference_type: str | None = Field(
         default=None,
@@ -227,15 +225,24 @@ class Notification(BaseModel, table=True):
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_read: bool = Field(default=False, nullable=False)
-    read_at: datetime | None = Field(default=None, nullable=True)
+    read_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     is_dismissed: bool = Field(default=False, nullable=False)
-    dismissed_at: datetime | None = Field(default=None, nullable=True)
+    dismissed_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
 
     # ── Delivery tracking ─────────────────────────────────────────────────────
 
     delivered_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
     )
     delivery_error: str | None = Field(
         default=None,
@@ -250,6 +257,7 @@ class Notification(BaseModel, table=True):
     expires_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
     )
     is_expired: bool = Field(default=False, nullable=False)
 

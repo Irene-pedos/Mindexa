@@ -82,6 +82,24 @@ class User(BaseModel, table=True):
         sa_column=Column(DateTime(timezone=True), nullable=True),
     )
 
+    # ── Onboarding & External Integration ─────────────────────────────────────
+    onboarding_completed: bool = Field(
+        default=False, 
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
+    )
+    external_id: Optional[str] = Field(
+        default=None, 
+        max_length=100, 
+        index=True,
+        sa_column_kwargs={"comment": "External ID from MIS/SIS systems"}
+    )
+    source_system: Optional[str] = Field(
+        default=None, 
+        max_length=50,
+        sa_column_kwargs={"comment": "Source system name (e.g. RP_MIS)"}
+    )
+
     # ── Relationships ─────────────────────────────────────────────────────────
     profile: Optional["UserProfile"] = Relationship(
         back_populates="user",
@@ -128,6 +146,62 @@ class UserProfile(BaseModel, table=True):
     option: Optional[str] = Field(default=None, max_length=150)
     level: Optional[str] = Field(default=None, max_length=20)
     year: Optional[str] = Field(default=None, max_length=20)
+
+    # ── Relational Academic Assignment ────────────────────────────────────────
+    institution_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("institution.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    campus_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("campus.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    college_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("college.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    department_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("department.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    option_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("option.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
+    class_section_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("class_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     user: Optional["User"] = Relationship(back_populates="profile")

@@ -74,6 +74,9 @@ from app.db.schemas.auth import (
     UserProfileUpdate,
     UserRegisterRequest,
     UserResponse,
+    VerifyEmailRequest,
+    StudentOnboardingRequest,
+    LecturerOnboardingRequest,
 )
 from app.db.session import get_db
 from app.dependencies.auth import (
@@ -164,8 +167,12 @@ def _build_user_response(user) -> UserResponse:
             option=getattr(user.profile, "option", None),
             level=getattr(user.profile, "level", None),
             year=getattr(user.profile, "year", None),
+            # Relational IDs
+            institution_id=getattr(user.profile, "institution_id", None),
+            department_id=getattr(user.profile, "department_id", None),
+            option_id=getattr(user.profile, "option_id", None),
+            class_section_id=getattr(user.profile, "class_section_id", None),
         )
-
 
     return UserResponse(
         id=user.id,
@@ -175,6 +182,7 @@ def _build_user_response(user) -> UserResponse:
         role=user.role,
         status=user.status,
         email_verified=user.email_verified,
+        onboarding_completed=getattr(user, "onboarding_completed", False),
         email_verified_at=getattr(user, "email_verified_at", None),
         last_login_at=getattr(user, "last_login_at", None),
         profile=profile_response,
@@ -275,29 +283,22 @@ async def register(
         first_name=body.first_name,
         last_name=body.last_name,
         role=UserRole(body.role.value) if hasattr(body.role, "value") else UserRole(str(body.role)),
+        phone_number=body.phone_number,
         reg_number=body.reg_number,
-        college=body.college,
-        department=body.department,
-        option=body.option,
-        level=body.level,
-        year=body.year,
+        staff_id=body.staff_id,
         ip_address=ip,
-        institution_ids=body.institution_ids,
-        department_ids=body.department_ids,
-        option_ids=body.option_ids,
     )
 
     # ── EMAIL SENDING HOOK ────────────────────────────────────────────────────
     # Dispatch verification email via Celery (only for students who get a token)
     if raw_verification_token:
-        verification_url = settings.build_verification_url(raw_verification_token)
         _queue_email_notification(
             to_email=user.email,
             subject="Verify your Mindexa account",
             template_name="verification",
             context={
                 "first_name": body.first_name,
-                "verification_url": verification_url,
+                "otp_code": raw_verification_token,
                 "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
                 "app_name": settings.APP_NAME,
             },
@@ -453,6 +454,7 @@ async def refresh_tokens(
 @router.post(
     "/logout",
     status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
     summary="Revoke the current session",
     description=(
         "Invalidate the current refresh token, ending this session. "
@@ -545,44 +547,31 @@ async def logout_all_sessions(
 # EMAIL VERIFICATION
 # ─────────────────────────────────────────────────────────────────────────────
 
-@router.get(
+@router.post(
     "/verify-email",
     response_model=AuthMessageResponse,
     status_code=status.HTTP_200_OK,
     summary="Verify email address",
     description=(
-        "Verify a user's email address using the token from the verification email. "
-        "The token is passed as a query parameter. "
+        "Verify a user's email address using the 6-digit OTP from the verification email. "
+        "The OTP is passed in the request body. "
         "On success, the account is activated and the user can access all features."
     ),
 )
 async def verify_email(
-    token: str,
+    body: VerifyEmailRequest,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> AuthMessageResponse:
     """
-    Verify email from verification link.
+    Verify email from verification OTP.
 
     PUBLIC ENDPOINT — accessible without authentication.
-
-    The verification link sent in the email looks like:
-        https://app.mindexa.ac/verify-email?token=<raw_token>
-
-    The frontend calls this endpoint with the token from the URL.
-
-    Returns success even if the token is invalid — prevents confirming
-    whether an email address is registered.
-
-    ACTUALLY: we do raise errors for invalid tokens since:
-        1. The token is high-entropy (not guessable)
-        2. Users need clear feedback to know if the link expired
-        3. The email address isn't revealed by the error
     """
     ip = _get_client_ip(request)
     service = AuthService(db)
 
-    await service.verify_email(raw_token=token, ip_address=ip)
+    await service.verify_email(raw_token=body.token, ip_address=ip)
 
     return AuthMessageResponse(
         message=(
@@ -634,14 +623,13 @@ async def resend_verification(
     if raw_token and user:
         # ── EMAIL SENDING HOOK ────────────────────────────────────────────────
         # Dispatch new verification email via Celery
-        verification_url = settings.build_verification_url(raw_token)
         _queue_email_notification(
             to_email=user.email,
             subject="Verify your Mindexa account",
             template_name="verification",
             context={
                 "first_name": user.profile.first_name if user.profile else "there",
-                "verification_url": verification_url,
+                "otp_code": raw_token,
                 "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
                 "app_name": settings.APP_NAME,
             },
@@ -854,6 +842,57 @@ async def update_me(
     await db.refresh(profile)
 
     return _build_user_response(current_user)
+
+
+@router.post(
+    "/me/onboarding/student",
+    response_model=UserResponse,
+    summary="Complete student onboarding",
+)
+async def complete_student_onboarding(
+    body: StudentOnboardingRequest,
+    current_user: VerifiedUser,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """
+    Phase 2: Complete academic onboarding for students.
+    """
+    service = AuthService(db)
+    user = await service.complete_student_onboarding(
+        user_id=current_user.id,
+        institution_id=body.institution_id,
+        campus_id=body.campus_id,
+        college_id=body.college_id,
+        department_id=body.department_id,
+        option_id=body.option_id,
+        level=body.level,
+        year=body.year,
+        class_section_id=body.class_section_id,
+    )
+    return _build_user_response(user)
+
+
+@router.post(
+    "/me/onboarding/lecturer",
+    response_model=UserResponse,
+    summary="Complete lecturer onboarding",
+)
+async def complete_lecturer_onboarding(
+    body: LecturerOnboardingRequest,
+    current_user: VerifiedUser,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """
+    Phase 2: Complete profile onboarding for lecturers.
+    """
+    service = AuthService(db)
+    user = await service.complete_lecturer_onboarding(
+        user_id=current_user.id,
+        bio=body.bio,
+        profile_picture_url=body.profile_picture_url,
+        phone_number=body.phone_number,
+    )
+    return _build_user_response(user)
 
 
 @router.post(

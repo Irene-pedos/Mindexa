@@ -64,13 +64,13 @@ class ResourceService:
         with open(absolute_path, "wb") as f:
             f.write(content)
 
-        # 5. Handle versioning (mark old versions of this filename as not current)
-        if metadata.course_id:
-            await self.repo.mark_superseded(metadata.course_id, file.filename)
+        # 5. Handle versioning (mark old versions of this filename as not current in this workspace)
+        await self.repo.mark_superseded(metadata.teaching_workspace_id, file.filename)
 
         # 6. Create DB record
         material = LecturerMaterial(
             lecturer_id=lecturer_id,
+            teaching_workspace_id=metadata.teaching_workspace_id,
             course_id=metadata.course_id,
             assessment_id=metadata.assessment_id,
             original_filename=file.filename,
@@ -91,9 +91,9 @@ class ResourceService:
 
         return material
 
-    async def list_course_materials(self, course_id: uuid.UUID) -> List[LecturerMaterial]:
-        """List current materials for a course."""
-        return await self.repo.list_materials_by_course(course_id)
+    async def list_workspace_materials(self, workspace_id: uuid.UUID) -> List[LecturerMaterial]:
+        """List current materials for a workspace."""
+        return await self.repo.list_materials_by_workspace(workspace_id)
 
     async def get_material(self, material_id: uuid.UUID) -> Optional[LecturerMaterial]:
         """Get a specific material."""

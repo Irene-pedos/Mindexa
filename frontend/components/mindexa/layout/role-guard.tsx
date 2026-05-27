@@ -12,11 +12,11 @@ export function RoleGuard({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, loading, isInitializing } = useAuth();
 
   // Public routes that don't need role protection
-  const publicRoutes = ["/", "/login", "/signup"];
+  const publicRoutes = ["/", "/login", "/signup", "/onboarding", "/forgot-password", "/reset-password"];
 
   const isPublicRoute = publicRoutes.some((route) => {
     if (route === "/") return pathname === "/";
-    return pathname.startsWith(route);
+    return pathname === route || pathname.startsWith(route + "/");
   });
 
   useEffect(() => {
@@ -37,7 +37,15 @@ export function RoleGuard({ children }: { children: ReactNode }) {
       return;
     }
 
-    // 4. Role-based protection
+    // 4. Force Onboarding if not completed (except for admins)
+    const isAdmin = userRole === "admin" || userRole === "super_admin";
+    if (!user?.onboarding_completed && pathname !== "/onboarding" && !isAdmin) {
+        console.warn("[RoleGuard] Redirecting to /onboarding — incomplete profile");
+        router.replace("/onboarding");
+        return;
+    }
+
+    // 5. Role-based protection
     console.log("[RoleGuard] Current path:", pathname, "User Role:", userRole);
 
     if (pathname.startsWith("/lecturer") && userRole !== "lecturer") {

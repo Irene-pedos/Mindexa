@@ -162,3 +162,26 @@ class AttemptGradingSummary(BaseModel):
     ai_suggested_count: int
     manual_count: int
     is_fully_graded: bool
+
+
+class GroupSubmissionSummary(BaseModel):
+    """Simplified summary of a group submission for the grading queue."""
+    id: uuid.UUID
+    group_id: uuid.UUID
+    group_name: str
+    assessment_id: uuid.UUID
+    assessment_title: str
+    member_count: int
+    status: str
+    score: float | None = None
+    max_score: float | None = None
+    submitted_at: datetime | None = None
+    has_active_appeal: bool = False
+
+
+class GroupGradingQueueListResponse(BaseModel):
+    """Paginated list of group submissions for grading."""
+    items: list[GroupSubmissionSummary]
+    total: int
+    page: int
+    page_size: int

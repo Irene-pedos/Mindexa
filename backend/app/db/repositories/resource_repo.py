@@ -7,7 +7,7 @@ Repository for student resources and lecturer materials.
 import uuid
 from typing import List, Optional
 
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.resource import LecturerMaterial, StudentResource
@@ -20,10 +20,24 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
 
     # ── Lecturer Materials ──────────────────────────────────────────────────
 
+    async def list_materials_by_workspace(
+        self, workspace_id: uuid.UUID, is_current: bool = True
+    ) -> List[LecturerMaterial]:
+        """List all current materials for a workspace."""
+        stmt = select(LecturerMaterial).where(
+            and_(
+                LecturerMaterial.teaching_workspace_id == workspace_id,
+                LecturerMaterial.is_current == is_current,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_materials_by_course(
         self, course_id: uuid.UUID, is_current: bool = True
     ) -> List[LecturerMaterial]:
-        """List all materials for a course."""
+        """List all current materials for a course (Admin view)."""
         stmt = select(LecturerMaterial).where(
             and_(
                 LecturerMaterial.course_id == course_id,
@@ -50,17 +64,17 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
 
     async def get_material_by_id(self, material_id: uuid.UUID) -> Optional[LecturerMaterial]:
         """Fetch a single material by ID."""
-        return await self.get_by_id_simple(material_id)
+        return await self.get_by_id(material_id)
 
-    async def mark_superseded(self, course_id: uuid.UUID, original_filename: str) -> None:
-        """Mark old versions of a file as not current."""
+    async def mark_superseded(self, workspace_id: uuid.UUID, original_filename: str) -> None:
+        """Mark old versions of a file as not current within a workspace."""
         from sqlalchemy import update
 
         stmt = (
             update(LecturerMaterial)
             .where(
                 and_(
-                    LecturerMaterial.course_id == course_id,
+                    LecturerMaterial.teaching_workspace_id == workspace_id,
                     LecturerMaterial.original_filename == original_filename,
                     LecturerMaterial.is_current == True,
                 )

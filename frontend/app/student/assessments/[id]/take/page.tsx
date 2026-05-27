@@ -1,89 +1,543 @@
 // app/student/assessments/[id]/take/page.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useEffect, useState, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
+  CardFooter,
 } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
+import { Separator } from "@/components/ui/separator";
 import {
+  Clock,
   Timer,
+  Check,
   AlertTriangle,
   ArrowLeft,
   ArrowRight,
-  CheckCircle,
-  ShieldCheck,
+  Shield,
   Lock,
   Monitor,
-  BookOpen,
-  Save,
-  EyeOff,
+  CheckCircle,
+  PlayCircle,
+  FileText,
+  ChevronUp,
+  ChevronDown,
+  ChevronRight,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { submissionApi } from "@/lib/api/submission";
-import { integrityApi } from "@/lib/api/integrity";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-type Stage =
-  | "intro"
-  | "password"
-  | "readiness"
-  | "taking"
-  | "submitted"
-  | "terminated";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { getAssessmentProgressStatus, isHighSecurityAssessment } from "@/lib/grading-architecture";
 
-export default function StudentAssessmentTake() {
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  useDraggable,
+  useDroppable,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+
+type Stage = "intro" | "password" | "readiness" | "taking" | "submitted" | "terminated";
+
+// --- DnD Components for Matching Pairs ---
+
+function DraggableMatchResponse({ id, text, isUsed }: { id: string, text: string, isUsed: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id,
+    data: { text }
+  });
+  
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 100 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        "px-4 py-2.5 rounded-xl bg-background border-2 border-primary/20 text-primary font-bold text-sm cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
+        isDragging && "shadow-xl border-primary scale-105 -rotate-1",
+        isUsed && "opacity-20 grayscale pointer-events-none border-dashed"
+      )}
+    >
+      {text}
+    </div>
+  );
+}
+
+function DroppableMatchTarget({ premiseId, premiseText, matchedValue, onRemove }: { premiseId: string, premiseText: string, matchedValue?: string, onRemove: () => void }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `target-${premiseId}`,
+  });
+
+  return (
+    <div 
+      ref={setNodeRef}
+      className={cn(
+        "flex items-center gap-4 p-5 rounded-2xl border-2 transition-all",
+        isOver ? "bg-primary/10 border-primary border-solid scale-[1.02]" : 
+        matchedValue ? "bg-primary/5 border-primary/40 border-solid" : "bg-background border-muted/30 border-dashed hover:border-muted-foreground/20"
+      )}
+    >
+      <div className="flex-1 text-sm font-semibold text-foreground/70 leading-relaxed">{premiseText}</div>
+      <div className="shrink-0 text-muted-foreground/20"><ArrowRight className="size-4" /></div>
+      <div className={cn(
+        "w-[260px] h-12 rounded-xl flex items-center justify-center px-4 transition-all relative group",
+        matchedValue ? "bg-primary text-white shadow-md" : "bg-muted/30 border-2 border-dashed border-muted-foreground/10"
+      )}>
+        {matchedValue ? (
+            <>
+                <span className="font-bold text-xs uppercase tracking-wider truncate">{matchedValue}</span>
+                <button 
+                    onClick={(e) => { e.stopPropagation(); onRemove(); }}
+                    className="absolute -top-2 -right-2 size-5 rounded-full bg-destructive text-white flex items-center justify-center shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                >
+                    <X className="size-3" />
+                </button>
+            </>
+        ) : (
+            <span className="text-[10px] font-bold text-muted-foreground/30 uppercase tracking-[0.15em] animate-pulse">Drop here</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MatchingDnd({ q, currentVal, setAnswers, renderDebugBadge }: any) {
+  const matchingAnswers = currentVal || {};
+  
+  const premises = useMemo(() => {
+    return (q.options || []).filter((o: any) => o.text || o.option_text);
+  }, [q.options]);
+
+  const responses = useMemo(() => {
+    const raw = (q.options || []).map((o: any) => o.option_text_right || o.match_value || o.text || o.option_text);
+    return Array.from(new Set(raw)).filter(Boolean).map((text, i) => ({
+      id: `resp-${i}`,
+      text: text as string
+    }));
+  }, [q.options]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && over.id.toString().startsWith("target-")) {
+      const premiseId = over.id.toString().replace("target-", "");
+      const droppedText = active.data.current?.text;
+      
+      if (droppedText) {
+        setAnswers((prev: any) => ({
+          ...prev,
+          [q.id]: { ...matchingAnswers, [premiseId]: droppedText }
+        }));
+      }
+    }
+  };
+
+  const removeMatch = (premiseId: string) => {
+    const newMatches = { ...matchingAnswers };
+    delete newMatches[premiseId];
+    setAnswers((prev: any) => ({
+      ...prev,
+      [q.id]: newMatches
+    }));
+  };
+
+  const matchedValues = Object.values(matchingAnswers) as string[];
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="space-y-8 relative">
+        {renderDebugBadge()}
+        
+        <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 flex items-center justify-between text-[11px] font-bold uppercase tracking-widest text-primary">
+            <span>Premise Matrix</span>
+            <div className="flex items-center gap-2">
+                <ChevronRight className="size-4 opacity-40" />
+                <span>Target Correlation</span>
+            </div>
+        </div>
+
+        <div className="grid gap-3">
+          {premises.map((p: any) => (
+            <DroppableMatchTarget 
+                key={p.id} 
+                premiseId={p.id} 
+                premiseText={p.text || p.option_text} 
+                matchedValue={matchingAnswers[p.id]} 
+                onRemove={() => removeMatch(p.id)}
+            />
+          ))}
+        </div>
+
+        <div className="space-y-4 pt-6 border-t border-dashed">
+            <div className="flex items-center justify-center gap-3">
+                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Response Pool</span>
+            </div>
+            <div className="flex flex-wrap justify-center gap-3 p-6 rounded-2xl bg-muted/5 border-2 border-dashed border-muted/40">
+                {responses.map((r) => (
+                    <DraggableMatchResponse 
+                        key={r.id} 
+                        id={r.id} 
+                        text={r.text} 
+                        isUsed={matchedValues.includes(r.text)} 
+                    />
+                ))}
+            </div>
+            <p className="text-center text-[10px] text-muted-foreground/60 font-medium uppercase tracking-tight italic">Associate each response node with its corresponding premise target</p>
+        </div>
+      </div>
+    </DndContext>
+  );
+}
+
+// --- DnD Components for Fill-in-the-Blanks ---
+
+function DraggableFillBlankAnswer({ id, text, isUsed }: { id: string, text: string, isUsed: boolean }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id,
+    data: { text }
+  });
+  
+  const style = {
+    transform: CSS.Translate.toString(transform),
+    zIndex: isDragging ? 100 : 1,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      {...listeners}
+      {...attributes}
+      className={cn(
+        "px-4 py-2 rounded-xl bg-background border-2 border-primary/20 text-primary font-bold text-sm cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
+        isDragging && "shadow-xl border-primary scale-105 rotate-1",
+        isUsed && "opacity-20 grayscale pointer-events-none border-dashed"
+      )}
+    >
+      {text}
+    </div>
+  );
+}
+
+function DroppableBlank({ index, value, onRemove }: { index: number, value?: string, onRemove: () => void }) {
+  const { isOver, setNodeRef } = useDroppable({
+    id: `blank-${index}`,
+  });
+
+  return (
+    <span
+      ref={setNodeRef}
+      className={cn(
+        "inline-flex items-center justify-center min-w-[140px] h-10 mx-1 border-b-2 transition-all rounded-t-xl px-3 relative top-1",
+        isOver ? "bg-primary/20 border-primary shadow-[inset_0_2px_4px_rgba(0,0,0,0.06)]" : 
+        value ? "bg-primary/10 border-primary/60" : "bg-muted/40 border-muted-foreground/20",
+      )}
+    >
+      {value ? (
+        <span 
+          className="text-primary font-bold text-[15px] flex items-center gap-2 cursor-pointer group"
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        >
+          {value}
+          <X className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary/60 hover:text-primary" />
+        </span>
+      ) : (
+        <span className="text-muted-foreground/30 text-[10px] font-bold uppercase tracking-widest animate-pulse">Drop here</span>
+      )}
+    </span>
+  );
+}
+
+function FillInTheBlanksDnd({ q, currentVal, setAnswers, renderDebugBadge }: any) {
+  const rawText = q.text || q.content || "";
+  const parts = rawText.split("[blank]");
+  const blankAnswers = currentVal || {};
+  
+  const pool = useMemo(() => {
+    return (q.options || []).map((o: any, i: number) => ({
+      id: o.id || `pool-${i}`,
+      text: o.option_text || o.text || ""
+    }));
+  }, [q.options]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor)
+  );
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (over && over.id.toString().startsWith("blank-")) {
+      const blankIndex = over.id.toString().split("-")[1];
+      const droppedText = active.data.current?.text;
+      
+      if (droppedText) {
+        setAnswers((prev: any) => ({
+          ...prev,
+          [q.id]: { ...blankAnswers, [blankIndex]: droppedText }
+        }));
+      }
+    }
+  };
+
+  const removeAnswer = (index: number) => {
+    const newAnswers = { ...blankAnswers };
+    delete newAnswers[index];
+    setAnswers((prev: any) => ({
+      ...prev,
+      [q.id]: newAnswers
+    }));
+  };
+
+  const usedAnswers = Object.values(blankAnswers) as string[];
+
+  return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <div className="space-y-10 relative">
+        {renderDebugBadge()}
+        
+        <div className="p-12 rounded-2xl border-2 border-muted/30 bg-background leading-[3] text-[18px] font-medium text-foreground/80 shadow-[inset_0_2px_10px_rgba(0,0,0,0.02)]">
+          {parts.map((part: string, i: number) => (
+            <React.Fragment key={i}>
+              <span className="whitespace-pre-wrap">{part}</span>
+              {i < parts.length - 1 && (
+                <DroppableBlank 
+                  index={i} 
+                  value={blankAnswers[i]} 
+                  onRemove={() => removeAnswer(i)} 
+                />
+              )}
+            </React.Fragment>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center gap-3 px-2">
+             <div className="h-px flex-1 bg-muted/50" />
+             <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Response Pool</span>
+             <div className="h-px flex-1 bg-muted/50" />
+          </div>
+          
+          <div className="flex flex-wrap justify-center gap-3 p-6 rounded-2xl bg-muted/5 border-2 border-dashed border-muted/40">
+            {pool.map((ans: any) => (
+              <DraggableFillBlankAnswer 
+                key={ans.id} 
+                id={ans.id} 
+                text={ans.text} 
+                isUsed={usedAnswers.includes(ans.text)} 
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+    </DndContext>
+  );
+}
+
+// --- DnD Components for Ordering ---
+
+function SortableOrderItem({ id, index, text, onMoveUp, onMoveDown, isFirst, isLast }: { id: string, index: number, text: string, onMoveUp: () => void, onMoveDown: () => void, isFirst: boolean, isLast: boolean }) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    position: 'relative' as const,
+  };
+
+  return (
+    <div 
+      ref={setNodeRef} 
+      style={style} 
+      className={cn(
+        "flex items-center gap-4 p-4 rounded-xl border bg-background group transition-all",
+        isDragging ? "shadow-lg border-primary/50" : "hover:border-primary/10"
+      )}
+    >
+      <div 
+        {...attributes} 
+        {...listeners} 
+        className="size-7 rounded-lg bg-muted/50 flex items-center justify-center text-xs font-bold text-muted-foreground cursor-grab active:cursor-grabbing"
+      >
+        {index + 1}
+      </div>
+      <div className="flex-1 text-[15px] font-medium">{text}</div>
+      <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <Button variant="ghost" size="icon" className="size-8" onClick={onMoveUp} disabled={isFirst}><ChevronUp className="size-4" /></Button>
+        <Button variant="ghost" size="icon" className="size-8" onClick={onMoveDown} disabled={isLast}><ChevronDown className="size-4" /></Button>
+      </div>
+    </div>
+  );
+}
+
+function OrderingQuestion({ q, currentVal, setAnswers, renderDebugBadge }: any) {
+  const currentOrder = currentVal || q.options?.map((o: any) => o.id) || [];
+  
+  const moveItem = (from: number, to: number) => {
+      const newOrder = [...currentOrder];
+      const [removed] = newOrder.splice(from, 1);
+      newOrder.splice(to, 0, removed);
+      setAnswers((prev: any) => ({ ...prev, [q.id]: newOrder }));
+  };
+  
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+  
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active && over && active.id !== over.id) {
+      const oldIndex = currentOrder.indexOf(active.id);
+      const newIndex = currentOrder.indexOf(over.id);
+      const newOrder = arrayMove(currentOrder, oldIndex, newIndex);
+      setAnswers((prev: any) => ({ ...prev, [q.id]: newOrder }));
+    }
+  };
+
+  return (
+    <div className="space-y-4 relative">
+       {renderDebugBadge()}
+       <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-2 px-1">Sequence the items correctly</div>
+       
+       <DndContext 
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragEnd={handleDragEnd}
+          modifiers={[restrictToVerticalAxis]}
+       >
+          <SortableContext 
+            items={currentOrder}
+            strategy={verticalListSortingStrategy}
+          >
+             <div className="space-y-2">
+               {currentOrder.map((optId: string, idx: number) => {
+                  const opt = q.options?.find((o: any) => o.id === optId);
+                  return (
+                      <SortableOrderItem 
+                        key={optId} 
+                        id={optId} 
+                        index={idx} 
+                        text={opt?.text || opt?.option_text || "Sequencing Item"} 
+                        onMoveUp={() => idx > 0 && moveItem(idx, idx - 1)}
+                        onMoveDown={() => idx < currentOrder.length - 1 && moveItem(idx, idx + 1)}
+                        isFirst={idx === 0}
+                        isLast={idx === currentOrder.length - 1}
+                      />
+                  );
+               })}
+             </div>
+          </SortableContext>
+       </DndContext>
+    </div>
+  );
+}
+
+export default function TakeAssessmentPage() {
   const params = useParams();
   const router = useRouter();
   const assessmentId = params.id as string;
 
-  // ── Core state ─────────────────────────────────────────────────────
+  const [stage, setStage] = useState<Stage>("intro");
   const [assessment, setAssessment] = useState<any>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
   const [questions, setQuestions] = useState<any[]>([]);
-  const [stage, setStage] = useState<Stage>("intro");
-  const [timeLeft, setTimeLeft] = useState(0);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string | number, any>>({});
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  
+  // Integrity state
   const [warnings, setWarnings] = useState(0);
   const [showWarningModal, setShowWarningModal] = useState(false);
-  const [activeWarning, setActiveWarning] = useState<any>(null);
-  const [lastSaved, setLastSaved] = useState<Date | null>(null);
-  const [passwordInput, setPasswordInput] = useState("");
-  const [passwordError, setPasswordError] = useState(false);
-  const [readinessChecked, setReadinessChecked] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [terminationReason, setTerminationReason] = useState<string | null>(
-    null,
-  );
-  const [loading, setLoading] = useState(true);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [terminationReason, setTerminationReason] = useState<string | null>(null);
 
+  // Form states
+  const [passwordInput, setPasswordInput] = useState("");
+  const [readinessChecked, setReadinessChecked] = useState(false);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+
+  const currentQ = questions[currentQuestionIndex];
+
+  const isHighSecurity = useMemo(() => isHighSecurityAssessment(assessment?.assessment_type, assessment?.is_supervised), [assessment]);
+
+  // 1. Initial Load
   useEffect(() => {
     async function loadAssessment() {
       try {
+        setLoading(true);
         const data = await assessmentApi.getAssessmentById(assessmentId);
         setAssessment(data);
-        setTimeLeft((data.duration_minutes || 90) * 60);
-        // If there are blueprints/questions, load them here if returned by the API
       } catch (err: any) {
-        toast.error("Failed to load assessment");
+        toast.error(err.message || "Failed to load assessment context.");
         router.push("/student/assessments");
       } finally {
         setLoading(false);
@@ -92,267 +546,169 @@ export default function StudentAssessmentTake() {
     loadAssessment();
   }, [assessmentId, router]);
 
-  const currentQ = questions[currentQuestionIndex];
-
-  // ── Navigation & Submit ───────────────────────────────────────────
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
-
-  const handleAutoSubmit = useCallback(async () => {
-    setSubmitted(true);
-    if (attemptId && attemptToken) {
-      try {
-        await attemptApi.submitAttempt(attemptId, attemptToken);
-        toast.success("Assessment auto-submitted");
-      } catch (err) {
-        toast.error("Failed to submit automatically");
-      }
-    }
-    router.push(`/student/assessments/${assessmentId}/results`);
-  }, [attemptId, attemptToken, assessmentId, router]);
-
-  // ── Timer (only active during taking stage) ───────────────────────
+  // 2. Fullscreen monitor
   useEffect(() => {
-    if (stage !== "taking" || submitted) return;
-
-    const timer = setInterval(() => {
-      setTimeLeft((t) => {
-        if (t <= 1) {
-          handleAutoSubmit();
-          clearInterval(timer);
-          return 0;
-        }
-        return t - 1;
-      });
-    }, 1000);
-
-    return () => clearInterval(timer);
-  }, [stage, submitted, handleAutoSubmit]);
-
-  // ── Autosave simulation ───────────────────────────────────────────
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const triggerAutosave = useCallback(
-    async (qId: string, answerVal: any) => {
-      if (!attemptId || !attemptToken) return;
-      try {
-        await submissionApi.saveAnswer({
-          attempt_id: attemptId,
-          question_id: qId,
-          access_token: attemptToken,
-          answer_type: "text",
-          text_answer:
-            typeof answerVal === "string"
-              ? answerVal
-              : JSON.stringify(answerVal),
-          change_type: "autosave",
-        });
-        setLastSaved(new Date());
-      } catch (err) {
-        console.error("Autosave failed", err);
-      }
-    },
-    [attemptId, attemptToken],
-  );
-
-  // ── Answer handlers ───────────────────────────────────────────────
-  const handleAnswer = useCallback(
-    (questionId: string | number, value: any) => {
-      setAnswers((prev) => ({ ...prev, [questionId]: value }));
-
-      // Clear existing timeout to debounce
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => {
-        triggerAutosave(String(questionId), value);
-      }, 1500);
-    },
-    [triggerAutosave],
-  );
-
-  // ── Integrity Guard – real-time monitoring ────────────────────────
-  const handleTerminateAssessment = useCallback(
-    async (reason: string) => {
-      if (submitted || stage !== "taking") return;
-
-      setSubmitted(true);
-      setStage("terminated");
-      setTerminationReason(reason);
-
-      if (attemptId && attemptToken) {
-        try {
-          // Record the critical event first
-          await integrityApi.recordEvent({
-            attempt_id: attemptId,
-            access_token: attemptToken,
-            event_type:
-              "TERMINATION_" + reason.toUpperCase().replace(/\s/g, "_"),
-          });
-
-          // Then submit the assessment
-          await attemptApi.submitAttempt(attemptId, attemptToken);
-          toast.error("Assessment terminated due to integrity violation");
-        } catch (err) {
-          console.error("Failed to terminate assessment securely", err);
-        }
-      }
-    },
-    [attemptId, attemptToken, submitted, stage],
-  );
-
-  const incrementWarning = useCallback(
-    async (reason: string) => {
-      // Immediate termination for tab switching or window blur in supervised mode
-      if (
-        assessment?.is_supervised &&
-        (reason === "TAB_SWITCH" || reason === "WINDOW_BLUR")
-      ) {
-        handleTerminateAssessment(
-          reason === "TAB_SWITCH"
-            ? "Tab switching detected"
-            : "Assessment window left",
-        );
-        return;
-      }
-
-      setWarnings((w) => {
-        const next = w + 1;
-        if (next >= 3) {
-          handleTerminateAssessment("Multiple integrity warnings");
-        }
-        return Math.min(next, 3);
-      });
-      setShowWarningModal(true);
-
-      if (attemptId && attemptToken) {
-        try {
-          const result = await integrityApi.recordEvent({
-            attempt_id: attemptId,
-            access_token: attemptToken,
-            event_type: reason,
-          });
-          if (result.warning) {
-            setActiveWarning(result.warning);
-          }
-        } catch (err) {
-          console.error("Failed to record integrity event", err);
-        }
-      }
-    },
-    [attemptId, attemptToken, assessment, handleTerminateAssessment],
-  );
-
-  const handleAcknowledgeWarning = async () => {
-    if (activeWarning && attemptToken) {
-      try {
-        await integrityApi.acknowledgeWarning({
-          warning_id: activeWarning.id,
-          access_token: attemptToken,
-        });
-      } catch (err) {
-        console.error("Failed to acknowledge warning", err);
-      }
-    }
-    setShowWarningModal(false);
-    setActiveWarning(null);
-    if (assessment?.fullscreen_required && !isFullscreen) {
-      enterFullscreen();
-    }
-  };
-
-  const enterFullscreen = useCallback(async () => {
-    try {
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) {
-        await elem.requestFullscreen();
-      } else if ((elem as any).webkitRequestFullscreen) {
-        await (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).msRequestFullscreen) {
-        await (elem as any).msRequestFullscreen();
-      }
-      setIsFullscreen(true);
-    } catch (err) {
-      console.error("Fullscreen error", err);
-      incrementWarning("fullscreen-request-failed");
-    }
-  }, [incrementWarning]);
-
-  useEffect(() => {
-    if (stage !== "taking") return;
+    if (stage !== "taking" || !assessment?.fullscreen_required) return;
 
     const handleFullscreenChange = () => {
-      const isNowFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isNowFullscreen);
-      if (!isNowFullscreen && !submitted) incrementWarning("FULLSCREEN_EXIT");
-    };
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "hidden" && !submitted) {
-        incrementWarning("TAB_SWITCH");
-      }
-    };
-    const handleBlur = () => {
-      if (!submitted) incrementWarning("WINDOW_BLUR");
-    };
-    const handleCopyPaste = (e: ClipboardEvent) => {
-      if (assessment?.is_closed_book && !submitted) {
-        e.preventDefault();
-        incrementWarning(e.type === "copy" ? "COPY_ATTEMPT" : "PASTE_ATTEMPT");
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (!isFull && stage === "taking") {
+        handleIntegrityEvent("FULLSCREEN_EXIT");
       }
     };
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("blur", handleBlur);
-    document.addEventListener("copy", handleCopyPaste);
-    document.addEventListener("paste", handleCopyPaste);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, [stage, assessment]);
 
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("blur", handleBlur);
-      document.removeEventListener("copy", handleCopyPaste);
-      document.removeEventListener("paste", handleCopyPaste);
-    };
-  }, [stage, submitted, incrementWarning, assessment]);
+  // 2b. Tab switch monitor (High Security only)
+  useEffect(() => {
+    if (stage !== "taking" || !isHighSecurity) return;
 
-
-
-  const submitAssessment = async () => {
-    if (
-      !confirm("Submit assessment? This action is final and cannot be undone.")
-    )
-      return;
-    setSubmitted(true);
-    if (attemptId && attemptToken) {
-      try {
-        await attemptApi.submitAttempt(attemptId, attemptToken);
-        toast.success("Assessment submitted successfully");
-        router.push(`/student/assessments/${assessmentId}/results`);
-      } catch (err) {
-        toast.error("Failed to submit assessment");
-        setSubmitted(false);
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        handleIntegrityEvent("TAB_SWITCH");
       }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [stage, isHighSecurity]);
+
+  // 3. Timer logic
+  useEffect(() => {
+    if (stage !== "taking" || timeLeft <= 0) return;
+
+    const timer = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          autoSubmit();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, [stage, timeLeft]);
+
+  // 4. Autosave logic
+  const saveAnswer = useCallback(async (questionId: string, qType: string, answerVal: any) => {
+    if (!attemptId || !attemptToken) return;
+
+    const typeMap: Record<string, string> = {
+      short_answer: "TEXT",
+      shortanswer: "TEXT",
+      essay: "TEXT",
+      computational: "TEXT",
+      case_study: "TEXT",
+      casestudy: "TEXT",
+      mcq: "SINGLE_OPTION",
+      true_false: "SINGLE_OPTION",
+      truefalse: "SINGLE_OPTION",
+      matching: "MATCH_PAIRS",
+      fill_blank: "FILL_BLANKS",
+      fillblank: "FILL_BLANKS",
+      ordering: "ORDERED_LIST",
+    };
+
+    const normalizedType = (qType || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    const answerType = typeMap[normalizedType] || "TEXT";
+
+    const payload: any = {
+      attempt_id: attemptId,
+      question_id: questionId,
+      access_token: attemptToken,
+      answer_type: answerType,
+      change_type: "autosave",
+    };
+
+    if (answerType === "TEXT") {
+      payload.answer_text = typeof answerVal === "string" ? answerVal : JSON.stringify(answerVal);
+    } else if (answerType === "SINGLE_OPTION" || answerType === "MULTI_OPTION") {
+      payload.selected_option_ids = Array.isArray(answerVal) ? answerVal : [answerVal];
+    } else if (answerType === "ORDERED_LIST") {
+      payload.ordered_option_ids = Array.isArray(answerVal) ? answerVal : [];
+    } else if (answerType === "MATCH_PAIRS") {
+      payload.match_pairs_json = (answerVal && typeof answerVal === 'object' && !Array.isArray(answerVal)) ? answerVal : {};
+    } else if (answerType === "FILL_BLANKS") {
+      payload.fill_blank_answers = (answerVal && typeof answerVal === 'object' && !Array.isArray(answerVal)) ? answerVal : {};
+    } else if (answerType === "FILE") {
+      payload.file_url = answerVal;
     }
+
+    try {
+        await submissionApi.saveAnswer(payload);
+        setLastSaved(new Date());
+    } catch (err) {
+        console.error("Autosave failed", err);
+    }
+  }, [attemptId, attemptToken]);
+
+  useEffect(() => {
+    if (stage !== "taking") return;
+    const currentAnswer = answers[currentQ?.id];
+    if (currentAnswer !== undefined) {
+        const timeout = setTimeout(() => saveAnswer(currentQ.id, currentQ.type, currentAnswer), 2000);
+        return () => clearTimeout(timeout);
+    }
+  }, [answers, currentQuestionIndex, stage, saveAnswer, currentQ]);
+
+  const enterFullscreen = () => {
+    document.documentElement.requestFullscreen().catch(() => {
+      toast.error("Fullscreen request denied. Please enable manually.");
+    });
   };
 
-  // ── Stage handlers ────────────────────────────────────────────────
+  const handleIntegrityEvent = async (type: string) => {
+     if (!attemptId || !attemptToken) return;
+     try {
+        const { warning } = await attemptApi.recordIntegrityEvent(attemptId, attemptToken, type);
+        if (warning) {
+            setWarnings(prev => {
+                const newCount = prev + 1;
+                if (newCount >= 3) {
+                    terminateSession(`Maximum integrity warnings exceeded (${type}). Session automatically submitted.`);
+                } else {
+                    setShowWarningModal(true);
+                }
+                return newCount;
+            });
+        }
+     } catch (err) {
+        console.error("Failed to log integrity event", err);
+     }
+  };
+
+  const handleExitEnvironment = () => {
+    if (stage === "taking" && isHighSecurity) {
+        if (confirm("HIGH SECURITY SESSION: Exiting now will automatically submit your work and terminate this attempt. Continue?")) {
+            submitAssessment();
+        }
+        return;
+    }
+    router.back();
+  };
+
   const handleStartAssessment = () => {
-    if (assessment?.requires_password) {
+    if (assessment.is_password_protected) {
       setStage("password");
     } else {
       setStage("readiness");
     }
   };
 
-  const handlePasswordSubmit = () => {
+  const handlePasswordSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!passwordInput) return;
     setStage("readiness");
   };
 
   const handleReadinessConfirm = async () => {
     if (!readinessChecked) return;
 
-    // Call backend to start attempt
     try {
       const data = await attemptApi.startAttempt({
         assessment_id: assessmentId,
@@ -360,167 +716,225 @@ export default function StudentAssessmentTake() {
       });
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
-
-      // Fetch the actual questions for the attempt
-      const attemptData = await attemptApi.getAttempt(data.id);
+      setTimeLeft(data.seconds_remaining || 3600);
+      
+      const attemptData = await attemptApi.getAttemptDetail(data.id, data.access_token);
       setQuestions(attemptData.questions || []);
 
-      await enterFullscreen();
+      try {
+        const subRes = await submissionApi.getSubmissionsForAttempt(data.id);
+        const savedAnswers: Record<string, any> = {};
+        subRes.submissions?.forEach((s: any) => {
+           if (s.answer_type === "SINGLE_OPTION" || s.answer_type === "MULTI_OPTION") {
+              savedAnswers[s.question_id] = s.selected_option_ids?.[0] || (s.selected_option_ids?.length > 1 ? s.selected_option_ids : undefined);
+           } else if (s.answer_type === "MATCH_PAIRS") {
+              savedAnswers[s.question_id] = s.match_pairs_json || {};
+           } else if (s.answer_type === "FILL_BLANKS") {
+              savedAnswers[s.question_id] = s.fill_blank_answers || {};
+           } else if (s.answer_type === "ORDERED_LIST") {
+              savedAnswers[s.question_id] = s.ordered_option_ids || [];
+           } else {
+              savedAnswers[s.question_id] = s.answer_text;
+           }
+        });
+        setAnswers(savedAnswers);
+      } catch (e) {
+        console.error("Failed to load existing submissions", e);
+      }
+
       setStage("taking");
-      setTimeLeft(assessment.duration_minutes * 60);
+
+      if (assessment.fullscreen_required) {
+          enterFullscreen();
+      }
     } catch (err: any) {
-      toast.error(err.message || "Failed to start attempt");
+      toast.error(err.message || "Failed to start attempt. Verify your credentials.");
+      if (err.code === "INVALID_PASSWORD") setStage("password");
     }
   };
 
-  // ── Question Renderer ───────────────────────────────────────────
+  const handleAcknowledgeWarning = () => {
+    setShowWarningModal(false);
+    if (assessment.fullscreen_required && !document.fullscreenElement) {
+        enterFullscreen();
+    }
+  };
+
+  const terminateSession = (reason: string) => {
+    setTerminationReason(reason);
+    setStage("terminated");
+    autoSubmit();
+  };
+
+  const autoSubmit = async () => {
+     if (!attemptId || !attemptToken) return;
+     try {
+        await attemptApi.submitAttempt(attemptId, attemptToken, true);
+        toast.info("Session ended and responses preserved.");
+     } catch (e) {
+        console.error("Auto-submit failed", e);
+     }
+  };
+
+  const submitAssessment = async () => {
+    if (!attemptId || !attemptToken) return;
+    setSubmitting(true);
+    try {
+      await attemptApi.submitAttempt(attemptId, attemptToken, true);
+      if (document.fullscreenElement) document.exitFullscreen();
+      setStage("submitted");
+      toast.success("Assessment submitted successfully!");
+    } catch (err: any) {
+      toast.error(err.message || "Submission failed.");
+    } finally {
+      setSubmitting(false);
+      setShowSubmitConfirm(false);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const progress = questions.length > 0 ? (Object.keys(answers).length / questions.length) * 100 : 0;
+
   const renderQuestion = (q: any) => {
-    if (!q)
-      return (
-        <div className="text-muted-foreground py-8">Loading question...</div>
-      );
+    if (!q) return null;
+    const currentVal = answers[q.id];
+    const rawType = (q.type || q.question_type || "").toString().toUpperCase();
+    const normalizedType = rawType.replace(/[^A-Z0-9]/g, "").toLowerCase();
 
-    const answer = answers[q.id] || "";
-    const qType = (q.type || "").toLowerCase();
+    const renderDebugBadge = () => (
+      <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity">
+        <Badge variant="outline" className="text-[8px] font-mono bg-muted/50">
+          RAW: {rawType} | NORM: {normalizedType}
+        </Badge>
+      </div>
+    );
 
-    switch (qType) {
-      case "mcq":
-      case "multiple_choice":
+    if (
+        normalizedType === "mcq" || 
+        normalizedType === "mcqs" ||
+        normalizedType === "truefalse" || 
+        normalizedType === "true_false" ||
+        normalizedType === "singleoption" || 
+        normalizedType === "multioption" ||
+        rawType === "MCQ" || 
+        rawType === "TRUE_FALSE" ||
+        rawType === "SINGLE_OPTION" ||
+        rawType === "MULTI_OPTION"
+    ) {
         return (
-          <RadioGroup
-            value={String(answer)}
-            onValueChange={(val) => handleAnswer(q.id, val)}
-            className="space-y-4"
-          >
-            {(q.options || []).map((option: any, idx: number) => {
-              const optText =
-                typeof option === "string"
-                  ? option
-                  : option.text || `Option ${idx + 1}`;
-              return (
-                <div
-                  key={idx}
-                  className="flex items-center space-x-3 border border-border rounded-xl p-3.5 hover:border-ring transition-colors"
-                >
-                  <RadioGroupItem value={optText} id={`mcq-${q.id}-${idx}`} />
-                  <Label
-                    htmlFor={`mcq-${q.id}-${idx}`}
-                    className="flex-1 cursor-pointer text-foreground"
-                  >
-                    {optText}
+          <div className="space-y-4 relative">
+            {renderDebugBadge()}
+            <RadioGroup
+              value={currentVal || ""}
+              onValueChange={(val) => setAnswers(prev => ({ ...prev, [q.id]: val }))}
+              className="grid gap-2.5"
+            >
+              {q.options?.map((opt: any) => (
+                <div key={opt.id} className={cn(
+                    "flex items-center space-x-3 p-5 rounded-xl border transition-all cursor-pointer",
+                    currentVal === opt.id ? "bg-primary/5 border-primary/20" : "hover:bg-muted/5"
+                )}>
+                  <RadioGroupItem value={opt.id} id={opt.id} />
+                  <Label htmlFor={opt.id} className="flex-1 cursor-pointer font-medium text-[15px] text-foreground/80 leading-snug">
+                    {opt.text || opt.option_text || "Option"}
                   </Label>
                 </div>
-              );
-            })}
-          </RadioGroup>
-        );
-
-      case "truefalse":
-      case "true_false":
-        return (
-          <RadioGroup
-            value={String(answer)}
-            onValueChange={(val) => handleAnswer(q.id, val)}
-            className="flex gap-6"
-          >
-            {["True", "False"].map((val) => (
-              <div
-                key={val}
-                className="flex-1 flex items-center space-x-3 border border-border rounded-xl p-4 hover:border-ring transition-colors"
-              >
-                <RadioGroupItem value={val} id={`tf-${q.id}-${val}`} />
-                <Label
-                  htmlFor={`tf-${q.id}-${val}`}
-                  className="cursor-pointer text-xl font-medium text-foreground"
-                >
-                  {val}
-                </Label>
-              </div>
-            ))}
-          </RadioGroup>
-        );
-
-      case "shortanswer":
-      case "short_answer":
-      case "essay":
-        return (
-          <Textarea
-            className={cn(
-              "w-full bg-card border-border focus:border-primary resize-y text-foreground",
-              qType === "essay" ? "h-80" : "h-40",
-            )}
-            placeholder="Type your answer here..."
-            value={typeof answer === "string" ? answer : ""}
-            onChange={(e) => handleAnswer(q.id, e.target.value)}
-          />
-        );
-
-      default:
-        return (
-          <Textarea
-            className="w-full h-40 bg-card border-border focus:border-primary resize-y text-foreground"
-            placeholder="Answer here..."
-            value={typeof answer === "string" ? answer : JSON.stringify(answer)}
-            onChange={(e) => handleAnswer(q.id, e.target.value)}
-          />
+              ))}
+            </RadioGroup>
+          </div>
         );
     }
+
+    if (normalizedType === "matching" || normalizedType === "matchpairs" || normalizedType === "match_pairs" || rawType === "MATCHING" || rawType === "MATCH_PAIRS") {
+        return <MatchingDnd q={q} currentVal={currentVal} setAnswers={setAnswers} renderDebugBadge={renderDebugBadge} />;
+    }
+
+    if (normalizedType === "fillblank" || normalizedType === "fillblanks" || normalizedType === "fill_blank" || rawType === "FILL_BLANK" || rawType === "FILL_BLANKS") {
+        return <FillInTheBlanksDnd q={q} currentVal={currentVal} setAnswers={setAnswers} renderDebugBadge={renderDebugBadge} />;
+    }
+
+    if (normalizedType === "ordering" || normalizedType === "orderedlist" || normalizedType === "ordered_list" || rawType === "ORDERING" || rawType === "ORDERED_LIST") {
+        return <OrderingQuestion q={q} currentVal={currentVal} setAnswers={setAnswers} renderDebugBadge={renderDebugBadge} />;
+    }
+
+    return (
+      <div className="space-y-6 relative">
+         {renderDebugBadge()}
+         {q.caseStudyContext && (
+            <div className="p-5 rounded-xl border border-amber-100 bg-amber-50/30 text-[15px] leading-relaxed italic text-foreground/70 mb-5">
+                <div className="text-[10px] font-bold uppercase tracking-widest text-amber-600 mb-2 not-italic">Scenario Context</div>
+                {q.caseStudyContext}
+            </div>
+         )}
+         <textarea
+            className="w-full min-h-[250px] p-6 rounded-xl border bg-muted/5 focus:ring-1 focus:ring-primary/20 outline-none text-base leading-relaxed"
+            placeholder={normalizedType === "essay" ? "Compose your detailed response here..." : "Type your response here..."}
+            value={currentVal || ""}
+            onChange={(e) => setAnswers(prev => ({ ...prev, [q.id]: e.target.value }))}
+         />
+         <div className="flex items-center gap-2 text-[11px] text-muted-foreground uppercase font-semibold tracking-widest px-1">
+            <Shield className="size-3.5 opacity-50" />
+            End-to-end encrypted trace active
+         </div>
+      </div>
+    );
   };
 
-  // ── Render ────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-background">
-        <div className="space-y-4 w-96 text-center">
-          <Skeleton className="h-10 w-3/4 mx-auto" />
-          <Skeleton className="h-4 w-1/2 mx-auto" />
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="h-16 border-b flex items-center px-6 justify-between bg-muted/5">
+            <Skeleton className="h-7 w-40 rounded" />
+            <div className="flex gap-4">
+                <Skeleton className="h-7 w-24 rounded-full" />
+                <Skeleton className="h-7 w-28 rounded-full" />
+            </div>
+        </div>
+        <div className="flex-1 flex items-center justify-center p-6">
+            <Card className="max-w-lg w-full shadow-none border rounded-xl">
+                <CardHeader className="text-center py-10 border-b bg-muted/5">
+                    <Skeleton className="h-8 w-3/4 mx-auto rounded" />
+                    <Skeleton className="h-4 w-1/2 mx-auto mt-3 rounded opacity-60" />
+                </CardHeader>
+                <CardContent className="p-10 space-y-8">
+                    <div className="grid grid-cols-2 gap-5">
+                        <Skeleton className="h-20 w-full rounded-xl" />
+                        <Skeleton className="h-20 w-full rounded-xl" />
+                    </div>
+                    <div className="space-y-4">
+                        <Skeleton className="h-4 w-full rounded-full" />
+                        <Skeleton className="h-4 w-full rounded-full" />
+                        <Skeleton className="h-4 w-2/3 opacity-60 rounded-full" />
+                    </div>
+                    <Skeleton className="h-11 w-full rounded-lg" />
+                </CardContent>
+            </Card>
         </div>
       </div>
     );
   }
 
-  if (!assessment)
-    return (
-      <div className="p-8 text-center text-destructive">
-        Assessment not found.
-      </div>
-    );
-
-  const progress =
-    questions.length > 0
-      ? ((currentQuestionIndex + 1) / questions.length) * 100
-      : 0;
-
   if (stage === "terminated") {
     return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center p-6">
-        <Card className="max-w-md w-full border-destructive bg-destructive/5 shadow-2xl">
-          <CardContent className="p-8 text-center">
-            <AlertTriangle className="mx-auto size-20 text-destructive mb-6" />
-            <CardTitle className="text-2xl text-destructive font-bold">
-              Assessment Terminated
-            </CardTitle>
-            <CardDescription className="mt-4 text-lg font-medium text-foreground">
-              {terminationReason || "A security violation was detected."}
-            </CardDescription>
-            <div className="mt-8 p-4 bg-muted rounded-xl text-left border border-border">
-              <p className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <ShieldCheck className="size-4 text-destructive" /> Violation
-                Details:
-              </p>
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                Mindexa Integrity Guard has automatically submitted your
-                assessment because you attempted to leave the secure environment
-                or violated strictly enforced rules. This incident has been
-                logged with a high-risk score and reported to your lecturer for
-                administrative review.
-              </p>
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="max-w-md w-full border-red-100 bg-red-50/20 shadow-none rounded-xl overflow-hidden">
+          <CardHeader className="text-center py-8">
+            <div className="size-12 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 border border-red-200">
+              <AlertTriangle className="size-6 text-red-600" />
             </div>
-            <Button
-              onClick={() => router.push("/student/dashboard")}
-              variant="outline"
-              className="mt-10 w-full h-12"
-            >
+            <CardTitle className="text-xl font-semibold text-red-700">Session Terminated</CardTitle>
+            <CardDescription className="text-[11px] font-bold uppercase tracking-widest text-red-600/60">{terminationReason || "Integrity Violation"}</CardDescription>
+          </CardHeader>
+          <CardContent className="p-8 pt-0 text-center space-y-5">
+            <p className="text-sm text-muted-foreground font-medium leading-relaxed">
+                Mindexa Integrity Guard has automatically submitted your attempt to secure your partial responses for review.
+            </p>
+            <Button onClick={() => router.push("/student/dashboard")} className="w-full h-10 text-xs font-semibold rounded-lg shadow-none" variant="outline">
               Return to Dashboard
             </Button>
           </CardContent>
@@ -531,20 +945,17 @@ export default function StudentAssessmentTake() {
 
   if (stage === "submitted") {
     return (
-      <div className="min-h-screen bg-background text-foreground flex items-center justify-center">
-        <Card className="max-w-md w-full">
-          <CardContent className="p-8 text-center">
-            <CheckCircle className="mx-auto size-16 text-emerald-500 mb-6" />
-            <CardTitle className="text-2xl font-bold tracking-tight">Assessment Submitted</CardTitle>
-            <CardDescription className="mt-3 text-lg">
-              Your responses have been securely recorded.
-              <br />
-              Results will be released according to the lecturer policy.
-            </CardDescription>
-            <Button
-              onClick={() => router.push("/student/dashboard")}
-              className="mt-8 w-full"
-            >
+      <div className="min-h-screen bg-background flex items-center justify-center p-6">
+        <Card className="max-w-sm w-full shadow-none border rounded-xl overflow-hidden">
+          <CardContent className="p-10 text-center space-y-5">
+            <div className="size-14 bg-emerald-50 rounded-full flex items-center justify-center mx-auto border border-emerald-100">
+              <CheckCircle className="size-7 text-emerald-600" />
+            </div>
+            <div className="space-y-1.5">
+              <CardTitle className="text-xl font-semibold text-foreground/90">Session Finalized</CardTitle>
+              <p className="text-xs text-muted-foreground font-medium uppercase tracking-tight">Your attempt has been securely recorded.</p>
+            </div>
+            <Button onClick={() => router.push("/student/dashboard")} className="w-full h-10 text-xs font-semibold rounded-lg shadow-sm">
               Return to Dashboard
             </Button>
           </CardContent>
@@ -554,141 +965,84 @@ export default function StudentAssessmentTake() {
   }
 
   return (
-    <div className="min-h-screen bg-background text-foreground flex flex-col">
-      {/* SECURE TOP BAR */}
-      <div className="sticky top-0 z-50 border-b border-border bg-background/95 backdrop-blur-md px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-x-4">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.back()}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="mr-2 size-4" /> Exit
+    <div className="min-h-screen bg-background flex flex-col">
+      <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-md px-6 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-4 min-w-0">
+          <Button variant="ghost" size="sm" onClick={handleExitEnvironment} className="h-8 px-2.5 text-[11px] font-bold uppercase tracking-wider gap-2 rounded-md hover:bg-muted/50">
+            <ArrowLeft className="size-3.5" /> {isHighSecurity ? "End Session" : "Exit"}
           </Button>
-          <div>
-            <div className="font-semibold text-lg tracking-tight">
-              {assessment.title}
-            </div>
-            <div className="flex items-center gap-x-2 text-xs text-muted-foreground">
-              <Badge variant="secondary">{assessment.type}</Badge>
-              {assessment.is_closed_book && (
-                <Badge variant="outline">Closed Book</Badge>
-              )}
-              {assessment.is_supervised && (
-                <Badge variant="outline">Supervised</Badge>
-              )}
-              {!assessment.ai_allowed && (
-                <Badge variant="destructive" className="gap-x-1">
-                  <EyeOff className="size-3" /> AI BLOCKED
-                </Badge>
-              )}
+          <Separator orientation="vertical" className="h-4" />
+          <div className="flex flex-col min-w-0">
+            <div className="font-semibold text-sm leading-tight truncate max-w-[250px] text-foreground/80">{assessment.title}</div>
+            <div className="flex items-center gap-1.5 mt-1">
+              <Badge variant="secondary" className="h-4 px-1.5 text-[8px] uppercase font-bold tracking-tight bg-muted/40 border-muted-foreground/5">{assessment.assessment_type}</Badge>
+              {assessment.is_supervised && <Badge variant="outline" className="h-4 px-1.5 text-[8px] uppercase font-bold tracking-tight text-primary border-primary/10 bg-primary/5">Secure</Badge>}
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-x-6">
-          <div className="flex items-center gap-x-2 font-mono text-lg tabular-nums">
-            <Timer className="size-5 text-primary" />
-            <span className={cn(timeLeft < 300 && "text-destructive")}>
-              {formatTime(timeLeft)}
-            </span>
+        <div className="flex items-center gap-4">
+          <div className={cn(
+              "flex items-center gap-2 px-3 py-1 rounded-md border text-xs font-bold tabular-nums shadow-none transition-colors",
+              timeLeft < 300 ? "border-red-100 text-red-600 bg-red-50" : "bg-muted/20 border-muted/40"
+          )}>
+            <Timer className="size-3.5" />
+            <span>{formatTime(timeLeft)}</span>
           </div>
 
-          {questions.length > 0 && (
-            <Badge variant="outline" className="px-4 py-2 text-sm font-medium">
-              Q{currentQuestionIndex + 1} of {questions.length}
-            </Badge>
-          )}
+          <div className="hidden md:flex items-center gap-4 text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+              Node {currentQuestionIndex + 1}/{questions.length}
+              {lastSaved && <div className="flex items-center gap-1.5 text-emerald-600 font-bold"><Check className="size-3" /> Synced</div>}
+          </div>
 
-          {lastSaved && (
-            <div className="flex items-center gap-x-2 text-xs text-muted-foreground">
-              <Save className="size-4" />
-              <span>Saved just now</span>
-            </div>
-          )}
-
-          <Button
-            onClick={submitAssessment}
-            variant="destructive"
-            size="sm"
-            disabled={stage !== "taking"}
-          >
-            Submit Assessment
+          <Button onClick={() => setShowSubmitConfirm(true)} variant="destructive" size="sm" className="h-8 text-[11px] font-bold uppercase tracking-wider px-4 rounded-md shadow-none" disabled={stage !== "taking"}>
+            Finalize
           </Button>
         </div>
       </div>
 
-      {/* WARNING BANNER */}
-      {warnings > 0 && (
-        <div
-          className={cn(
-            "px-6 py-4 text-sm font-medium flex items-center gap-x-3 border-b",
-            warnings === 1 && "bg-amber-950/80 border-amber-400 text-amber-400",
-            warnings === 2 &&
-              "bg-orange-950/80 border-orange-400 text-orange-400",
-            warnings >= 3 &&
-              "bg-destructive/80 border-destructive text-destructive-foreground",
-          )}
-        >
-          <AlertTriangle className="size-5 flex-shrink-0" />
-          <span>
-            Integrity Warning {warnings}/3 —{" "}
-            {warnings >= 3 ? "Critical flag" : "Suspicious activity detected"}
-          </span>
-          <ShieldCheck className="ml-auto size-4" />
-        </div>
-      )}
-
-      {/* STAGES */}
       {stage === "intro" && (
         <div className="flex-1 flex items-center justify-center p-6">
-          <Card className="max-w-2xl w-full">
-            <CardHeader className="text-center pb-4">
-              <CardTitle className="text-2xl font-bold tracking-tight">
-                {assessment.title}
-              </CardTitle>
-              <CardDescription className="text-xl text-muted-foreground mt-3">
-                {assessment.description ||
-                  "Review instructions before beginning."}
-              </CardDescription>
-              <div className="flex justify-center gap-x-6 mt-6">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">
-                    {assessment.duration_minutes || 90}
-                  </div>
-                  <div className="text-xs tracking-widest uppercase text-muted-foreground">
-                    minutes
-                  </div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">
-                    {assessment.total_marks || 100}
-                  </div>
-                  <div className="text-xs tracking-widest uppercase text-muted-foreground">
-                    marks
-                  </div>
-                </div>
-              </div>
+          <Card className="max-w-xl w-full border shadow-none rounded-xl overflow-hidden bg-background/50 hover:border-primary/10 transition-all">
+            <CardHeader className="text-center py-8 bg-muted/5 border-b border-muted/20">
+                <CardTitle className="text-2xl font-semibold tracking-tight">{assessment.title}</CardTitle>
+                <CardDescription className="text-[10px] font-bold mt-1.5 uppercase tracking-widest text-muted-foreground/60">
+                    {assessment.assessment_type} Session • {assessment.academic_year}
+                </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="grid grid-cols-3 gap-4 text-center text-sm">
-                <div className="border border-border rounded-xl p-3">
-                  Fullscreen Req.
+            <CardContent className="p-8 space-y-8">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="p-4 border border-muted/50 rounded-xl space-y-1 bg-background">
+                    <Label className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest">Duration</Label>
+                    <div className="text-xl font-bold">{assessment.duration_minutes || 90}m</div>
                 </div>
-                <div className="border border-border rounded-xl p-3">
-                  Closed Book
-                </div>
-                <div className="border border-border rounded-xl p-3">
-                  Supervised
+                <div className="p-4 border border-muted/50 rounded-xl space-y-1 bg-background">
+                    <Label className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest">Total Weight</Label>
+                    <div className="text-xl font-bold">{assessment.total_marks || 100}pts</div>
                 </div>
               </div>
-              <Button
-                onClick={handleStartAssessment}
-                size="lg"
-                className="w-full h-14 text-lg"
-              >
-                Begin Assessment
+
+              <div className="space-y-4">
+                  <p className="text-[11px] text-muted-foreground leading-relaxed font-semibold uppercase tracking-tight">
+                      {assessment.description || "Adhere to all institutional integrity standards throughout this session."}
+                  </p>
+                  <div className="rounded-lg border bg-muted/20 p-4 text-[11px] text-muted-foreground leading-relaxed font-semibold">
+                    {assessment.result_release_mode === "manual"
+                      ? "This assessment includes responses that may require lecturer review before final results are released."
+                      : "This assessment is configured for immediate automatic result release once submission processing is complete."}
+                  </div>
+                  <div className="flex flex-wrap gap-2 pt-2">
+                      <Badge variant={assessment.is_supervised ? "default" : "outline"} className="h-5 text-[9px] font-bold uppercase tracking-tight rounded-md">
+                         {assessment.is_supervised ? "Proctored" : "Self-paced"}
+                      </Badge>
+                      <Badge variant={assessment.fullscreen_required ? "default" : "outline"} className="h-5 text-[9px] font-bold uppercase tracking-tight rounded-md">
+                         {assessment.fullscreen_required ? "Lockdown" : "Open Environment"}
+                      </Badge>
+                  </div>
+              </div>
+
+              <Button onClick={handleStartAssessment} className="w-full h-11 text-[11px] font-bold uppercase tracking-wider rounded-lg shadow-none">
+                Enter Environment
               </Button>
             </CardContent>
           </Card>
@@ -697,28 +1051,36 @@ export default function StudentAssessmentTake() {
 
       {stage === "password" && (
         <div className="flex-1 flex items-center justify-center p-6">
-          <Card className="max-w-md w-full">
-            <CardHeader>
-              <CardTitle>Password Required</CardTitle>
-              <CardDescription>
-                Enter the access code provided by your lecturer.
-              </CardDescription>
+          <Card className="max-w-md w-full border shadow-none rounded-xl overflow-hidden bg-background/50 hover:border-primary/10 transition-all">
+            <CardHeader className="text-center py-8 bg-muted/5 border-b border-muted/20">
+                <div className="size-11 bg-primary/5 rounded-full flex items-center justify-center mx-auto mb-4 border border-primary/10">
+                    <Lock className="size-5 text-primary" />
+                </div>
+                <CardTitle className="text-xl font-semibold tracking-tight">Access Control</CardTitle>
+                <CardDescription className="text-[10px] font-bold mt-1.5 uppercase tracking-widest text-muted-foreground/60">
+                    Enter session password provided by supervisor
+                </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <Input
-                type="password"
-                placeholder="••••••••"
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                className="text-center text-3xl tracking-[0.5em] font-mono"
-              />
-              <Button
-                onClick={handlePasswordSubmit}
-                className="w-full"
-                size="lg"
-              >
-                Verify &amp; Continue
-              </Button>
+            <CardContent className="p-8">
+              <form onSubmit={handlePasswordSubmit} className="space-y-6">
+                <div className="space-y-2">
+                    <Label className="text-[9px] text-muted-foreground uppercase font-bold tracking-widest ml-1">Access Password</Label>
+                    <Input
+                        type="password"
+                        placeholder="••••••••"
+                        className="h-11 rounded-lg text-center text-lg font-bold tracking-[0.3em] border-muted/60 bg-background"
+                        value={passwordInput}
+                        onChange={(e) => setPasswordInput(e.target.value)}
+                        autoFocus
+                    />
+                </div>
+                <Button type="submit" className="w-full h-11 text-[11px] font-bold uppercase tracking-wider rounded-lg shadow-none">
+                  Authorize & Continue
+                </Button>
+                <Button variant="ghost" onClick={() => setStage("intro")} className="w-full h-10 text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 rounded-lg">
+                    Back to Overview
+                </Button>
+              </form>
             </CardContent>
           </Card>
         </div>
@@ -726,194 +1088,211 @@ export default function StudentAssessmentTake() {
 
       {stage === "readiness" && (
         <div className="flex-1 flex items-center justify-center p-6">
-          <Card className="max-w-xl w-full">
-            <CardHeader className="text-center">
-              <CardTitle className="text-xl font-bold">Ready to begin?</CardTitle>
-              <CardDescription className="text-base">
-                You are about to enter a secure, timed assessment.
-              </CardDescription>
+          <Card className="max-w-md w-full border shadow-none rounded-xl overflow-hidden bg-background/50 hover:border-primary/10 transition-all">
+            <CardHeader className="py-6 border-b border-muted/20 bg-muted/5">
+              <CardTitle className="text-[13px] font-bold text-center uppercase tracking-widest">Protocol Declaration</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-8">
-              <div className="flex items-start gap-x-3">
-                <Checkbox
-                  id="readiness"
-                  checked={readinessChecked}
-                  onCheckedChange={(c) => setReadinessChecked(!!c)}
-                />
-                <Label
-                  htmlFor="readiness"
-                  className="text-sm leading-relaxed cursor-pointer"
-                >
-                  I confirm that I understand the rules, will remain in
-                  fullscreen mode, and accept that any violations will be
-                  logged.
-                </Label>
+            <CardContent className="p-8 space-y-8">
+              <div className="space-y-2.5">
+                {[
+                  "No tab switching or window exits allowed.",
+                  "Fullscreen mode is strictly enforced.",
+                  "All activities are cryptographically logged.",
+                ].map((text, i) => (
+                  <div key={i} className="flex gap-4 p-4 rounded-lg border border-muted/40 bg-background items-center">
+                    <Check className="size-4 text-emerald-600 shrink-0" />
+                    <span className="text-[11px] font-bold uppercase tracking-tight text-foreground/60">{text}</span>
+                  </div>
+                ))}
               </div>
-              <Button
-                onClick={handleReadinessConfirm}
-                disabled={!readinessChecked}
-                size="lg"
-                className="w-full h-14"
-              >
-                Enter Fullscreen &amp; Start
-              </Button>
+
+              <div className="space-y-5">
+                <div className="flex items-start gap-3 p-4 rounded-lg bg-primary/5 border border-primary/10">
+                  <Checkbox 
+                    id="readiness" 
+                    checked={readinessChecked} 
+                    onCheckedChange={(c) => setReadinessChecked(!!c)} 
+                    className="mt-0.5 size-4 rounded-md border-primary/30 data-[state=checked]:bg-primary data-[state=checked]:border-primary" 
+                  />
+                  <Label htmlFor="readiness" className="text-[10px] font-bold leading-relaxed cursor-pointer uppercase tracking-tight text-primary/70">
+                    I declare that I will complete this assessment independently and adhere to all integrity standards.
+                  </Label>
+                </div>
+                <Button onClick={handleReadinessConfirm} disabled={!readinessChecked} className="w-full h-11 text-[11px] font-bold uppercase tracking-widest rounded-lg shadow-none">
+                  Confirm & Begin
+                </Button>
+              </div>
             </CardContent>
           </Card>
         </div>
       )}
 
       {stage === "taking" && (
-        <div className="flex-1 flex">
-          <div className="flex-1 p-8 max-w-4xl mx-auto">
+        <div className="flex-1 flex overflow-hidden bg-muted/5">
+          <div className="flex-1 p-6 overflow-y-auto">
             {!isFullscreen && assessment?.fullscreen_required ? (
-              <div className="h-full flex flex-col items-center justify-center space-y-6 py-20">
-                <div className="bg-destructive/10 p-6 rounded-full">
-                  <Monitor className="size-16 text-destructive" />
-                </div>
-                <div className="text-center space-y-2">
-                  <h3 className="text-xl font-bold">Fullscreen Required</h3>
-                  <p className="text-muted-foreground max-w-md">
-                    This assessment is being taken in secure mode. You must
-                    remain in fullscreen to view and answer questions.
+              <div className="h-full flex flex-col items-center justify-center space-y-8 py-12 max-w-sm mx-auto text-center">
+                <Monitor className="size-12 text-red-600 animate-pulse" />
+                <div className="space-y-3">
+                  <h3 className="text-xl font-bold text-red-600 uppercase tracking-tight">Environment Lost</h3>
+                  <p className="text-muted-foreground text-xs font-semibold leading-relaxed">
+                    Fullscreen mode is mandatory. Re-enter immediately to avoid automated termination.
                   </p>
                 </div>
-                <Button
-                  onClick={enterFullscreen}
-                  size="lg"
-                  variant="destructive"
-                  className="h-14 px-8 text-lg"
-                >
-                  Return to Fullscreen
+                <Button onClick={enterFullscreen} variant="destructive" className="h-11 w-full text-[11px] font-bold uppercase tracking-widest rounded-lg shadow-md shadow-red-100">
+                  Restore Secure Mode
                 </Button>
               </div>
             ) : (
-              <>
-                {!isFullscreen && (
-                  <Card className="mb-8 border-destructive bg-destructive/10">
-                    <CardContent className="p-8 text-center">
-                      <p className="text-destructive mb-6 font-medium">
-                        Fullscreen mode recommended for all assessments.
-                      </p>
-                      <Button onClick={enterFullscreen} variant="destructive">
-                        Enter Fullscreen
-                      </Button>
-                    </CardContent>
-                  </Card>
-                )}
+              <div className="max-w-4xl mx-auto space-y-6">
+                <div className="flex items-center justify-between px-1">
+                    <div className="flex-1 max-w-[250px] space-y-2">
+                        <div className="flex justify-between text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+                            <span>Progress</span>
+                            <span>{Math.round(progress)}%</span>
+                        </div>
+                        <Progress value={progress} className="h-1.5 bg-muted/40" />
+                    </div>
+                    <Badge variant="outline" className="h-7 px-3 text-emerald-700 border-emerald-100 bg-emerald-50 text-[11px] font-bold rounded-md uppercase">
+                        {currentQ?.marks || 0} PTS
+                    </Badge>
+                </div>
 
-                <Progress value={progress} className="h-1.5 mb-6 bg-muted" />
-
-                <Card className="bg-card border-border">
-                  <CardContent className="p-8">
-                    <div className="flex justify-between items-baseline mb-4">
-                      <div>
-                        <span className="text-muted-foreground">
-                          Question {currentQuestionIndex + 1}
-                        </span>
-                        {currentQ?.section_id && (
-                          <span className="ml-3 text-xs bg-secondary px-3 py-1 rounded-full">
-                            Sec {currentQ.section_id}
-                          </span>
+                <Card className="shadow-none border border-muted/40 rounded-xl overflow-hidden bg-background">
+                  <CardContent className="p-10">
+                    <div className="space-y-6 mb-10">
+                        <div className="flex items-start gap-4">
+                            <span className="flex-shrink-0 size-8 bg-muted/30 rounded-lg flex items-center justify-center text-[11px] font-bold text-muted-foreground">
+                                {currentQuestionIndex + 1}
+                            </span>
+                            <h2 className="text-lg font-semibold leading-snug text-foreground/80 pt-0.5">
+                              {currentQ?.text || currentQ?.content || "Synchronizing Environment..."}
+                            </h2>
+                        </div>
+                        {currentQ?.imageUrl && (
+                          <div className="ml-12 p-1.5 border border-muted/30 rounded-xl bg-muted/5 inline-block">
+                            <img src={currentQ.imageUrl} alt="Context Media" className="max-h-[320px] rounded-lg object-contain" />
+                          </div>
                         )}
-                      </div>
-                      <span className="font-medium text-emerald-500">
-                        {currentQ?.marks || 0} marks
-                      </span>
                     </div>
 
-                    <h2 className="text-xl font-semibold leading-tight mb-6 text-foreground">
-                      {currentQ?.text ||
-                        currentQ?.content ||
-                        "Question text missing"}
-                    </h2>
-                    {renderQuestion(currentQ)}
+                    <div className="ml-12 min-h-[160px]">
+                        {renderQuestion(currentQ)}
+                    </div>
                   </CardContent>
+                  <CardFooter className="bg-muted/5 p-5 flex justify-between border-t border-muted/20">
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => setCurrentQuestionIndex(Math.max(0, currentQuestionIndex - 1))} 
+                      disabled={currentQuestionIndex === 0} 
+                      className="h-10 px-4 font-bold text-[10px] uppercase tracking-wider text-muted-foreground/70 rounded-lg"
+                    >
+                        <ArrowLeft className="mr-2 size-3.5" /> Previous
+                    </Button>
+
+                    <Button size="sm" onClick={() => {
+                        if (currentQuestionIndex < questions.length - 1) {
+                            setCurrentQuestionIndex(currentQuestionIndex + 1);
+                        } else {
+                            setShowSubmitConfirm(true);
+                        }
+                    }} className="h-10 px-8 font-bold text-[10px] uppercase tracking-widest rounded-lg shadow-none">
+                        {currentQuestionIndex === questions.length - 1 ? "Finalize" : "Next"}
+                        <ArrowRight className="ml-2 size-3.5" />
+                    </Button>
+                  </CardFooter>
                 </Card>
-
-                <div className="flex justify-between mt-6">
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      setCurrentQuestionIndex(
-                        Math.max(0, currentQuestionIndex - 1),
-                      )
-                    }
-                    disabled={currentQuestionIndex === 0}
-                  >
-                    <ArrowLeft className="mr-2 size-4" /> Previous
-                  </Button>
-
-                  <Button
-                    onClick={() => {
-                      if (currentQuestionIndex < questions.length - 1) {
-                        setCurrentQuestionIndex(currentQuestionIndex + 1);
-                      } else {
-                        submitAssessment();
-                      }
-                    }}
-                  >
-                    {currentQuestionIndex === questions.length - 1
-                      ? "Finish & Submit"
-                      : "Next Question"}
-                    <ArrowRight className="ml-2 size-4" />
-                  </Button>
-                </div>
-              </>
+              </div>
             )}
           </div>
 
-          <div className="w-80 border-l border-border bg-card p-6 hidden xl:block">
-            <div className="font-semibold mb-4 flex items-center gap-x-2">
-              <span>Navigator</span>
-              <Badge variant="secondary" className="ml-auto">
-                {Object.keys(answers).length} answered
-              </Badge>
+          <div className="w-72 border-l border-muted/20 bg-background p-8 hidden lg:flex flex-col">
+            <div className="space-y-1.5 mb-6">
+                <h3 className="text-[11px] font-bold uppercase tracking-[0.15em] text-muted-foreground">Assessment Map</h3>
+                <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase">Session Navigator</p>
             </div>
-            <div className="grid grid-cols-6 gap-3">
-              {questions.map((q, idx) => (
-                <button
-                  key={q.id}
-                  onClick={() => setCurrentQuestionIndex(idx)}
-                  className={cn(
-                    "h-10 rounded-xl border text-sm font-medium transition-all hover:border-primary",
-                    idx === currentQuestionIndex &&
-                      "border-primary bg-primary text-primary-foreground shadow-inner",
-                    answers[q.id] &&
-                      idx !== currentQuestionIndex &&
-                      "border-emerald-500 bg-emerald-950/50 text-emerald-400",
-                  )}
-                >
-                  {idx + 1}
-                </button>
-              ))}
+            
+            <div className="grid grid-cols-4 gap-2">
+              {questions.map((q, idx) => {
+                const isAnswered = !!answers[q.id];
+                const isCurrent = idx === currentQuestionIndex;
+
+                return (
+                  <button
+                    key={q.id}
+                    onClick={() => setCurrentQuestionIndex(idx)}
+                    className={cn(
+                      "h-9 rounded-lg border text-[11px] font-bold transition-all flex items-center justify-center shadow-none",
+                      isCurrent 
+                          ? "border-primary bg-primary text-primary-foreground" 
+                          : isAnswered 
+                              ? "border-emerald-100 bg-emerald-50 text-emerald-700" 
+                              : "bg-muted/10 border-muted/20 text-muted-foreground/40 hover:bg-muted/20"
+                    )}
+                  >
+                    {(idx + 1).toString().padStart(2, '0')}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="mt-auto pt-8 border-t border-dashed border-muted/30">
+                <div className="flex items-center gap-2.5 font-bold text-[9px] text-muted-foreground uppercase tracking-widest">
+                  <div className="size-1.5 rounded-full bg-primary animate-pulse" /> 
+                  Sync Monitor Active
+                </div>
             </div>
           </div>
         </div>
       )}
 
-      {showWarningModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[100]">
-          <Card className="max-w-md bg-card border-destructive">
-            <CardContent className="p-8 text-center">
-              <AlertTriangle className="mx-auto size-12 text-destructive mb-4" />
-              <CardTitle className="text-xl font-bold">
-                {activeWarning?.message || "Security Violation Detected"}
-              </CardTitle>
-              <p className="text-muted-foreground mt-3 mb-8">
-                {activeWarning
-                  ? "This violation has been logged to your lecturer."
-                  : "Your action has been logged. Please return to secure mode."}
+      <Dialog open={showWarningModal} onOpenChange={handleAcknowledgeWarning}>
+        <DialogContent className="sm:max-w-sm rounded-xl p-8 border-red-50 bg-red-50/50 shadow-2xl border-none">
+          <DialogHeader className="text-center space-y-4">
+            <div className="size-14 bg-red-100 rounded-full flex items-center justify-center mx-auto border border-red-200">
+                <AlertTriangle className="size-7 text-red-600" />
+            </div>
+            <div className="space-y-1.5">
+                <DialogTitle className="text-xl font-bold uppercase tracking-tight text-red-700">Integrity Alert</DialogTitle>
+                <DialogDescription className="text-[11px] font-bold uppercase tracking-wider text-red-600/60">
+                    Secure environment protocol violation.
+                </DialogDescription>
+            </div>
+          </DialogHeader>
+          <div className="py-3 text-center">
+            <p className="text-[11px] font-bold text-muted-foreground uppercase leading-relaxed tracking-tight">
+                Warning {warnings}/3. Further violations will result in automated termination.
+            </p>
+          </div>
+          <Button onClick={handleAcknowledgeWarning} className="w-full h-11 text-[11px] font-bold uppercase tracking-widest rounded-lg bg-red-600 hover:bg-red-700 text-white shadow-none border-none">
+            Acknowledge
+          </Button>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showSubmitConfirm} onOpenChange={setShowSubmitConfirm}>
+        <DialogContent className="sm:max-w-sm rounded-xl p-8 overflow-hidden border-none shadow-2xl">
+          <DialogHeader className="text-center pb-4">
+            <DialogTitle className="text-xl font-bold tracking-tight">Finalize Submission?</DialogTitle>
+            <DialogDescription className="text-[11px] font-bold uppercase tracking-widest pt-2 text-muted-foreground/60">
+              {Object.keys(answers).length} / {questions.length} Items Synchronized
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-1 text-center">
+              <p className="text-[11px] font-semibold text-muted-foreground leading-relaxed uppercase tracking-tight">
+                  By finalizing, you confirm that your responses are complete and ready for evaluation.
               </p>
-              <Button
-                onClick={handleAcknowledgeWarning}
-                className="w-full h-12"
-              >
-                I Understand
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+          </div>
+          <div className="flex gap-2.5 pt-6">
+            <Button variant="ghost" className="flex-1 font-bold h-11 text-[10px] uppercase tracking-widest rounded-lg" onClick={() => setShowSubmitConfirm(false)}>
+              Review
+            </Button>
+            <Button variant="default" className="flex-1 font-bold h-11 text-[10px] uppercase tracking-widest rounded-lg shadow-none" onClick={submitAssessment} disabled={submitting}>
+              {submitting ? "Processing..." : "Finalize"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -24,13 +24,13 @@ class QuestionOptionCreate(BaseModel):
 class QuestionOptionResponse(BaseModel):
     id: uuid.UUID
     question_id: uuid.UUID
-    option_text: str
-    option_text_right: str | None
-    is_correct: bool
+    option_text: str = Field(..., validation_alias="content")
+    option_text_right: str | None = Field(None, validation_alias="match_value")
+    is_correct: bool | None = False
     order_index: int
-    explanation: str | None
+    explanation: str | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 # ─── Question Tag Schemas ─────────────────────────────────────────────────────

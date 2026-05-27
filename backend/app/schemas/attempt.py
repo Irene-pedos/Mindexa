@@ -1,17 +1,16 @@
-from __future__ import annotations
 """
 app/schemas/attempt.py
 
 Pydantic schemas for AssessmentAttempt endpoints.
 """
 
-
 import uuid
 from datetime import datetime
+from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from app.db.enums import AttemptStatus
+from app.db.enums import AttemptStatus, GroupSubmissionStatus, QuestionDistributionMode
 
 # ---------------------------------------------------------------------------
 # REQUEST SCHEMAS
@@ -25,7 +24,7 @@ class AttemptStartRequest(BaseModel):
     Optional: access_password if the assessment is password-protected.
     """
     assessment_id: uuid.UUID
-    access_password: str | None = Field(
+    access_password: Optional[str] = Field(
         default=None,
         alias="password", # Support frontend field name
         description="Required only if the assessment is password-protected",
@@ -54,7 +53,7 @@ class AttemptSubmitRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def confirm_must_be_true(self) -> AttemptSubmitRequest:
+    def confirm_must_be_true(self) -> "AttemptSubmitRequest":
         if not self.confirm:
             raise ValueError("confirm must be True to submit the attempt")
         return self
@@ -66,40 +65,48 @@ class AttemptSubmitRequest(BaseModel):
 
 class AttemptQuestionOption(BaseModel):
     """Option for a multiple choice question in an attempt."""
-    text: str
+    id: uuid.UUID
+    text: str = Field(validation_alias="content")
+    option_text_right: Optional[str] = Field(None, validation_alias="match_value")
     order_index: int
 
+    model_config = {"from_attributes": True, "populate_by_name": True}
 class AttemptQuestionResponse(BaseModel):
     """Question detail within an attempt."""
     id: uuid.UUID
     type: str
     content: str
-    text: str | None = None
+    text: Optional[str] = None
     marks: int
     order_index: int
-    options: list[AttemptQuestionOption] | None = None
+    options: Optional[List[AttemptQuestionOption]] = None
 
-class AttemptResponse(BaseModel):
+class AttemptDetailResponse(BaseModel):
     """Full attempt detail — returned to student during active attempt."""
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
     assessment_id: uuid.UUID
     student_id: uuid.UUID
+    group_id: Optional[uuid.UUID] = None
+    group_submission_id: Optional[uuid.UUID] = None
+    group_submission_status: Optional[GroupSubmissionStatus] = None
+    question_distribution_mode: Optional[QuestionDistributionMode] = None
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime | None = None
-    submitted_at: datetime | None = None
-    expires_at: datetime | None = None
-    last_activity_at: datetime | None = None
-    access_token: uuid.UUID | None = None
-    total_score: float | None = None
+    started_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
+    access_token: Optional[uuid.UUID] = None
+    total_score: Optional[float] = None
     total_integrity_warnings: int = 0
     is_flagged: bool = False
     created_at: datetime
     
     # Nested data for the UI
-    questions: list[AttemptQuestionResponse] = []
+    questions: List[AttemptQuestionResponse] = []
+    group_members: Optional[List[Dict[str, Any]]] = None
 
 
 class AttemptStartResponse(BaseModel):
@@ -113,11 +120,11 @@ class AttemptStartResponse(BaseModel):
     assessment_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime | None = None
-    expires_at: datetime | None = None
-    access_token: uuid.UUID | None = None
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    access_token: Optional[uuid.UUID] = None
     # Seconds remaining (computed, not stored)
-    seconds_remaining: int | None = None
+    seconds_remaining: Optional[int] = None
 
 
 class AttemptSummary(BaseModel):
@@ -128,16 +135,19 @@ class AttemptSummary(BaseModel):
     assessment_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime | None = None
-    submitted_at: datetime | None = None
-    expires_at: datetime | None = None
-    total_score: float | None = None
+    group_id: Optional[uuid.UUID] = None
+    group_submission_id: Optional[uuid.UUID] = None
+    group_submission_status: Optional[GroupSubmissionStatus] = None
+    started_at: Optional[datetime] = None
+    submitted_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    total_score: Optional[float] = None
     is_flagged: bool = False
 
 
 class AttemptListResponse(BaseModel):
     """Paginated list of attempts."""
-    items: list[AttemptSummary]
+    items: List[AttemptSummary]
     total: int
     page: int
     page_size: int
@@ -159,19 +169,18 @@ class AttemptSupervisorView(BaseModel):
     student_id: uuid.UUID
     attempt_number: int
     status: AttemptStatus
-    started_at: datetime | None = None
-    expires_at: datetime | None = None
-    last_activity_at: datetime | None = None
+    started_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = None
+    last_activity_at: Optional[datetime] = None
     total_integrity_warnings: int = 0
     is_flagged: bool = False
-    ip_address: str | None = None
+    ip_address: Optional[str] = None
 
 # Rebuild models to resolve deferred type evaluation
 AttemptQuestionOption.model_rebuild()
 AttemptQuestionResponse.model_rebuild()
-AttemptResponse.model_rebuild()
+AttemptDetailResponse.model_rebuild()
 AttemptListResponse.model_rebuild()
 AttemptStartResponse.model_rebuild()
 AttemptSummary.model_rebuild()
 AttemptSupervisorView.model_rebuild()
-

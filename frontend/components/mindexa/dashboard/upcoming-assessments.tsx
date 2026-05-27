@@ -10,11 +10,12 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, PlayCircle, CheckCircle2 } from "lucide-react";
+import { Calendar, Clock, PlayCircle, CheckCircle2, AlertTriangle, History, ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { assessmentApi } from "@/lib/api/assessment";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
+import { getAssessmentCategory, getAssessmentProgressStatus } from "@/lib/grading-architecture";
 
 import {
   StudentActiveAttempt,
@@ -30,65 +31,115 @@ export function UpcomingAssessments({
 }) {
   const now = new Date();
 
-  const availableNow = upcomingAssessments.filter(a => 
-    !a.window_start || new Date(a.window_start) <= now
-  );
+  // 1. In Progress
+  const inProgress = activeAttempts.filter(a => a.status === 'IN_PROGRESS' || a.status === 'PAUSED');
 
-  const upcomingSoon = upcomingAssessments.filter(a => 
+  // 2. Available (Open but not started)
+  const available = upcomingAssessments.filter(a => {
+    const isStarted = (!a.window_start || new Date(a.window_start) <= now);
+    const isNotEnded = (!a.window_end || new Date(a.window_end) >= now);
+    const hasNoAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
+    return isStarted && isNotEnded && hasNoAttempt;
+  });
+
+  // 3. Upcoming
+  const upcoming = upcomingAssessments.filter(a => 
     a.window_start && new Date(a.window_start) > now
   );
 
+  // 4. Violations / Auto-Submitted
+  const violations = activeAttempts.filter(a => a.status === 'TERMINATED' || a.status === 'AUTO_SUBMITTED');
+
+  // 5. Missed
+  const missed = upcomingAssessments.filter(a => {
+    const hasEnded = a.window_end && new Date(a.window_end) < now;
+    const noAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
+    return hasEnded && noAttempt;
+  });
+
   return (
-    <Card>
-      <CardHeader>
+    <Card className="shadow-none border rounded-xl overflow-hidden">
+      <CardHeader className="py-2.5 px-4 bg-muted/5 border-b">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Assessments</CardTitle>
-            <CardDescription>Your current and upcoming academic tasks</CardDescription>
+            <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+               <History className="size-3" /> Assessment Command
+            </CardTitle>
           </div>
-          <Button variant="ghost" size="sm" asChild>
-            <Link href="/student/assessments">View all</Link>
+          <Button variant="ghost" size="sm" className="h-6 text-[9px] font-bold uppercase px-2 rounded-lg" asChild>
+            <Link href="/student/assessments">View Registry</Link>
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="p-3 space-y-5">
+        {/* Violations / Alerts */}
+        {violations.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-[9px] font-bold uppercase tracking-widest text-red-600 flex items-center gap-1.5 px-1">
+              <ShieldAlert className="size-3" /> Integrity Violations
+            </h4>
+            {violations.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50/50 p-2.5 transition-all group"
+              >
+                <div className="space-y-0.5 min-w-0 flex-1">
+                  <div className="font-bold text-xs truncate text-red-800">
+                    {item.assessment_title}
+                  </div>
+                  <div className="text-[9px] text-red-600/70 font-bold uppercase tracking-tighter">
+                     Session Terminated • Pending Review
+                  </div>
+                </div>
+                <Button variant="destructive" size="sm" className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg shadow-none" asChild>
+                  <Link href={`/student/results/${item.id}`}>Audit</Link>
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* 1. In Progress Section */}
-        {activeAttempts.length > 0 && (
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-primary flex items-center gap-2">
-              <span className="relative flex h-2 w-2">
+        {inProgress.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-[9px] font-bold uppercase tracking-widest text-primary flex items-center gap-1.5 px-1">
+              <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
               </span>
               In Progress
             </h4>
-            {activeAttempts.map((item) => (
+            {inProgress.map((item) => (
               <div
                 key={item.id}
-                className="flex items-start justify-between rounded-xl border-2 border-primary/20 bg-primary/5 p-4 hover:bg-primary/10 transition-all group shadow-sm"
+                className="flex items-center justify-between rounded-xl border bg-primary/5 p-2.5 hover:bg-primary/10 transition-all group"
               >
-                <div className="space-y-1 pr-4">
-                  <div className="font-bold text-base leading-tight">
+                <div className="space-y-0.5 min-w-0 flex-1">
+                  <div className="font-semibold text-xs truncate text-foreground/80">
                     {item.assessment_title}
                   </div>
-                  <div className="text-xs text-muted-foreground flex items-center gap-4">
-                     <span className="flex items-center gap-1 font-medium text-primary">
-                        {item.status === 'PAUSED' ? 'Paused - Ready to resume' : 'Active session'}
+                  <div className="text-[9px] text-muted-foreground flex items-center gap-2 font-medium">
+                     <span className="font-bold text-primary uppercase text-[8px]">
+                        {item.status === 'PAUSED' ? 'Paused' : 'Active Session'}
                      </span>
                      {item.course_code && (
-                       <span className="font-mono bg-primary/10 px-1.5 py-0.5 rounded text-[10px]">
+                       <span className="opacity-60 uppercase tracking-tighter">
                          {item.course_code}
                        </span>
                      )}
                   </div>
                 </div>
 
-                <div className="flex flex-col items-end gap-3">
-                  <Button size="sm" className="rounded-full px-4" asChild>
+                <div className="flex shrink-0">
+                  <Button size="sm" className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg shadow-none" asChild>
                     <Link
-                      href={`/student/assessments/${item.assessment_id}/take`}
+                      href={
+                        (item.assessment_type || '').toLowerCase().includes('group')
+                          ? `/student/group-work/${item.assessment_id}`
+                          : `/student/assessments/${item.assessment_id}/take`
+                      }
                     >
-                      Resume <PlayCircle className="ml-2 size-4" />
+                      Resume
                     </Link>
                   </Button>
                 </div>
@@ -98,43 +149,38 @@ export function UpcomingAssessments({
         )}
 
         {/* 2. Available Section */}
-        {availableNow.length > 0 && (
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-emerald-600 flex items-center gap-2">
+        {available.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-[9px] font-bold uppercase tracking-widest text-emerald-600 flex items-center gap-1 px-1">
               <CheckCircle2 className="size-3" />
-              Available Now
+              Open Sessions
             </h4>
-            {availableNow.map((item) => (
+            {available.map((item) => (
               <div
                 key={item.id}
-                className="flex items-start justify-between rounded-xl border p-4 hover:border-emerald-500/50 hover:bg-emerald-50/30 transition-all group"
+                className="flex items-center justify-between rounded-xl border p-2.5 hover:bg-muted/30 transition-all group"
               >
-                <div className="space-y-1 pr-4">
-                  <div className="font-semibold leading-tight">{item.title}</div>
-                  <div className="text-xs text-muted-foreground flex items-center gap-4">
-                    <span className="flex items-center gap-1">
-                      <Clock className="size-3.5" /> {item.duration_minutes || 90} min
+                <div className="space-y-0.5 min-w-0 flex-1">
+                  <div className="font-semibold text-xs truncate text-foreground/80">{item.title}</div>
+                  <div className="text-[9px] text-muted-foreground flex items-center gap-2 font-medium">
+                    <span className="flex items-center gap-1 uppercase tracking-tighter">
+                      <Clock className="size-2.5" /> {item.duration_minutes || 90}m
                     </span>
-                    {item.course_code && (
-                       <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-[10px]">
-                         {item.course_code}
-                       </span>
-                    )}
-                    <Badge variant="outline" className="text-[9px] h-4 uppercase font-bold">
+                    <Badge variant="outline" className="text-[7px] h-3.5 px-1 uppercase font-bold tracking-tight opacity-70 rounded-md">
                       {item.type}
                     </Badge>
                   </div>
                 </div>
 
-                <div className="flex flex-col items-end">
+                <div className="flex shrink-0">
                   <Button
                     variant="outline"
                     size="sm"
+                    className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg border-muted/60"
                     asChild
-                    className="rounded-full px-5 group-hover:bg-emerald-600 group-hover:text-white group-hover:border-emerald-600 transition-all"
                   >
                     <Link href={`/student/assessments/${item.id}/take`}>
-                      Start
+                      Enter
                     </Link>
                   </Button>
                 </div>
@@ -144,35 +190,30 @@ export function UpcomingAssessments({
         )}
 
         {/* 3. Upcoming Soon Section */}
-        {upcomingSoon.length > 0 && (
-          <div className="space-y-3">
-            <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+        {upcoming.length > 0 && (
+          <div className="space-y-2">
+            <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1 px-1">
               <Calendar className="size-3" />
-              Coming Soon
+              Scheduled
             </h4>
-            {upcomingSoon.map((item) => (
+            {upcoming.map((item) => (
               <div
                 key={item.id}
-                className="flex items-start justify-between rounded-xl border border-dashed p-4 bg-muted/20 opacity-80"
+                className="flex items-center justify-between rounded-xl border border-dashed p-2.5 bg-muted/5 opacity-70"
               >
-                <div className="space-y-1 pr-4">
-                  <div className="font-medium text-sm leading-tight text-muted-foreground">{item.title}</div>
-                  <div className="text-[10px] text-muted-foreground flex items-center gap-3">
+                <div className="space-y-0.5 min-w-0 flex-1">
+                  <div className="font-medium text-xs truncate text-muted-foreground/80">{item.title}</div>
+                  <div className="text-[8px] text-muted-foreground flex items-center gap-2 font-semibold uppercase tracking-tight">
                     <span className="flex items-center gap-1">
-                      <Calendar className="size-3" />{" "}
+                      <Clock className="size-2.5" />
                       {item.window_start
                         ? new Date(item.window_start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
                         : "TBD"}
                     </span>
-                    {item.course_code && (
-                       <span className="font-mono bg-muted/50 px-1.5 py-0.5 rounded text-[10px]">
-                         {item.course_code}
-                       </span>
-                    )}
                   </div>
                 </div>
 
-                <Badge variant="secondary" className="text-[9px] uppercase">
+                <Badge variant="secondary" className="text-[7px] h-3.5 px-1 uppercase opacity-50 rounded-md">
                   {item.type}
                 </Badge>
               </div>
@@ -180,9 +221,37 @@ export function UpcomingAssessments({
           </div>
         )}
 
-        {activeAttempts.length === 0 && availableNow.length === 0 && upcomingSoon.length === 0 && (
-           <div className="py-8 text-center">
-             <p className="text-sm text-muted-foreground">No assessments scheduled at this time.</p>
+        {/* 5. Missed / Closed Section */}
+        {missed.length > 0 && (
+          <div className="space-y-2">
+             <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40 flex items-center gap-1 px-1">
+              <AlertTriangle className="size-3" /> Missed / Expired
+            </h4>
+            {missed.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-center justify-between rounded-xl border p-2.5 opacity-40 grayscale bg-muted/20"
+              >
+                 <div className="space-y-0.5 min-w-0 flex-1">
+                  <div className="font-medium text-xs truncate text-muted-foreground/80">{item.title}</div>
+                  <div className="text-[7px] text-muted-foreground uppercase font-bold tracking-widest">
+                     Window Closed
+                  </div>
+                </div>
+                <Badge variant="outline" className="text-[7px] h-3.5 px-1 uppercase font-bold tracking-tight rounded-md">
+                  {item.type}
+                </Badge>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {inProgress.length === 0 && available.length === 0 && upcoming.length === 0 && violations.length === 0 && missed.length === 0 && (
+           <div className="py-10 text-center bg-muted/5 rounded-xl border border-dashed border-muted/30">
+             <div className="size-8 rounded-full bg-muted/20 flex items-center justify-center mx-auto mb-2">
+                <Clock className="size-4 text-muted-foreground/30" />
+             </div>
+             <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-[0.2em]">No activities found.</p>
            </div>
         )}
       </CardContent>

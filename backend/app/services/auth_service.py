@@ -37,6 +37,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 
 import bcrypt
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -67,6 +68,14 @@ from app.core.security import (
     hash_password,
     hash_token,
     verify_password,
+)
+from app.db.models.academic import (
+    Department,
+    Institution,
+    LecturerDepartment,
+    LecturerInstitution,
+    LecturerOption,
+    Option,
 )
 from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
 from app.db.repositories.auth import (
@@ -140,32 +149,15 @@ class AuthService:
         first_name: str,
         last_name: str,
         role: UserRole = UserRole.STUDENT,
+        phone_number: str | None = None,
         reg_number: str | None = None,
-        college: str | None = None,
-        department: str | None = None,
-        option: str | None = None,
-        level: str | None = None,
-        year: str | None = None,
+        staff_id: str | None = None,
         ip_address: str | None = None,
-        institution_ids: list[uuid.UUID] | None = None,
-        department_ids: list[uuid.UUID] | None = None,
-        option_ids: list[uuid.UUID] | None = None,
     ) -> tuple:
         """
-        Create a new user account with profile and issue a verification token.
+        Create a new user account with profile — Phase 1: Identity Creation.
 
-        FLOW:
-            1. Check for duplicate email
-            2. If student, check for duplicate registration number
-            3. Hash password
-            4. Create User row (status based on role)
-            5. Create UserProfile row with new academic fields
-            6. If lecturer, populate junction tables for multi-association
-            7. If student, generate email verification token
-            8. Record security event (best-effort)
-
-        Returns:
-            (User, raw_verification_token or None)
+        Academic assignment (Institution, Dept, etc.) happens during Onboarding (Phase 2).
         """
         # email is already normalised by the route validator
         if await self._users.email_exists(email):
@@ -175,8 +167,6 @@ class AuthService:
 
         # Registration Number Uniqueness (if provided)
         if reg_number:
-            from sqlalchemy import select
-            from app.db.models.auth import UserProfile
             stmt = select(UserProfile).where(UserProfile.student_id == reg_number)
             result = await self.db.execute(stmt)
             if result.scalar_one_or_none():
@@ -185,9 +175,9 @@ class AuthService:
         hashed = hash_password(password)
 
         # Role-specific status logic
-        if role_value == UserRole.LECTURER.value:
+        if role_value == UserRole.LECTURER.value or role_value == UserRole.ADMIN.value:
             status = UserStatus.PENDING_APPROVAL
-            email_verified = False # Usually True if admin created, but here it's signup
+            email_verified = False 
         else:
             status = UserStatus.PENDING_VERIFICATION
             email_verified = False
@@ -199,44 +189,25 @@ class AuthService:
             status=self._enum_value(status),
             email_verified=email_verified,
             failed_login_attempts=0,
+            onboarding_completed=False, # New accounts always start in Phase 2
         )
-        user_profile = UserProfile(
+        user.profile = UserProfile(
             user_id=user.id,
             first_name=first_name,
             last_name=last_name,
+            phone_number=phone_number,
             student_id=reg_number if role_value == UserRole.STUDENT.value else None,
-            staff_id=reg_number if role_value == UserRole.LECTURER.value else None,
-            college=college,
-            department=department,
-            option=option,
-            level=level,
-            year=year,
+            staff_id=staff_id or (reg_number if role_value == UserRole.LECTURER.value else None),
         )
 
         await self._users.create(user)
-        user_profile.user_id = user.id
-        self.db.add(user_profile)
+        # Profile is created via cascade
         
-        # Multi-association for Lecturers
-        if role_value == UserRole.LECTURER.value:
-            from app.db.models.academic import LecturerInstitution, LecturerDepartment, LecturerOption
-            
-            if institution_ids:
-                for inst_id in institution_ids:
-                    self.db.add(LecturerInstitution(lecturer_id=user.id, institution_id=inst_id))
-            
-            if department_ids:
-                for dept_id in department_ids:
-                    self.db.add(LecturerDepartment(lecturer_id=user.id, department_id=dept_id))
-                    
-            if option_ids:
-                for opt_id in option_ids:
-                    self.db.add(LecturerOption(lecturer_id=user.id, option_id=opt_id))
-
         await self.db.flush()
 
         raw_token = None
-        if role_value == UserRole.STUDENT.value:
+        # Both Students and Lecturers must verify their email via OTP
+        if role_value in [UserRole.STUDENT.value, UserRole.LECTURER.value]:
             raw_token = await self._create_verification_token(user.id)
 
         await self._record_security_event(
@@ -251,7 +222,7 @@ class AuthService:
             extra={
                 "user_id": str(user.id),
                 "email": email,
-                "role": role.value if hasattr(role, "value") else str(role),
+                "role": role_value,
             },
         )
 
@@ -260,6 +231,80 @@ class AuthService:
     # ─────────────────────────────────────────────────────────────────────────
     # LOGIN
     # ─────────────────────────────────────────────────────────────────────────
+
+    async def complete_student_onboarding(
+        self,
+        user_id: uuid.UUID,
+        institution_id: uuid.UUID,
+        department_id: uuid.UUID,
+        option_id: uuid.UUID,
+        level: str,
+        year: str,
+        campus_id: uuid.UUID | None = None,
+        college_id: uuid.UUID | None = None,
+        class_section_id: uuid.UUID | None = None,
+    ) -> User:
+        """
+        Complete Phase 2 onboarding for a student.
+        """
+        user = await self._users.get_by_id(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        # Update profile
+        user.profile.institution_id = institution_id
+        user.profile.campus_id = campus_id
+        user.profile.college_id = college_id
+        user.profile.department_id = department_id
+        user.profile.option_id = option_id
+        user.profile.level = level
+        user.profile.year = year
+        user.profile.class_section_id = class_section_id
+        
+        # Pull text names for legacy fields from relational models
+        inst = await self.db.get(Institution, institution_id)
+        dept = await self.db.get(Department, department_id)
+        opt = await self.db.get(Option, option_id)
+        
+        if inst: user.profile.college = inst.name # legacy field might be misused but keeping for now
+        if dept: user.profile.department = dept.name
+        if opt: user.profile.option = opt.name
+
+        user.onboarding_completed = True
+        self.db.add(user.profile)
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def complete_lecturer_onboarding(
+        self,
+        user_id: uuid.UUID,
+        bio: str | None = None,
+        profile_picture_url: str | None = None,
+        phone_number: str | None = None,
+    ) -> User:
+        """
+        Complete Phase 2 onboarding for a lecturer.
+        Assignments are still pending admin approval.
+        """
+        user = await self._users.get_by_id(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        if bio is not None:
+            user.profile.bio = bio
+        if profile_picture_url:
+            user.profile.avatar_url = profile_picture_url
+        if phone_number:
+            user.profile.phone_number = phone_number
+
+        user.onboarding_completed = True
+        self.db.add(user.profile)
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
 
     async def login(
         self,
@@ -898,10 +943,11 @@ class AuthService:
 
     async def _create_verification_token(self, user_id: uuid.UUID) -> str:
         """
-        Generate and persist an email verification token.
-        Returns the raw token (to be included in the verification email URL).
+        Generate and persist a 6-digit email verification OTP.
+        Returns the raw OTP string.
         """
-        raw_token = generate_secure_token()
+        import secrets
+        raw_token = f"{secrets.randbelow(1000000):06d}"
         token_hash = hash_token(raw_token)
         expires_at = datetime.now(UTC) + timedelta(
             minutes=settings.EMAIL_VERIFICATION_EXPIRE_MINUTES

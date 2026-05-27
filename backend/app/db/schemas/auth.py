@@ -48,11 +48,7 @@ from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 class UserRegisterRequest(MindexaSchema):
     """
-    Registration request body.
-
-    Password is validated for minimum length here.
-    Email normalisation (lowercase + strip) happens in the service, not here,
-    so we accept any valid email format.
+    Registration request body — Phase 1: Identity only.
     """
 
     email: EmailStr = Field(description="User email address.")
@@ -73,49 +69,21 @@ class UserRegisterRequest(MindexaSchema):
     )
     role: UserRole = Field(
         default=UserRole.STUDENT,
-        description=(
-            "Requested role. For security, only STUDENT is accepted via public registration. "
-            "LECTURER and ADMIN roles are assigned by system administrators."
-        ),
+        description="Requested role: STUDENT or LECTURER.",
     )
-    reg_number: str | None = Field(default=None, max_length=50)
-    college: str | None = Field(default=None, max_length=150)
-    department: str | None = Field(default=None, max_length=150)
-    option: str | None = Field(default=None, max_length=150)
-    level: str | None = Field(default=None, max_length=20)
-    year: str | None = Field(default=None, max_length=20)
-
-    # Multi-select fields for lecturers
-    institution_ids: list[uuid.UUID] | None = Field(default=None, description="Institutions the lecturer is associated with.")
-    department_ids: list[uuid.UUID] | None = Field(default=None, description="Departments the lecturer is associated with.")
-    option_ids: list[uuid.UUID] | None = Field(default=None, description="Options the lecturer is associated with.")
+    phone_number: str | None = Field(default=None, max_length=30)
+    reg_number: str | None = Field(default=None, max_length=50, description="Student Reg Number or Lecturer Staff ID.")
+    staff_id: str | None = Field(default=None, max_length=50, description="Optional explicit Staff ID.")
 
     @field_validator("role")
     @classmethod
     def restrict_self_registration_roles(cls, v: UserRole) -> UserRole:
         """
         Prevent self-registration as ADMIN.
-
-        A user cannot register themselves as an admin via the
-        public API. This role is assigned by administrators.
-        LECTURER is allowed but requires admin approval.
         """
         if v == UserRole.ADMIN:
             return UserRole.STUDENT
         return v
-
-    @model_validator(mode="after")
-    def validate_student_fields(self) -> UserRegisterRequest:
-        """
-        Enforce required fields for students per Section 4.2.
-        Students MUST provide a registration number and college.
-        """
-        if self.role == UserRole.STUDENT:
-            if not self.reg_number:
-                raise ValueError("Registration Number is required for students.")
-            if not self.college:
-                raise ValueError("College is required for students.")
-        return self
 
     @field_validator("first_name", "last_name")
     @classmethod
@@ -216,6 +184,16 @@ class ResetPasswordRequest(MindexaSchema):
 PasswordResetConfirmRequest = ResetPasswordRequest
 
 
+class VerifyEmailRequest(MindexaSchema):
+    """
+    Email verification using OTP.
+    """
+    token: str = Field(
+        min_length=6,
+        max_length=6,
+        description="6-digit OTP code sent via email.",
+    )
+
 class ResendVerificationRequest(MindexaSchema):
     """Request a new email verification link."""
 
@@ -296,6 +274,26 @@ class UserProfileUpdate(MindexaSchema):
         return self
 
 
+class StudentOnboardingRequest(MindexaSchema):
+    """Phase 2: Student academic onboarding."""
+    institution_id: uuid.UUID
+    campus_id: uuid.UUID | None = None
+    college_id: uuid.UUID | None = None
+    department_id: uuid.UUID
+    option_id: uuid.UUID
+    level: str = Field(description="Academic level (e.g. Level 6)")
+    year: str = Field(description="Academic year (e.g. 2024 - 2025)")
+    class_section_id: uuid.UUID | None = None
+    profile_picture_url: str | None = None
+
+
+class LecturerOnboardingRequest(MindexaSchema):
+    """Phase 2: Lecturer profile completion."""
+    bio: str | None = Field(default=None, max_length=1000)
+    profile_picture_url: str | None = None
+    phone_number: str | None = None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RESPONSE SCHEMAS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -364,6 +362,12 @@ class UserProfileResponse(MindexaSchema):
     level: str | None = None
     year: str | None = None
     
+    # Relational IDs
+    institution_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    option_id: uuid.UUID | None = None
+    class_section_id: uuid.UUID | None = None
+    
     # Lecturer specific (populated when role is LECTURER)
     assigned_courses: list[str] = Field(default_factory=list, description="List of course codes assigned to the lecturer.")
 
@@ -384,6 +388,7 @@ class UserResponse(BaseAuditedResponse):
     role: UserRole
     status: UserStatus
     email_verified: bool
+    onboarding_completed: bool
     email_verified_at: datetime | None = None
     last_login_at: datetime | None = None
     profile: UserProfileResponse | None = None
@@ -408,6 +413,7 @@ class UserSummaryResponse(MindexaSchema):
     id: uuid.UUID
     email: str
     role: UserRole
+    onboarding_completed: bool
     first_name: str | None = None
     last_name: str | None = None
     student_id: str | None = None
@@ -432,3 +438,24 @@ class LoginResponse(MindexaSchema):
     expires_in: int
     refresh_token: str
     user: UserResponse
+
+# Rebuild models
+UserRegisterRequest.model_rebuild()
+UserLoginRequest.model_rebuild()
+RefreshRequest.model_rebuild()
+LogoutRequest.model_rebuild()
+ForgotPasswordRequest.model_rebuild()
+UserApproveRequest.model_rebuild()
+ResetPasswordRequest.model_rebuild()
+VerifyEmailRequest.model_rebuild()
+ResendVerificationRequest.model_rebuild()
+ChangePasswordRequest.model_rebuild()
+UserProfileUpdate.model_rebuild()
+StudentOnboardingRequest.model_rebuild()
+LecturerOnboardingRequest.model_rebuild()
+AuthMessageResponse.model_rebuild()
+TokenResponse.model_rebuild()
+UserProfileResponse.model_rebuild()
+UserResponse.model_rebuild()
+UserSummaryResponse.model_rebuild()
+LoginResponse.model_rebuild()

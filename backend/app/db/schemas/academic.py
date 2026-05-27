@@ -22,14 +22,18 @@ class InstitutionCreate(MindexaSchema):
     name: str = Field(min_length=2, max_length=255)
     code: str = Field(min_length=2, max_length=20)
     timezone: str = Field(default="UTC", max_length=64)
-    logo_url: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None)
+    settings: dict | None = None
+    integrations: dict | None = None
 
 
 class InstitutionUpdate(MindexaSchema):
     name: str | None = Field(default=None, min_length=2, max_length=255)
     timezone: str | None = Field(default=None, max_length=64)
-    logo_url: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None)
     is_active: bool | None = None
+    settings: dict | None = None
+    integrations: dict | None = None
 
 
 class InstitutionResponse(BaseAuditedResponse):
@@ -38,6 +42,10 @@ class InstitutionResponse(BaseAuditedResponse):
     timezone: str
     logo_url: str | None
     is_active: bool
+    settings: dict | None
+    integrations: dict | None
+
+InstitutionResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -69,6 +77,8 @@ class AcademicPeriodResponse(BaseAuditedResponse):
     end_date: date
     is_active: bool
 
+AcademicPeriodResponse.model_rebuild()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUBJECT
@@ -90,6 +100,46 @@ class SubjectResponse(BaseAuditedResponse):
     description: str | None
     is_active: bool
 
+SubjectResponse.model_rebuild()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAMPUS
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CampusCreate(MindexaSchema):
+    institution_id: uuid.UUID
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=2, max_length=20)
+
+
+class CampusResponse(BaseAuditedResponse):
+    institution_id: uuid.UUID
+    name: str
+    code: str
+    is_active: bool
+
+CampusResponse.model_rebuild()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COLLEGE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CollegeCreate(MindexaSchema):
+    campus_id: uuid.UUID
+    name: str = Field(min_length=2, max_length=255)
+    code: str = Field(min_length=2, max_length=20)
+
+
+class CollegeResponse(BaseAuditedResponse):
+    campus_id: uuid.UUID
+    name: str
+    code: str
+    is_active: bool
+
+CollegeResponse.model_rebuild()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DEPARTMENT
@@ -97,15 +147,21 @@ class SubjectResponse(BaseAuditedResponse):
 
 class DepartmentCreate(MindexaSchema):
     institution_id: uuid.UUID
+    campus_id: uuid.UUID | None = None
+    college_id: uuid.UUID | None = None
     name: str = Field(min_length=2, max_length=255)
     code: str = Field(min_length=2, max_length=20)
 
 
 class DepartmentResponse(BaseAuditedResponse):
     institution_id: uuid.UUID
+    campus_id: uuid.UUID | None = None
+    college_id: uuid.UUID | None = None
     name: str
     code: str
     is_active: bool
+
+DepartmentResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -123,6 +179,8 @@ class OptionResponse(BaseAuditedResponse):
     name: str
     code: str
     is_active: bool
+
+OptionResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -143,6 +201,8 @@ class ClassGroupResponse(BaseAuditedResponse):
     level: int | None
     is_active: bool
 
+ClassGroupResponse.model_rebuild()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # COURSE
@@ -150,14 +210,17 @@ class ClassGroupResponse(BaseAuditedResponse):
 
 class CourseCreate(MindexaSchema):
     institution_id: uuid.UUID
-    department_ids: list[uuid.UUID] | None = Field(default=None, description="Departments this course is offered to")
+    department_ids: list[uuid.UUID] | None = Field(default=None, description="Departments offering this course")
     option_ids: list[uuid.UUID] | None = Field(default=None, description="Options this course is offered to")
     class_group_ids: list[uuid.UUID] | None = Field(default=None, description="Classes this course is offered to")
-    academic_period_id: uuid.UUID
+    academic_period_id: uuid.UUID | None = None
+    academic_year: str = Field(min_length=9, max_length=20)
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=255)
     description: str | None = None
     credit_hours: int | None = Field(default=None, ge=1, le=30)
+
+CourseCreate.model_rebuild()
 
 
 class CourseUpdate(MindexaSchema):
@@ -169,10 +232,13 @@ class CourseUpdate(MindexaSchema):
     option_ids: list[uuid.UUID] | None = None
     class_group_ids: list[uuid.UUID] | None = None
 
+CourseUpdate.model_rebuild()
+
 
 class CourseResponse(BaseAuditedResponse):
     institution_id: uuid.UUID
-    academic_period_id: uuid.UUID
+    academic_period_id: uuid.UUID | None = None
+    academic_year: str
     code: str
     title: str = Field(validation_alias="name")
     description: str | None
@@ -182,6 +248,8 @@ class CourseResponse(BaseAuditedResponse):
     option_ids: list[uuid.UUID] = []
     class_group_ids: list[uuid.UUID] = []
 
+CourseResponse.model_rebuild()
+
 
 class CourseSummaryResponse(MindexaSchema):
     """Minimal course info embedded in other responses."""
@@ -189,6 +257,8 @@ class CourseSummaryResponse(MindexaSchema):
     id: uuid.UUID
     code: str
     title: str = Field(validation_alias="name")
+
+CourseSummaryResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -210,6 +280,8 @@ class ClassSectionResponse(BaseAuditedResponse):
     room: str | None
     schedule_notes: str | None
     is_active: bool
+
+ClassSectionResponse.model_rebuild()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -238,6 +310,8 @@ class StudentEnrollmentResponse(BaseAuditedResponse):
     withdrawn_at: datetime | None
     withdrawal_reason: str | None
 
+StudentEnrollmentResponse.model_rebuild()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LECTURER ASSIGNMENT
@@ -248,7 +322,7 @@ class LecturerAssignRequest(MindexaSchema):
 
     lecturer_id: uuid.UUID
     course_id: uuid.UUID
-    assignment_role: LecturerAssignmentRole = LecturerAssignmentRole.PRIMARY
+    assignment_role: LecturerAssignmentRole = LecturerAssignmentRole.MAIN_LECTURER
 
 
 class LecturerCourseAssignmentResponse(BaseAuditedResponse):
@@ -257,3 +331,5 @@ class LecturerCourseAssignmentResponse(BaseAuditedResponse):
     assignment_role: str
     assigned_at: datetime
     is_active: bool
+
+LecturerCourseAssignmentResponse.model_rebuild()

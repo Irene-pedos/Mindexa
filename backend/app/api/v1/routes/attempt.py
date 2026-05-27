@@ -31,7 +31,7 @@ from app.db.session import get_db
 from app.dependencies.auth import require_active_user, require_lecturer_or_admin, require_student
 from app.schemas.attempt import (
     AttemptListResponse,
-    AttemptResponse,
+    AttemptDetailResponse,
     AttemptStartRequest,
     AttemptStartResponse,
     AttemptSubmitRequest,
@@ -146,7 +146,7 @@ async def resume_attempt(
 
 @router.post(
     "/{attempt_id}/submit",
-    response_model=AttemptResponse,
+    response_model=AttemptDetailResponse,
     summary="Voluntarily submit an attempt",
 )
 async def submit_attempt(
@@ -154,7 +154,7 @@ async def submit_attempt(
     body: AttemptSubmitRequest,
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
-) -> AttemptResponse:
+) -> any:
     """
     Submit the attempt. Locks all responses (is_final=True).
     Requires confirm=True and the valid access_token.
@@ -165,7 +165,7 @@ async def submit_attempt(
         student_id=current_user.id,
         access_token=body.access_token,
     )
-    return AttemptResponse.model_validate(attempt)
+    return AttemptDetailResponse.model_validate(attempt)
 
 
 # ── GET ATTEMPT ───────────────────────────────────────────────────────────────
@@ -173,14 +173,14 @@ async def submit_attempt(
 
 @router.get(
     "/{attempt_id}",
-    response_model=AttemptResponse,
+    response_model=AttemptDetailResponse,
     summary="Get attempt detail",
 )
 async def get_attempt(
     attempt_id: uuid.UUID,
     current_user=Depends(require_active_user),
     db: AsyncSession = Depends(get_db),
-) -> AttemptResponse:
+) -> any:
     """
     Return attempt detail.
 
@@ -209,7 +209,14 @@ async def get_attempt(
                     "marks": aq.marks_override or q.marks,
                     "order_index": aq.order_index,
                     "options": [
-                        {"text": opt.content, "order_index": opt.order_index}
+                        {
+                            "id": str(opt.id),
+                            "text": opt.content,
+                            "option_text": opt.content,
+                            "match_value": opt.match_value,
+                            "option_text_right": opt.match_value,
+                            "order_index": opt.order_index
+                        }
                         for opt in (q.options or [])
                     ] if q.options else None
                 })
@@ -217,8 +224,47 @@ async def get_attempt(
     # Sort by order_index
     questions_data.sort(key=lambda x: x["order_index"])
 
-    response = AttemptResponse.model_validate(attempt)
+    response = AttemptDetailResponse.model_validate(attempt)
     response.questions = questions_data
+
+    # Populate group-work specific fields
+    if attempt.group_id:
+        # Get the group submission for this assessment/group
+        from app.db.models.attempt import GroupSubmission, StudentGroupMember
+        from app.db.models.auth import User, UserProfile
+        from sqlalchemy import select
+
+        # Get submission status/id
+        sub_stmt = select(GroupSubmission).where(
+            GroupSubmission.assessment_id == attempt.assessment_id,
+            GroupSubmission.group_id == attempt.group_id
+        )
+        sub_res = await db.execute(sub_stmt)
+        submission = sub_res.scalar_one_or_none()
+        if submission:
+            response.group_submission_id = submission.id
+            response.group_submission_status = submission.status
+
+        # Get question distribution mode from assessment
+        if attempt.assessment:
+            response.question_distribution_mode = attempt.assessment.question_distribution_mode
+
+        # Populate group members
+        members_stmt = (
+            select(UserProfile.display_name, UserProfile.first_name, UserProfile.last_name, User.id)
+            .join(User, User.id == UserProfile.user_id)
+            .join(StudentGroupMember, StudentGroupMember.student_id == User.id)
+            .where(StudentGroupMember.group_id == attempt.group_id)
+        )
+        members_res = await db.execute(members_stmt)
+        response.group_members = [
+            {
+                "id": str(m.id),
+                "name": m.display_name or f"{m.first_name} {m.last_name}",
+            }
+            for m in members_res.all()
+        ]
+
     return response
 
 
@@ -244,8 +290,27 @@ async def list_my_attempts(
         page=page,
         page_size=page_size,
     )
+    
+    summaries = []
+    from app.db.models.attempt import GroupSubmission
+    from sqlalchemy import select
+    
+    for a in items:
+        summary = AttemptSummary.model_validate(a)
+        if a.group_id:
+            sub_stmt = select(GroupSubmission).where(
+                GroupSubmission.assessment_id == a.assessment_id,
+                GroupSubmission.group_id == a.group_id
+            )
+            sub_res = await db.execute(sub_stmt)
+            submission = sub_res.scalar_one_or_none()
+            if submission:
+                summary.group_submission_id = submission.id
+                summary.group_submission_status = submission.status
+        summaries.append(summary)
+
     return AttemptListResponse(
-        items=[AttemptSummary.model_validate(a) for a in items],
+        items=summaries,
         total=total,
         page=page,
         page_size=page_size,

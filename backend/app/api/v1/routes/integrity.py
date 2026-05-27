@@ -39,7 +39,7 @@ from app.schemas.integrity import (
 )
 from app.services.integrity_service import IntegrityService
 
-router = APIRouter(prefix="/integrity", tags=["Integrity"])
+router = APIRouter(prefix="/integrity", tags=["Integrity"], redirect_slashes=True)
 
 
 # ── RECORD EVENT (Student) ────────────────────────────────────────────────────

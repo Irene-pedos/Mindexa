@@ -83,6 +83,13 @@ class SubmissionService:
             access_token=access_token,
         )
 
+        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
+        if assessment and assessment.is_group_assessment:
+            raise ValidationError(
+                "Group-work answers must be saved through the shared group workspace.",
+                code="GROUP_WORK_SHARED_SUBMISSION_REQUIRED",
+            )
+
         # Gate 2 — question belongs to this assessment
         in_assessment = await self.assessment_repo.question_in_assessment(
             attempt.assessment_id, question_id
@@ -100,6 +107,12 @@ class SubmissionService:
                 "This answer has been locked after submission",
                 code="RESPONSE_ALREADY_FINAL",
             )
+
+        # Normalize JSONB fields — ensure UUIDs are strings
+        if selected_option_ids:
+            selected_option_ids = [str(uid) for uid in selected_option_ids]
+        if ordered_option_ids:
+            ordered_option_ids = [str(uid) for uid in ordered_option_ids]
 
         # Capture previous state for audit log
         previous_value = _extract_answer_payload(existing) if existing else None
@@ -197,6 +210,25 @@ class SubmissionService:
         """Return all responses for an attempt (grading view — no ownership check)."""
         return await self.submission_repo.list_responses_for_attempt(attempt_id)
 
+    async def list_responses_for_group(
+        self, group_id: uuid.UUID, student_id: uuid.UUID
+    ) -> list[StudentResponse]:
+        """Return all responses for all members of a group. Validates membership."""
+        from app.db.models.attempt import StudentGroupMember
+        from sqlalchemy import select
+        
+        # Validate that student is a member of this group
+        member_check = await self.db.execute(
+            select(StudentGroupMember).where(
+                StudentGroupMember.group_id == group_id,
+                StudentGroupMember.student_id == student_id
+            )
+        )
+        if not member_check.scalar_one_or_none():
+            raise AuthorizationError("Group membership violation", code="GROUP_MEMBERSHIP_VIOLATION")
+
+        return await self.submission_repo.list_responses_for_group(group_id)
+
 
 # ---------------------------------------------------------------------------
 # HELPERS
@@ -209,11 +241,28 @@ def _extract_answer_payload(response: StudentResponse | None) -> dict | None:
     """
     if not response:
         return None
+    
+    # Ensure Enum objects are converted to strings for JSON serialization
+    answer_type = response.answer_type
+    if hasattr(answer_type, "value"):
+        answer_type = str(answer_type.value)
+    elif not isinstance(answer_type, str) and answer_type is not None:
+        answer_type = str(answer_type)
+
+    # Ensure list items are strings (UUIDs from DB need conversion for JSON serialization in logs)
+    selected_option_ids = response.selected_option_ids
+    if selected_option_ids:
+        selected_option_ids = [str(x) for x in selected_option_ids]
+
+    ordered_option_ids = response.ordered_option_ids
+    if ordered_option_ids:
+        ordered_option_ids = [str(x) for x in ordered_option_ids]
+
     return {
-        "answer_type": response.answer_type,
+        "answer_type": answer_type,
         "answer_text": response.answer_text,
-        "selected_option_ids": response.selected_option_ids,
-        "ordered_option_ids": response.ordered_option_ids,
+        "selected_option_ids": selected_option_ids,
+        "ordered_option_ids": ordered_option_ids,
         "match_pairs_json": response.match_pairs_json,
         "fill_blank_answers": response.fill_blank_answers,
         "file_url": response.file_url,

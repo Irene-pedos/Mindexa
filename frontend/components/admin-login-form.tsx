@@ -37,6 +37,13 @@ export function AdminLoginForm({
       }
 
       toast.success("Admin access granted");
+      
+      // Check for Phase 2 Onboarding
+      if (!data.user.onboarding_completed) {
+          router.push("/onboarding");
+          return;
+      }
+      
       router.push("/admin/dashboard");
     } catch (err: unknown) {
       const errorMessage =
@@ -49,20 +56,10 @@ export function AdminLoginForm({
 
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
-      <Card className="overflow-hidden p-0">
+      <Card className="overflow-hidden p-0 border shadow-none rounded-xl bg-background max-w-5xl w-full mx-auto">
         <CardContent className="grid p-0 md:grid-cols-2">
-          <form onSubmit={handleLogin} className="p-6 md:p-8">
+          <form onSubmit={handleLogin} className="p-6 md:p-10 flex flex-col justify-center">
             <div className="flex flex-col items-center gap-2 text-center mb-8">
-              <div className="size-8 flex items-center justify-center text-primary mb-2">
-                <Image
-                  src="/icons/logo/mindexa-icon.svg"
-                  alt="Mindexa Icon"
-                  width={24}
-                  height={24}
-                  style={{ height: "auto" }}
-                  className="size-10"
-                />
-              </div>
               <TypographyH2 className="text-2xl font-semibold tracking-tight">
                 Mindexa Admin
               </TypographyH2>
@@ -72,7 +69,7 @@ export function AdminLoginForm({
             </div>
 
             <div className="space-y-4">
-              <div>
+              <div className="space-y-1.5">
                 <label className="text-sm font-medium">
                   Administrator Email
                 </label>
@@ -82,10 +79,11 @@ export function AdminLoginForm({
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  className="h-10"
                 />
               </div>
 
-              <div>
+              <div className="space-y-1.5">
                 <div className="flex justify-between items-center mb-2">
                   <label className="text-sm font-medium">Secure Password</label>
                   <Link
@@ -100,21 +98,31 @@ export function AdminLoginForm({
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  className="h-10"
                 />
               </div>
 
               <Button
                 type="submit"
-                className="w-full rounded-full mt-4"
+                className="w-full rounded-full h-10 font-medium"
                 disabled={loading}
               >
-                {loading ? "Verifying Credentials..." : "Authenticate Access"}
+                {loading ? "Verifying..." : "Authenticate Access"}
               </Button>
             </div>
 
-            <div className="text-center text-xs text-muted-foreground mt-8">
-              This is a restricted access system. All authentication attempts
-              are logged for security auditing purposes.
+            <div className="text-center text-sm mt-6">
+              Need an administrator account?{" "}
+              <Link
+                href="/signup"
+                className="text-primary hover:underline font-medium"
+              >
+                Request Access
+              </Link>
+            </div>
+
+            <div className="text-center text-[10px] text-muted-foreground mt-8 uppercase font-bold tracking-widest opacity-60">
+              Restricted Access System
             </div>
           </form>
 
@@ -125,7 +133,6 @@ export function AdminLoginForm({
               fill
               className="object-cover"
             />
-            <div className="absolute inset-0 bg-primary/20 mix-blend-multiply" />
           </div>
         </CardContent>
       </Card>

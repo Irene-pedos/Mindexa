@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, Shield, Bell, Loader2, BookOpen } from "lucide-react";
+import { User, Mail, Phone, Shield, Bell, BookOpen } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
 import { toast } from "sonner";
@@ -134,7 +134,7 @@ export default function ProfileSettingsPage() {
                   className="relative overflow-hidden h-9"
                   disabled={loading}
                 >
-                  {loading ? <Loader2 className="size-4 animate-spin mr-2" /> : null}
+                  {loading ? <div className="size-4 rounded-full bg-primary/20 animate-pulse mr-2" /> : null}
                   Change Photo
                   <input
                     type="file"
@@ -308,8 +308,7 @@ export default function ProfileSettingsPage() {
 
       <div className="flex justify-end">
         <Button size="lg" onClick={handleSave} disabled={loading}>
-          {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Save Changes
+          {loading ? "Saving Changes..." : "Save Changes"}
         </Button>
       </div>
     </div>

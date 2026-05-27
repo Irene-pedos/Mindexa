@@ -116,6 +116,36 @@ async def list_responses(
     )
 
 
+# ── LIST RESPONSES FOR GROUP ──────────────────────────────────────────────────
+
+
+@router.get(
+    "/group/{group_id}",
+    response_model=AttemptSubmissionsResponse,
+    summary="List all responses for a student group (collaboration)",
+)
+async def list_group_responses(
+    group_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptSubmissionsResponse:
+    """
+    Return all student responses for all members of a specific group.
+    Allows group members to see each other's progress.
+    """
+    service = SubmissionService(db)
+    responses = await service.list_responses_for_group(
+        group_id=group_id,
+        student_id=current_user.id
+    )
+
+    return AttemptSubmissionsResponse(
+        attempt_id=group_id, # Reusing schema, use group_id as ID
+        submissions=[SubmissionResponse.model_validate(r) for r in responses],
+        total=len(responses),
+    )
+
+
 # ── GET AUDIT LOG (Lecturer/Admin) ────────────────────────────────────────────
 
 

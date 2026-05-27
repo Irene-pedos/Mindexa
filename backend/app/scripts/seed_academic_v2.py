@@ -221,7 +221,7 @@ async def seed_v2():
             db.add(LecturerCourseAssignment(
                 lecturer_id=lecturer.id,
                 course_id=course.id,
-                assignment_role=LecturerAssignmentRole.PRIMARY,
+                assignment_role=LecturerAssignmentRole.MAIN_LECTURER,
                 is_active=True
             ))
             logger.info("Assigned lecturer and class sections to course")

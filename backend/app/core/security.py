@@ -336,7 +336,7 @@ def create_access_token(
 
     now = datetime.now(UTC)
     expires_at = now + expires_delta
-    role_value = str(role)
+    role_value = getattr(role, "value", str(role))
     jti = str(uuid.uuid4())
 
     payload: dict[str, Any] = {
@@ -464,7 +464,7 @@ def decode_token(token: str, expected_type: str) -> TokenPayload:
         raise InvalidTokenError() from exc
 
     # Enforce token type — prevents refresh tokens being used as access tokens
-    expected_type_value = str(expected_type)
+    expected_type_value = getattr(expected_type, "value", expected_type)
     if raw.get("type") != expected_type_value:
         raise InvalidTokenError(
             detail=f"Invalid token type. '{expected_type_value}' token required."

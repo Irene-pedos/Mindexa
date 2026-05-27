@@ -62,6 +62,13 @@ class ResultBreakdownItem(BaseModel):
     grading_mode: str | None
     was_skipped: bool
 
+    # UI fields for the student (populated by result_service)
+    question_text: str | None = None
+    question_type: str | None = None
+    student_answer: str | None = None
+    correct_answer: str | None = None
+    options: list[dict] | None = None
+
 
 class AssessmentResultResponse(BaseModel):
     """
@@ -74,6 +81,8 @@ class AssessmentResultResponse(BaseModel):
     attempt_id: uuid.UUID
     student_id: uuid.UUID
     assessment_id: uuid.UUID
+    assessment_title: str | None = None
+    academic_year: str | None = None
     total_score: float
     max_score: float
     percentage: float
@@ -96,6 +105,8 @@ class ResultSummary(BaseModel):
     attempt_id: uuid.UUID
     student_id: uuid.UUID
     assessment_id: uuid.UUID
+    assessment_title: str | None = None
+    academic_year: str | None = None
     total_score: float
     max_score: float
     percentage: float
@@ -119,3 +130,12 @@ class ResultReleaseResponse(BaseModel):
     held_count: int
     held_attempt_ids: list[uuid.UUID]
     message: str
+
+# Rebuild models
+ReleaseResultsRequest.model_rebuild()
+ClearIntegrityHoldRequest.model_rebuild()
+ResultBreakdownItem.model_rebuild()
+AssessmentResultResponse.model_rebuild()
+ResultSummary.model_rebuild()
+ResultListResponse.model_rebuild()
+ResultReleaseResponse.model_rebuild()

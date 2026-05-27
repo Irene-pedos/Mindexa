@@ -8,11 +8,18 @@ from pydantic import BaseModel
 
 from app.db.enums import AssessmentType, AssessmentStatus
 
+class DashboardMetric(BaseModel):
+    """A metric value with trend comparison."""
+    value: int
+    delta: float = 0.0
+    last_month: int = 0
+    positive: bool = True
+
 class LecturerDashboardSummary(BaseModel):
-    active_classes_count: int = 0
-    upcoming_assessments_count: int = 0
-    pending_grading_count: int = 0
-    flagged_events_count: int = 0
+    active_classes_count: DashboardMetric
+    upcoming_assessments_count: DashboardMetric
+    pending_grading_count: DashboardMetric
+    flagged_events_count: DashboardMetric
 
 class LecturerPendingItem(BaseModel):
     id: uuid.UUID
@@ -49,6 +56,34 @@ class LecturerDashboardResponse(BaseModel):
     recent_submissions: list[LecturerRecentSubmission]
     chart_data: List[LecturerChartDataPoint] = []
     recent_alerts: List[LecturerIntegrityAlert] = []
+    workspaces: List[WorkspaceListItem] = []
+
+class WorkspaceListItem(BaseModel):
+    """Operational teaching space summary for lecturer dashboard."""
+    id: uuid.UUID
+    title: str
+    code: str
+    academic_year: str
+    student_count: int
+    status: str
+    performance_avg: float = 0.0
+    lecturer_name: str
+    institution_name: str
+    class_name: str
+
+class WorkspaceDetail(WorkspaceListItem):
+    """Detailed operational teaching space view."""
+    description: Optional[str] = None
+    department_name: Optional[str] = None
+    option_name: Optional[str] = None
+    sections: List[str] = []
+    roster: List[LecturerCourseRosterItem] = []
+
+class WorkspaceCreate(BaseModel):
+    """Request to initialize a teaching workspace from an assignment."""
+    teaching_assignment_id: uuid.UUID
+    title: Optional[str] = None # Defaults to "{Course} ({Section})"
+    description: Optional[str] = None
 
 class LecturerCourseRosterItem(BaseModel):
     id: uuid.UUID
@@ -62,8 +97,11 @@ class LecturerCourseDetail(BaseModel):
     id: uuid.UUID
     code: str
     title: str
+    description: Optional[str] = None
     student_count: int
     performance_avg: float
+    institution_id: uuid.UUID
+    academic_year: str
     roster: List[LecturerCourseRosterItem]
     department_name: Optional[str] = None
     option_name: Optional[str] = None

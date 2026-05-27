@@ -57,6 +57,7 @@ export interface AdminCourseListItem {
   student_count: number;
   status: string;
   performance_avg: number;
+  academic_year: string;
 }
 
 export interface AdminCourseListResponse {
@@ -77,8 +78,11 @@ export interface LecturerCourseDetail {
   id: string;
   code: string;
   title: string;
+  description?: string;
   student_count: number;
   performance_avg: number;
+  institution_id: string;
+  academic_year: string;
   roster: LecturerCourseRosterItem[];
   department_name?: string;
   option_name?: string;
@@ -134,12 +138,25 @@ export interface AcademicPeriodResponse {
   period_type: string;
 }
 
+export interface UserResponse {
+  id: string;
+  email: string;
+  role: string;
+  profile?: {
+    first_name: string;
+    last_name: string;
+    display_name?: string;
+    staff_id?: string;
+  };
+}
+
 export interface CourseCreateRequest {
   institution_id: string;
   department_ids?: string[];
   option_ids?: string[];
   class_group_ids?: string[];
-  academic_period_id: string;
+  academic_period_id?: string;
+  academic_year: string;
   code: string;
   title: string;
   description?: string;
@@ -165,42 +182,69 @@ export interface StudentCourseRecordResponse {
   attempts: StudentRecordAttempt[];
 }
 
+export interface WorkspaceListItem {
+  id: string;
+  title: string;
+  code: string;
+  academic_year: string;
+  student_count: number;
+  status: string;
+  performance_avg: number;
+  lecturer_name: string;
+  institution_name: string;
+  class_name: string;
+}
+
+export interface WorkspaceDetail extends WorkspaceListItem {
+  description?: string;
+  department_name?: string;
+  option_name?: string;
+  sections?: string[];
+  roster: LecturerCourseRosterItem[];
+}
+
+export interface WorkspaceCreateRequest {
+  teaching_assignment_id: string;
+  title?: string;
+  description?: string;
+}
+
 export const lecturerApi = {
   getDashboard: async (): Promise<LecturerDashboardResponse> => {
     return apiClient("/lecturers/me/dashboard");
   },
-  getCourses: async (
+  getWorkspaces: async (
     page = 1,
     pageSize = 20,
-  ): Promise<AdminCourseListResponse> => {
-    return apiClient(`/lecturers/me/courses?page=${page}&page_size=${pageSize}`);
+  ): Promise<WorkspaceListItem[]> => {
+    return apiClient(`/lecturers/me/workspaces?page=${page}&page_size=${pageSize}`);
   },
-  getCourseDetail: async (courseId: string): Promise<LecturerCourseDetail> => {
-    return apiClient(`/lecturers/me/courses/${courseId}`);
+  getWorkspaceDetail: async (workspaceId: string): Promise<WorkspaceDetail> => {
+    return apiClient(`/lecturers/me/workspaces/${workspaceId}`);
   },
-  createCourse: async (data: CourseCreateRequest): Promise<any> => {
-    return apiClient("/lecturers/me/courses", {
+  initializeWorkspace: async (data: WorkspaceCreateRequest): Promise<WorkspaceDetail> => {
+    return apiClient("/lecturers/me/workspaces/initialize", {
       method: "POST",
       body: JSON.stringify(data),
     });
   },
-  deleteCourse: async (courseId: string): Promise<any> => {
-    return apiClient(`/lecturers/me/courses/${courseId}`, {
+  archiveWorkspace: async (workspaceId: string): Promise<any> => {
+    return apiClient(`/lecturers/me/workspaces/${workspaceId}`, {
       method: "DELETE",
     });
   },
-  enrollStudent: async (courseId: string, email: string): Promise<any> => {
-    return apiClient(`/lecturers/me/courses/${courseId}/students`, {
+  enrollStudent: async (workspaceId: string, email: string): Promise<any> => {
+    return apiClient(`/lecturers/me/workspaces/${workspaceId}/students`, {
       method: "POST",
       body: JSON.stringify({ email }),
     });
   },
   getStudentRecord: async (
-    courseId: string,
+    workspaceId: string,
     studentId: string,
   ): Promise<StudentCourseRecordResponse> => {
     return apiClient(
-      `/lecturers/me/courses/${courseId}/students/${studentId}/record`,
+      `/lecturers/me/workspaces/${workspaceId}/students/${studentId}/record`,
     );
   },
   getInstitutions: async (): Promise<InstitutionResponse[]> => {
@@ -230,6 +274,9 @@ export const lecturerApi = {
   getPeriods: async (): Promise<AcademicPeriodResponse[]> => {
     return apiClient("/lecturers/academic-periods");
   },
+  getLecturers: async (): Promise<UserResponse[]> => {
+    return apiClient("/lecturers");
+  },
 
   // Resource / Materials
   uploadMaterial: async (formData: FormData): Promise<LecturerMaterialResponse> => {
@@ -238,7 +285,7 @@ export const lecturerApi = {
       body: formData,
     });
   },
-  getCourseMaterials: async (courseId: string): Promise<LecturerMaterialResponse[]> => {
-    return apiClient(`/resources/courses/${courseId}/materials`);
+  getWorkspaceMaterials: async (workspaceId: string): Promise<LecturerMaterialResponse[]> => {
+    return apiClient(`/resources/workspaces/${workspaceId}/materials`);
   },
 };

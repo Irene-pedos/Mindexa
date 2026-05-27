@@ -38,8 +38,8 @@ class SubmitAnswerRequest(BaseModel):
     answer_text: str | None = None
     selected_option_ids: list[uuid.UUID] | None = None
     ordered_option_ids: list[uuid.UUID] | None = None
-    match_pairs_json: dict[str, str] | None = None
-    fill_blank_answers: dict[str, str] | None = None
+    match_pairs_json: dict[str, str] = Field(default_factory=dict)
+    fill_blank_answers: dict[str, str] = Field(default_factory=dict)
     file_url: str | None = Field(default=None, max_length=2000)
 
     # Client metadata
@@ -64,9 +64,9 @@ class SubmitAnswerRequest(BaseModel):
                 raise ValueError("selected_option_ids required for OPTION answer types")
         if t == SubmissionAnswerType.ORDERED_LIST and not self.ordered_option_ids and not self.is_skipped:
             raise ValueError("ordered_option_ids required for ORDERED_LIST answer_type")
-        if t == SubmissionAnswerType.MATCH_PAIRS and self.match_pairs_json is None and not self.is_skipped:
+        if t == SubmissionAnswerType.MATCH_PAIRS and not self.match_pairs_json and not self.is_skipped:
             raise ValueError("match_pairs_json required for MATCH_PAIRS answer_type")
-        if t == SubmissionAnswerType.FILL_BLANKS and self.fill_blank_answers is None and not self.is_skipped:
+        if t == SubmissionAnswerType.FILL_BLANKS and not self.fill_blank_answers and not self.is_skipped:
             raise ValueError("fill_blank_answers required for FILL_BLANKS answer_type")
         if t == SubmissionAnswerType.FILE and not self.file_url and not self.is_skipped:
             raise ValueError("file_url required for FILE answer_type")

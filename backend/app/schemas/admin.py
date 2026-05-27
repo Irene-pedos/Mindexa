@@ -6,12 +6,20 @@ from typing import List, Optional
 
 from pydantic import BaseModel
 from app.db.schemas.auth import UserResponse
+from app.db.schemas.academic import CourseCreate, CourseResponse
+
+class DashboardMetric(BaseModel):
+    """A metric value with trend comparison."""
+    value: int
+    delta: float = 0.0
+    last_month: int = 0
+    positive: bool = True
 
 class AdminDashboardSummary(BaseModel):
-    total_students: int = 0
-    total_lecturers: int = 0
-    active_courses: int = 0
-    flagged_events_today: int = 0
+    total_students: DashboardMetric
+    total_lecturers: DashboardMetric
+    active_courses: DashboardMetric
+    flagged_events_today: DashboardMetric
     system_status: str = "Healthy"
 
 class AdminRecentActivity(BaseModel):
@@ -41,6 +49,7 @@ class AdminCourseListItem(BaseModel):
     student_count: int
     status: str
     performance_avg: float = 0.0
+    academic_year: str | None = None
 
 class AdminCourseListResponse(BaseModel):
     items: List[AdminCourseListItem]
@@ -69,6 +78,21 @@ class AdminCourseAssignmentRequest(BaseModel):
     """Request to assign courses to a lecturer."""
     course_ids: List[uuid.UUID]
 
+class AdminCourseCreate(CourseCreate):
+    """Admin-specific course creation, allowing optional lecturer assignment."""
+    primary_lecturer_id: Optional[uuid.UUID] = None
+
+class AdminCourseUpdate(BaseModel):
+    """Request to update course metadata."""
+    title: Optional[str] = None
+    code: Optional[str] = None
+    credit_hours: Optional[int] = None
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    institution_id: Optional[uuid.UUID] = None
+    academic_period_id: Optional[uuid.UUID] = None
+    academic_year: Optional[str] = None
+
 class AdminAnalyticsMetric(BaseModel):
     label: str
     value: str | int
@@ -84,6 +108,7 @@ class AdminAnalyticsResponse(BaseModel):
     user_distribution: List[dict] # [{name: 'Student', value: 400}, ...]
     assessment_trends: List[dict] # [{date: '2024-01', count: 10}, ...]
     integrity_hotspots: List[dict] # [{course: 'Database', flags: 5}, ...]
+    ai_grading_stats: List[dict] = [] # [{mode: 'AI Fully Auto', count: 120}, ...]
     key_insights: List[str]
 
 class AdminIntegrityOverview(BaseModel):
@@ -91,6 +116,16 @@ class AdminIntegrityOverview(BaseModel):
     high_severity_today: int
     active_sessions: int
     recent_flags: List[dict]
+
+class AdminBulkUserApproveRequest(BaseModel):
+    """Request to approve multiple users."""
+    user_ids: List[uuid.UUID]
+    status: str = "ACTIVE"
+
+class AdminBulkUserStatusUpdateRequest(BaseModel):
+    """Request to update status of multiple users."""
+    user_ids: List[uuid.UUID]
+    status: str
 
 class SystemSettingsSchema(BaseModel):
     platform_name: str
@@ -100,3 +135,24 @@ class SystemSettingsSchema(BaseModel):
     ai_assistance_default: bool
     auto_flag_threshold: str
     default_duration: int
+
+# Rebuild models
+DashboardMetric.model_rebuild()
+AdminDashboardSummary.model_rebuild()
+AdminRecentActivity.model_rebuild()
+AdminChartDataPoint.model_rebuild()
+AdminDashboardResponse.model_rebuild()
+AdminUserListResponse.model_rebuild()
+AdminCourseListItem.model_rebuild()
+AdminCourseListResponse.model_rebuild()
+AdminUserStatusUpdate.model_rebuild()
+AdminUserCreate.model_rebuild()
+AdminCourseAssignmentRequest.model_rebuild()
+AdminCourseCreate.model_rebuild()
+AdminAnalyticsMetric.model_rebuild()
+AdminAnalyticsChartData.model_rebuild()
+AdminAnalyticsResponse.model_rebuild()
+AdminIntegrityOverview.model_rebuild()
+AdminBulkUserApproveRequest.model_rebuild()
+AdminBulkUserStatusUpdateRequest.model_rebuild()
+SystemSettingsSchema.model_rebuild()

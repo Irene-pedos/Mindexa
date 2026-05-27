@@ -19,6 +19,8 @@ from app.db.schemas.resource import (
     LecturerMaterialCreate,
     StudentResourceResponse
 )
+from app.db.repositories.resource_repo import ResourceRepository
+from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.services.resource_service import ResourceService
 from app.services.student_service import StudentService
 from app.db.enums import ResourceCategory, UserRole
@@ -34,6 +36,7 @@ router = APIRouter(prefix="/resources", tags=["Resources"])
     summary="Upload a lecturer material file",
 )
 async def upload_material(
+    teaching_workspace_id: uuid.UUID = Form(...),
     course_id: uuid.UUID = Form(None),
     assessment_id: uuid.UUID = Form(None),
     material_category: ResourceCategory = Form(ResourceCategory.GENERAL),
@@ -45,10 +48,12 @@ async def upload_material(
     db: AsyncSession = Depends(get_db),
 ) -> LecturerMaterialResponse:
     """
-    Upload a file (lecture notes, rubric, etc.) for a course or assessment.
+    Upload a file (lecture notes, rubric, etc.) for a teaching workspace or assessment.
     """
     service = ResourceService(db)
+    from app.db.schemas.resource import LecturerMaterialCreate
     metadata = LecturerMaterialCreate(
+        teaching_workspace_id=teaching_workspace_id,
         course_id=course_id,
         assessment_id=assessment_id,
         material_category=material_category,
@@ -61,36 +66,38 @@ async def upload_material(
 
 
 @router.get(
-    "/courses/{course_id}/materials",
+    "/workspaces/{workspace_id}/materials",
     response_model=List[LecturerMaterialResponse],
-    summary="List materials for a specific course",
+    summary="List materials for a specific workspace",
 )
-async def list_course_materials(
-    course_id: uuid.UUID,
+async def list_workspace_materials(
+    workspace_id: uuid.UUID,
     current_user=Depends(require_verified_email),
     db: AsyncSession = Depends(get_db),
 ) -> List[LecturerMaterialResponse]:
     """
-    Returns all current materials uploaded for a specific course.
-    - Lecturers: Can see materials for their assigned courses.
-    - Students: Can see materials for courses they are enrolled in.
+    Returns all current materials uploaded for a specific teaching workspace.
+    - Lecturers: Can see materials for their assigned workspaces.
+    - Students: Can see materials for workspaces they are enrolled in.
     """
     # 1. Authorization check
     if current_user.role == UserRole.STUDENT:
         student_svc = StudentService(db)
-        # Check if student is enrolled in this course
-        enrollment = await student_svc.get_course_detail(current_user.id, course_id)
-        if not enrollment:
-            raise AuthorizationError("You are not enrolled in this course")
+        # Check if student is enrolled in this workspace
+        workspace = await student_svc.get_workspace_detail(current_user.id, workspace_id)
+        if not workspace:
+            raise AuthorizationError("You are not enrolled in this workspace")
     elif current_user.role == UserRole.LECTURER:
-        # For now we allow all lecturers to see materials, but we could restrict
-        # it to only assigned lecturers if needed.
-        pass
+        # Check if lecturer owns this workspace
+        ws_repo = WorkspaceRepository(db)
+        ws = await ws_repo.get_by_id(workspace_id)
+        if not ws or ws.teaching_assignment.lecturer_id != current_user.id:
+            raise AuthorizationError("You do not have access to this workspace")
     elif current_user.role != UserRole.ADMIN:
         raise RoleRequiredError(["student", "lecturer", "admin"])
 
     service = ResourceService(db)
-    materials = await service.list_course_materials(course_id)
+    materials = await service.list_workspace_materials(workspace_id)
     # Filter for student visibility if current user is a student
     if current_user.role == UserRole.STUDENT:
         materials = [m for m in materials if m.is_student_visible]
@@ -109,7 +116,7 @@ async def download_material(
 ):
     """
     Downloads a lecturer material. 
-    Checks if student is enrolled before allowing download.
+    Checks if student is enrolled in the workspace before allowing download.
     """
     service = ResourceService(db)
     material = await service.get_material(material_id)
@@ -118,14 +125,14 @@ async def download_material(
 
     # Authorization check
     if current_user.role == UserRole.STUDENT:
-        student_svc = StudentService(db)
-        # Only allow download if material is student visible and student is enrolled
+        # Only allow download if material is student visible and student is enrolled in workspace
         if not material.is_student_visible:
             raise AuthorizationError("This material is not visible to students")
 
-        enrollment = await student_svc.get_course_detail(current_user.id, material.course_id)
-        if not enrollment:
-            raise AuthorizationError("You are not enrolled in this course")
+        student_svc = StudentService(db)
+        workspace = await student_svc.get_workspace_detail(current_user.id, material.teaching_workspace_id)
+        if not workspace:
+            raise AuthorizationError("You are not enrolled in this teaching workspace")
 
     # In a real app, we'd use a cloud storage URL, but for local we return the file from disk
     absolute_path = os.path.join(settings.UPLOAD_DIR, material.file_path)
@@ -178,6 +185,38 @@ async def list_student_resources(
     service = ResourceService(db)
     resources = await service.list_student_resources(current_user.id)
     return [StudentResourceResponse.model_validate(r) for r in resources]
+
+
+@router.get(
+    "/student-resources/download/{resource_id}",
+    summary="Download a personal study resource",
+)
+async def download_student_resource_file(
+    resource_id: uuid.UUID,
+    current_user=Depends(require_verified_email),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Downloads a personal study resource. 
+    Only available to the owner student.
+    """
+    service = ResourceService(db)
+    resource = await service.repo.get_student_resource(resource_id)
+    if not resource:
+        raise NotFoundError("Resource not found")
+
+    if resource.student_id != current_user.id and current_user.role != UserRole.ADMIN:
+        raise AuthorizationError("You do not have permission to access this resource")
+
+    absolute_path = os.path.join(settings.UPLOAD_DIR, resource.file_path)
+    if not os.path.exists(absolute_path):
+        raise NotFoundError("File not found on disk")
+
+    return FileResponse(
+        path=absolute_path,
+        filename=resource.original_filename,
+        media_type=resource.mime_type,
+    )
 
 
 @router.delete(

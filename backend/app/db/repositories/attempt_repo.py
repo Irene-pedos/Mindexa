@@ -38,6 +38,7 @@ class AttemptRepository:
         grading_mode: GradingMode,
         expires_at: datetime,
         access_token: uuid.UUID,
+        group_id: uuid.UUID | None = None,
         ip_address: str | None = None,
         user_agent: str | None = None,
     ) -> AssessmentAttempt:
@@ -46,6 +47,7 @@ class AttemptRepository:
             student_id=student_id,
             attempt_number=attempt_number,
             grading_mode=grading_mode,
+            group_id=group_id,
             status=AttemptStatus.IN_PROGRESS,
             started_at=_utcnow(),
             expires_at=expires_at,
@@ -62,10 +64,21 @@ class AttemptRepository:
     # READS
     # -----------------------------------------------------------------------
 
+    async def get_by_id_simple(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
+        """Lightweight fetch: no relationships loaded."""
+        result = await self.db.execute(
+            select(AssessmentAttempt).where(
+                AssessmentAttempt.id == attempt_id,
+                AssessmentAttempt.is_deleted.is_(False),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def get_by_id(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
         result = await self.db.execute(
             select(AssessmentAttempt)
             .options(
+                selectinload(AssessmentAttempt.assessment),
                 selectinload(AssessmentAttempt.responses),
                 selectinload(AssessmentAttempt.integrity_flags),
                 selectinload(AssessmentAttempt.integrity_warnings),
@@ -119,7 +132,9 @@ class AttemptRepository:
     ) -> AssessmentAttempt | None:
         """Validate the access_token for a specific attempt."""
         result = await self.db.execute(
-            select(AssessmentAttempt).where(
+            select(AssessmentAttempt)
+            .options(selectinload(AssessmentAttempt.assessment))
+            .where(
                 AssessmentAttempt.id == attempt_id,
                 AssessmentAttempt.access_token == access_token,
                 AssessmentAttempt.is_deleted.is_(False),
@@ -144,6 +159,7 @@ class AttemptRepository:
         self,
         student_id: uuid.UUID,
         status: str | None = None,
+        assessment_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[AssessmentAttempt], int]:
@@ -153,6 +169,8 @@ class AttemptRepository:
         ]
         if status:
             filters.append(AssessmentAttempt.status == status)
+        if assessment_id:
+            filters.append(AssessmentAttempt.assessment_id == assessment_id)
 
         count_result = await self.db.execute(
             select(func.count(AssessmentAttempt.id)).where(*filters)

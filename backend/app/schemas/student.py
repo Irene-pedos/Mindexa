@@ -8,22 +8,29 @@ from pydantic import BaseModel, Field
 
 from app.db.enums import AttemptStatus, AssessmentType, ResultLetterGrade
 
+class DashboardMetric(BaseModel):
+    """A metric value with trend comparison."""
+    value: float
+    delta: float = 0.0
+    last_month: float = 0.0
+    positive: bool = True
+
 class StudentDashboardSummary(BaseModel):
     """Overall student performance and status summary."""
-    cgpa: float = 0.0
-    total_credits: int = 0
-    attendance_rate: float = 0.0
-    semesters_completed: int = 0
-    active_assessments_count: int = 0
-    pending_results_count: int = 0
+    cgpa: DashboardMetric
+    active_assessments_count: DashboardMetric
+    completed_assessments_count: DashboardMetric
+    avg_performance_percent: DashboardMetric
 
 class StudentActiveAttempt(BaseModel):
     """Brief info about an attempt currently in progress or paused."""
     id: uuid.UUID
     assessment_id: uuid.UUID
     assessment_title: str
+    assessment_type: AssessmentType
     course_code: Optional[str] = None
     course_name: Optional[str] = None
+    academic_year: Optional[str] = None
     status: AttemptStatus
     started_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
@@ -35,6 +42,7 @@ class StudentRecentResult(BaseModel):
     assessment_type: AssessmentType
     course_code: Optional[str] = None
     course_name: Optional[str] = None
+    academic_year: Optional[str] = None
     score: float
     total_marks: float
     percentage: float
@@ -48,6 +56,7 @@ class StudentUpcomingAssessment(BaseModel):
     type: AssessmentType
     course_code: Optional[str] = None
     course_name: Optional[str] = None
+    academic_year: Optional[str] = None
     window_start: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     total_marks: Optional[int] = None
@@ -77,13 +86,15 @@ class StudentScheduleResponse(BaseModel):
     events: list[StudentScheduleEvent] = []
 
 class StudentCourseListItem(BaseModel):
-    """Simplified course info for student listing with progress."""
+    """Simplified course/workspace info for student listing with progress."""
     id: uuid.UUID
     code: str
     title: str
     lecturer_name: str
     status: str
     progress: int = 0
+    academic_year: str
+    workspace_id: Optional[uuid.UUID] = None
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""
@@ -92,6 +103,7 @@ class StudentDashboardResponse(BaseModel):
     recent_results: list[StudentRecentResult] = []
     upcoming_assessments: list[StudentUpcomingAssessment] = []
     performance_trend: list[PerformanceTrendItem] = []
+    workspaces: list[StudentCourseListItem] = []
 
 # Rebuild models to resolve deferred type evaluation
 StudentDashboardSummary.model_rebuild()
@@ -102,4 +114,5 @@ PerformanceTrendItem.model_rebuild()
 StudentDashboardResponse.model_rebuild()
 StudentScheduleEvent.model_rebuild()
 StudentScheduleResponse.model_rebuild()
+StudentCourseListItem.model_rebuild()
 

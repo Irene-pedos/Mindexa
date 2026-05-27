@@ -151,3 +151,14 @@ class LiveAttemptStatusResponse(MindexaSchema):
     copy_attempt_count: int
     reconnect_count: int
     latest_event_at: datetime | None = None
+
+# Rebuild models
+IntegrityEventIngest.model_rebuild()
+IntegrityEventResponse.model_rebuild()
+IntegrityWarningResponse.model_rebuild()
+ManualWarningRequest.model_rebuild()
+ManualFlagRequest.model_rebuild()
+FlagResolutionRequest.model_rebuild()
+IntegrityFlagResponse.model_rebuild()
+SupervisionSessionResponse.model_rebuild()
+LiveAttemptStatusResponse.model_rebuild()

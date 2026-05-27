@@ -75,14 +75,42 @@ async def list_my_results(
     """
     Returns a paginated list of released results for the current student.
     """
-    service = ResultService(db)
-    items, total = await service.list_results_for_student(
-        student_id=current_user.id,
-        page=page,
-        page_size=page_size,
+    from app.db.models.assessment import Assessment
+    from app.db.models.result import AssessmentResult
+    from sqlalchemy import select, func
+
+    # Get results for current student
+    stmt = select(AssessmentResult).where(
+        AssessmentResult.student_id == current_user.id,
+        AssessmentResult.is_released == True,
+        AssessmentResult.is_deleted == False
+    ).order_by(AssessmentResult.released_at.desc())
+
+    # Count total
+    count_stmt = select(func.count(AssessmentResult.id)).where(
+        AssessmentResult.student_id == current_user.id,
+        AssessmentResult.is_released == True,
+        AssessmentResult.is_deleted == False
     )
+    total = (await db.execute(count_stmt)).scalar_one()
+
+    # Paginate
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    result = await db.execute(stmt)
+    items = result.scalars().all()
+
+    summaries = []
+    for r in items:
+        summary = ResultSummary.model_validate(r)
+        # Fetch assessment info
+        ass = await db.get(Assessment, r.assessment_id)
+        if ass:
+            summary.assessment_title = ass.title
+            summary.academic_year = ass.academic_year
+        summaries.append(summary)
+
     return ResultListResponse(
-        items=[ResultSummary.model_validate(r) for r in items],
+        items=summaries,
         total=total,
         page=page,
         page_size=page_size,

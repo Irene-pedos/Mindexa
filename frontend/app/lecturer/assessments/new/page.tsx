@@ -1,7 +1,7 @@
 // app/lecturer/assessments/new/page.tsx
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Card,
@@ -43,8 +43,12 @@ import {
   X,
   GripVertical,
   Database,
+  Info,
+  Image as ImageIcon,
   Loader2 as LoaderCircleIcon,
   Calendar as CalendarIcon,
+  Users,
+  Upload,
 } from "lucide-react";
 import { format } from "date-fns";
 import { Calendar } from "@/components/ui/calendar";
@@ -73,20 +77,52 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
-import { 
-  lecturerApi, 
+import {
+  lecturerApi,
   AdminCourseListItem,
   InstitutionResponse,
   DepartmentResponse,
   OptionResponse,
-  ClassGroupResponse 
+  ClassGroupResponse,
+  AcademicPeriodResponse,
+  UserResponse,
 } from "@/lib/api/lecturer";
 import { QuestionBankSelector } from "@/components/mindexa/assessment/question-bank-selector";
 import { QuestionBankItem } from "@/lib/api/question";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { GroupWorkConfigSection } from "@/components/mindexa/assessment/group-work-config";
+import { GroupCsvImport } from "@/components/mindexa/assessment/group-csv-import";
+import { GroupBuilderDnd } from "@/components/mindexa/assessment/group-builder-dnd";
+import { GroupQuestionEditor } from "@/components/mindexa/assessment/group-question-editor";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { summarizeQuestionMix } from "@/lib/grading-architecture";
 
-type AssessmentMode = "Practice" | "Formative" | "Homework" | "CAT" | "Summative" | "Groupwork";
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { restrictToVerticalAxis } from '@dnd-kit/modifiers';
+
+type AssessmentMode =
+  | "Practice"
+  | "Formative"
+  | "Homework"
+  | "CAT"
+  | "Summative"
+  | "Groupwork";
 type Difficulty = "Easy" | "Medium" | "Hard";
 type QuestionType =
   | "mcq"
@@ -98,6 +134,8 @@ type QuestionType =
   | "computational"
   | "ordering"
   | "casestudy";
+
+type ComputationalSubType = "decision" | "search" | "counting" | "optimization";
 
 interface QuestionOption {
   id?: string;
@@ -120,11 +158,28 @@ interface BlueprintSection {
 interface Question {
   id: string;
   sectionId: string;
+  groupId?: string;
   text: string;
+  imageUrl?: string;
   type: QuestionType;
+  computationalType?: ComputationalSubType;
+  caseStudyContext?: string;
   marks: number;
   options: QuestionOption[];
   aiGenerated: boolean;
+}
+
+interface GroupMember {
+  id: string;
+  name: string;
+  email: string;
+  is_leader?: boolean;
+}
+
+interface Group {
+  id: string;
+  name: string;
+  members: GroupMember[];
 }
 
 const PREDEFINED_INSTRUCTIONS = [
@@ -136,12 +191,940 @@ const PREDEFINED_INSTRUCTIONS = [
   "Formula sheet provided",
 ];
 
-const STEPS = [
-  { title: "Metadata", icon: FileText },
+// --- COMPONENTS ---
+
+function SortableLecturerOrderItem({
+  id,
+  index,
+  option,
+  onUpdateText,
+  onRemove,
+}: {
+  id: string;
+  index: number;
+  option: any;
+  onUpdateText: (val: string) => void;
+  onRemove: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    position: "relative" as const,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-3 p-2 border rounded-md bg-background transition-all",
+        isDragging && "shadow-lg border-primary/50 z-10"
+      )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground"
+      >
+        <GripVertical className="size-4" />
+      </div>
+      <Badge variant="outline">{index + 1}</Badge>
+      <Input
+        value={option.option_text || option.text || ""}
+        onChange={(e) => onUpdateText(e.target.value)}
+        className="flex-1 h-9"
+        placeholder={`Step ${index + 1}`}
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onRemove}
+        className="text-destructive h-8 w-8"
+      >
+        <X className="size-4" />
+      </Button>
+    </div>
+  );
+}
+
+function LecturerOrderingList({
+  options,
+  onUpdateOptions,
+  onAddOption,
+  onUpdateOptionText,
+  onRemoveOption,
+}: {
+  options: any[];
+  onUpdateOptions: (newOptions: any[]) => void;
+  onAddOption: () => void;
+  onUpdateOptionText: (index: number, val: string) => void;
+  onRemoveOption: (index: number) => void;
+}) {
+  const itemsWithIds = useMemo(() => {
+    return options.map((opt, i) => ({ ...opt, _dndId: opt.id || `opt-${i}` }));
+  }, [options]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active && over && active.id !== over.id) {
+      const oldIndex = itemsWithIds.findIndex((x) => x._dndId === active.id);
+      const newIndex = itemsWithIds.findIndex((x) => x._dndId === over.id);
+
+      const newOptions = arrayMove(options, oldIndex, newIndex);
+      const sortedOptions = newOptions.map((opt, i) => ({ ...opt, order_index: i }));
+      onUpdateOptions(sortedOptions);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pl-4 border-l-2 border-muted">
+      <Label className="text-sm font-semibold">
+        Correct Sequence (Auto-Shuffled for Students)
+      </Label>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        modifiers={[restrictToVerticalAxis]}
+      >
+        <SortableContext
+          items={itemsWithIds.map(x => x._dndId)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-2">
+            {itemsWithIds.map((opt, idx) => (
+              <SortableLecturerOrderItem
+                key={opt._dndId}
+                id={opt._dndId}
+                index={idx}
+                option={opt}
+                onUpdateText={(val) => onUpdateOptionText(idx, val)}
+                onRemove={() => onRemoveOption(idx)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <Button variant="outline" size="sm" onClick={onAddOption}>
+        <Plus className="size-3 mr-2" /> Add Item
+      </Button>
+    </div>
+  );
+}
+
+function SortableMatchingPairItem({
+  id,
+  option,
+  onUpdateLeft,
+  onUpdateRight,
+  onRemove,
+}: {
+  id: string;
+  option: any;
+  onUpdateLeft: (val: string) => void;
+  onUpdateRight: (val: string) => void;
+  onRemove: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : 1,
+    position: "relative" as const,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "flex items-center gap-3 p-2 border rounded-md bg-background transition-all",
+        isDragging && "shadow-lg border-primary/50 z-10"
+      )}
+    >
+      <div
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1 text-muted-foreground hover:text-foreground"
+      >
+        <GripVertical className="size-4" />
+      </div>
+      <Input
+        value={option.option_text || ""}
+        onChange={(e) => onUpdateLeft(e.target.value)}
+        className="flex-1 h-9"
+        placeholder="Premise (Left)"
+      />
+      <ChevronRight className="size-4 text-muted-foreground opacity-30" />
+      <Input
+        value={option.option_text_right || ""}
+        onChange={(e) => onUpdateRight(e.target.value)}
+        className="flex-1 h-9"
+        placeholder="Response (Right)"
+      />
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onRemove}
+        className="text-destructive h-8 w-8"
+      >
+        <X className="size-4" />
+      </Button>
+    </div>
+  );
+}
+
+function LecturerMatchingList({
+  options,
+  onUpdateOptions,
+  onAddOption,
+  onUpdateOptionLeft,
+  onUpdateOptionRight,
+  onRemoveOption,
+}: {
+  options: any[];
+  onUpdateOptions: (newOptions: any[]) => void;
+  onAddOption: () => void;
+  onUpdateOptionLeft: (index: number, val: string) => void;
+  onUpdateOptionRight: (index: number, val: string) => void;
+  onRemoveOption: (index: number) => void;
+}) {
+  const itemsWithIds = useMemo(() => {
+    return options.map((opt, i) => ({ ...opt, _dndId: opt.id || `match-${i}` }));
+  }, [options]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const handleDragEnd = (event: any) => {
+    const { active, over } = event;
+    if (active && over && active.id !== over.id) {
+      const oldIndex = itemsWithIds.findIndex((x) => x._dndId === active.id);
+      const newIndex = itemsWithIds.findIndex((x) => x._dndId === over.id);
+
+      const newOptions = arrayMove(options, oldIndex, newIndex);
+      const sortedOptions = newOptions.map((opt, i) => ({ ...opt, order_index: i }));
+      onUpdateOptions(sortedOptions);
+    }
+  };
+
+  return (
+    <div className="space-y-4 pl-4 border-l-2 border-muted">
+      <Label className="text-sm font-semibold">
+        Matching Pairs (Draggable Reordering)
+      </Label>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+        modifiers={[restrictToVerticalAxis]}
+      >
+        <SortableContext
+          items={itemsWithIds.map(x => x._dndId)}
+          strategy={verticalListSortingStrategy}
+        >
+          <div className="space-y-2">
+            {itemsWithIds.map((opt, idx) => (
+              <SortableMatchingPairItem
+                key={opt._dndId}
+                id={opt._dndId}
+                option={opt}
+                onUpdateLeft={(val) => onUpdateOptionLeft(idx, val)}
+                onUpdateRight={(val) => onUpdateOptionRight(idx, val)}
+                onRemove={() => onRemoveOption(idx)}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <Button variant="outline" size="sm" onClick={onAddOption}>
+        <Plus className="size-3 mr-2" /> Add Pair
+      </Button>
+    </div>
+  );
+}
+
+function QuestionCard({
+  question,
+  index,
+  allowedTypes,
+  onUpdate,
+  onDelete,
+  onSaveToBank,
+  onUpdateOption,
+  onAddOption,
+  onRemoveOption,
+}: {
+  question: Question;
+  index: number;
+  allowedTypes: QuestionType[];
+  onUpdate: (updates: Partial<Question>) => void;
+  onDelete: () => void;
+  onSaveToBank: () => void;
+  onUpdateOption: (idx: number, updates: Partial<QuestionOption>) => void;
+  onAddOption: () => void;
+  onRemoveOption: (idx: number) => void;
+}) {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("Image too large. Max 5MB.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        onUpdate({ imageUrl: reader.result as string });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  return (
+    <Card className="shadow-none border hover:border-primary/20 transition-colors">
+      <CardContent className="p-6 space-y-6">
+        {/* Header Row */}
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Badge
+              variant="outline"
+              className="size-8 flex items-center justify-center rounded-lg font-semibold text-sm"
+            >
+              {index + 1}
+            </Badge>
+            <Select
+              value={question.type}
+              onValueChange={(v: QuestionType) => {
+                let newOptions: QuestionOption[] = [];
+                if (v === "mcq") {
+                  newOptions = [
+                    {
+                      option_text: "Option 1",
+                      is_correct: true,
+                      order_index: 0,
+                    },
+                    {
+                      option_text: "Option 2",
+                      is_correct: false,
+                      order_index: 1,
+                    },
+                  ];
+                } else if (v === "truefalse") {
+                  newOptions = [
+                    { option_text: "True", is_correct: true, order_index: 0 },
+                    { option_text: "False", is_correct: false, order_index: 1 },
+                  ];
+                } else if (v === "fillblank") {
+                  newOptions = [
+                    {
+                      option_text: "Answer 1",
+                      is_correct: true,
+                      order_index: 0,
+                    },
+                  ];
+                } else if (v === "matching") {
+                  newOptions = [
+                    {
+                      option_text: "Premise 1",
+                      option_text_right: "Response 1",
+                      is_correct: true,
+                      order_index: 0,
+                    },
+                    {
+                      option_text: "Premise 2",
+                      option_text_right: "Response 2",
+                      is_correct: true,
+                      order_index: 1,
+                    },
+                  ];
+                } else if (v === "ordering") {
+                  newOptions = [
+                    { option_text: "Step 1", is_correct: true, order_index: 0 },
+                    { option_text: "Step 2", is_correct: true, order_index: 1 },
+                  ];
+                }
+                onUpdate({ type: v, options: newOptions });
+              }}
+            >
+              <SelectTrigger className="w-[160px] h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {allowedTypes.map((t) => (
+                  <SelectItem key={t} value={t} className="capitalize">
+                    {t}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs font-semibold text-muted-foreground">
+                Marks
+              </Label>
+              <Input
+                type="number"
+                className="w-16 h-8 text-center"
+                value={question.marks ?? 0}
+                onChange={(e) =>
+                  onUpdate({ marks: parseInt(e.target.value) || 0 })
+                }
+              />
+            </div>
+            <div className="flex items-center gap-1 border-l pl-4">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onSaveToBank}
+                className="text-primary hover:bg-primary/5 h-8 w-8"
+                title="Save to Bank"
+              >
+                <Database className="size-4" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onDelete}
+                className="text-muted-foreground hover:text-destructive hover:bg-destructive/5 h-8 w-8"
+                title="Delete Question"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {/* Question Text & Media */}
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold">Question Content</Label>
+            <Textarea
+              placeholder="Write your question text here..."
+              value={question.text}
+              onChange={(e) => onUpdate({ text: e.target.value })}
+              className="min-h-[100px] text-base"
+            />
+            {question.type === "fillblank" && (
+              <p className="text-[11px] text-primary font-medium mt-1">
+                Tip: Use <strong>[blank]</strong> to indicate where students
+                should type their answers.
+              </p>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-sm font-semibold flex items-center gap-2">
+              <ImageIcon className="size-4" /> Question Media (Optional)
+            </Label>
+            {question.imageUrl ? (
+              <div className="relative inline-block border rounded-lg p-2 bg-muted/30 group">
+                <img
+                  src={question.imageUrl}
+                  alt="Diagram"
+                  className="max-h-60 rounded-md object-contain"
+                />
+                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-md">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => onUpdate({ imageUrl: undefined })}
+                  >
+                    <Trash2 className="size-4 mr-2" /> Remove Image
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 px-4 h-9 rounded-md border border-dashed cursor-pointer hover:bg-muted/50 transition-colors">
+                  <Upload className="size-4 text-muted-foreground" />
+                  <span className="text-xs font-medium text-muted-foreground">
+                    Upload Image
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={handleImageUpload}
+                  />
+                </label>
+                <span className="text-[11px] text-muted-foreground">
+                  JPG, PNG, SVG (Max 5MB)
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <Separator />
+
+        {/* Specialized Logic Sections */}
+        {question.type === "computational" && (
+          <div className="space-y-4 pl-4 border-l-2 border-primary bg-primary/5 p-4 rounded-r-lg">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase text-primary">
+                  Logic Classification
+                </Label>
+                <Select
+                  value={question.computationalType || "search"}
+                  onValueChange={(v: ComputationalSubType) =>
+                    onUpdate({ computationalType: v })
+                  }
+                >
+                  <SelectTrigger className="h-9 bg-background">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="decision">
+                      Decision Problem (Yes/No)
+                    </SelectItem>
+                    <SelectItem value="search">
+                      Search Problem (Value retrieval)
+                    </SelectItem>
+                    <SelectItem value="counting">
+                      Counting Problem (Solution total)
+                    </SelectItem>
+                    <SelectItem value="optimization">
+                      Optimization Problem (Best solution)
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase text-primary">
+                  Expected Solution / Rubric
+                </Label>
+                <Textarea
+                  placeholder="Describe the mathematical proof or value expected..."
+                  className="h-9 min-h-[36px] bg-background text-sm"
+                  value={question.options[0]?.option_text || ""}
+                  onChange={(e) =>
+                    onUpdate({
+                      options: [
+                        {
+                          option_text: e.target.value,
+                          is_correct: true,
+                          order_index: 0,
+                        },
+                      ],
+                    })
+                  }
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {question.type === "casestudy" && (
+          <div className="space-y-4 pl-4 border-l-2 border-amber-500 bg-amber-50/50 p-4 rounded-r-lg">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase text-amber-700">
+                Case Scenario / Background
+              </Label>
+              <Textarea
+                placeholder="Paste the scenario, story, or data context here..."
+                className="min-h-[120px] bg-background text-sm leading-relaxed"
+                value={question.caseStudyContext || ""}
+                onChange={(e) => onUpdate({ caseStudyContext: e.target.value })}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Answer Options Editors */}
+        {(question.type === "mcq" || question.type === "truefalse") && (
+          <div className="space-y-4 pl-4 border-l-2 border-muted">
+            <Label className="text-sm font-semibold">
+              Options (Select the correct one)
+            </Label>
+            <RadioGroup
+              value={question.options
+                .find((o) => o.is_correct)
+                ?.order_index.toString()}
+              onValueChange={(v) => {
+                const idx = parseInt(v);
+                onUpdate({
+                  options: question.options.map((opt, i) => ({
+                    ...opt,
+                    is_correct: i === idx,
+                  })),
+                });
+              }}
+              className="space-y-2"
+            >
+              {question.options.map((opt, oIdx) => (
+                <div key={oIdx} className="flex items-center gap-3">
+                  <RadioGroupItem value={oIdx.toString()} />
+                  <Input
+                    value={opt.option_text || ""}
+                    onChange={(e) =>
+                      onUpdateOption(oIdx, { option_text: e.target.value })
+                    }
+                    className="h-9"
+                    placeholder={`Option ${oIdx + 1}`}
+                    disabled={question.type === "truefalse"}
+                  />
+                  {question.type === "mcq" && question.options.length > 2 && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => onRemoveOption(oIdx)}
+                      className="text-destructive h-9 w-9"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+            </RadioGroup>
+            {question.type === "mcq" && (
+              <Button variant="outline" size="sm" onClick={onAddOption}>
+                <Plus className="size-3 mr-2" /> Add Option
+              </Button>
+            )}
+          </div>
+        )}
+
+        {question.type === "matching" && (
+          <LecturerMatchingList
+            options={question.options}
+            onUpdateOptions={(newOptions) => onUpdate({ options: newOptions })}
+            onAddOption={onAddOption}
+            onUpdateOptionLeft={(idx, val) => onUpdateOption(idx, { option_text: val })}
+            onUpdateOptionRight={(idx, val) => onUpdateOption(idx, { option_text_right: val })}
+            onRemoveOption={onRemoveOption}
+          />
+        )}
+
+        {question.type === "fillblank" && (
+          <div className="space-y-6 pl-4 border-l-2 border-muted">
+            <div className="space-y-4">
+              <Label className="text-sm font-semibold flex items-center gap-2">
+                <CheckCircle2 className="size-4 text-emerald-500" />
+                Correct Answers for Blanks (In Sequence)
+              </Label>
+              <div className="space-y-2">
+                {question.options.filter(o => o.is_correct).map((opt, oIdx) => (
+                  <div key={oIdx} className="flex items-center gap-3">
+                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">#{oIdx + 1}</Badge>
+                    <Input
+                      value={opt.option_text || ""}
+                      onChange={(e) => {
+                        const correctIndices = question.options.map((o, i) => o.is_correct ? i : -1).filter(i => i !== -1);
+                        const actualIdx = correctIndices[oIdx];
+                        onUpdateOption(actualIdx, { option_text: e.target.value });
+                      }}
+                      className="flex-1 h-9"
+                      placeholder="Correct Answer"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const correctIndices = question.options.map((o, i) => o.is_correct ? i : -1).filter(i => i !== -1);
+                        onRemoveOption(correctIndices[oIdx]);
+                      }}
+                      className="text-destructive"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => {
+                    const newOptions = [...question.options, { option_text: "", is_correct: true, order_index: question.options.length }];
+                    onUpdate({ options: newOptions });
+                  }}
+                  className="h-8 text-[11px]"
+                >
+                  <Plus className="size-3 mr-2" /> Add Blank Target
+                </Button>
+              </div>
+            </div>
+
+            <Separator className="opacity-50" />
+
+            <div className="space-y-4">
+              <Label className="text-sm font-semibold flex items-center gap-2 text-muted-foreground">
+                <Plus className="size-4" />
+                Extra Pool Distractors (Optional)
+              </Label>
+              <p className="text-[11px] text-muted-foreground">These will appear in the student&apos;s pool but are not correct for any blank.</p>
+              <div className="space-y-2">
+                {question.options.filter(o => !o.is_correct).map((opt, oIdx) => (
+                  <div key={oIdx} className="flex items-center gap-3">
+                    <div className="size-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold opacity-40">D</div>
+                    <Input
+                      value={opt.option_text || ""}
+                      onChange={(e) => {
+                        const distractorIndices = question.options.map((o, i) => !o.is_correct ? i : -1).filter(i => i !== -1);
+                        const actualIdx = distractorIndices[oIdx];
+                        onUpdateOption(actualIdx, { option_text: e.target.value });
+                      }}
+                      className="flex-1 h-9"
+                      placeholder="Distractor Text"
+                    />
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => {
+                        const distractorIndices = question.options.map((o, i) => !o.is_correct ? i : -1).filter(i => i !== -1);
+                        onRemoveOption(distractorIndices[oIdx]);
+                      }}
+                      className="text-destructive"
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+                <Button 
+                  variant="ghost" 
+                  size="sm" 
+                  onClick={() => {
+                    const newOptions = [...question.options, { option_text: "", is_correct: false, order_index: question.options.length }];
+                    onUpdate({ options: newOptions });
+                  }}
+                  className="h-8 text-[11px] border border-dashed hover:bg-muted/50"
+                >
+                  <Plus className="size-3 mr-2" /> Add Distractor
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {question.type === "ordering" && (
+          <LecturerOrderingList
+            options={question.options}
+            onUpdateOptions={(newOptions) => onUpdate({ options: newOptions })}
+            onAddOption={onAddOption}
+            onUpdateOptionText={(idx, val) => onUpdateOption(idx, { option_text: val })}
+            onRemoveOption={onRemoveOption}
+          />
+        )}
+
+        {(question.type === "shortanswer" || question.type === "essay") && (
+          <div className="space-y-4 pl-4 border-l-2 border-muted">
+            <div className="p-4 rounded-lg bg-primary/5 border border-primary/10">
+              <p className="text-xs text-primary font-semibold flex items-center gap-2 mb-1">
+                <BrainCircuit className="size-4" /> Open-Ended Evaluation
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Students will be provided with a{" "}
+                {question.type === "shortanswer"
+                  ? "text input"
+                  : "rich text area"}
+                . AI will use the rubric below for pre-grading.
+              </p>
+            </div>
+            <Label className="text-sm font-semibold">
+              Ideal Answer / Grading Rubric
+            </Label>
+            <Textarea
+              placeholder="Define exactly what constitutes a full-mark answer..."
+              className="min-h-[100px] text-sm"
+              value={question.options[0]?.option_text || ""}
+              onChange={(e) =>
+                onUpdate({
+                  options: [
+                    {
+                      option_text: e.target.value,
+                      is_correct: true,
+                      order_index: 0,
+                    },
+                  ],
+                })
+              }
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ReviewQuestionCard({
+  question,
+  index,
+}: {
+  question: Question;
+  index: number;
+}) {
+  return (
+    <div className="space-y-4 group p-4 border rounded-lg hover:bg-muted/5 transition-colors">
+      <div className="flex gap-4">
+        <span className="text-muted-foreground font-bold text-2xl tabular-nums shrink-0">
+          {(index + 1).toString().padStart(2, "0")}
+        </span>
+        <div className="space-y-3 flex-1">
+          <div>
+            <p className="font-semibold text-lg leading-tight">
+              {question.text || (
+                <em className="text-muted-foreground font-normal italic">
+                  No question text provided
+                </em>
+              )}
+            </p>
+            {question.imageUrl && (
+              <div className="mt-3 inline-block p-1 border rounded-lg overflow-hidden">
+                <img
+                  src={question.imageUrl}
+                  alt="Diagram"
+                  className="max-h-52 rounded-md object-contain"
+                />
+              </div>
+            )}
+            {question.caseStudyContext && (
+              <div className="mt-3 p-4 bg-muted/20 border border-dashed rounded-lg text-sm text-foreground/80 leading-relaxed">
+                <span className="font-bold block mb-1 text-[10px] text-primary uppercase tracking-wider">
+                  Case Scenario
+                </span>
+                {question.caseStudyContext}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="secondary"
+              className="h-5 text-[10px] uppercase font-bold"
+            >
+              {question.type}
+            </Badge>
+            <Badge variant="outline" className="h-5 text-[10px] font-medium">
+              {question.marks} Marks
+            </Badge>
+          </div>
+
+          {/* Options Preview */}
+          <div className="space-y-2">
+            {(question.type === "mcq" || question.type === "truefalse") && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                {question.options.map((opt, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "text-sm p-2 px-3 rounded-md border flex items-center justify-between",
+                      opt.is_correct
+                        ? "bg-emerald-50 border-emerald-100 text-emerald-900 font-medium"
+                        : "bg-background border-border",
+                    )}
+                  >
+                    {opt.option_text}
+                    {opt.is_correct && (
+                      <CheckCircle2 className="size-3.5 text-emerald-500" />
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {question.type === "matching" && (
+              <div className="space-y-1 max-w-lg">
+                {question.options.map((opt, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-4 bg-muted/10 p-2 px-3 rounded-md border border-dashed text-xs"
+                  >
+                    <div className="font-medium flex-1">{opt.option_text}</div>
+                    <ChevronRight className="size-3 text-primary" />
+                    <div className="font-bold text-primary flex-1">
+                      {opt.option_text_right}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(question.type === "fillblank" || question.type === "fill_blank") && (
+              <div className="flex flex-wrap gap-2">
+                {question.options.map((opt, i) => (
+                  <Badge
+                    key={i}
+                    variant="outline"
+                    className="h-7 bg-amber-50 text-amber-900 border-amber-200"
+                  >
+                    #{i + 1}: {opt.option_text}
+                  </Badge>
+                ))}
+              </div>
+            )}
+
+            {question.type === "ordering" && (
+              <div className="space-y-1 max-w-md">
+                {question.options.map((opt, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-3 bg-background border p-2 px-3 rounded-md text-sm font-medium"
+                  >
+                    <span className="size-5 bg-primary text-white rounded-full flex items-center justify-center text-[10px]">
+                      {i + 1}
+                    </span>
+                    {opt.option_text}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {(question.type === "computational" ||
+              question.type === "shortanswer" ||
+              question.type === "essay" ||
+              question.type === "casestudy") && (
+              <div className="p-3 bg-muted/10 border-l-2 border-primary/20 rounded-r-md text-sm italic text-muted-foreground">
+                <span className="block text-[10px] font-bold uppercase tracking-wider text-primary not-italic mb-1">
+                  Grading Key
+                </span>
+                {question.options[0]?.option_text ||
+                  "No grading rubric provided."}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// --- MAIN BUILDER ---
+
+const STEPS_DATA = [
+  { title: "Identity", icon: FileText },
   { title: "Blueprint", icon: Layout },
-  { title: "Questions", icon: BrainCircuit },
-  { title: "Review", icon: Eye },
-  { title: "Publish", icon: CheckCircle2 },
+  { title: "Structure", icon: BrainCircuit },
+  { title: "Final Review", icon: Eye },
+  { title: "Go Live", icon: CheckCircle2 },
 ];
 
 export default function NewAssessmentBuilder() {
@@ -155,18 +1138,29 @@ export default function NewAssessmentBuilder() {
   const [isLoadingDraft, setIsLoadingDraft] = useState(false);
   const [courses, setCourses] = useState<AdminCourseListItem[]>([]);
   const [isLoadingCourses, setIsLoadingCourses] = useState(true);
+  const [periods, setPeriods] = useState<AcademicPeriodResponse[]>([]);
 
-  // Step 1: Metadata
+  const uniquePeriods = useMemo(() => {
+    const seen = new Set();
+    return periods.filter((p) => {
+      if (seen.has(p.name)) return false;
+      seen.add(p.name);
+      return true;
+    });
+  }, [periods]);
+
+  // Core State
   const [metadata, setMetadata] = useState({
     title: "",
     description: "",
     mode: "CAT" as AssessmentMode,
     institution_id: "",
+    course_id: "",
+    teaching_workspace_id: "",
     department_ids: [] as string[],
     option_ids: [] as string[],
     class_group_ids: [] as string[],
-    course_id: "",
-    subject_id: "",
+    academic_year: "",
     date: undefined as Date | undefined,
     startTime: "09:00",
     endTime: "11:00",
@@ -179,33 +1173,41 @@ export default function NewAssessmentBuilder() {
       "Time strictly enforced",
     ] as string[],
     customInstructions: "",
-    maxGroupSize: 4,
-    groupFormation: "self_enrol" as "self_enrol" | "manual",
+    max_group_size: 4,
+    group_formation_mode: "self_enrol",
+    group_assignment_mode: "AUTOMATIC" as "AUTOMATIC" | "MANUAL",
+    question_distribution_mode: "SHARED" as "SHARED" | "PER_GROUP",
+    require_all_member_approval: true,
+    require_all_member_participation: true,
+    appeal_window_days: 7,
   });
 
+  const [groups, setGroups] = useState<Group[]>([]);
   const [datePopoverOpen, setDatePopoverOpen] = useState(false);
-
-  // Metadata dropdown options
   const [institutions, setInstitutions] = useState<InstitutionResponse[]>([]);
-  const [availableDepartments, setAvailableDepartments] = useState<DepartmentResponse[]>([]);
-  const [availableOptions, setAvailableOptions] = useState<OptionResponse[]>([]);
-  const [availableClasses, setAvailableClasses] = useState<ClassGroupResponse[]>([]);
-  
+  const [availableDepartments, setAvailableDepartments] = useState<
+    DepartmentResponse[]
+  >([]);
+  const [availableOptions, setAvailableOptions] = useState<OptionResponse[]>(
+    [],
+  );
+  const [availableClasses, setAvailableClasses] = useState<
+    ClassGroupResponse[]
+  >([]);
   const [fetchingMetadata, setFetchingMetadata] = useState(true);
   const [fetchingDepts, setFetchingDepts] = useState(false);
   const [fetchingOptions, setFetchingOptions] = useState(false);
   const [fetchingClasses, setFetchingClasses] = useState(false);
 
-  // Step 2: Blueprint & Rules
   const [blueprint, setBlueprint] = useState<BlueprintSection[]>([
     {
       id: "sec-1",
       section: "Section A",
       topics: "",
-      marks: 0,
-      questions: 0,
+      marks: 20,
+      questions: 10,
       difficulty: "Medium",
-      allowedTypes: ["mcq"],
+      allowedTypes: ["mcq", "truefalse", "matching"],
     },
   ]);
 
@@ -217,251 +1219,20 @@ export default function NewAssessmentBuilder() {
     shuffleQuestions: true,
     shuffleOptions: true,
     resultRelease: "manual" as "immediate" | "manual",
+    resultReleaseAt: undefined as Date | undefined,
     attempts: 1,
     passwordProtected: false,
     accessPassword: "",
     latePenaltyPercent: 0,
     gracePeriodMinutes: 0,
-    autosaveToken: typeof window !== 'undefined' ? crypto.randomUUID() : undefined,
+    autosaveToken:
+      typeof window !== "undefined" ? crypto.randomUUID() : undefined,
+    supervisor_ids: [] as string[],
   });
 
-  // Step 3: Question Creation
   const [questions, setQuestions] = useState<Question[]>([]);
 
-  // Update result release mode based on question types
-  useEffect(() => {
-    const hasOpenQuestions = questions.some(q => 
-      ["essay", "shortanswer", "computational", "casestudy"].includes(q.type)
-    );
-    setRules(prev => ({
-      ...prev,
-      resultRelease: hasOpenQuestions ? "delayed" : "immediate"
-    }));
-  }, [questions]);
-
-  // Set default late penalty for homework
-  useEffect(() => {
-    if (metadata.mode === "Homework") {
-      setRules(prev => ({ ...prev, latePenaltyPercent: 20 }));
-    } else {
-      setRules(prev => ({ ...prev, latePenaltyPercent: 0 }));
-    }
-  }, [metadata.mode]);
-
-  useEffect(() => {
-    async function fetchCourses() {
-      setIsLoadingCourses(true);
-      try {
-        const response = await lecturerApi.getCourses();
-        setCourses(response.items);
-      } catch (error) {
-        console.error("Failed to fetch courses", error);
-        toast.error("Failed to load your courses. Please try again.");
-      } finally {
-        setIsLoadingCourses(false);
-      }
-    }
-    fetchCourses();
-  }, []);
-
-  useEffect(() => {
-    async function loadMetadata() {
-      try {
-        const insts = await lecturerApi.getMyInstitutions();
-        setInstitutions(insts);
-        
-        // Auto-select if there is exactly one institution
-        if (insts.length === 1) {
-          handleInstitutionChange(insts[0].id);
-        }
-      } catch (err: any) {
-        console.error("Failed to fetch institutions", err);
-        toast.error("Failed to load metadata");
-      } finally {
-        setFetchingMetadata(false);
-      }
-    }
-    loadMetadata();
-  }, []);
-
-  const handleInstitutionChange = async (val: string) => {
-    setMetadata(prev => ({ ...prev, institution_id: val, department_ids: [], option_ids: [], class_group_ids: [] }));
-    setAvailableDepartments([]);
-    setAvailableOptions([]);
-    setAvailableClasses([]);
-    
-    setFetchingDepts(true);
-    try {
-      const depts = await lecturerApi.getMyDepartments(val);
-      setAvailableDepartments(depts);
-    } catch (err) {
-      toast.error("Failed to load departments");
-    } finally {
-      setFetchingDepts(false);
-    }
-  };
-
-  const toggleDept = async (id: string) => {
-    const newSelected = metadata.department_ids.includes(id) 
-      ? metadata.department_ids.filter(i => i !== id)
-      : [...metadata.department_ids, id];
-    
-    setMetadata(p => ({ ...p, department_ids: newSelected, option_ids: [], class_group_ids: [] }));
-    setAvailableOptions([]);
-    setAvailableClasses([]);
-    
-    if (newSelected.length > 0) {
-      setFetchingOptions(true);
-      try {
-        const allOptions = await Promise.all(
-          newSelected.map(dId => lecturerApi.getMyOptions(dId))
-        );
-        setAvailableOptions(allOptions.flat());
-      } catch (err) {
-        toast.error("Failed to load options");
-      } finally {
-        setFetchingOptions(false);
-      }
-    }
-  };
-
-  const toggleOption = async (id: string) => {
-    const newSelected = metadata.option_ids.includes(id)
-      ? metadata.option_ids.filter(i => i !== id)
-      : [...metadata.option_ids, id];
-    
-    setMetadata(p => ({ ...p, option_ids: newSelected, class_group_ids: [] }));
-    setAvailableClasses([]);
-    
-    if (newSelected.length > 0) {
-      setFetchingClasses(true);
-      try {
-        const allClasses = await Promise.all(
-          newSelected.map(oId => lecturerApi.getMyClasses(oId))
-        );
-        setAvailableClasses(allClasses.flat());
-      } catch (err) {
-        toast.error("Failed to load classes");
-      } finally {
-        setFetchingClasses(false);
-      }
-    }
-  };
-
-  const toggleClass = (id: string) => {
-    setMetadata(p => ({
-      ...p,
-      class_group_ids: p.class_group_ids.includes(id) 
-        ? p.class_group_ids.filter(i => i !== id) 
-        : [...p.class_group_ids, id]
-    }));
-  };
-
-  useEffect(() => {
-    if (draftId) {
-      loadDraft(draftId);
-    }
-  }, [draftId]);
-
-  const loadDraft = async (id: string) => {
-    setIsLoadingDraft(true);
-    try {
-      const res = await assessmentApi.getAssessmentById(id) as any;
-      
-      // Map Metadata
-      const modeMap: Record<string, AssessmentMode> = {
-        "FORMATIVE": "Formative",
-        "HOMEWORK": "Homework",
-        "CAT": "CAT",
-        "SUMMATIVE": "Summative",
-        "GROUP_WORK": "Groupwork",
-      };
-
-      const formatTime = (dateStr: string) => {
-        const d = new Date(dateStr);
-        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false });
-      };
-
-      setMetadata({
-        title: res.title || "",
-        description: res.description || "",
-        mode: modeMap[res.assessment_type] || "CAT",
-        institution_id: "", 
-        department_ids: [],
-        option_ids: [],
-        class_group_ids: [],
-        course_id: res.course_id || "",
-        subject_id: res.subject_id || "",
-        date: res.window_start ? new Date(res.window_start) : undefined,
-        startTime: res.window_start ? formatTime(res.window_start) : "09:00",
-        endTime: res.window_end ? formatTime(res.window_end) : "11:00",
-        durationMinutes: res.duration_minutes || 120,
-        passing_marks: res.passing_marks || 50,
-        selectedInstructions: [], // instructions are merged in backend, we'll put them in custom
-        customInstructions: res.instructions || "",
-        maxGroupSize: res.max_group_size || 4,
-        groupFormation: res.group_formation_mode || "self_enrol",
-      });
-
-      // Map Blueprint
-      if (res.sections && res.sections.length > 0) {
-        setBlueprint(res.sections.map((s: any) => ({
-          id: s.id,
-          section: s.title,
-          topics: s.description || "",
-          marks: s.allocated_marks || 0,
-          questions: s.question_count_target || 0,
-          difficulty: "Medium",
-          allowedTypes: s.allowed_question_types?.types || ["mcq"]
-        })));
-      }
-
-      // Map Rules
-      setRules({
-        openBook: res.is_open_book,
-        supervised: res.is_supervised,
-        aiAllowed: res.ai_assistance_allowed,
-        browserRestricted: res.fullscreen_required,
-        shuffleQuestions: res.randomise_questions,
-        shuffleOptions: res.randomise_options,
-        resultRelease: res.result_release_mode === "immediate" ? "immediate" : "delayed",
-        resultReleaseAt: res.result_release_at ? new Date(res.result_release_at) : undefined,
-        attempts: res.max_attempts || 1,
-        passwordProtected: res.is_password_protected || false,
-        accessPassword: "", // Hashed in backend
-        latePenaltyPercent: res.late_penalty_percent || 0,
-        gracePeriodMinutes: res.grace_period_minutes || 0,
-        autosaveToken: res.autosave_token || crypto.randomUUID(),
-      });
-
-      // Map Questions
-      if (res.assessment_questions && res.assessment_questions.length > 0) {
-        setQuestions(res.assessment_questions.map((aq: any) => ({
-          id: aq.id,
-          sectionId: aq.section_id,
-          text: aq.question.content,
-          type: aq.question.question_type.toLowerCase().replace("_", ""),
-          marks: aq.marks,
-          options: aq.question.options.map((opt: any) => ({
-            id: opt.id,
-            option_text: opt.option_text,
-            option_text_right: opt.option_text_right,
-            is_correct: opt.is_correct,
-            order_index: opt.order_index
-          })),
-          aiGenerated: aq.added_via === "ai_generated"
-        })));
-      }
-
-      toast.success("Draft loaded successfully");
-    } catch (error: any) {
-      toast.error("Failed to load draft: " + error.message);
-    } finally {
-      setIsLoadingDraft(false);
-    }
-  };
-
-  // Derived State
+  // Derived
   const totalMarks = useMemo(
     () => blueprint.reduce((sum, s) => sum + s.marks, 0),
     [blueprint],
@@ -474,23 +1245,139 @@ export default function NewAssessmentBuilder() {
     () => questions.reduce((sum, q) => sum + q.marks, 0),
     [questions],
   );
+  const gradingArchitecture = useMemo(
+    () => summarizeQuestionMix(questions),
+    [questions],
+  );
 
-  const availableInstructions = useMemo(() => {
-    if (metadata.mode === "Homework") {
-      return PREDEFINED_INSTRUCTIONS.filter(
-        (i) =>
-          i !== "Fullscreen required" &&
-          i !== "No tab switching" &&
-          i !== "Time strictly enforced",
-      );
+  const [availableLecturers, setAvailableLecturers] = useState<UserResponse[]>([]);
+  const [passingMarksPercent, setPassingMarksPercent] = useState(70);
+
+  // Logic: Passing Marks calculation
+  useEffect(() => {
+    setMetadata(prev => ({
+      ...prev,
+      passing_marks: Math.floor((totalMarks * passingMarksPercent) / 100)
+    }));
+  }, [totalMarks, passingMarksPercent]);
+
+  // Init Data
+  useEffect(() => {
+    async function init() {
+      try {
+        const [workspaceRes, instRes, periodRes, lectRes] = await Promise.all([
+          lecturerApi.getWorkspaces(),
+          lecturerApi.getMyInstitutions(),
+          lecturerApi.getPeriods(),
+          lecturerApi.getLecturers(),
+        ]);
+        setCourses(workspaceRes as any); // Type assertion until AdminCourseListItem is fully retired
+        setInstitutions(instRes);
+        setPeriods(periodRes);
+        setAvailableLecturers(lectRes);
+        
+        if (instRes.length === 1) handleInstitutionChange(instRes[0].id);
+        
+        if (periodRes.length > 0) {
+            setMetadata(prev => ({
+                ...prev,
+                academic_year: periodRes[0].name
+            }));
+        }
+      } catch (err) {
+        toast.error("Failed to initialize builder.");
+      } finally {
+        setIsLoadingCourses(false);
+        setFetchingMetadata(false);
+      }
     }
-    if (metadata.mode === "Practice") {
-      return PREDEFINED_INSTRUCTIONS.filter(
-        (i) => i !== "Fullscreen required" && i !== "No tab switching",
-      );
+    init();
+  }, []);
+
+  const handleInstitutionChange = async (val: string) => {
+    setMetadata((prev) => ({
+      ...prev,
+      institution_id: val,
+      department_ids: [],
+      option_ids: [],
+      class_group_ids: [],
+    }));
+    setAvailableDepartments([]);
+    setFetchingDepts(true);
+    try {
+      const depts = await lecturerApi.getMyDepartments(val);
+      setAvailableDepartments(depts);
+    } finally {
+      setFetchingDepts(false);
     }
-    return PREDEFINED_INSTRUCTIONS;
-  }, [metadata.mode]);
+  };
+
+  const toggleDept = async (id: string) => {
+    const newSelected = metadata.department_ids.includes(id)
+      ? metadata.department_ids.filter((i) => i !== id)
+      : [...metadata.department_ids, id];
+    setMetadata((p) => ({
+      ...p,
+      department_ids: newSelected,
+      option_ids: [],
+      class_group_ids: [],
+    }));
+    setAvailableOptions([]);
+    if (newSelected.length > 0) {
+      setFetchingOptions(true);
+      try {
+        const all = await Promise.all(
+          newSelected.map((dId) => lecturerApi.getMyOptions(dId)),
+        );
+        setAvailableOptions(all.flat());
+      } finally {
+        setFetchingOptions(false);
+      }
+    }
+  };
+
+  const toggleOption = async (id: string) => {
+    const newSelected = metadata.option_ids.includes(id)
+      ? metadata.option_ids.filter((i) => i !== id)
+      : [...metadata.option_ids, id];
+    setMetadata((p) => ({
+      ...p,
+      option_ids: newSelected,
+      class_group_ids: [],
+    }));
+    setAvailableClasses([]);
+    if (newSelected.length > 0) {
+      setFetchingClasses(true);
+      try {
+        const all = await Promise.all(
+          newSelected.map((oId) => lecturerApi.getMyClasses(oId)),
+        );
+        setAvailableClasses(all.flat());
+      } finally {
+        setFetchingClasses(false);
+      }
+    }
+  };
+
+  const toggleClass = (id: string) => {
+    setMetadata((p) => ({
+      ...p,
+      class_group_ids: p.class_group_ids.includes(id)
+        ? p.class_group_ids.filter((i) => i !== id)
+        : [...p.class_group_ids, id],
+    }));
+  };
+
+  // Logic: Result Release Mode
+  useEffect(() => {
+    const hasOpen = questions.some((q) =>
+      ["essay", "shortanswer", "computational", "casestudy"].includes(q.type),
+    );
+    setRules((prev) => ({
+      ...prev,
+      resultRelease: hasOpen ? "manual" : "immediate",
+    }));
+  }, [questions]);
 
   // Handlers
   const addSection = () => {
@@ -525,13 +1412,12 @@ export default function NewAssessmentBuilder() {
     setQuestions(questions.filter((q) => q.sectionId !== id));
   };
 
-  const addQuestion = (sectionId: string) => {
+  const addQuestion = (sectionId: string, groupId?: string) => {
     const section = blueprint.find((s) => s.id === sectionId);
     if (!section) return;
-
     const type = section.allowedTypes[0] || "mcq";
-    let initialOptions: QuestionOption[] = [];
 
+    let initialOptions: QuestionOption[] = [];
     if (type === "mcq") {
       initialOptions = [
         { option_text: "Option 1", is_correct: true, order_index: 0 },
@@ -549,25 +1435,126 @@ export default function NewAssessmentBuilder() {
       {
         id: `q-${Date.now()}`,
         sectionId,
+        groupId,
         text: "",
         type,
-        marks: Math.floor(section.marks / (section.questions || 1)),
+        marks:
+          section.questions > 0
+            ? Math.floor(section.marks / section.questions)
+            : 2,
         options: initialOptions,
         aiGenerated: false,
       },
     ]);
   };
 
-  const handleBankSelect = async (qBankSummary: QuestionBankItem, sectionId: string) => {
+  const updateQuestion = (id: string, updates: Partial<Question>) =>
+    setQuestions(
+      questions.map((q) => (q.id === id ? { ...q, ...updates } : q)),
+    );
+  const removeQuestion = (id: string) =>
+    setQuestions(questions.filter((q) => q.id !== id));
+  const updateOption = (
+    qId: string,
+    optIdx: number,
+    updates: Partial<QuestionOption>,
+  ) => {
+    setQuestions(
+      questions.map((q) => {
+        if (q.id !== qId) return q;
+        const newOptions = [...q.options];
+        newOptions[optIdx] = { ...newOptions[optIdx], ...updates };
+        return { ...q, options: newOptions };
+      }),
+    );
+  };
+  const addOption = (qId: string) =>
+    setQuestions(
+      questions.map((q) =>
+        q.id === qId
+          ? {
+              ...q,
+              options: [
+                ...q.options,
+                {
+                  option_text: `New Item`,
+                  is_correct: false,
+                  order_index: q.options.length,
+                },
+              ],
+            }
+          : q,
+      ),
+    );
+  const removeOption = (qId: string, optIdx: number) =>
+    setQuestions(
+      questions.map((q) =>
+        q.id === qId
+          ? {
+              ...q,
+              options: q.options
+                .filter((_, i) => i !== optIdx)
+                .map((opt, i) => ({ ...opt, order_index: i })),
+            }
+          : q,
+      ),
+    );
+
+  const handleSaveToBank = async (q: Question) => {
+    if (!q.text) {
+      toast.error("Please enter question text before saving to bank");
+      return;
+    }
+
+    try {
+      const typeMap: Record<string, string> = {
+        mcq: "mcq",
+        truefalse: "true_false",
+        shortanswer: "short_answer",
+        essay: "essay",
+        matching: "matching",
+        fillblank: "fill_blank",
+        computational: "computational",
+        ordering: "ordering",
+        casestudy: "case_study",
+      };
+
+      await questionApi.createQuestion({
+        content: q.text,
+        question_type: typeMap[q.type] || "short_answer",
+        difficulty: "medium",
+        suggested_marks: Math.max(1, q.marks),
+        options: q.options.map((opt) => ({
+          option_text: opt.option_text,
+          option_text_right: opt.option_text_right,
+          is_correct: opt.is_correct,
+          order_index: opt.order_index,
+        })),
+        topic: blueprint.find((s) => s.id === q.sectionId)?.topics || "",
+      });
+      toast.success("Question saved to bank successfully");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save question to bank");
+    }
+  };
+
+  const handleBankSelect = async (
+    qBankSummary: QuestionBankItem,
+    sectionId: string,
+    groupId?: string,
+  ) => {
     try {
       const qBank = await questionApi.getQuestion(qBankSummary.id);
-      const mappedType = qBank.question_type.toLowerCase().replace("_", "") as QuestionType;
-      
+      const mappedType = qBank.question_type
+        .toLowerCase()
+        .replace("_", "") as QuestionType;
+
       setQuestions((prev) => [
         ...prev,
         {
           id: `q-bank-${qBank.id}-${Date.now()}`,
           sectionId,
+          groupId,
           text: qBank.content,
           type: mappedType,
           marks: qBank.marks,
@@ -586,54 +1573,10 @@ export default function NewAssessmentBuilder() {
     }
   };
 
-  const preparePayload = () => {
-    const payload = { 
-      id: draftId || undefined, 
-      metadata: { ...metadata }, 
-      blueprint, 
-      questions, 
-      rules 
-    };
-
-    const parseTimeString = (timeStr: string, baseDate: Date) => {
-      const d = new Date(baseDate);
-      let [time, modifier] = timeStr.trim().split(/\s+/);
-      const [h, m] = time.split(':');
-      let hours = parseInt(h);
-      const minutes = parseInt(m);
-      
-      if (modifier) {
-        modifier = modifier.toLowerCase();
-        if (modifier === 'pm' && hours < 12) hours += 12;
-        if (modifier === 'am' && hours === 12) hours = 0;
-      } else if (timeStr.toLowerCase().includes('pm')) {
-        if (hours < 12) hours += 12;
-      } else if (timeStr.toLowerCase().includes('am')) {
-        if (hours === 12) hours = 0;
-      }
-      
-      d.setHours(hours, minutes, 0, 0);
-      return d;
-    };
-
-    // Fix AM/PM issue by combining date and time on frontend
-    if (metadata.date && metadata.startTime) {
-      const start = parseTimeString(metadata.startTime, metadata.date);
-      (payload.metadata as any).windowStart = start.toISOString();
-    }
-
-    if (metadata.date && metadata.endTime) {
-      const end = parseTimeString(metadata.endTime, metadata.date);
-      (payload.metadata as any).windowEnd = end.toISOString();
-    }
-
-    return payload;
-  };
-
   const formatDisplayTime = (timeStr: string) => {
     if (!timeStr) return "";
     try {
-      const [h, m] = timeStr.split(':');
+      const [h, m] = timeStr.split(":");
       const d = new Date();
       d.setHours(parseInt(h), parseInt(m));
       return format(d, "h:mm a");
@@ -642,176 +1585,185 @@ export default function NewAssessmentBuilder() {
     }
   };
 
+  const preparePayload = () => {
+    const payload = {
+      id: draftId || undefined,
+      metadata: {
+        ...metadata,
+        academic_year: metadata.academic_year,
+        maxGroupSize: metadata.max_group_size,
+        groupFormation: metadata.group_formation_mode,
+        groupAssignmentMode: metadata.group_assignment_mode,
+        questionDistributionMode: metadata.question_distribution_mode,
+        appealWindowDays: metadata.appeal_window_days,
+        // Ensure lists are valid or empty
+        department_ids: metadata.department_ids || [],
+        option_ids: metadata.option_ids || [],
+        class_group_ids: metadata.class_group_ids || [],
+      },
+      blueprint: blueprint.map((b) => ({
+        id: b.id,
+        section: b.section,
+        topics: b.topics,
+        marks: b.marks,
+        questions: b.questions,
+        difficulty: b.difficulty,
+        allowedTypes: b.allowedTypes,
+      })),
+      questions: questions.map((q) => ({
+        id: q.id,
+        sectionId: q.sectionId,
+        groupId: q.groupId,
+        text: q.text,
+        type: q.type, // BulkAssessmentQuestion expects 'type' and handles casing in service
+        marks: q.marks,
+        options: q.options.map(opt => ({
+          option_text: opt.option_text,
+          option_text_right: opt.option_text_right,
+          is_correct: opt.is_correct,
+          order_index: opt.order_index
+        })),
+        aiGenerated: q.aiGenerated,
+        imageUrl: q.imageUrl,
+        computationalType: q.computationalType,
+        caseStudyContext: q.caseStudyContext,
+      })),
+      rules: {
+        ...rules,
+        requireAllMemberApproval: metadata.require_all_member_approval,
+        requireAllMemberParticipation:
+          metadata.require_all_member_participation,
+        supervisor_ids: rules.supervisor_ids,
+      },
+    };
+
+    const parseTimeString = (timeStr: string, baseDate: Date) => {
+      const d = new Date(baseDate);
+      const [time, modifier] = timeStr.trim().split(/\s+/);
+      const [h, m] = time.split(":");
+      let hours = parseInt(h);
+      const minutes = parseInt(m);
+      if (modifier?.toLowerCase() === "pm" && hours < 12) hours += 12;
+      if (modifier?.toLowerCase() === "am" && hours === 12) hours = 0;
+      d.setHours(hours, minutes, 0, 0);
+      return d;
+    };
+
+    if (metadata.date && metadata.startTime)
+      (payload.metadata as any).windowStart = parseTimeString(
+        metadata.startTime,
+        metadata.date,
+      ).toISOString();
+    if (metadata.date && metadata.endTime)
+      (payload.metadata as any).windowEnd = parseTimeString(
+        metadata.endTime,
+        metadata.date,
+      ).toISOString();
+
+    return payload;
+  };
+
   const handleSaveDraft = async () => {
-    if (isSavingDraft || isPublishing) return;
     setIsSavingDraft(true);
     try {
-      const res = await apiClient("/assessments/draft", {
+      const res = (await apiClient("/assessments/draft", {
         method: "POST",
         body: JSON.stringify(preparePayload()),
-      }) as { assessment_id: string };
-      
-      toast.success("Draft saved successfully");
-      
-      // If this was a new assessment, update the URL to include the draft ID
-      if (!draftId && res.assessment_id) {
+      })) as any;
+      toast.success("Draft saved successfully.");
+      if (!draftId && res.assessment_id)
         router.replace(`/lecturer/assessments/new?draft=${res.assessment_id}`);
-      }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Failed to save draft";
-      toast.error(msg);
     } finally {
       setIsSavingDraft(false);
     }
   };
 
-  const removeQuestion = (id: string) => {
-    setQuestions(questions.filter((q) => q.id !== id));
-  };
-
-  const updateQuestion = (id: string, updates: Partial<Question>) => {
-    setQuestions(
-      questions.map((q) => (q.id === id ? { ...q, ...updates } : q)),
-    );
-  };
-
-  const updateOption = (qId: string, optIdx: number, updates: Partial<QuestionOption>) => {
-    setQuestions(questions.map(q => {
-      if (q.id !== qId) return q;
-      const newOptions = [...q.options];
-      newOptions[optIdx] = { ...newOptions[optIdx], ...updates };
-      return { ...q, options: newOptions };
-    }));
-  };
-
-  const addOption = (qId: string) => {
-    setQuestions(questions.map(q => {
-      if (q.id !== qId) return q;
-      return {
-        ...q,
-        options: [
-          ...q.options,
-          { option_text: `Option ${q.options.length + 1}`, is_correct: false, order_index: q.options.length }
-        ]
-      };
-    }));
-  };
-
-  const removeOption = (qId: string, optIdx: number) => {
-    setQuestions(questions.map(q => {
-      if (q.id !== qId) return q;
-      return {
-        ...q,
-        options: q.options.filter((_, i) => i !== optIdx).map((opt, i) => ({ ...opt, order_index: i }))
-      };
-    }));
-  };
-
-  const handleSaveToBank = async (q: Question) => {
-    if (!q.text) {
-      toast.error("Please enter question text before saving to bank");
-      return;
-    }
-
-    try {
-      const typeMap: Record<string, string> = {
-        mcq: "MCQ",
-        truefalse: "TRUE_FALSE",
-        shortanswer: "SHORT_ANSWER",
-        essay: "ESSAY",
-        matching: "MATCHING",
-        fillblank: "FILL_BLANK",
-        computational: "COMPUTATIONAL",
-        ordering: "ORDERING",
-        casestudy: "CASE_STUDY",
-      };
-
-      await questionApi.createQuestion({
-        content: q.text,
-        question_type: typeMap[q.type] || "SHORT_ANSWER",
-        difficulty: "MEDIUM",
-        suggested_marks: q.marks,
-        options: q.options.map((opt) => ({
-          option_text: opt.option_text,
-          option_text_right: opt.option_text_right,
-          is_correct: opt.is_correct,
-          order_index: opt.order_index,
-        })),
-        topic: blueprint.find((s) => s.id === q.sectionId)?.topics || "",
-      });
-      toast.success("Question saved to bank successfully");
-    } catch (err: any) {
-      toast.error(err.message || "Failed to save question to bank");
-    }
-  };
-
   const handlePublish = async () => {
-    if (isPublishing || isSavingDraft) return;
     if (currentMarks !== totalMarks) {
-      toast.error(`Total marks mismatch! Expected ${totalMarks}, but got ${currentMarks}`);
+      toast.error(
+        `Total marks mismatch. Expected ${totalMarks}, but got ${currentMarks}.`,
+      );
       return;
     }
     if (questions.length !== totalQuestions) {
-      toast.error(`Question count mismatch! Expected ${totalQuestions}, but got ${questions.length}`);
+      toast.error(
+        `Question count mismatch. Expected ${totalQuestions}, but got ${questions.length}.`,
+      );
       return;
     }
     setIsPublishing(true);
     try {
-      const payload = preparePayload();
-      const result = await apiClient("/assessments/publish", {
+      const result = (await apiClient("/assessments/publish", {
         method: "POST",
-        body: JSON.stringify(payload),
-      }) as { validation_passed: boolean; errors?: string[] };
-      
+        body: JSON.stringify(preparePayload()),
+      })) as any;
       if (result.validation_passed) {
-        toast.success("Assessment published successfully!");
+        toast.success("Assessment Published!");
         router.push("/lecturer/assessments");
       } else {
-        toast.error(`Publishing failed: ${result.errors?.join(", ") || "Validation failed"}`);
+        toast.error(result.errors?.join(", ") || "Validation failed.");
       }
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : "Failed to publish assessment";
-      toast.error(msg);
     } finally {
       setIsPublishing(false);
     }
   };
 
-  if (isLoadingDraft || isLoadingCourses) {
+  if (isLoadingDraft || isLoadingCourses)
     return (
-      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-        <LoaderCircleIcon className="size-12 animate-spin text-primary" />
-        <p className="text-muted-foreground animate-pulse">
-          {isLoadingDraft ? "Loading draft assessment..." : "Loading courses..."}
-        </p>
+      <div className="max-w-6xl mx-auto space-y-10 py-10 px-4">
+        <div className="flex items-center justify-between">
+           <div className="space-y-2">
+              <Skeleton variant="title" className="h-10 w-64" />
+              <Skeleton variant="title" className="h-4 w-96" />
+           </div>
+           <div className="flex gap-2">
+              <Skeleton variant="title" className="h-9 w-24 rounded-lg" />
+              <Skeleton variant="title" className="h-9 w-24 rounded-lg" />
+           </div>
+        </div>
+        <div className="space-y-6 bg-muted/50 p-6 rounded-2xl border">
+           <div className="flex gap-4">
+              {[1, 2, 3, 4, 5].map(i => <Skeleton key={i} variant="title" className="flex-1 h-12 rounded-lg" />)}
+           </div>
+           <Card className="shadow-none border p-8 space-y-8">
+              <div className="grid grid-cols-2 gap-8">
+                 <Skeleton variant="media" className="h-12 w-full rounded-lg" />
+                 <Skeleton variant="media" className="h-12 w-full rounded-lg" />
+              </div>
+              <Skeleton variant="media" className="h-32 w-full rounded-lg" />
+              <div className="grid grid-cols-4 gap-4">
+                 {[1, 2, 3, 4].map(i => <Skeleton key={i} variant="media" className="h-10 w-full rounded-lg" />)}
+              </div>
+           </Card>
+        </div>
       </div>
     );
-  }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-12">
+    <div className="max-w-6xl mx-auto space-y-6 pb-24 px-4">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-3xl font-semibold tracking-tight">
             Assessment Builder
           </h1>
-          <p className="text-muted-foreground text-sm">
-            Step-based creation of secure academic assessments
+          <p className="text-muted-foreground mt-1">
+            Design secure academic assessments with ease
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Button
             variant="outline"
             size="sm"
             onClick={handleSaveDraft}
-            disabled={isSavingDraft || isPublishing}
-            className="h-8"
+            disabled={isSavingDraft}
+            className="h-9"
           >
-            <Save className="mr-2 size-3.5" />
+            <Save className="mr-2 size-4" />
             {isSavingDraft ? "Saving..." : "Save Draft"}
           </Button>
-          <Badge variant="outline" className="px-3 h-7 text-[11px] font-bold">
-            Step {activeStep} of 5
+          <Badge variant="outline" className="h-9 px-4 font-semibold">
+            Step {activeStep} / 5
           </Badge>
         </div>
       </div>
@@ -819,281 +1771,242 @@ export default function NewAssessmentBuilder() {
       <Stepper
         value={activeStep}
         onValueChange={setActiveStep}
+        className="space-y-6"
         indicators={{
           completed: <Check className="size-3.5" />,
-          loading: <LoaderCircleIcon className="size-3.5 animate-spin" />,
+          loading: <div className="size-3.5 rounded-full bg-primary/40 animate-pulse" />,
         }}
-        className="space-y-6"
       >
-        <StepperNav className="gap-2">
-          {STEPS.map((s, index) => {
-            const Icon = s.icon;
-            return (
-              <StepperItem key={index} step={index + 1} className="relative">
-                <StepperTrigger className="flex justify-start gap-1.5 p-2 hover:bg-muted/50 rounded-lg">
-                  <StepperIndicator className="size-7">
-                    <Icon className="size-3.5" />
-                  </StepperIndicator>
-                  <StepperTitle className="text-xs font-semibold">{s.title}</StepperTitle>
-                </StepperTrigger>
-                {STEPS.length > index + 1 && (
-                  <StepperSeparator className="group-data-[state=completed]/step:bg-primary" />
-                )}
-              </StepperItem>
-            );
-          })}
+        <StepperNav className="flex w-full gap-2 border-b">
+          {STEPS_DATA.map((s, index) => (
+            <StepperItem
+              key={index}
+              step={index + 1}
+              className="relative flex-1"
+            >
+              <StepperTrigger className="flex w-full flex-row items-center justify-center gap-2 p-3 rounded-none border-b-2 border-transparent transition-all hover:bg-muted/50 data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:shadow-none">
+                <StepperIndicator className="size-5 text-[10px] rounded-full bg-muted text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                  <s.icon className="size-3" />
+                </StepperIndicator>
+                <StepperTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground data-[state=active]:text-foreground">
+                  {s.title}
+                </StepperTitle>
+              </StepperTrigger>
+            </StepperItem>
+          ))}
         </StepperNav>
 
         <StepperPanel>
+          {/* STEP 1: IDENTITY */}
           <StepperContent value={1}>
-            {/* STEP 1: Metadata */}
-            <Card className="border shadow-none">
-              <CardHeader className="py-4 border-b">
-                <CardTitle className="text-lg">Assessment Metadata</CardTitle>
-                <CardDescription className="text-xs">
-                  Core identity and scheduling details
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6 p-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Title</Label>
-                    <Input
-                      value={metadata.title}
-                      onChange={(e) =>
-                        setMetadata({ ...metadata, title: e.target.value })
-                      }
-                      placeholder="e.g. Mid-Semester CAT – Database Systems"
-                      className="h-10 text-base border"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Course / Module</Label>
-                    <Select
-                      value={metadata.course_id}
-                      onValueChange={(v) => setMetadata({ ...metadata, course_id: v })}
-                    >
-                      <SelectTrigger className="h-10">
-                        <SelectValue placeholder="Select course" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {courses.map((c) => (
-                          <SelectItem key={c.id} value={c.id}>
-                            {c.title} ({c.code})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Description</Label>
-                  <Textarea
-                    value={metadata.description}
-                    onChange={(e) =>
-                      setMetadata({ ...metadata, description: e.target.value })
-                    }
-                    placeholder="Brief overview of the assessment goals and coverage..."
-                    className="min-h-[80px]"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pt-4 border-t">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Mode</Label>
-                    <Select
-                      value={metadata.mode}
-                      onValueChange={(v: AssessmentMode) =>
-                        setMetadata({ ...metadata, mode: v })
-                      }
-                    >
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CAT">CAT</SelectItem>
-                        <SelectItem value="Summative">Summative</SelectItem>
-                        <SelectItem value="Homework">Homework</SelectItem>
-                        <SelectItem value="Formative">Formative</SelectItem>
-                        <SelectItem value="Practice">Practice</SelectItem>
-                        <SelectItem value="Groupwork">Groupwork</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Date</Label>
-                    <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant={"outline"}
-                          className={cn(
-                            "w-full justify-start text-left font-normal h-9 px-3",
-                            !metadata.date && "text-muted-foreground"
-                          )}
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4" />
-                          {metadata.date ? format(metadata.date, "PPP") : <span>Pick a date</span>}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={metadata.date}
-                          onSelect={(d) => {
-                            setMetadata({ ...metadata, date: d });
-                            setDatePopoverOpen(false);
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Start Time</Label>
-                    <Input
-                      type="time"
-                      value={metadata.startTime}
-                      onChange={(e) => setMetadata({ ...metadata, startTime: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">End Time</Label>
-                    <Input
-                      type="time"
-                      value={metadata.endTime}
-                      onChange={(e) => setMetadata({ ...metadata, endTime: e.target.value })}
-                      className="h-9"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-4 border-t">
-                  <div className="flex items-center justify-between mb-4">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Target Academic Hierarchy</Label>
-                    {fetchingMetadata || fetchingDepts || fetchingOptions || fetchingClasses ? (
-                      <LoaderCircleIcon className="size-4 animate-spin text-primary" />
-                    ) : null}
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="space-y-2">
-                      <Label className="text-[10px] text-muted-foreground">Departments</Label>
-                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
-                        <div className="space-y-1">
-                          {availableDepartments.map(dept => (
-                            <div key={dept.id} className="flex items-center space-x-2">
-                              <Checkbox 
-                                id={`dept-${dept.id}`} 
-                                checked={metadata.department_ids.includes(dept.id)}
-                                onCheckedChange={() => toggleDept(dept.id)}
-                              />
-                              <label htmlFor={`dept-${dept.id}`} className="text-[11px] cursor-pointer truncate">
-                                {dept.name}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-[10px] text-muted-foreground">Options</Label>
-                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
-                        <div className="space-y-1">
-                          {availableOptions.map(opt => (
-                            <div key={opt.id} className="flex items-center space-x-2">
-                              <Checkbox 
-                                id={`opt-${opt.id}`} 
-                                checked={metadata.option_ids.includes(opt.id)}
-                                onCheckedChange={() => toggleOption(opt.id)}
-                              />
-                              <label htmlFor={`opt-${opt.id}`} className="text-[11px] cursor-pointer truncate">
-                                {opt.name}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label className="text-[10px] text-muted-foreground">Classes</Label>
-                      <ScrollArea className="h-[120px] rounded-md border p-2 bg-muted/10">
-                        <div className="space-y-1">
-                          {availableClasses.map(cls => (
-                            <div 
-                              key={cls.id} 
-                              onClick={() => toggleClass(cls.id)}
-                              className={cn(
-                                "flex items-center justify-between p-1.5 px-2 rounded border cursor-pointer text-[11px]",
-                                metadata.class_group_ids.includes(cls.id) 
-                                  ? "bg-primary/10 border-primary text-primary" 
-                                  : "hover:bg-muted"
-                              )}
-                            >
-                              <span className="truncate">{cls.name}</span>
-                              {metadata.class_group_ids.includes(cls.id) && <Check className="size-3" />}
-                            </div>
-                          ))}
-                        </div>
-                      </ScrollArea>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Assessment Instructions</Label>
-                    <div className="grid grid-cols-2 gap-2">
-                      {availableInstructions.map((instr) => (
-                        <div
-                          key={instr}
-                          className={cn(
-                            "flex items-center space-x-2 border rounded-lg p-2 cursor-pointer transition-colors hover:bg-muted/30",
-                            metadata.selectedInstructions.includes(instr) &&
-                              "border-primary bg-primary/5",
-                          )}
-                          onClick={() => {
-                            const current = metadata.selectedInstructions;
-                            setMetadata({
-                              ...metadata,
-                              selectedInstructions: current.includes(instr)
-                                ? current.filter((i) => i !== instr)
-                                : [...current, instr],
-                            });
-                          }}
-                        >
-                          <Checkbox checked={metadata.selectedInstructions.includes(instr)} className="size-3" />
-                          <span className="text-[10px] font-medium">{instr}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-6">
+                <Card className="shadow-none border">
+                  <CardHeader className="py-5 border-b">
+                    <CardTitle className="text-lg">
+                      Assessment Identity
+                    </CardTitle>
+                    <CardDescription>
+                      Define the core details and schedule for this assessment.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-6 space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
-                        <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Passing Marks</Label>
+                        <Label>Assessment Title</Label>
                         <Input
-                          type="number"
-                          value={metadata.passing_marks}
+                          value={metadata.title}
                           onChange={(e) =>
-                            setMetadata({
-                              ...metadata,
-                              passing_marks: parseInt(e.target.value) || 0,
-                            })
+                            setMetadata({ ...metadata, title: e.target.value })
                           }
-                          className="h-9"
+                          placeholder="e.g. Mid-Semester CAT – Database Systems"
+                          className="h-10 font-medium"
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Total Duration (Min)</Label>
+                        <Label>Course / Module</Label>
+                        <Select
+                          value={metadata.teaching_workspace_id || metadata.course_id}
+                          onValueChange={(v) => {
+                            const ws = courses.find(c => c.id === v);
+                            setMetadata({ 
+                                ...metadata, 
+                                teaching_workspace_id: v,
+                                // If the workspace has a course_id (or if we can get it from the code/title)
+                                // In WorkspaceListItem, we don't have course_id directly, but backend will resolve it.
+                                // We'll set it to v for now as the backend handle potential workspace ID in course_id field.
+                                course_id: v 
+                            });
+                          }}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select course" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {courses.map((c) => (
+                              <SelectItem key={c.id} value={c.id}>
+                                {c.title} ({c.code})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Description</Label>
+                      <Textarea
+                        value={metadata.description}
+                        onChange={(e) =>
+                          setMetadata({
+                            ...metadata,
+                            description: e.target.value,
+                          })
+                        }
+                        placeholder="Brief overview of the assessment coverage..."
+                        className="min-h-[100px] text-sm"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-dashed">
+                      <div className="space-y-2">
+                        <Label>Mode</Label>
+                        <Select
+                          value={metadata.mode}
+                          onValueChange={(v: any) =>
+                            setMetadata({ ...metadata, mode: v })
+                          }
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {[
+                              "CAT",
+                              "Summative",
+                              "Homework",
+                              "Formative",
+                              "Practice",
+                              "Groupwork",
+                            ].map((m) => (
+                              <SelectItem key={m} value={m}>
+                                {m}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Date</Label>
+                        <Popover
+                          open={datePopoverOpen}
+                          onOpenChange={setDatePopoverOpen}
+                        >
+                          <PopoverTrigger asChild>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "w-full h-10 justify-start font-normal text-sm",
+                                !metadata.date && "text-muted-foreground",
+                              )}
+                            >
+                              <CalendarIcon className="mr-2 size-4" />
+                              {metadata.date
+                                ? format(metadata.date, "PPP")
+                                : "Set Date"}
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-auto p-0" align="start">
+                            <Calendar
+                              mode="single"
+                              selected={metadata.date}
+                              onSelect={(d) => {
+                                setMetadata({ ...metadata, date: d });
+                                setDatePopoverOpen(false);
+                              }}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Start Time</Label>
+                        <Input
+                          type="time"
+                          value={metadata.startTime}
+                          onChange={(e) =>
+                            setMetadata({
+                              ...metadata,
+                              startTime: e.target.value,
+                            })
+                          }
+                          className="h-10"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>End Time</Label>
+                        <Input
+                          type="time"
+                          value={metadata.endTime}
+                          onChange={(e) =>
+                            setMetadata({
+                              ...metadata,
+                              endTime: e.target.value,
+                            })
+                          }
+                          className="h-10"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-dashed">
+                      <div className="space-y-2">
+                        <Label>Institution</Label>
+                        <Select
+                          value={metadata.institution_id}
+                          onValueChange={handleInstitutionChange}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select Institution" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {institutions.map((inst) => (
+                              <SelectItem key={inst.id} value={inst.id}>
+                                {inst.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Academic Year</Label>
+                        <Select
+                          value={metadata.academic_year}
+                          onValueChange={(val) => {
+                            const p = periods.find(p => p.name === val);
+                            setMetadata({ 
+                                ...metadata, 
+                                academic_year: val,
+                                academic_period_id: p?.id 
+                            });
+                          }}
+                        >
+                          <SelectTrigger className="h-10">
+                            <SelectValue placeholder="Select Year Range" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {uniquePeriods.map((p) => (
+                              <SelectItem key={p.name} value={p.name}>
+                                {p.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4 pt-6 border-t border-dashed">
+                      <div className="space-y-2">
+                        <Label>Duration (Min)</Label>
                         <Input
                           type="number"
                           value={metadata.durationMinutes}
@@ -1103,223 +2016,562 @@ export default function NewAssessmentBuilder() {
                               durationMinutes: parseInt(e.target.value) || 0,
                             })
                           }
-                          className="h-9"
+                          className="h-10"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Passing Marks (%)</Label>
+                        <div className="flex items-center gap-2">
+                          <Input
+                            type="number"
+                            value={passingMarksPercent}
+                            onChange={(e) =>
+                              setPassingMarksPercent(parseInt(e.target.value) || 0)
+                            }
+                            className="h-10 flex-1"
+                          />
+                          <Badge variant="secondary" className="h-10 px-3">
+                            {metadata.passing_marks} Marks
+                          </Badge>
+                        </div>
+                        <p className="text-[10px] text-muted-foreground">
+                          Passing threshold based on total assessment marks ({totalMarks})
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-dashed">
+                      <div className="space-y-2">
+                        <Label>Predefined Instructions</Label>
+                        <div className="grid grid-cols-1 gap-2 border rounded-lg p-3 bg-muted/10">
+                          {PREDEFINED_INSTRUCTIONS.map((instr) => (
+                            <div
+                              key={instr}
+                              className="flex items-center space-x-2"
+                            >
+                              <Checkbox
+                                id={instr}
+                                checked={metadata.selectedInstructions.includes(
+                                  instr,
+                                )}
+                                onCheckedChange={(checked) => {
+                                  const current = metadata.selectedInstructions;
+                                  setMetadata({
+                                    ...metadata,
+                                    selectedInstructions: checked
+                                      ? [...current, instr]
+                                      : current.filter((i) => i !== instr),
+                                  });
+                                }}
+                              />
+                              <label
+                                htmlFor={instr}
+                                className="text-sm cursor-pointer"
+                              >
+                                {instr}
+                              </label>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Custom Instructions</Label>
+                        <Textarea
+                          placeholder="Any additional rules not covered by presets..."
+                          className="min-h-[120px] text-sm"
+                          value={metadata.customInstructions}
+                          onChange={(e) =>
+                            setMetadata({
+                              ...metadata,
+                              customInstructions: e.target.value,
+                            })
+                          }
                         />
                       </div>
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Custom Instructions</Label>
-                      <Textarea 
-                        placeholder="Any additional rules not covered by the presets..."
-                        className="min-h-[80px]"
-                        value={metadata.customInstructions}
-                        onChange={(e) => setMetadata({ ...metadata, customInstructions: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter className="flex justify-end py-4 px-5 border-t bg-muted/20">
-                <Button size="sm" onClick={() => setActiveStep(2)} className="rounded-lg h-9 px-6 font-semibold">
-                  Continue to Blueprint <ChevronRight className="ml-2 size-3.5" />
-                </Button>
-              </CardFooter>
-            </Card>
-          </StepperContent>
-
-          <StepperContent value={2}>
-            {/* STEP 2: Blueprint & Rules */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-6">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                      <CardTitle>Assessment Blueprint</CardTitle>
-                      <CardDescription>Define marks distribution and sections</CardDescription>
-                    </div>
-                    <Button onClick={addSection} variant="outline" size="sm">
-                      <Plus className="mr-2 size-4" /> Add Section
-                    </Button>
-                  </CardHeader>
-                  <CardContent className="space-y-6">
-                    {blueprint.map((sec) => (
-                      <div key={sec.id} className="border rounded-2xl p-6 space-y-4 bg-muted/30">
-                        <div className="flex justify-between items-center">
-                          <Input
-                            value={sec.section}
-                            onChange={(e) => updateSection(sec.id, "section", e.target.value)}
-                            className="font-bold text-lg w-48 bg-transparent border-none focus-visible:ring-0 px-0 h-auto"
-                          />
-                          <Button variant="ghost" size="icon" onClick={() => removeSection(sec.id)} className="text-destructive">
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                          <div className="space-y-2">
-                            <Label className="text-xs uppercase text-muted-foreground">Topics Covered</Label>
-                            <Input
-                              placeholder="e.g. Normalization, SQL Queries"
-                              value={sec.topics}
-                              onChange={(e) => updateSection(sec.id, "topics", e.target.value)}
-                            />
-                          </div>
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase text-muted-foreground">Total Marks</Label>
-                              <Input
-                                type="number"
-                                value={sec.marks}
-                                onChange={(e) => updateSection(sec.id, "marks", parseInt(e.target.value) || 0)}
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label className="text-xs uppercase text-muted-foreground">Question Count</Label>
-                              <Input
-                                type="number"
-                                value={sec.questions}
-                                onChange={(e) => updateSection(sec.id, "questions", parseInt(e.target.value) || 0)}
-                              />
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="space-y-3">
-                          <Label className="text-xs uppercase text-muted-foreground">Allowed Question Types</Label>
-                          <ToggleGroup
-                            type="multiple"
-                            value={sec.allowedTypes}
-                            onValueChange={(v: QuestionType[]) => {
-                              if (v.length > 0) updateSection(sec.id, "allowedTypes", v);
-                            }}
-                            className="justify-start flex-wrap gap-2"
-                          >
-                            {[
-                              { id: "mcq", label: "MCQ" },
-                              { id: "truefalse", label: "True/False" },
-                              { id: "shortanswer", label: "Short Answer" },
-                              { id: "essay", label: "Essay" },
-                              { id: "matching", label: "Matching" },
-                              { id: "fillblank", label: "Fill Blank" },
-                              { id: "ordering", label: "Ordering" },
-                              { id: "computational", label: "Computational" },
-                              { id: "casestudy", label: "Case Study" },
-                            ].map((t) => (
-                              <ToggleGroupItem
-                                key={t.id}
-                                value={t.id}
-                                variant="outline"
-                                className="px-3 h-9 rounded-lg data-[state=on]:bg-primary data-[state=on]:text-primary-foreground"
-                              >
-                                {t.label}
-                              </ToggleGroupItem>
-                            ))}
-                          </ToggleGroup>
-                        </div>
-                      </div>
-                    ))}
                   </CardContent>
-                  <CardFooter className="bg-muted/50 flex justify-between py-4">
-                    <div className="text-sm">Total Marks: <span className="font-bold">{totalMarks}</span></div>
-                    <div className="text-sm">Total Questions: <span className="font-bold">{totalQuestions}</span></div>
-                  </CardFooter>
+                </Card>
+
+                {metadata.mode === "Groupwork" && (
+                  <GroupWorkConfigSection
+                    config={metadata as any}
+                    onConfigChange={(updates) =>
+                      setMetadata((prev) => ({ ...prev, ...updates }))
+                    }
+                  />
+                )}
+              </div>
+
+              <div className="space-y-6">
+                <Card className="shadow-none border">
+                  <CardHeader className="py-4 border-b">
+                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                      Target Enrollment
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-5 space-y-6">
+                    <div className="space-y-4">
+                      <div>
+                        <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
+                          Departments
+                        </Label>
+                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                          {availableDepartments.map((d) => (
+                            <div
+                              key={d.id}
+                              className="flex items-center gap-2 p-1.5 rounded-md hover:bg-white cursor-pointer"
+                              onClick={() => toggleDept(d.id)}
+                            >
+                              <Checkbox
+                                checked={metadata.department_ids.includes(d.id)}
+                              />
+                              <span className="text-[11px] font-medium truncate">
+                                {d.name}
+                              </span>
+                            </div>
+                          ))}
+                          {availableDepartments.length === 0 && (
+                            <p className="text-[10px] text-center py-8 text-muted-foreground">
+                              Select an institution first
+                            </p>
+                          )}
+                        </ScrollArea>
+                      </div>
+                      <div>
+                        <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
+                          Class Options
+                        </Label>
+                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                          {availableOptions.map((o) => (
+                            <div
+                              key={o.id}
+                              className="flex items-center gap-2 p-1.5 rounded-md hover:bg-white cursor-pointer"
+                              onClick={() => toggleOption(o.id)}
+                            >
+                              <Checkbox
+                                checked={metadata.option_ids.includes(o.id)}
+                              />
+                              <span className="text-[11px] font-medium truncate">
+                                {o.name}
+                              </span>
+                            </div>
+                          ))}
+                          {availableOptions.length === 0 && (
+                            <p className="text-[10px] text-center py-8 text-muted-foreground">
+                              Select departments first
+                            </p>
+                          )}
+                        </ScrollArea>
+                      </div>
+                      <div>
+                        <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
+                          Classes
+                        </Label>
+                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                          {availableClasses.map((c) => (
+                            <div
+                              key={c.id}
+                              className="flex items-center gap-2 p-1.5 rounded-md hover:bg-white cursor-pointer"
+                              onClick={() => toggleClass(c.id)}
+                            >
+                              <Checkbox
+                                checked={metadata.class_group_ids.includes(
+                                  c.id,
+                                )}
+                              />
+                              <span className="text-[11px] font-medium truncate">
+                                {c.name}
+                              </span>
+                            </div>
+                          ))}
+                          {availableClasses.length === 0 && (
+                            <p className="text-[10px] text-center py-8 text-muted-foreground">
+                              Select options first
+                            </p>
+                          )}
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  </CardContent>
                 </Card>
               </div>
-              <div className="space-y-6">
-                <Card>
-                  <CardHeader><CardTitle className="text-lg flex items-center gap-2"><Shield className="size-5 text-primary" /> Environment & Policy</CardTitle></CardHeader>
-                  <CardContent className="space-y-6">
+            </div>
+            <div className="flex justify-end mt-8">
+              <Button
+                size="lg"
+                onClick={() => setActiveStep(2)}
+                className="h-11 px-8 rounded-md font-semibold"
+              >
+                Define Blueprint <ChevronRight className="ml-2 size-4" />
+              </Button>
+            </div>
+          </StepperContent>
+
+          {/* STEP 2: BLUEPRINT */}
+          <StepperContent value={2}>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              <div className="lg:col-span-2 space-y-6">
+                <div className="flex items-center justify-between mb-2">
+                  <h2 className="text-xl font-semibold tracking-tight">
+                    Assessment Blueprint
+                  </h2>
+                  <Button
+                    onClick={addSection}
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                  >
+                    <Plus className="mr-2 size-3.5" /> Add Section
+                  </Button>
+                </div>
+
+                {blueprint.map((sec) => (
+                  <Card
+                    key={sec.id}
+                    className="shadow-none border overflow-hidden"
+                  >
+                    <CardHeader className="bg-muted/30 flex flex-row items-center justify-between p-4 py-3 border-b">
+                      <div className="flex items-center gap-3">
+                        <Badge
+                          variant="secondary"
+                          className="font-bold text-[10px] px-2 h-5"
+                        >
+                          {sec.section}
+                        </Badge>
+                        <Input
+                          value={sec.section}
+                          onChange={(e) =>
+                            updateSection(sec.id, "section", e.target.value)
+                          }
+                          className="font-semibold text-base p-0 h-auto bg-transparent border-none focus-visible:ring-0 w-48"
+                        />
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeSection(sec.id)}
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </CardHeader>
+                    <CardContent className="p-6 grid grid-cols-1 md:grid-cols-2 gap-8">
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                            Topic Coverage
+                          </Label>
+                          <Input
+                            placeholder="e.g. Advanced Calculus, Integration"
+                            value={sec.topics}
+                            onChange={(e) =>
+                              updateSection(sec.id, "topics", e.target.value)
+                            }
+                            className="h-9 font-medium"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                              Allocated Marks
+                            </Label>
+                            <Input
+                              type="number"
+                              value={sec.marks}
+                              onChange={(e) =>
+                                updateSection(
+                                  sec.id,
+                                  "marks",
+                                  parseInt(e.target.value) || 0,
+                                )
+                              }
+                              className="h-9 font-bold text-center"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                              Question Count
+                            </Label>
+                            <Input
+                              type="number"
+                              value={sec.questions}
+                              onChange={(e) =>
+                                updateSection(
+                                  sec.id,
+                                  "questions",
+                                  parseInt(e.target.value) || 0,
+                                )
+                              }
+                              className="h-9 font-bold text-center"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                          Permitted Question Types
+                        </Label>
+                        <ToggleGroup
+                          type="multiple"
+                          value={sec.allowedTypes}
+                          onValueChange={(v: any) =>
+                            v.length > 0 &&
+                            updateSection(sec.id, "allowedTypes", v)
+                          }
+                          className="flex flex-wrap gap-2 justify-start"
+                        >
+                          {[
+                            "mcq",
+                            "truefalse",
+                            "shortanswer",
+                            "essay",
+                            "matching",
+                            "fillblank",
+                            "computational",
+                            "ordering",
+                            "casestudy",
+                          ].map((t) => (
+                            <ToggleGroupItem
+                              key={t}
+                              value={t}
+                              className="h-8 px-2.5 text-[10px] font-bold uppercase tracking-tight border hover:bg-muted data-[state=on]:bg-primary data-[state=on]:text-white data-[state=on]:border-primary transition-all rounded-md"
+                            >
+                              {t}
+                            </ToggleGroupItem>
+                          ))}
+                        </ToggleGroup>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="space-y-6 pt-10">
+                <Card className="shadow-none border">
+                  <CardHeader className="py-4 border-b">
+                    <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                      <Shield className="size-4 text-primary" /> Environment &
+                      Policy
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-5 space-y-6">
                     <div className="space-y-4">
                       {[
-                        { key: "supervised", label: "Proctored", desc: "Live monitoring enabled" },
-                        { key: "browserRestricted", label: "Safe Browser", desc: "Forces fullscreen" },
+                        {
+                          key: "supervised",
+                          label: "Proctored",
+                          desc: "Live monitoring enabled",
+                        },
+                        {
+                          key: "browserRestricted",
+                          label: "Safe Browser",
+                          desc: "Forces fullscreen mode",
+                        },
+                        {
+                          key: "aiAllowed",
+                          label: "AI Allowed",
+                          desc: "Allow LLM tools during exam",
+                        },
+                        {
+                          key: "openBook",
+                          label: "Open Book",
+                          desc: "Reference materials allowed",
+                        },
                       ].map((item) => (
-                        <div key={item.key} className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>{item.label}</Label><p className="text-xs text-muted-foreground">{item.desc}</p></div>
-                          <Switch checked={(rules as any)[item.key]} onCheckedChange={(v) => setRules({ ...rules, [item.key]: v })} />
+                        <div
+                          key={item.key}
+                          className="flex items-start justify-between gap-4"
+                        >
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">{item.label}</Label>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              {item.desc}
+                            </p>
+                          </div>
+                          <Switch
+                            checked={(rules as any)[item.key]}
+                            onCheckedChange={(v) =>
+                              setRules({ ...rules, [item.key]: v })
+                            }
+                          />
                         </div>
                       ))}
                     </div>
 
-                    <div className="space-y-3 pt-4 border-t">
-                      <Label className="text-xs uppercase text-muted-foreground">Result Release Mode</Label>
+                    {rules.supervised && (
+                      <div className="pt-5 border-t space-y-4">
+                        <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-2">
+                          Co-Supervisors / Invigilators
+                        </Label>
+                        <div className="space-y-3">
+                          <p className="text-[10px] text-muted-foreground leading-tight">
+                            Select colleagues who can assist with live proctoring and integrity management.
+                          </p>
+                          <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                            {availableLecturers.map((l) => (
+                              <div
+                                key={l.id}
+                                className="flex items-center gap-2 p-1.5 rounded-md hover:bg-white cursor-pointer"
+                                onClick={() => {
+                                  const current = rules.supervisor_ids;
+                                  setRules({
+                                    ...rules,
+                                    supervisor_ids: current.includes(l.id)
+                                      ? current.filter((id) => id !== l.id)
+                                      : [...current, l.id],
+                                  });
+                                }}
+                              >
+                                <Checkbox
+                                  checked={rules.supervisor_ids.includes(l.id)}
+                                />
+                                <div className="flex flex-col">
+                                  <span className="text-[11px] font-semibold">
+                                    {l.profile?.display_name || `${l.profile?.first_name} ${l.profile?.last_name}`}
+                                  </span>
+                                  <span className="text-[9px] text-muted-foreground">
+                                    {l.email}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                            {availableLecturers.length === 0 && (
+                              <p className="text-[10px] text-center py-8 text-muted-foreground">
+                                No other lecturers found.
+                              </p>
+                            )}
+                          </ScrollArea>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-3 pt-5 border-t">
+                      <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Result Release Mode
+                      </Label>
                       <Select
                         value={rules.resultRelease}
-                        onValueChange={(v: "immediate" | "delayed") => setRules({ ...rules, resultRelease: v })}
+                        onValueChange={(v: any) =>
+                          setRules({ ...rules, resultRelease: v })
+                        }
                       >
                         <SelectTrigger className="h-9">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="immediate">Immediate (Auto-grade)</SelectItem>
-                          <SelectItem value="delayed">Manual (Upload after grading)</SelectItem>
+                          <SelectItem value="immediate">
+                            Immediate (Auto-grade)
+                          </SelectItem>
+                          <SelectItem value="manual">
+                            Manual Review Required
+                          </SelectItem>
                         </SelectContent>
                       </Select>
-                      <p className="text-[10px] text-muted-foreground italic">
-                        {rules.resultRelease === "delayed" 
-                          ? "Students will be notified when you finalize the grading." 
-                          : "Results released as soon as student submits."}
-                      </p>
                     </div>
 
-                    <div className="pt-4 border-t">
-                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2 mb-4">
-                        Additional Configuration <ChevronDown className="size-3" />
+                    <div className="pt-5 border-t">
+                      <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-2 mb-4">
+                        Additional Configuration{" "}
+                        <ChevronDown className="size-3" />
                       </Label>
                       <div className="space-y-4">
                         <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>AI Allowed</Label><p className="text-[10px] text-muted-foreground">Allow LLM tools during exam</p></div>
-                          <Switch checked={rules.aiAllowed} onCheckedChange={(v) => setRules({ ...rules, aiAllowed: v })} />
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>Open Book</Label><p className="text-[10px] text-muted-foreground">Reference materials allowed</p></div>
-                          <Switch checked={rules.openBook} onCheckedChange={(v) => setRules({ ...rules, openBook: v })} />
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>Randomize Questions</Label><p className="text-[10px] text-muted-foreground">Shuffle order per student</p></div>
-                          <Switch checked={rules.shuffleQuestions} onCheckedChange={(v) => setRules({ ...rules, shuffleQuestions: v })} />
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>Randomize Options</Label><p className="text-[10px] text-muted-foreground">Shuffle MCQ options</p></div>
-                          <Switch checked={rules.shuffleOptions} onCheckedChange={(v) => setRules({ ...rules, shuffleOptions: v })} />
-                        </div>
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5"><Label>Password Protected</Label><p className="text-[10px] text-muted-foreground">Require code to start</p></div>
-                          <Switch checked={rules.passwordProtected} onCheckedChange={(v) => setRules({ ...rules, passwordProtected: v })} />
-                        </div>
-                        
-                        {rules.passwordProtected && (
-                          <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                            <Input 
-                              type="text" 
-                              placeholder="Access code..." 
-                              value={rules.accessPassword}
-                              onChange={(e) => setRules({ ...rules, accessPassword: e.target.value })}
-                              className="h-8 text-xs"
-                            />
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">
+                              Randomize Questions
+                            </Label>
+                            <p className="text-[10px] text-muted-foreground">
+                              Shuffle order per student
+                            </p>
                           </div>
+                          <Switch
+                            checked={rules.shuffleQuestions}
+                            onCheckedChange={(v) =>
+                              setRules({ ...rules, shuffleQuestions: v })
+                            }
+                          />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">Randomize Options</Label>
+                            <p className="text-[10px] text-muted-foreground">
+                              Shuffle MCQ options
+                            </p>
+                          </div>
+                          <Switch
+                            checked={rules.shuffleOptions}
+                            onCheckedChange={(v) =>
+                              setRules({ ...rules, shuffleOptions: v })
+                            }
+                          />
+                        </div>
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="space-y-0.5">
+                            <Label className="text-sm">
+                              Password Protected
+                            </Label>
+                            <p className="text-[10px] text-muted-foreground">
+                              Require code to start
+                            </p>
+                          </div>
+                          <Switch
+                            checked={rules.passwordProtected}
+                            onCheckedChange={(v) =>
+                              setRules({ ...rules, passwordProtected: v })
+                            }
+                          />
+                        </div>
+
+                        {rules.passwordProtected && (
+                          <Input
+                            placeholder="Access code..."
+                            value={rules.accessPassword}
+                            onChange={(e) =>
+                              setRules({
+                                ...rules,
+                                accessPassword: e.target.value,
+                              })
+                            }
+                            className="h-8 text-sm"
+                          />
                         )}
 
-                        <div className="grid grid-cols-2 gap-4 pt-2">
-                          <div className="space-y-2">
-                            <Label className="text-[10px] uppercase text-muted-foreground">Max Attempts</Label>
-                            <Input 
-                              type="number" 
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                              Max Attempts
+                            </Label>
+                            <Input
+                              type="number"
                               min={1}
                               value={rules.attempts}
-                              onChange={(e) => setRules({ ...rules, attempts: parseInt(e.target.value) || 1 })}
-                              className="h-8 text-xs"
+                              onChange={(e) =>
+                                setRules({
+                                  ...rules,
+                                  attempts: parseInt(e.target.value) || 1,
+                                })
+                              }
+                              className="h-8 text-sm"
                             />
                           </div>
                           {metadata.mode === "Homework" && (
-                            <div className="space-y-2">
-                              <Label className="text-[10px] uppercase text-muted-foreground">Late Penalty %</Label>
-                              <Input 
-                                type="number" 
+                            <div className="space-y-1.5">
+                              <Label className="text-[10px] uppercase font-bold text-muted-foreground">
+                                Late Penalty %
+                              </Label>
+                              <Input
+                                type="number"
                                 min={0}
                                 max={100}
                                 value={rules.latePenaltyPercent}
-                                onChange={(e) => setRules({ ...rules, latePenaltyPercent: parseFloat(e.target.value) || 0 })}
-                                className="h-8 text-xs"
+                                onChange={(e) =>
+                                  setRules({
+                                    ...rules,
+                                    latePenaltyPercent:
+                                      parseFloat(e.target.value) || 0,
+                                  })
+                                }
+                                className="h-8 text-sm"
                               />
                             </div>
                           )}
@@ -1328,414 +2580,635 @@ export default function NewAssessmentBuilder() {
                     </div>
                   </CardContent>
                 </Card>
-                <div className="flex gap-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setActiveStep(1)}><ChevronLeft className="mr-2 size-4" /> Back</Button>
-                  <Button className="flex-1" onClick={() => setActiveStep(3)}>Questions <ChevronRight className="ml-2 size-4" /></Button>
-                </div>
+
+                <Card className="shadow-none border bg-muted/20">
+                  <CardHeader className="py-3 border-b">
+                    <CardTitle className="text-xs uppercase tracking-widest text-muted-foreground">
+                      Blueprint Summary
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-medium">Total Marks</span>
+                      <span className="font-bold">{totalMarks}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-medium">Question Target</span>
+                      <span className="font-bold">{totalQuestions}</span>
+                    </div>
+                  </CardContent>
+                </Card>
               </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-8 pt-6 border-t">
+              <Button variant="ghost" onClick={() => setActiveStep(1)}>
+                Back
+              </Button>
+              <Button
+                size="lg"
+                onClick={() => setActiveStep(3)}
+                className="h-11 px-8 rounded-md font-semibold"
+              >
+                Construct Questions <ChevronRight className="ml-2 size-4" />
+              </Button>
             </div>
           </StepperContent>
 
+          {/* STEP 3: QUESTIONS */}
           <StepperContent value={3}>
-            {/* STEP 3: Question Creation */}
-            <div className="space-y-8">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <Badge variant="secondary" className="px-3 py-1">Progress: {questions.length} / {totalQuestions}</Badge>
-                  <Badge variant={currentMarks === totalMarks ? "outline" : "destructive"} className="px-3 py-1">
-                    Marks: {currentMarks} / {totalMarks}
-                  </Badge>
-                </div>
-              </div>
+            {metadata.mode === "Groupwork" ? (
+              <Tabs
+                defaultValue="structure"
+                className="space-y-8 max-w-5xl mx-auto"
+              >
+                <TabsList className="grid w-full grid-cols-2 max-w-md mx-auto">
+                  <TabsTrigger value="structure">Exam Structure</TabsTrigger>
+                  <TabsTrigger value="groups">Groups & Members</TabsTrigger>
+                </TabsList>
 
-              {blueprint.map((sec) => (
-                <div key={sec.id} className="space-y-6">
-                  <div className="flex items-center gap-3 border-b pb-2">
-                    <h3 className="font-bold text-xl">{sec.section}</h3>
-                    <Badge variant="secondary">{sec.topics}</Badge>
+                <TabsContent value="structure" className="space-y-8">
+                  <div className="flex items-center justify-between sticky top-16 z-40 bg-background/95 backdrop-blur-md py-3 border-b border-dashed">
+                    <div className="flex items-center gap-6">
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">
+                          Progress
+                        </p>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xl font-bold text-primary">
+                            {questions.length}
+                          </span>
+                          <span className="text-sm font-medium text-muted-foreground">
+                            / {totalQuestions} questions
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-primary/20 text-primary hover:bg-primary/5 shadow-none"
+                        >
+                          <Info className="mr-2 size-3.5" />
+                          Grading Logic
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="end"
+                        className="w-[600px] p-0 overflow-hidden rounded-2xl border-none shadow-2xl"
+                      >
+                        <div className="bg-muted/10 border-b p-5">
+                          <h4 className="text-sm font-bold uppercase tracking-widest">
+                            Grading Architecture
+                          </h4>
+                          <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                            Mindexa will automatically grade deterministic
+                            closed questions and route open-ended responses
+                            through lecturer review. AI-assisted review will
+                            plug into this same control model later without
+                            replacing lecturer authority.
+                          </p>
+                        </div>
+                        <div className="p-4 grid grid-cols-2 gap-4">
+                          <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                            <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
+                              Closed Questions
+                            </div>
+                            <div className="text-2xl font-bold text-emerald-600 tabular-nums">
+                              {gradingArchitecture.closedQuestions}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              MCQ, True/False, Matching, Fill-in-the-Blank,
+                              Ordering
+                            </p>
+                          </div>
+                          <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                            <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
+                              Open Questions
+                            </div>
+                            <div className="text-2xl font-bold text-amber-600 tabular-nums">
+                              {gradingArchitecture.openQuestions}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              Short Answer, Essay, Case Study, Computational
+                              Reasoning
+                            </p>
+                          </div>
+                          <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                            <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
+                              Release Mode
+                            </div>
+                            <div className="text-base font-bold text-foreground">
+                              {gradingArchitecture.releaseMode === "manual"
+                                ? "Manual Review"
+                                : "Immediate Release"}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              {gradingArchitecture.releaseMode === "manual"
+                                ? "Open questions prevent immediate final release."
+                                : "All current questions are auto-gradable."}
+                            </p>
+                          </div>
+                          <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                            <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">
+                              Rubric Readiness
+                            </div>
+                            <div className="text-base font-bold text-foreground">
+                              {gradingArchitecture.rubricRequired
+                                ? "Required"
+                                : "Optional"}
+                            </div>
+                            <p className="text-[10px] text-muted-foreground leading-tight">
+                              {gradingArchitecture.rubricRequired
+                                ? "Analytic rubrics should be defined for open-ended questions."
+                                : "Current question mix does not require guided review."}
+                            </p>
+                          </div>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
                   </div>
-                  
-                  <div className="space-y-6">
-                    {questions.filter((q) => q.sectionId === sec.id).map((q, idx) => (
-                      <Card key={q.id} className="border-2 hover:border-primary/20 transition-colors">
-                        <CardContent className="p-6 space-y-4">
-                          <div className="flex items-start justify-between gap-4">
-                            <div className="flex items-center gap-3">
-                              <Badge className="size-7 flex items-center justify-center rounded-full p-0">{idx + 1}</Badge>
-                              <Select
-                                value={q.type}
-                                onValueChange={(v: QuestionType) => {
-                                  let newOptions: QuestionOption[] = [];
-                                  if (v === "mcq") {
-                                    newOptions = [
-                                      { option_text: "Option 1", is_correct: true, order_index: 0 },
-                                      { option_text: "Option 2", is_correct: false, order_index: 1 },
-                                    ];
-                                  } else if (v === "truefalse") {
-                                    newOptions = [
-                                      { option_text: "True", is_correct: true, order_index: 0 },
-                                      { option_text: "False", is_correct: false, order_index: 1 },
-                                    ];
-                                  }
-                                  updateQuestion(q.id, { type: v, options: newOptions });
-                                }}
+
+                  {blueprint.map((sec) => (
+                    <div key={sec.id} className="space-y-6">
+                      <div className="flex items-center gap-4 bg-muted/30 p-4 rounded-lg border">
+                        <Badge className="font-bold px-3">{sec.section}</Badge>
+                        <span className="text-sm font-semibold">
+                          {sec.topics || "General Topics"}
+                        </span>
+                      </div>
+
+                      <div className="space-y-6">
+                        <GroupQuestionEditor
+                          groups={groups.map((g) => ({
+                            id: g.id,
+                            name: g.name,
+                            memberCount: g.members.length,
+                          }))}
+                          totalMarks={sec.marks}
+                          getGroupMarks={(gId) =>
+                            questions
+                              .filter(
+                                (q) => q.sectionId === sec.id && q.groupId === gId,
+                              )
+                              .reduce((sum, q) => sum + q.marks, 0)
+                          }
+                          renderQuestionEditor={(gId) => (
+                            <div className="space-y-6">
+                              {questions
+                                .filter(
+                                  (q) =>
+                                    q.sectionId === sec.id &&
+                                    q.groupId === gId,
+                                )
+                                .map((q, idx) => (
+                                  <QuestionCard
+                                    key={q.id}
+                                    question={q}
+                                    index={idx}
+                                    allowedTypes={sec.allowedTypes}
+                                    onUpdate={(u) => updateQuestion(q.id, u)}
+                                    onDelete={() => removeQuestion(q.id)}
+                                    onSaveToBank={() => handleSaveToBank(q)}
+                                    onUpdateOption={(oi, u) =>
+                                      updateOption(q.id, oi, u)
+                                    }
+                                    onAddOption={() => addOption(q.id)}
+                                    onRemoveOption={(oi) =>
+                                      removeOption(q.id, oi)
+                                    }
+                                  />
+                                ))}
+                              <Button
+                                variant="outline"
+                                className="w-full h-12 border-dashed flex items-center justify-center gap-2"
+                                onClick={() => addQuestion(sec.id, gId)}
                               >
-                                <SelectTrigger className="w-[160px] h-9">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {sec.allowedTypes.map(t => (
-                                    <SelectItem key={t} value={t}>{t.toUpperCase()}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              <div className="flex items-center gap-2">
-                                <Label className="text-xs font-bold uppercase text-muted-foreground">Marks</Label>
-                                <Input
-                                  type="number"
-                                  className="w-16 h-9"
-                                  value={q.marks}
-                                  onChange={(e) => updateQuestion(q.id, { marks: parseInt(e.target.value) || 0 })}
-                                />
-                              </div>
-                              <div className="flex items-center gap-1 border-l pl-3">
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => handleSaveToBank(q)} 
-                                  className="text-primary hover:bg-primary/10"
-                                  title="Save to Bank"
-                                >
-                                  <Database className="size-4" />
-                                </Button>
-                                <Button 
-                                  variant="ghost" 
-                                  size="icon" 
-                                  onClick={() => removeQuestion(q.id)} 
-                                  className="text-destructive hover:bg-destructive/10"
-                                  title="Delete Question"
-                                >
-                                  <Trash2 className="size-4" />
-                                </Button>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <Label className="text-sm font-semibold">Question Content</Label>
-                            <Textarea
-                              placeholder="Write your question here..."
-                              value={q.text}
-                              onChange={(e) => updateQuestion(q.id, { text: e.target.value })}
-                              className="text-lg font-medium min-h-[100px] bg-muted/20"
-                            />
-                          </div>
-
-                          {/* QUESTION TYPE SPECIFIC EDITORS */}
-                          {(q.type === "mcq" || q.type === "truefalse") && (
-                            <div className="space-y-3 pl-4 border-l-2 border-muted">
-                              <Label className="text-sm font-semibold">Options (Select the correct one)</Label>
-                              <RadioGroup
-                                value={q.options.find(o => o.is_correct)?.order_index.toString()}
-                                onValueChange={(v) => {
-                                  const idx = parseInt(v);
-                                  setQuestions(questions.map(item => {
-                                    if (item.id !== q.id) return item;
-                                    return {
-                                      ...item,
-                                      options: item.options.map((opt, i) => ({ ...opt, is_correct: i === idx }))
-                                    };
-                                  }));
-                                }}
-                                className="space-y-2"
-                              >
-                                {q.options.map((opt, oIdx) => (
-                                  <div key={oIdx} className="flex items-center gap-3">
-                                    <RadioGroupItem value={oIdx.toString()} />
-                                    <Input
-                                      value={opt.option_text}
-                                      onChange={(e) => updateOption(q.id, oIdx, { option_text: e.target.value })}
-                                      className="flex-1 h-9"
-                                      placeholder={`Option ${oIdx + 1}`}
-                                      disabled={q.type === "truefalse"}
-                                    />
-                                    {q.type === "mcq" && q.options.length > 2 && (
-                                      <Button variant="ghost" size="icon" onClick={() => removeOption(q.id, oIdx)}>
-                                        <X className="size-4" />
-                                      </Button>
-                                    )}
-                                  </div>
-                                ))}
-                              </RadioGroup>
-                              {q.type === "mcq" && (
-                                <Button variant="outline" size="sm" onClick={() => addOption(q.id)} className="mt-2">
-                                  <Plus className="size-3 mr-2" /> Add Option
-                                </Button>
-                              )}
+                                <Plus className="size-4" /> Add Question to{" "}
+                                {groups.find((g) => g.id === gId)?.name}
+                              </Button>
                             </div>
                           )}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </TabsContent>
 
-                          {q.type === "matching" && (
-                            <div className="space-y-3 pl-4 border-l-2 border-muted">
-                              <Label className="text-sm font-semibold">Pairs (Match Left to Right)</Label>
-                              <div className="space-y-2">
-                                {q.options.map((opt, oIdx) => (
-                                  <div key={oIdx} className="flex items-center gap-3">
-                                    <Input
-                                      value={opt.option_text}
-                                      onChange={(e) => updateOption(q.id, oIdx, { option_text: e.target.value })}
-                                      className="flex-1 h-9"
-                                      placeholder="Left Item"
-                                    />
-                                    <ChevronRight className="size-4 text-muted-foreground" />
-                                    <Input
-                                      value={opt.option_text_right}
-                                      onChange={(e) => updateOption(q.id, oIdx, { option_text_right: e.target.value })}
-                                      className="flex-1 h-9"
-                                      placeholder="Right Match"
-                                    />
-                                    <Button variant="ghost" size="icon" onClick={() => removeOption(q.id, oIdx)}>
-                                      <X className="size-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                                <Button variant="outline" size="sm" onClick={() => {
-                                  setQuestions(questions.map(item => {
-                                    if (item.id !== q.id) return item;
-                                    return {
-                                      ...item,
-                                      options: [...item.options, { option_text: "", option_text_right: "", is_correct: true, order_index: item.options.length }]
-                                    };
-                                  }));
-                                }}>
-                                  <Plus className="size-3 mr-2" /> Add Pair
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {(q.type === "shortanswer" || q.type === "essay") && (
-                            <div className="space-y-3 pl-4 border-l-2 border-muted">
-                              <div className="p-4 rounded-xl bg-primary/5 border border-primary/10">
-                                <p className="text-sm text-primary font-medium flex items-center gap-2">
-                                  <BrainCircuit className="size-4" /> 
-                                  {q.type === "shortanswer" ? "Short Answer Field" : "Essay Response Field"}
-                                </p>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                  Students will see a specified {q.type === "shortanswer" ? "text input" : "rich text area"} to answer this question.
-                                </p>
-                              </div>
-                              <Label className="text-sm font-semibold">Sample Correct Answer / Rubric</Label>
-                              <Textarea
-                                placeholder="Enter what a good answer looks like..."
-                                className="min-h-[80px]"
-                                value={q.options[0]?.option_text || ""}
-                                onChange={(e) => {
-                                  const opts = [{ option_text: e.target.value, is_correct: true, order_index: 0 }];
-                                  updateQuestion(q.id, { options: opts });
-                                }}
-                              />
-                            </div>
-                          )}
-
-                          {q.type === "fillblank" && (
-                            <div className="space-y-3 pl-4 border-l-2 border-muted">
-                              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
-                                Use <strong>[blank]</strong> in the question text above to indicate where student should type.
-                              </div>
-                              <Label className="text-sm font-semibold">Answers for Blanks (in order)</Label>
-                              <div className="space-y-2">
-                                {q.options.map((opt, oIdx) => (
-                                  <div key={oIdx} className="flex items-center gap-2">
-                                    <Badge variant="outline">#{oIdx + 1}</Badge>
-                                    <Input
-                                      value={opt.option_text}
-                                      onChange={(e) => updateOption(q.id, oIdx, { option_text: e.target.value })}
-                                      className="flex-1 h-9"
-                                      placeholder="Correct Answer"
-                                    />
-                                    <Button variant="ghost" size="icon" onClick={() => removeOption(q.id, oIdx)}>
-                                      <X className="size-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                                <Button variant="outline" size="sm" onClick={() => addOption(q.id)}>
-                                  <Plus className="size-3 mr-2" /> Add Blank Answer
-                                </Button>
-                              </div>
-                            </div>
-                          )}
-
-                          {q.type === "ordering" && (
-                            <div className="space-y-3 pl-4 border-l-2 border-muted">
-                              <Label className="text-sm font-semibold">Items (Set in Correct Order)</Label>
-                              <div className="space-y-2">
-                                {q.options.map((opt, oIdx) => (
-                                  <div key={oIdx} className="flex items-center gap-3">
-                                    <GripVertical className="size-4 text-muted-foreground cursor-grab" />
-                                    <Input
-                                      value={opt.option_text}
-                                      onChange={(e) => updateOption(q.id, oIdx, { option_text: e.target.value })}
-                                      className="flex-1 h-9"
-                                      placeholder={`Item ${oIdx + 1}`}
-                                    />
-                                    <Button variant="ghost" size="icon" onClick={() => removeOption(q.id, oIdx)}>
-                                      <X className="size-4" />
-                                    </Button>
-                                  </div>
-                                ))}
-                                <Button variant="outline" size="sm" onClick={() => addOption(q.id)}>
-                                  <Plus className="size-3 mr-2" /> Add Item
-                                </Button>
-                              </div>
-                            </div>
-                          )}
+                <TabsContent value="groups" className="space-y-8">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
+                    <div className="md:col-span-4 space-y-6">
+                      <Card className="shadow-none border">
+                        <CardHeader>
+                          <CardTitle className="text-base">
+                            Import Students
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <GroupCsvImport
+                            assessmentId={draftId || undefined}
+                            onImport={(members) => {
+                              // Logic to auto-create groups or assign to list
+                              toast.success(
+                                `Imported ${members.length} students`,
+                              );
+                            }}
+                          />
                         </CardContent>
                       </Card>
-                    ))}
-                    <div className="flex gap-4">
-                      <Button variant="outline" className="flex-1 h-20 rounded-2xl border-2 hover:bg-muted/50 hover:border-primary/50 transition-all" onClick={() => addQuestion(sec.id)}>
-                        <div className="flex flex-col items-center">
-                          <Plus className="size-6 mb-1" />
-                          <span className="font-semibold text-sm uppercase tracking-wider">Add Manually</span>
-                        </div>
-                      </Button>
-                      <QuestionBankSelector selectedIds={questions.map(q => q.id)} onSelect={(q) => handleBankSelect(q, sec.id)} />
+                    </div>
+                    <div className="md:col-span-8">
+                      <GroupBuilderDnd
+                        courseId={metadata.course_id}
+                        initialGroups={groups}
+                        maxGroupSize={metadata.max_group_size}
+                        onSave={setGroups}
+                      />
                     </div>
                   </div>
-                </div>
-              ))}
-              <div className="flex justify-between pt-8 border-t">
-                <Button variant="outline" size="lg" onClick={() => setActiveStep(2)} className="rounded-full px-8">
-                  <ChevronLeft className="mr-2 size-4" /> Back to Blueprint
-                </Button>
-                <Button size="lg" onClick={() => setActiveStep(4)} className="rounded-full px-10">
-                  Review Assessment <ChevronRight className="ml-2 size-4" />
-                </Button>
-              </div>
-            </div>
-          </StepperContent>
+                </TabsContent>
 
-          <StepperContent value={4}>
-            {/* STEP 4: Review */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-8">
-                <div className="space-y-4">
-                  <div className="space-y-1">
-                    <h2 className="text-3xl font-bold">{metadata.title || "Untitled Assessment"}</h2>
-                    <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
-                      <span className="flex items-center gap-1"><CalendarIcon className="size-4" /> {metadata.date ? format(metadata.date, "PPP") : "No date set"}</span>
-                      <span className="flex items-center gap-1"><Clock className="size-4" /> {formatDisplayTime(metadata.startTime)} - {formatDisplayTime(metadata.endTime)} ({metadata.durationMinutes} mins)</span>
-                      <span className="flex items-center gap-1"><FileText className="size-4" /> {metadata.mode}</span>
+                <div className="flex justify-between mt-12 pt-8 border-t border-dashed">
+                  <Button variant="ghost" onClick={() => setActiveStep(2)}>
+                    Back to Blueprint
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={() => setActiveStep(4)}
+                    className="h-11 px-10 rounded-md font-semibold"
+                  >
+                    Review & Finalize <ChevronRight className="ml-2 size-4" />
+                  </Button>
+                </div>
+              </Tabs>
+            ) : (
+              <div className="space-y-8 max-w-4xl mx-auto">
+                <div className="flex items-center justify-between sticky top-16 z-40 bg-background/95 backdrop-blur-md py-3 border-b border-dashed">
+                  <div className="flex items-center gap-6">
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">
+                        Progress
+                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xl font-bold text-primary">
+                          {questions.length}
+                        </span>
+                        <span className="text-sm font-medium text-muted-foreground">
+                          / {totalQuestions} questions
+                        </span>
+                      </div>
+                    </div>
+                    <div className="w-px h-8 bg-muted" />
+                    <div className="space-y-0.5">
+                      <p className="text-[10px] font-bold uppercase text-muted-foreground tracking-tight">
+                        Marks
+                      </p>
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={cn(
+                            "text-xl font-bold",
+                            currentMarks === totalMarks
+                              ? "text-emerald-600"
+                              : "text-red-600",
+                          )}
+                        >
+                          {currentMarks}
+                        </span>{" "}
+                        <span className="text-sm font-medium text-muted-foreground">
+                          / {totalMarks} allocated
+                        </span>
+                      </div>
                     </div>
                   </div>
-                  
-                  {/* Target Groups Summary */}
-                  <div className="flex flex-wrap gap-2">
-                    {metadata.class_group_ids.map(id => {
-                      const cls = availableClasses.find(c => c.id === id);
-                      return cls ? (
-                        <Badge key={id} variant="secondary" className="bg-primary/5 text-primary border-primary/10">
-                          {cls.name}
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
+
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" size="sm" className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-primary/20 text-primary hover:bg-primary/5 shadow-none">
+                        <Info className="mr-2 size-3.5" />
+                        Grading Logic
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-[600px] p-0 overflow-hidden rounded-2xl border-none shadow-2xl">
+                        <div className="bg-muted/10 border-b p-5">
+                            <h4 className="text-sm font-bold uppercase tracking-widest">Grading Architecture</h4>
+                            <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
+                                Mindexa will automatically grade deterministic closed questions and route open-ended responses through lecturer review. AI-assisted review will plug into this same control model later without replacing lecturer authority.
+                            </p>
+                        </div>
+                        <div className="p-4 grid grid-cols-2 gap-4">
+                            <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                                <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Closed Questions</div>
+                                <div className="text-2xl font-bold text-emerald-600 tabular-nums">{gradingArchitecture.closedQuestions}</div>
+                                <p className="text-[10px] text-muted-foreground leading-tight">MCQ, True/False, Matching, Fill-in-the-Blank, Ordering</p>
+                            </div>
+                            <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                                <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Open Questions</div>
+                                <div className="text-2xl font-bold text-amber-600 tabular-nums">{gradingArchitecture.openQuestions}</div>
+                                <p className="text-[10px] text-muted-foreground leading-tight">Short Answer, Essay, Case Study, Computational Reasoning</p>
+                            </div>
+                            <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                                <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Release Mode</div>
+                                <div className="text-base font-bold text-foreground">{gradingArchitecture.releaseMode === "manual" ? "Manual Review" : "Immediate Release"}</div>
+                                <p className="text-[10px] text-muted-foreground leading-tight">
+                                    {gradingArchitecture.releaseMode === "manual" ? "Open questions prevent immediate final release." : "All current questions are auto-gradable."}
+                                </p>
+                            </div>
+                            <div className="p-4 rounded-xl border bg-muted/5 space-y-2">
+                                <div className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider">Rubric Readiness</div>
+                                <div className="text-base font-bold text-foreground">{gradingArchitecture.rubricRequired ? "Required" : "Optional"}</div>
+                                <p className="text-[10px] text-muted-foreground leading-tight">
+                                    {gradingArchitecture.rubricRequired ? "Analytic rubrics should be defined for open-ended questions." : "Current question mix does not require guided review."}
+                                </p>
+                            </div>
+                        </div>
+                    </PopoverContent>
+                  </Popover>
                 </div>
-                <Separator />
+
                 {blueprint.map((sec) => (
                   <div key={sec.id} className="space-y-6">
-                    <div className="flex justify-between items-center border-b pb-2">
-                      <h3 className="font-bold text-xl">{sec.section}</h3>
-                      <Badge variant="outline">{sec.marks} Marks</Badge>
+                    <div className="flex items-center gap-4 bg-muted/30 p-4 rounded-lg border">
+                      <Badge className="font-bold px-3">{sec.section}</Badge>
+                      <div className="flex-1">
+                        <span className="text-sm font-semibold block">
+                          {sec.topics || "General Topics"}
+                        </span>
+                        <span className="text-[11px] text-muted-foreground uppercase font-bold">
+                          {sec.marks} Marks Target
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-sm font-bold block">
+                          {questions
+                            .filter((q) => q.sectionId === sec.id)
+                            .reduce((s, q) => s + q.marks, 0)}{" "}
+                          / {sec.marks} Marks
+                        </span>
+                      </div>
                     </div>
+
                     <div className="space-y-6">
-                      {questions.filter((q) => q.sectionId === sec.id).map((q, i) => (
-                        <div key={q.id} className="space-y-2">
-                          <div className="flex justify-between items-start">
-                            <div className="flex gap-3">
-                              <span className="text-muted-foreground font-bold">{i + 1}.</span>
-                              <div className="space-y-1">
-                                <p className="font-medium text-lg">{q.text || <em>No question text</em>}</p>
-                                <div className="flex gap-2">
-                                  <Badge variant="secondary" className="text-[10px] uppercase">{q.type}</Badge>
-                                  <span className="text-xs text-muted-foreground">{q.marks} Marks</span>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                          
-                          {/* Options Preview */}
-                          {q.options.length > 0 && (
-                            <div className="pl-8 space-y-1">
-                              {q.type === "mcq" || q.type === "truefalse" ? (
-                                <ul className="list-disc text-sm text-muted-foreground pl-4">
-                                  {q.options.map((opt, oIdx) => (
-                                    <li key={oIdx} className={cn(opt.is_correct && "text-primary font-medium")}>
-                                      {opt.option_text} {opt.is_correct && "✓"}
-                                    </li>
-                                  ))}
-                                </ul>
-                              ) : q.type === "matching" ? (
-                                <div className="grid grid-cols-2 gap-2 max-w-md">
-                                  {q.options.map((opt, oIdx) => (
-                                    <React.Fragment key={oIdx}>
-                                      <div className="text-sm bg-muted p-2 rounded-lg">{opt.option_text}</div>
-                                      <div className="text-sm bg-primary/10 p-2 rounded-lg">{opt.option_text_right}</div>
-                                    </React.Fragment>
-                                  ))}
-                                </div>
-                              ) : (
-                                <p className="text-sm text-muted-foreground italic">
-                                  {q.type === "shortanswer" || q.type === "essay" ? "Open response field" : "Multiple answers/items"}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                      {questions
+                        .filter((q) => q.sectionId === sec.id)
+                        .map((q, idx) => (
+                          <QuestionCard
+                            key={q.id}
+                            question={q}
+                            index={idx}
+                            allowedTypes={sec.allowedTypes}
+                            onUpdate={(u) => updateQuestion(q.id, u)}
+                            onDelete={() => removeQuestion(q.id)}
+                            onSaveToBank={() => handleSaveToBank(q)}
+                            onUpdateOption={(oi, u) =>
+                              updateOption(q.id, oi, u)
+                            }
+                            onAddOption={() => addOption(q.id)}
+                            onRemoveOption={(oi) => removeOption(q.id, oi)}
+                          />
+                        ))}
+                      <div className="flex gap-4">
+                        <Button
+                          variant="outline"
+                          className="flex-1 h-20 border-2 border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-1.5"
+                          onClick={() => addQuestion(sec.id)}
+                        >
+                          <Plus className="size-5 text-primary" />
+                          <span className="font-bold uppercase text-[10px] tracking-wider">
+                            Add Manually
+                          </span>
+                        </Button>
+                        <QuestionBankSelector
+                          selectedIds={questions.map((q) => q.id)}
+                          onSelect={(q) => handleBankSelect(q, sec.id)}
+                        />
+                      </div>
                     </div>
                   </div>
                 ))}
-              </div>
-              <div className="space-y-6">
-                <Card><CardHeader><CardTitle>Summary</CardTitle></CardHeader><CardContent className="space-y-4">
-                  <div className="flex justify-between text-sm"><span>Total Marks</span><span className="font-bold">{totalMarks}</span></div>
-                  <div className="flex justify-between text-sm"><span>Questions</span><span className={cn("font-bold", questions.length !== totalQuestions && "text-destructive")}>{questions.length} / {totalQuestions}</span></div>
-                </CardContent></Card>
-                <div className="flex gap-4">
-                  <Button variant="outline" className="flex-1" onClick={() => setActiveStep(3)}><ChevronLeft className="mr-2 size-4" /> Back</Button>
-                  <Button className="flex-1" onClick={() => setActiveStep(5)}>Finalize <ChevronRight className="ml-2 size-4" /></Button>
+
+                <div className="flex justify-between mt-12 pt-8 border-t border-dashed">
+                  <Button variant="ghost" onClick={() => setActiveStep(2)}>
+                    Back to Blueprint
+                  </Button>
+                  <Button
+                    size="lg"
+                    onClick={() => setActiveStep(4)}
+                    className="h-11 px-10 rounded-md font-semibold"
+                  >
+                    Review & Finalize <ChevronRight className="ml-2 size-4" />
+                  </Button>
                 </div>
+              </div>
+            )}
+          </StepperContent>
+
+          {/* STEP 4: REVIEW */}
+          <StepperContent value={4}>
+            <div className="max-w-4xl mx-auto space-y-8">
+              <div className="space-y-2">
+                <h2 className="text-3xl font-bold tracking-tight">
+                  {metadata.title || "Untitled Assessment"}
+                </h2>
+                <div className="flex flex-wrap gap-4 text-sm text-muted-foreground">
+                  <span className="flex items-center gap-1.5">
+                    <CalendarIcon className="size-4" />{" "}
+                    {metadata.date ? format(metadata.date, "PPP") : "TBD"}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="size-4" />{" "}
+                    {formatDisplayTime(metadata.startTime)} -{" "}
+                    {formatDisplayTime(metadata.endTime)}
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <Users className="size-4" /> {metadata.mode}
+                  </span>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div className="md:col-span-2 space-y-8">
+                  {blueprint.map((sec) => (
+                    <div key={sec.id} className="space-y-6">
+                      <div className="flex justify-between items-center border-b pb-2">
+                        <h3 className="font-bold text-xl">{sec.section}</h3>
+                        <Badge variant="outline">{sec.marks} Marks</Badge>
+                      </div>
+                      <div className="space-y-6">
+                        {questions
+                          .filter((q) => q.sectionId === sec.id)
+                          .map((q, i) => (
+                            <ReviewQuestionCard
+                              key={q.id}
+                              question={q}
+                              index={i}
+                            />
+                          ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-6">
+                  <Card className="shadow-none border sticky top-20">
+                    <CardHeader className="py-4 border-b">
+                      <CardTitle className="text-sm uppercase font-bold tracking-wider">
+                        Exam Summary
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-5 space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Total Questions
+                          </span>
+                          <span
+                            className={cn(
+                              "font-bold",
+                              questions.length !== totalQuestions &&
+                                "text-destructive",
+                            )}
+                          >
+                            {questions.length} / {totalQuestions}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Total Marks
+                          </span>
+                          <span
+                            className={cn(
+                              "font-bold",
+                              currentMarks !== totalMarks && "text-destructive",
+                            )}
+                          >
+                            {currentMarks} / {totalMarks}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-sm">
+                          <span className="text-muted-foreground">
+                            Closed / Open Mix
+                          </span>
+                          <span className="font-bold">
+                            {gradingArchitecture.closedQuestions} / {gradingArchitecture.openQuestions}
+                          </span>
+                        </div>
+                      </div>
+                      <Separator />
+                      <div className="space-y-2 text-xs">
+                        <p className="font-bold uppercase text-muted-foreground">
+                          Grading Path
+                        </p>
+                        <div className="rounded-lg border bg-muted/30 p-3 leading-relaxed">
+                          Closed questions will be graded automatically. Open-ended responses stay in lecturer review and align with rubric-based moderation in the later AI-assisted phase.
+                        </div>
+                      </div>
+                      <Separator />
+                      <div className="space-y-2 text-xs">
+                        <p className="font-bold uppercase text-muted-foreground">
+                          Policy Checklist
+                        </p>
+                        <div className="grid gap-1.5">
+                          <div className="flex items-center gap-2">
+                            {rules.supervised ? (
+                              <Check className="size-3 text-emerald-500" />
+                            ) : (
+                              <X className="size-3 text-muted-foreground" />
+                            )}
+                            <span>Proctored Exam</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {rules.browserRestricted ? (
+                              <Check className="size-3 text-emerald-500" />
+                            ) : (
+                              <X className="size-3 text-muted-foreground" />
+                            )}
+                            <span>Safe Browser Forced</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {rules.resultRelease === "immediate" ? (
+                              <Check className="size-3 text-emerald-500" />
+                            ) : (
+                              <Clock className="size-3 text-amber-500" />
+                            )}
+                            <span>
+                              {rules.resultRelease === "immediate"
+                                ? "Immediate Results"
+                                : "Manual Review"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>
+
+              <div className="flex justify-between mt-12 pt-8 border-t border-dashed">
+                <Button variant="ghost" onClick={() => setActiveStep(3)}>
+                  Back to Questions
+                </Button>
+                <Button
+                  size="lg"
+                  onClick={() => setActiveStep(5)}
+                  className="h-11 px-10 rounded-md font-semibold"
+                >
+                  Final Confirmation <ChevronRight className="ml-2 size-4" />
+                </Button>
               </div>
             </div>
           </StepperContent>
 
+          {/* STEP 5: FINALIZE */}
           <StepperContent value={5}>
-            {/* STEP 5: Finalize */}
             <div className="flex flex-col items-center justify-center py-20 text-center space-y-8">
-              <Shield className="size-16 text-primary" />
               <div className="max-w-md space-y-4">
-                <h2 className="text-3xl font-bold">Ready to Publish?</h2>
+                <h2 className="text-3xl font-bold tracking-tight">
+                  Ready to Publish?
+                </h2>
                 <p className="text-muted-foreground">
-                  Scheduled for <strong>{metadata.date ? format(metadata.date, "PPP") : "Unscheduled"}</strong> 
-                  <br />
-                  From <strong>{formatDisplayTime(metadata.startTime)}</strong> to <strong>{formatDisplayTime(metadata.endTime)}</strong>.
+                  Your assessment is fully configured and ready for students.
+                  Scheduled for{" "}
+                  <strong>
+                    {metadata.date ? format(metadata.date, "PPP") : "TBD"}
+                  </strong>
+                  .
                 </p>
-                {metadata.mode === "Homework" && rules.latePenaltyPercent > 0 && (
-                  <p className="text-xs text-amber-600 font-medium">
-                    Late submission penalty of {rules.latePenaltyPercent}% enabled.
+                <div className="p-4 bg-muted/50 rounded-lg text-sm space-y-1">
+                  <p>
+                    <strong>Window:</strong>{" "}
+                    {formatDisplayTime(metadata.startTime)} -{" "}
+                    {formatDisplayTime(metadata.endTime)}
                   </p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  Passing Marks: <strong>{metadata.passing_marks}</strong> • Mode: <strong>{rules.resultRelease === 'immediate' ? 'Immediate' : 'Manual'}</strong>
-                </p>
+                  <p>
+                    <strong>Mode:</strong> {metadata.mode} •{" "}
+                    <strong>Review:</strong> {rules.resultRelease}
+                  </p>
+                  <p>
+                    <strong>Closed / Open:</strong> {gradingArchitecture.closedQuestions} / {gradingArchitecture.openQuestions}
+                  </p>
+                  <p className="text-muted-foreground">
+                    {gradingArchitecture.hasOpenQuestions
+                      ? "Open-ended responses will require lecturer review now and can adopt rubric-guided AI suggestions later."
+                      : "This assessment is currently compatible with full automatic grading."}
+                  </p>
+                </div>
               </div>
-              <div className="flex flex-col gap-4 w-full max-w-sm">
-                <Button size="lg" className="h-14 rounded-full" onClick={handlePublish} disabled={isPublishing}>Publish Now</Button>
-                <Button variant="ghost" onClick={() => setActiveStep(4)}>Back to Review</Button>
+              <div className="flex flex-col gap-3 w-full max-w-xs">
+                <Button
+                  size="lg"
+                  className="h-12 text-base font-semibold"
+                  onClick={handlePublish}
+                  disabled={isPublishing}
+                >
+                  {isPublishing ? "Publishing..." : "Publish Assessment"}
+                </Button>
+                <Button variant="ghost" onClick={() => setActiveStep(4)}>
+                  Review Again
+                </Button>
               </div>
             </div>
           </StepperContent>

@@ -65,7 +65,7 @@ from app.db.schemas.assessment import (
 
 # ── Attempt ───────────────────────────────────────────────────────────────────
 from app.db.schemas.attempt import (
-                                     AttemptResponse,
+                                     AttemptDBSchema,
                                      AttemptStartRequest,
                                      AttemptSummaryResponse,
                                      BulkResponseSave,
@@ -116,6 +116,30 @@ from app.db.schemas.grading import (
                                      RubricGradeResponse,
                                      RubricGradingRequest,
                                      SubmissionGradeResponse,
+)
+
+# ── Group work ───────────────────────────────────────────────────────────────
+from app.db.schemas.group_work import (
+                                     AddGroupCommentRequest,
+                                     ApproveGroupAppealRequest,
+                                     ApproveGroupSubmissionRequest,
+                                     AutoGenerateGroupsRequest,
+                                     CreateGroupAppealRequest,
+                                     FinalizeGroupSubmissionRequest,
+                                     GroupActivityLogResponse,
+                                     GroupAppealResponse,
+                                     GroupAppealApprovalResponse,
+                                     GroupAssessmentMaterialResponse,
+                                     GroupCsvImportRequest,
+                                     GroupCsvImportResponse,
+                                     GroupMemberResponse,
+                                     GroupSubmissionAnswerResponse,
+                                     GroupSubmissionApprovalResponse,
+                                     GroupSubmissionCommentResponse,
+                                     GroupSubmissionGradeRequest,
+                                     GroupWorkspaceResponse,
+                                     ManualGroupCreateRequest,
+                                     SaveGroupAnswerRequest,
 )
 
 # ── Integrity ──────────────────────────────────────────────────────────────────
@@ -244,7 +268,7 @@ __all__: list[str] = [
     "AIQuestionReviewResponse",
     # Attempt
     "AttemptStartRequest",
-    "AttemptResponse",
+    "AttemptDBSchema",
     "AttemptSummaryResponse",
     "StudentResponseSave",
     "BulkResponseSave",
@@ -264,6 +288,27 @@ __all__: list[str] = [
     "ResultAppealCreate",
     "AppealReviewDecision",
     "ResultAppealResponse",
+    # Group work
+    "GroupMemberResponse",
+    "ManualGroupCreateRequest",
+    "AutoGenerateGroupsRequest",
+    "GroupCsvImportRequest",
+    "GroupCsvImportResponse",
+    "GroupAssessmentMaterialResponse",
+    "GroupSubmissionAnswerResponse",
+    "GroupSubmissionCommentResponse",
+    "GroupSubmissionApprovalResponse",
+    "GroupActivityLogResponse",
+    "GroupAppealResponse",
+    "GroupAppealApprovalResponse",
+    "GroupWorkspaceResponse",
+    "SaveGroupAnswerRequest",
+    "AddGroupCommentRequest",
+    "ApproveGroupSubmissionRequest",
+    "FinalizeGroupSubmissionRequest",
+    "CreateGroupAppealRequest",
+    "ApproveGroupAppealRequest",
+    "GroupSubmissionGradeRequest",
     # Integrity
     "IntegrityEventIngest",
     "IntegrityEventResponse",

@@ -25,10 +25,11 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
-from app.db.enums import AssessmentStatus, AttemptStatus
+from app.db.enums import AssessmentStatus, AttemptStatus, StudentGroupStatus
 from app.db.models.attempt import AssessmentAttempt
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
+from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 
 
@@ -41,6 +42,7 @@ class AttemptService:
         self.db = db
         self.attempt_repo = AttemptRepository(db)
         self.assessment_repo = AssessmentRepository(db)
+        self.group_repo = GroupRepository(db)
         self.submission_repo = SubmissionRepository(db)
 
     # -----------------------------------------------------------------------
@@ -82,6 +84,11 @@ class AttemptService:
             )
 
         # Gate 2 — within window
+        if assessment.is_group_assessment:
+            raise ValidationError(
+                "Group-work assessments must be finalized through the shared group workspace.",
+                code="GROUP_WORK_SHARED_SUBMISSION_REQUIRED",
+            )
         now = _utcnow()
         if assessment.window_start and now < assessment.window_start:
             raise ValidationError(
@@ -126,6 +133,25 @@ class AttemptService:
                     code="PASSWORD_INCORRECT",
                 )
 
+        group_id = None
+        if assessment.is_group_assessment:
+            group = await self.group_repo.get_student_group_for_assessment(
+                assessment_id=assessment_id,
+                student_id=student_id,
+                include_members=False,
+            )
+            if not group:
+                raise AuthorizationError(
+                    "You are not assigned to a group for this assessment.",
+                    code="GROUP_MEMBERSHIP_REQUIRED",
+                )
+            if group.status == StudentGroupStatus.INVALIDATED:
+                raise ConflictError(
+                    "Your lecturer must recreate groups before this assessment can start.",
+                    code="GROUPS_INVALIDATED",
+                )
+            group_id = group.id
+
         # Compute expires_at
         expires_at = self._compute_expires_at(assessment, now)
         access_token = uuid.uuid4()
@@ -137,6 +163,7 @@ class AttemptService:
             grading_mode=assessment.grading_mode,
             expires_at=expires_at,
             access_token=access_token,
+            group_id=group_id,
             ip_address=ip_address,
             user_agent=user_agent,
         )
@@ -178,6 +205,16 @@ class AttemptService:
                 f"Attempt is in status '{attempt.status}' — only PAUSED attempts can be resumed",
                 code="ATTEMPT_NOT_PAUSABLE",
             )
+
+        # SECURITY: Only allow resume for certain assessment types
+        if attempt.assessment:
+            strict_types = ["CAT", "SUMMATIVE", "FORMATIVE", "PRACTICE"]
+            if attempt.assessment.assessment_type in strict_types:
+                raise AuthorizationError(
+                    f"Resuming is disabled for {attempt.assessment.assessment_type} assessments to maintain integrity. "
+                    "Please contact your invigilator if you believe this is an error.",
+                    code="RESUME_DISABLED"
+                )
 
         # Check window still open
         now = _utcnow()
@@ -235,6 +272,88 @@ class AttemptService:
         await self.attempt_repo.set_status(attempt_id, AttemptStatus.SUBMITTED)
         await self.submission_repo.finalize_all(attempt_id)
         await self._append_submit_logs(attempt_id, change_type="submit")
+        
+        # 3.5. Trigger Automatic Grading & Result Calculation
+        try:
+            from app.services.grading_service import GradingService, AUTO_GRADABLE
+            from app.services.result_service import ResultService
+            from app.db.enums import ResultReleaseMode, QuestionType
+            
+            grading_service = GradingService(self.db)
+            result_service = ResultService(self.db)
+            
+            # Perform initial grading (Auto for closed, Queue for open)
+            # This marks closed-question grades as is_final=True
+            await grading_service.grade_attempt(
+                attempt_id=attempt_id,
+                assessment_id=attempt.assessment_id,
+                student_id=student_id
+            )
+            
+            # Calculate initial result based on the grades we just created
+            result, _ = await result_service.calculate_result(attempt_id=attempt_id)
+            
+            # Determine if we should auto-release
+            # We need to check if the assessment is set to IMMEDIATE release
+            # and if it consists ONLY of auto-gradable questions.
+            assessment_full = await self.assessment_repo.get_by_id(attempt.assessment_id)
+            if assessment_full and assessment_full.result_release_mode == ResultReleaseMode.IMMEDIATE:
+                # Check if ANY question is open-ended (not auto-gradable)
+                has_open = False
+                for aq in (assessment_full.assessment_questions or []):
+                    if not aq.question:
+                        continue
+                    # Safely convert to Enum member for comparison
+                    q_type = aq.question.question_type
+                    if q_type not in AUTO_GRADABLE:
+                        has_open = True
+                        break
+                
+                if not has_open:
+                    # Auto-release if all are closed questions
+                    await result_service.release_results(
+                        assessment_id=assessment_full.id,
+                        released_by_id=None, # System-level release
+                        attempt_ids=[attempt_id]
+                    )
+        except Exception as e:
+            # We log but don't fail the whole submission if background grading/release fails
+            print(f"FAILED automatic grading/result cycle for attempt {attempt_id}: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # 4. Trigger Notifications
+        try:
+            from app.db.repositories.notification_repo import NotificationRepository
+            from app.db.enums import NotificationType
+            notif_repo = NotificationRepository(self.db)
+            
+            # Notify Student
+            await notif_repo.create(
+                recipient_id=student_id,
+                notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                title="Assessment Submitted",
+                body=f"Your attempt for '{attempt.assessment.title}' has been securely recorded.",
+                reference_id=attempt_id,
+                reference_type="attempt",
+                action_url=f"/student/assessments/{attempt.assessment_id}/results"
+            )
+            
+            # Notify Lecturer (if assessment has an owner)
+            if attempt.assessment and attempt.assessment.created_by_id:
+                await notif_repo.create(
+                    recipient_id=attempt.assessment.created_by_id,
+                    notification_type=NotificationType.NEW_SUBMISSION,
+                    title="New Submission Received",
+                    body=f"A student has submitted an attempt for '{attempt.assessment.title}'.",
+                    reference_id=attempt_id,
+                    reference_type="attempt",
+                    action_url=f"/lecturer/assessments/{attempt.assessment_id}/submissions"
+                )
+        except Exception as e:
+            # Don't fail submission if notification fails
+            print(f"FAILED to send submission notifications: {e}")
+
         attempt.status = AttemptStatus.SUBMITTED
         attempt.submitted_at = now
         return attempt

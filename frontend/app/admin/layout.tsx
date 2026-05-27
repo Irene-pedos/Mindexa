@@ -7,7 +7,7 @@ import { SiteHeader } from "@/components/mindexa/layout/site-header";
 import { useAuth } from "@/hooks/use-auth";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function AdminLayout({
   children,
@@ -33,9 +33,56 @@ export default function AdminLayout({
 
   if (loading || isInitializing) {
     return (
-      <div className="h-screen w-screen flex flex-col items-center justify-center gap-4">
-        <Loader2 className="size-10 animate-spin text-primary" />
-        <p className="text-muted-foreground animate-pulse">Authenticating...</p>
+      <div className="flex h-screen w-screen overflow-hidden bg-background">
+        {/* Sidebar Skeleton */}
+        <div className="w-64 border-r bg-muted/5 p-4 flex flex-col">
+            <div className="flex items-center gap-3 px-2">
+                <Skeleton className="size-8 rounded-lg" />
+                <Skeleton className="h-4 w-24" />
+            </div>
+            <div className="space-y-2 pt-8">
+                {[1, 2, 3, 4, 5, 6].map(i => (
+                    <Skeleton key={i} className="h-9 w-full rounded-lg opacity-40" />
+                ))}
+            </div>
+            <div className="mt-auto space-y-2 pb-4">
+                <Skeleton className="h-9 w-full rounded-lg opacity-20" />
+                <Skeleton className="h-12 w-full rounded-lg" />
+            </div>
+        </div>
+        
+        {/* Main Content Skeleton */}
+        <div className="flex-1 flex flex-col">
+            {/* Header Skeleton */}
+            <div className="h-14 border-b px-6 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <Skeleton className="h-4 w-4 rounded opacity-50" />
+                    <Skeleton className="h-4 w-32" />
+                </div>
+                <div className="flex items-center gap-3">
+                    <Skeleton className="size-8 rounded-full" />
+                </div>
+            </div>
+            
+            {/* Body Skeleton */}
+            <div className="flex-1 p-8 space-y-8 bg-muted/10 overflow-hidden">
+                <div className="space-y-2">
+                    <Skeleton className="h-8 w-64" />
+                    <Skeleton className="h-4 w-96 opacity-60" />
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {[1, 2, 3, 4].map(i => (
+                        <Skeleton key={i} className="h-28 w-full rounded-xl" />
+                    ))}
+                </div>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <Skeleton className="lg:col-span-7 h-[400px] w-full rounded-xl" />
+                    <Skeleton className="lg:col-span-5 h-[400px] w-full rounded-xl" />
+                </div>
+            </div>
+        </div>
       </div>
     );
   }

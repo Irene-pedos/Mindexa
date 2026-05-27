@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,15 +13,26 @@ from app.db.schemas.auth import (
 from app.db.session import get_db
 from app.dependencies.auth import require_admin
 from app.schemas.admin import (
+    AdminAnalyticsResponse,
+    AdminBulkUserApproveRequest,
+    AdminBulkUserStatusUpdateRequest,
     AdminCourseAssignmentRequest,
     AdminCourseListResponse,
     AdminDashboardResponse,
     AdminUserListResponse,
     AdminUserStatusUpdate,
     AdminUserCreate,
+    AdminCourseCreate,
+    AdminCourseUpdate,
     AdminAnalyticsResponse,
     AdminIntegrityOverview,
     SystemSettingsSchema,
+)
+from app.db.schemas.academic import (
+    CourseResponse,
+    InstitutionCreate,
+    InstitutionUpdate,
+    InstitutionResponse,
 )
 from app.services.admin_service import AdminService
 
@@ -99,13 +111,50 @@ async def get_admin_integrity_overview(
 async def list_users(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    role: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
     current_user=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserListResponse:
     """Returns a paginated list of all users on the platform."""
     service = AdminService(db)
-    items, total = await service.list_users(page, page_size)
+    items, total = await service.list_users(page, page_size, role=role, status=status)
     return AdminUserListResponse(items=items, total=total)
+
+
+@router.patch(
+    "/users/bulk-approve",
+    status_code=status.HTTP_200_OK,
+    summary="Approve multiple user accounts at once",
+)
+async def bulk_approve_users(
+    body: AdminBulkUserApproveRequest,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Updates status and email verification for multiple users."""
+    from app.core.constants import UserStatus
+    service = AdminService(db)
+    count = await service.bulk_approve_users(body.user_ids, UserStatus(body.status.upper()))
+    return {"message": f"Successfully approved {count} users", "count": count}
+
+
+@router.patch(
+    "/users/bulk-status",
+    status_code=status.HTTP_200_OK,
+    summary="Update status for multiple users at once",
+)
+async def bulk_update_user_status(
+    body: AdminBulkUserStatusUpdateRequest,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Updates status for multiple users (SUSPENDED, ACTIVE, etc.)."""
+    from app.core.constants import UserStatus
+    service = AdminService(db)
+    count = await service.bulk_update_user_status(body.user_ids, UserStatus(body.status.upper()))
+    return {"message": f"Successfully updated {count} users", "count": count}
+
 
 @router.post(
     "/users",
@@ -183,3 +232,108 @@ async def assign_courses(
     """Assigns a list of courses to the specified lecturer."""
     service = AdminService(db)
     return await service.assign_courses_to_lecturer(user_id, body.course_ids)
+
+
+@router.delete(
+    "/courses/{course_id}",
+    summary="Suspend a course (Admin)",
+)
+async def delete_course(
+    course_id: uuid.UUID,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Soft deletes/suspends a course."""
+    service = AdminService(db)
+    await service.delete_course(course_id)
+    return {"success": True, "message": "Course suspended successfully"}
+
+
+@router.post(
+    "/courses",
+    response_model=CourseResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new official course (Admin)",
+)
+async def create_course(
+    body: AdminCourseCreate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseResponse:
+    """Creates a new official module/course."""
+    service = AdminService(db)
+    return await service.create_course(body)
+
+
+@router.patch(
+    "/courses/{course_id}",
+    response_model=CourseResponse,
+    summary="Update course metadata (Admin)",
+)
+async def update_course(
+    course_id: uuid.UUID,
+    body: AdminCourseUpdate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> CourseResponse:
+    """Updates course details."""
+    service = AdminService(db)
+    return await service.update_course(course_id, body)
+
+
+@router.get(
+    "/lecturers",
+    response_model=list[UserResponse],
+    summary="List all active lecturers",
+)
+async def list_lecturers(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[UserResponse]:
+    """Returns a list of all active lecturers for assignment."""
+    service = AdminService(db)
+    return await service.list_lecturers()
+
+# ── Institution Management ────────────────────────────────────────────────────
+
+@router.post(
+    "/institutions",
+    response_model=InstitutionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a new institution",
+)
+async def create_institution(
+    body: InstitutionCreate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> InstitutionResponse:
+    service = AdminService(db)
+    return await service.create_institution(body)
+
+
+@router.patch(
+    "/institutions/{institution_id}",
+    response_model=InstitutionResponse,
+    summary="Update institution settings and branding",
+)
+async def update_institution(
+    institution_id: uuid.UUID,
+    body: InstitutionUpdate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> InstitutionResponse:
+    service = AdminService(db)
+    return await service.update_institution(institution_id, body)
+
+
+@router.get(
+    "/institutions",
+    response_model=list[InstitutionResponse],
+    summary="List all institutions for admin",
+)
+async def list_institutions(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[InstitutionResponse]:
+    service = AdminService(db)
+    return await service.list_institutions()

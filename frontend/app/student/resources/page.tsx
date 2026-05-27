@@ -1,4 +1,4 @@
-// app/(student)/resources/page.tsx
+// app/student/resources/page.tsx
 "use client"
 
 import React, { useState, useEffect } from "react"
@@ -16,6 +16,7 @@ import {
 import { format } from "date-fns"
 import { toast } from "sonner"
 import { studentApi, StudentResourceResponse } from "@/lib/api/student"
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface UploadingFile {
   id: number
@@ -29,10 +30,19 @@ export default function StudentResourcesPage() {
   const [loading, setLoading] = useState(true)
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
   const [viewingResource, setViewingResource] = useState<StudentResourceResponse | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
 
   useEffect(() => {
     loadResources()
   }, [])
+
+  // Cleanup preview URL
+  useEffect(() => {
+    return () => {
+      if (previewUrl) window.URL.revokeObjectURL(previewUrl)
+    }
+  }, [previewUrl])
 
   const loadResources = async () => {
     try {
@@ -88,18 +98,46 @@ export default function StudentResourcesPage() {
     }
   }
 
-  const handleDownload = (resource: StudentResourceResponse) => {
-    toast.error("Download for personal resources not yet implemented in this view")
+  const handleDownload = async (resource: StudentResourceResponse) => {
+    try {
+      await studentApi.downloadPersonalResource(resource.id, resource.original_filename)
+    } catch (err) {
+      toast.error("Failed to download resource")
+    }
   }
 
-  const handleView = (resource: StudentResourceResponse) => {
-    toast.error("Preview for personal resources not yet implemented in this view")
+  const handleView = async (resource: StudentResourceResponse) => {
+    setViewingResource(resource)
+    setLoadingPreview(true)
+    if (previewUrl) window.URL.revokeObjectURL(previewUrl)
+    setPreviewUrl(null)
+
+    try {
+      const blob = await studentApi.getResourceBlob(resource.id, true)
+      const url = window.URL.createObjectURL(blob)
+      setPreviewUrl(url)
+    } catch (err) {
+      toast.error("Failed to load preview")
+    } finally {
+      setLoadingPreview(false)
+    }
   }
 
   if (loading) {
     return (
-      <div className="flex h-[60vh] items-center justify-center">
-        <Loader2 className="size-10 animate-spin text-muted-foreground" />
+      <div className="space-y-8 max-w-7xl mx-auto p-4">
+        <div className="flex justify-between items-center">
+            <div className="space-y-2">
+                <Skeleton className="h-8 w-64" />
+                <Skeleton className="h-4 w-96 opacity-60" />
+            </div>
+            <Skeleton className="h-12 w-32 rounded-lg" />
+        </div>
+        <div className="grid grid-cols-1 gap-4">
+            {[1, 2, 3, 4].map(i => (
+                <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            ))}
+        </div>
       </div>
     )
   }
@@ -133,7 +171,7 @@ export default function StudentResourcesPage() {
         <Card className="border-primary/20 bg-primary/5">
           <CardHeader className="py-4">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Loader2 className="size-4 animate-spin text-primary" />
+              <div className="size-4 rounded-full bg-primary/20 animate-pulse" />
               Uploading ({uploadingFiles.length})
             </CardTitle>
           </CardHeader>
@@ -206,7 +244,13 @@ export default function StudentResourcesPage() {
       </Card>
 
       {/* Resource Viewer Dialog */}
-      <Dialog open={!!viewingResource} onOpenChange={(open) => !open && setViewingResource(null)}>
+      <Dialog open={!!viewingResource} onOpenChange={(open) => {
+        if (!open) {
+          setViewingResource(null)
+          if (previewUrl) window.URL.revokeObjectURL(previewUrl)
+          setPreviewUrl(null)
+        }
+      }}>
         <DialogContent className="max-w-5xl h-[90vh] flex flex-col p-0 overflow-hidden">
           <DialogHeader className="p-4 border-b">
             <div className="flex items-center justify-between pr-8">
@@ -218,15 +262,40 @@ export default function StudentResourcesPage() {
               </div>
             </div>
           </DialogHeader>
-          <div className="flex-1 bg-muted/30 flex items-center justify-center">
-             <div className="text-center p-8 max-w-md">
-                <FileText className="size-16 mx-auto text-muted-foreground/20 mb-4" />
-                <h3 className="text-lg font-medium mb-2">Preview Unavailable</h3>
-                <p className="text-sm text-muted-foreground">
-                   Secure preview for personal study materials is currently restricted. 
-                   Please download the file to view its contents.
-                </p>
-             </div>
+          <div className="flex-1 bg-muted/30 relative">
+             {loadingPreview ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-4">
+                   <Skeleton className="size-16 rounded-xl" />
+                   <Skeleton className="h-4 w-48 rounded-full opacity-60" />
+                </div>
+             ) : previewUrl ? (
+                viewingResource?.file_extension.toLowerCase() === "pdf" || viewingResource?.mime_type === "application/pdf" ? (
+                   <iframe 
+                      src={`${previewUrl}#toolbar=0`} 
+                      className="w-full h-full border-none"
+                      title="Resource Preview"
+                   />
+                ) : viewingResource?.mime_type.startsWith("image/") ? (
+                   <div className="w-full h-full flex items-center justify-center p-4">
+                      <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain shadow-lg" />
+                   </div>
+                ) : (
+                   <div className="absolute inset-0 flex items-center justify-center">
+                      <div className="text-center p-8 max-w-md">
+                         <FileText className="size-16 mx-auto text-muted-foreground/20 mb-4" />
+                         <h3 className="text-lg font-medium mb-2">Preview Not Supported</h3>
+                         <p className="text-sm text-muted-foreground">
+                            This file type ({viewingResource?.file_extension}) cannot be previewed directly. 
+                            Please download it to view the content.
+                         </p>
+                      </div>
+                   </div>
+                )
+             ) : (
+                <div className="absolute inset-0 flex items-center justify-center">
+                   <p className="text-sm text-muted-foreground">Failed to load preview.</p>
+                </div>
+             )}
           </div>
         </DialogContent>
       </Dialog>

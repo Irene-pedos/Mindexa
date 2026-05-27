@@ -54,7 +54,7 @@ class LecturerMaterialCreate(MindexaSchema):
     """
     Metadata provided when a lecturer uploads a material file.
     """
-
+    teaching_workspace_id: uuid.UUID
     course_id: uuid.UUID | None = None
     assessment_id: uuid.UUID | None = None
     material_category: ResourceCategory = ResourceCategory.GENERAL
@@ -65,6 +65,7 @@ class LecturerMaterialCreate(MindexaSchema):
 
 class LecturerMaterialResponse(BaseAuditedResponse):
     lecturer_id: uuid.UUID
+    teaching_workspace_id: uuid.UUID
     course_id: uuid.UUID | None
     assessment_id: uuid.UUID | None
     original_filename: str

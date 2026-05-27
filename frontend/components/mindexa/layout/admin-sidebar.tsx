@@ -12,6 +12,8 @@ import {
   Shield,
   BarChart3,
   Settings,
+  GraduationCap,
+  Building2,
 } from "lucide-react";
 
 import {
@@ -32,6 +34,9 @@ import { useAuth } from "@/hooks/use-auth";
 const mainNav = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
   { title: "Users & Roles", url: "/admin/users", icon: Users },
+  { title: "Institutions", url: "/admin/institutions", icon: Building2 },
+  { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
+  { title: "Academic Assignments", url: "/admin/academic/assignments", icon: Users },
   { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen },
 ];
 

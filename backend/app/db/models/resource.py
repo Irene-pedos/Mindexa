@@ -344,18 +344,18 @@ class ResourceChunk(BaseModel, table=True):
 
 class LecturerMaterial(BaseModel, table=True):
     """
-    A file uploaded by a lecturer, scoped to a course or assessment.
+    A file uploaded by a lecturer, scoped to a workspace or assessment.
 
     Lecturer materials serve two purposes:
         1. Shared with students (if is_student_visible = True):
               Lecture notes, past papers, reference materials, rubric PDFs.
         2. Used as context by the Lecturer Assessment Agent (always):
-              Any lecturer material for a course can be included in the AI
+              Any lecturer material for a workspace can be included in the AI
               prompt when generating assessment questions.
 
     Access rules:
         - The uploading lecturer (lecturer_id) always has access.
-        - Students enrolled in the associated course have access
+        - Students enrolled in the associated workspace (via class section) have access
           if is_student_visible = True AND the assessment window
           is open or closed (determined by service layer policy).
         - Admins always have access.
@@ -367,8 +367,8 @@ class LecturerMaterial(BaseModel, table=True):
     assessment_id:
         Optional. If set, this material is specifically linked to one
         assessment (e.g. the official rubric PDF for a CAT).
-        If NULL, the material is course-level (available across all
-        assessments in the course).
+        If NULL, the material is workspace-level (available across all
+        assessments in the workspace).
 
     is_student_visible:
         Controls student access. False by default for uploaded materials
@@ -388,10 +388,10 @@ class LecturerMaterial(BaseModel, table=True):
     __tablename__ = "lecturer_material"
 
     __table_args__ = (
-        composite_index("lecturer_material", "course_id", "is_student_visible"),
+        composite_index("lecturer_material", "teaching_workspace_id", "is_student_visible"),
         composite_index("lecturer_material", "assessment_id"),
         composite_index("lecturer_material", "lecturer_id", "material_category"),
-        composite_index("lecturer_material", "course_id", "is_current"),
+        composite_index("lecturer_material", "teaching_workspace_id", "is_current"),
     )
 
     # ── Ownership & scope ─────────────────────────────────────────────────────
@@ -403,6 +403,15 @@ class LecturerMaterial(BaseModel, table=True):
             nullable=False,
         )
     )
+
+    teaching_workspace_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("teaching_workspace.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
+
     course_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
@@ -445,6 +454,10 @@ class LecturerMaterial(BaseModel, table=True):
     # ── Access control ────────────────────────────────────────────────────────
 
     is_student_visible: bool = Field(default=False, nullable=False)
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+
+    workspace: "TeachingWorkspace" = Relationship(back_populates="materials")
 
     # ── Versioning ────────────────────────────────────────────────────────────
 

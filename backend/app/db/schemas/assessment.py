@@ -16,7 +16,9 @@ from app.db.enums import (
     AssessmentType,
     BlueprintRuleType,
     DifficultyLevel,
+    GroupAssignmentMode,
     GradingMode,
+    QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
     SupervisorRole,
@@ -38,6 +40,7 @@ class AssessmentStep1Request(MindexaSchema):
     assessment_type: AssessmentType
     course_id: uuid.UUID
     subject_id: uuid.UUID | None = None
+    academic_year: str = Field(min_length=9, max_length=20)
     total_marks: int = Field(default=100, ge=1, le=1000)
     passing_marks: int | None = Field(default=None, ge=0)
     duration_minutes: int | None = Field(default=None, ge=1, le=480)
@@ -47,6 +50,14 @@ class AssessmentStep1Request(MindexaSchema):
     grading_mode: GradingMode = GradingMode.RUBRIC
     result_release_mode: ResultReleaseMode = ResultReleaseMode.MANUAL
     result_release_at: datetime | None = None
+    is_group_assessment: bool = False
+    max_group_size: int | None = Field(default=None, ge=1)
+    group_formation_mode: str | None = Field(default=None, max_length=50)
+    group_assignment_mode: GroupAssignmentMode | None = None
+    question_distribution_mode: QuestionDistributionMode | None = None
+    require_all_member_approval: bool = False
+    require_all_member_participation: bool = False
+    appeal_window_days: int | None = Field(default=None, ge=1, le=365)
 
     @model_validator(mode="after")
     def validate_window(self) -> AssessmentStep1Request:
@@ -90,6 +101,13 @@ class AssessmentStep2Request(MindexaSchema):
     randomize_questions: bool | None = Field(default=None, alias="randomise_questions")
     randomize_options: bool | None = Field(default=None, alias="randomise_options")
     is_group_assessment: bool | None = None
+    max_group_size: int | None = Field(default=None, ge=1)
+    group_formation_mode: str | None = Field(default=None, max_length=50)
+    group_assignment_mode: GroupAssignmentMode | None = None
+    question_distribution_mode: QuestionDistributionMode | None = None
+    require_all_member_approval: bool | None = None
+    require_all_member_participation: bool | None = None
+    appeal_window_days: int | None = Field(default=None, ge=1, le=365)
     late_submission_allowed: bool | None = None
     late_penalty_percent: float | None = Field(
         default=None,
@@ -225,6 +243,7 @@ class AssessmentSummaryResponse(MindexaSchema):
     total_marks: int
     window_start: datetime | None
     window_end: datetime | None
+    academic_year: str
     created_at: datetime
 
 
@@ -237,6 +256,7 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     status: str
     course_id: uuid.UUID
     subject_id: uuid.UUID | None
+    academic_year: str
     total_marks: int
     passing_marks: int | None
     duration_minutes: int | None
@@ -254,6 +274,15 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     randomize_questions: bool = Field(serialization_alias="randomise_questions")
     randomize_options: bool = Field(serialization_alias="randomise_options")
     is_group_assessment: bool
+    max_group_size: int | None
+    group_formation_mode: str | None
+    group_assignment_mode: GroupAssignmentMode | None
+    question_distribution_mode: QuestionDistributionMode | None
+    require_all_member_approval: bool
+    require_all_member_participation: bool
+    appeal_window_days: int | None
+    group_invalidated_at: datetime | None
+    group_membership_locked_at: datetime | None
     late_submission_allowed: bool
     late_penalty_percent: float | None
     grace_period_minutes: int | None
@@ -333,3 +362,24 @@ class RubricResponse(BaseAuditedResponse):
     description: str | None
     is_shared: bool
     criteria: list[RubricCriterionResponse] = Field(default_factory=list)
+
+# Rebuild models
+AssessmentStep1Request.model_rebuild()
+AssessmentStep2Request.model_rebuild()
+AssessmentStep3Request.model_rebuild()
+SupervisorAssignRequest.model_rebuild()
+AssessmentSectionCreate.model_rebuild()
+BlueprintRuleCreate.model_rebuild()
+AssessmentStep4Request.model_rebuild()
+AssessmentPublishRequest.model_rebuild()
+AssessmentSectionResponse.model_rebuild()
+AssessmentSummaryResponse.model_rebuild()
+AssessmentDetailResponse.model_rebuild()
+AssessmentDraftProgressResponse.model_rebuild()
+AssessmentPublishValidationResponse.model_rebuild()
+RubricCriterionLevelCreate.model_rebuild()
+RubricCriterionCreate.model_rebuild()
+RubricCreate.model_rebuild()
+RubricCriterionLevelResponse.model_rebuild()
+RubricCriterionResponse.model_rebuild()
+RubricResponse.model_rebuild()

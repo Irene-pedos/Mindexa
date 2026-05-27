@@ -255,6 +255,15 @@ class AssessmentQuestion(BaseModel, table=True):
             index=True,
         ),
     )
+    group_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_group.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     order_index: int = Field(nullable=False)
     marks_override: int | None = Field(default=None, nullable=True)
     is_required: bool = Field(default=True, nullable=False)
@@ -296,6 +305,7 @@ class AssessmentQuestion(BaseModel, table=True):
     assessment_section: Optional["AssessmentSection"] = Relationship(
         back_populates="assessment_questions"
     )
+    student_group: Optional["StudentGroup"] = Relationship()
     ai_review: Optional["AIQuestionReview"] = Relationship(back_populates="assessment_question")
     bank_entry: Optional["QuestionBankEntry"] = Relationship(back_populates="assessment_questions")
 

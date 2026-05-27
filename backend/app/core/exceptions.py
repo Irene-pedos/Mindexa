@@ -271,6 +271,7 @@ class NotFoundError(MindexaError):
 
     Usage:
         raise NotFoundError(resource="Assessment", resource_id=str(pk))
+        raise NotFoundError(detail="Custom message")
     """
 
     status_code = 404
@@ -279,14 +280,21 @@ class NotFoundError(MindexaError):
 
     def __init__(
         self,
+        detail: str | None = None,
         resource: str | None = None,
         resource_id: str | None = None,
         **kwargs: Any,
     ) -> None:
+        # If detail is provided positional or keyword, use it
+        if detail:
+            kwargs["detail"] = detail
+        
         super().__init__(**kwargs)
         self.resource = resource
         self.resource_id = resource_id
-        if resource:
+        
+        # Only overwrite detail if a specific resource was passed and NO detail was provided
+        if resource and not detail and "detail" not in kwargs:
             self.detail = f"{resource} not found."
             if resource_id:
                 self.detail = f"{resource} with id '{resource_id}' not found."

@@ -38,24 +38,45 @@ import {
   BrainCircuit,
   MessageSquareWarning,
   Filter,
+  Users,
+  User as UserIcon,
+  RefreshCcw,
+  Save,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { gradingApi } from "@/lib/api/grading";
+import { groupWorkApi } from "@/lib/api/group-work";
+import { apiClient } from "@/lib/api/client";
 import { Loader2 } from "lucide-react";
+import { GroupSubmissionList } from "@/components/mindexa/grading/group-submission-list";
+import { GroupSubmissionReview } from "@/components/mindexa/grading/group-submission-review";
+import { GroupAppealReview } from "@/components/mindexa/grading/group-appeal-review";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function LecturerGradingQueue() {
   const [data, setData] = useState<any[]>([]);
+  const [groupSubmissions, setGroupSubmissions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [groupsLoading, setGroupsLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+  const [selectedGroupSubmission, setSelectedGroupSubmission] = useState<
+    any | null
+  >(null);
+  const [activeTab, setActiveTab] = useState("individuals");
   const [overrideScore, setOverrideScore] = useState<string>("");
 
   useEffect(() => {
-    fetchSubmissions();
-  }, []);
+    if (activeTab === "individuals") {
+      fetchSubmissions();
+    } else {
+      fetchGroupSubmissions();
+    }
+  }, [activeTab]);
 
   const fetchSubmissions = async () => {
     setLoading(true);
@@ -71,18 +92,98 @@ export default function LecturerGradingQueue() {
     }
   };
 
+  const fetchGroupSubmissions = async () => {
+    setGroupsLoading(true);
+    try {
+      // Assuming a dedicated grading/group-queue endpoint
+      const response = await apiClient("/grading/group-queue");
+      setGroupSubmissions(response.items || []);
+    } catch (err) {
+      console.error("Failed to load group submissions", err);
+    } finally {
+      setGroupsLoading(false);
+    }
+  };
+
+  const handleReviewGroup = async (summary: any) => {
+    try {
+      // Fetch full workspace/submission data for grading
+      const detail = await groupWorkApi.getWorkspace(summary.assessment_id);
+      setSelectedGroupSubmission({
+        ...summary,
+        ...detail,
+      });
+    } catch (err) {
+      toast.error("Failed to load group details");
+    }
+  };
+
+  const handleGradeGroup = async (score: number, feedback?: string) => {
+    if (!selectedGroupSubmission) return;
+    try {
+      await groupWorkApi.gradeSubmission(
+        selectedGroupSubmission.assessment_id,
+        selectedGroupSubmission.id,
+        {
+          total_score: score,
+          max_score: selectedGroupSubmission.assessment.total_marks,
+          feedback,
+        },
+      );
+      toast.success("Group mark assigned successfully");
+      fetchGroupSubmissions();
+      setSelectedGroupSubmission((prev: any) => ({
+        ...prev,
+        status: "GRADED",
+        score,
+      }));
+    } catch (err: any) {
+      toast.error(err.message || "Failed to grade group");
+    }
+  };
+
+  const handleReleaseGroup = async () => {
+    if (!selectedGroupSubmission) return;
+    try {
+      await groupWorkApi.releaseResult(
+        selectedGroupSubmission.assessment_id,
+        selectedGroupSubmission.id,
+      );
+      toast.success("Results released to all group members");
+      setSelectedGroupSubmission(null);
+      fetchGroupSubmissions();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to release results");
+    }
+  };
+
+  const handleAssignReassessment = async () => {
+    if (!selectedGroupSubmission) return;
+    try {
+      await groupWorkApi.assignReassessment(
+        selectedGroupSubmission.assessment_id,
+        selectedGroupSubmission.id,
+      );
+      toast.success("Group-level reassessment assigned");
+      setSelectedGroupSubmission(null);
+      fetchGroupSubmissions();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to assign reassessment");
+    }
+  };
+
   const handleFlagLowConfidence = async () => {
-    toast.info("Flagging low confidence submissions...");
-    // In a real app, this would iterate through 'data' and flag those with confidence < threshold
+    toast.info(
+      "Prioritize open-ended and integrity-sensitive submissions for lecturer review.",
+    );
   };
 
   const handleApproveAll = async () => {
     try {
-      toast.info("Bulk approval initiated...");
-      // Logic for bulk approve if backend supports it
+      toast.info("Refreshing the grading queue...");
       fetchSubmissions();
     } catch (e: any) {
-      toast.error(e.message || "Failed to approve all.");
+      toast.error(e.message || "Failed to refresh queue.");
     }
   };
 
@@ -116,208 +217,304 @@ export default function LecturerGradingQueue() {
     }
   };
 
+  if (selectedGroupSubmission) {
+    return (
+      <div className="fixed inset-0 z-50 bg-background">
+        <GroupSubmissionReview
+          submission={selectedGroupSubmission}
+          onGrade={handleGradeGroup}
+          onRelease={handleReleaseGroup}
+          onAssignReassessment={handleAssignReassessment}
+          onClose={() => setSelectedGroupSubmission(null)}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-8 pb-20">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">
-            Grading & Review Queue
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Grading & Moderation Queue
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Analyze AI-graded submissions, review open questions, and finalize
-            academic results
+          <p className="text-muted-foreground mt-1 text-sm">
+            Closed questions are finalized automatically. Open responses and
+            group work remain under lecturer-controlled review before results
+            are released.
           </p>
         </div>
         <div className="flex gap-3">
           <Button variant="outline" onClick={handleFlagLowConfidence}>
-            <Flag className="mr-2 size-4" /> Flag Low Confidence
+            <Flag className="mr-2 size-4" /> Prioritize Review
           </Button>
           <Button
             onClick={handleApproveAll}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
-            <CheckCircle2 className="mr-2 size-4" /> Approve All AI Scores
+            <RefreshCcw className="mr-2 size-4" /> Refresh Queue
           </Button>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <Card className="bg-emerald-50/50 border-emerald-100">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-emerald-700 font-medium">
-              AI Evaluated (Pending)
+          <CardHeader>
+            <CardDescription className=" font-medium">
+              Auto-Graded Ready
             </CardDescription>
-            <CardTitle className="text-3xl">{data.filter(d => d.ai_pre_graded).length}</CardTitle>
+            <CardTitle className="text-2xl">
+              {data.filter((d) => d.ai_pre_graded).length}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-emerald-600">
-              Closed questions & AI suggestions
+            <p className="text-xs ">
+              Deterministic responses finalized by the system
             </p>
           </CardContent>
         </Card>
         <Card className="bg-amber-50/50 border-amber-100">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-amber-700 font-medium">
-              Pending Review
+          <CardHeader>
+            <CardDescription className=" font-medium">
+              Lecturer Review
             </CardDescription>
-            <CardTitle className="text-3xl">
-              {data.filter((d) => d.status !== "COMPLETED" && d.status !== "APPEALED").length}
+            <CardTitle className="text-2xl">
+              {
+                data.filter(
+                  (d) => d.status !== "COMPLETED" && d.status !== "APPEALED",
+                ).length
+              }
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-amber-600">
-              Submissions requiring manual oversight
+            <p className="text-xs ">
+              Open-ended submissions and moderated overrides
             </p>
           </CardContent>
         </Card>
         <Card className="bg-blue-50/50 border-blue-100">
-          <CardHeader className="pb-2">
-            <CardDescription className="text-blue-700 font-medium">
-              Appeals
+          <CardHeader>
+            <CardDescription className=" font-medium">
+              Appeals & Claims
             </CardDescription>
-            <CardTitle className="text-3xl">{data.filter(d => d.status === "APPEALED").length}</CardTitle>
+            <CardTitle className="text-2xl">
+              {data.filter((d) => d.status === "APPEALED").length}
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <p className="text-xs text-blue-600">Student review requests</p>
+            <p className="text-xs">Student review requests</p>
           </CardContent>
         </Card>
       </div>
 
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle>Submission Overview</CardTitle>
-              <CardDescription>
-                Database Systems CAT – Mid-Semester 2026
-              </CardDescription>
-            </div>
-            <div className="relative w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
-              <Input placeholder="Search student or ID..." className="pl-10" />
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {loadError ? (
-            <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-              {loadError}
-            </div>
-          ) : null}
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-[100px]">Reg Number</TableHead>
-                <TableHead>Student Name</TableHead>
-                <TableHead>Final Score</TableHead>
-                <TableHead>AI Proposed</TableHead>
-                <TableHead>AI Confidence</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8">
-                    <div className="flex flex-col items-center gap-2">
-                      <Loader2 className="size-6 animate-spin text-muted-foreground" />
-                      <span>Loading submissions...</span>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : data.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="text-center py-8 text-muted-foreground"
-                  >
-                    No pending submissions in queue.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                data.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell className="font-medium text-xs">
-                      {item.id.substring(0, 8)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="font-medium">
-                        {item.student_name || "Unknown Student"}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground">
-                        {item.assessment_title}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-muted-foreground">Pending</span>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="secondary"
-                        className="bg-primary/10 text-primary font-mono"
-                      >
-                        {item.ai_pre_graded
-                          ? "AI Evaluated"
-                          : "Manual Required"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className={cn("h-full rounded-full bg-amber-500")}
-                            style={{ width: `70%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-muted-foreground">
-                          ---
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className="text-amber-600 border-amber-200 bg-amber-50"
-                      >
-                        {item.status.replace("_", " ")}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          title="Review Submission"
-                          onClick={async () => {
-                            // Fetch full detail when selected
-                            try {
-                              const detail = await gradingApi.getGradeDetail(
-                                item.response_id,
-                              );
-                              setSelectedStudent({
-                                ...item,
-                                ...detail,
-                              });
-                              setOverrideScore(
-                                detail.ai_suggested_score?.toString() || "",
-                              );
-                            } catch (e) {
-                              toast.error("Failed to load submission details");
-                            }
-                          }}
-                        >
-                          <Eye className="size-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="bg-muted/50 p-1 h-12 w-full max-w-md border">
+          <TabsTrigger
+            value="individuals"
+            className="flex-1 rounded-lg text-xs font-bold uppercase tracking-widest gap-2"
+          >
+            <UserIcon className="size-3.5" /> Individual Submissions
+          </TabsTrigger>
+          <TabsTrigger
+            value="groups"
+            className="flex-1 rounded-lg text-xs font-bold uppercase tracking-widest gap-2"
+          >
+            <Users className="size-3.5" /> Group Work
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="individuals" className="mt-8">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Submission Overview</CardTitle>
+                  <CardDescription>
+                    Reviewing per-student attempts across automatic and
+                    lecturer-controlled grading paths
+                  </CardDescription>
+                </div>
+                <div className="relative w-72">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search student or ID..."
+                    className="pl-10"
+                  />
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {loadError ? (
+                <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+                  {loadError}
+                </div>
+              ) : null}
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-[100px]">Reg Number</TableHead>
+                    <TableHead>Student Name</TableHead>
+                    <TableHead>Final Score</TableHead>
+                    <TableHead>System Pipeline</TableHead>
+                    <TableHead>Review Signal</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                </TableHeader>
+                <TableBody>
+                  {loading ? (
+                    Array.from({ length: 5 }).map((_, i) => (
+                      <TableRow key={i}>
+                        <TableCell colSpan={7} className="py-4">
+                          <div className="flex items-center gap-3">
+                            <Skeleton className="size-8 rounded-lg" />
+                            <div className="space-y-1">
+                              <Skeleton className="h-4 w-32" />
+                              <Skeleton className="h-3 w-48 opacity-60" />
+                            </div>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  ) : data.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={7}
+                        className="text-center py-8 text-muted-foreground"
+                      >
+                        No pending submissions in queue.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    data.map((item) => (
+                      <TableRow key={item.id}>
+                        <TableCell className="font-medium text-xs">
+                          {item.id.substring(0, 8)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="font-medium">
+                            {item.student_name || "Unknown Student"}
+                          </div>
+                          <div className="text-[10px] text-muted-foreground">
+                            {item.assessment_title}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-muted-foreground">Pending</span>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className="bg-primary/10 text-primary font-mono"
+                          >
+                            {item.ai_pre_graded
+                              ? "Auto-Graded"
+                              : "Lecturer Review"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full bg-amber-500",
+                                )}
+                                style={{ width: `70%` }}
+                              />
+                            </div>
+                            <span className="text-xs text-muted-foreground">
+                              {item.ai_pre_graded
+                                ? "Deterministic"
+                                : "Open Response"}
+                            </span>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "border-amber-200 bg-amber-50",
+                              item.status === "TERMINATED" ? "text-red-600 border-red-200 bg-red-50" : "text-amber-600"
+                            )}
+                          >
+                            {item.status === "TERMINATED" ? "AUTO-SUBMITTED" : item.status.replace("_", " ")}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex justify-end gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              title="Review Submission"
+                              onClick={async () => {
+                                // Fetch full detail when selected
+                                try {
+                                  const detail =
+                                    await gradingApi.getGradeDetail(
+                                      item.response_id,
+                                    );
+                                  setSelectedStudent({
+                                    ...item,
+                                    ...detail,
+                                  });
+                                  setOverrideScore(
+                                    detail.ai_suggested_score?.toString() || "",
+                                  );
+                                } catch (e) {
+                                  toast.error(
+                                    "Failed to load submission details",
+                                  );
+                                }
+                              }}
+                            >
+                              <Eye className="size-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="groups" className="mt-8">
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">Group Grading Queue</h2>
+                <p className="text-xs text-muted-foreground">
+                  Evaluate collective work products and discussion participation
+                </p>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={fetchGroupSubmissions}
+                  disabled={groupsLoading}
+                  className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest gap-2"
+                >
+                  {groupsLoading ? (
+                    <div className="size-3 rounded-full bg-primary/20 animate-pulse" />
+                  ) : (
+                    <RefreshCcw className="size-3.5" />
+                  )}
+                  Refresh
+                </Button>
+              </div>
+            </div>
+
+            <GroupSubmissionList
+              submissions={groupSubmissions}
+              onReview={handleReviewGroup}
+              loading={groupsLoading}
+            />
+          </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Detailed View Modal (Sheet) */}
       <Sheet
@@ -363,23 +560,25 @@ export default function LecturerGradingQueue() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2 text-blue-700">
                       <BrainCircuit className="size-5" />
-                      <h3 className="font-semibold">AI Grading Analysis</h3>
+                      <h3 className="font-semibold">Review Analysis</h3>
                     </div>
                     <Badge
                       variant="outline"
                       className="bg-white border-blue-200 text-blue-700"
                     >
-                      Proposed: {selectedStudent.ai_suggested_score}% (
-                      {selectedStudent.ai_confidence}% Conf.)
+                      Suggested: {selectedStudent.ai_suggested_score}% (
+                      {selectedStudent.ai_confidence}% Signal)
                     </Badge>
                   </div>
                   <p className="text-sm text-blue-900/80 leading-relaxed">
-                    {selectedStudent.ai_rationale}
+                    {selectedStudent.ai_rationale ||
+                      "Structured guidance for open-question review will appear here. In the future AI phase, rubric-aligned suggestions will be advisory only and never final."}
                   </p>
                   {selectedStudent.ai_confidence < 75 && (
                     <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded-md text-xs font-medium">
                       <MessageSquareWarning className="size-4" />
-                      Low confidence. Manual review highly recommended.
+                      Review signal is weak. Lecturer judgment should dominate
+                      this decision.
                     </div>
                   )}
                 </div>
@@ -409,8 +608,9 @@ export default function LecturerGradingQueue() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    By saving, you confirm this score. The AI grade is discarded
-                    if overridden.
+                    By saving, you finalize the academic decision. Future
+                    AI-assisted grading suggestions will remain advisory and can
+                    always be overridden by the lecturer.
                   </p>
                 </div>
               </div>

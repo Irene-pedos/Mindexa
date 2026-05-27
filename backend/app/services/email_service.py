@@ -120,7 +120,7 @@ class EmailService:
         self,
         to_email: str,
         first_name: str,
-        verification_url: str,
+        otp_code: str,
     ) -> None:
         await self.send(
             to_email=to_email,
@@ -128,7 +128,7 @@ class EmailService:
             template_name="verification",
             context={
                 "first_name": first_name,
-                "verification_url": verification_url,
+                "otp_code": otp_code,
                 "expires_hours": settings.EMAIL_VERIFICATION_EXPIRE_MINUTES // 60,
                 "app_name": settings.APP_NAME,
             },
@@ -371,13 +371,15 @@ class EmailService:
         body = f"""
         <h1>Verify your email address</h1>
         <p>Hi {ctx.get('first_name', 'there')},</p>
-        <p>Welcome to {ctx['app_name']}! Click the button below to verify your
+        <p>Welcome to {ctx['app_name']}! Enter the 6-digit code below to verify your
         email address and activate your account.</p>
-        <p><a href="{ctx['verification_url']}" class="btn">Verify Email</a></p>
-        <p>Or copy and paste this URL into your browser:</p>
-        <p style="word-break:break-all;font-size:13px;">{ctx['verification_url']}</p>
+        <div style="background: #f4f6f9; border-radius: 8px; padding: 20px; text-align: center; margin: 24px 0;">
+            <span style="font-family: monospace; font-size: 32px; font-weight: bold; letter-spacing: 8px; color: #5b4fe8;">
+                {ctx['otp_code']}
+            </span>
+        </div>
         <div class="note">
-          This link expires in {ctx.get('expires_hours', 24)} hours.
+          This code expires in {ctx.get('expires_hours', 24)} hours.
           If you did not create an account, you can safely ignore this email.
         </div>"""
         return self._wrap("Verify your email", body, ctx["app_name"])
