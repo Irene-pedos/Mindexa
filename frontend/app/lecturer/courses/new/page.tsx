@@ -77,7 +77,7 @@ export default function NewWorkspacePage() {
     if (assignment) {
       setFormData((prev) => ({
         ...prev,
-        title: `${assignment.course_name} (${assignment.class_section_name})`,
+        title: `${(assignment as any).course_name} (${(assignment as any).class_section_name})`,
       }));
     }
   };
@@ -184,8 +184,8 @@ export default function NewWorkspacePage() {
                     <SelectContent>
                       {assignments.map((a) => (
                         <SelectItem key={a.id} value={a.id} className="text-sm">
-                          {a.course_code} • {a.course_name} (
-                          {a.class_section_name})
+                          {(a as any).course_code} • {(a as any).course_name} (
+                          {(a as any).class_section_name})
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -316,7 +316,7 @@ export default function NewWorkspacePage() {
                             Institution
                           </p>
                           <p className="text-xs font-medium truncate text-foreground/80">
-                            {selectedAssignment.institution_name}
+                            {(selectedAssignment as any).institution_name}
                           </p>
                         </div>
                       </div>
@@ -327,7 +327,7 @@ export default function NewWorkspacePage() {
                             Department
                           </p>
                           <p className="text-xs font-medium truncate text-foreground/80">
-                            {selectedAssignment.department_name}
+                            {(selectedAssignment as any).department_name}
                           </p>
                         </div>
                       </div>
@@ -338,7 +338,7 @@ export default function NewWorkspacePage() {
                             Academic Cycle
                           </p>
                           <p className="text-xs font-medium text-foreground/80">
-                            {selectedAssignment.academic_year}
+                            {(selectedAssignment as any).academic_year}
                           </p>
                         </div>
                       </div>
@@ -353,7 +353,7 @@ export default function NewWorkspacePage() {
                           variant="secondary"
                           className="rounded-full font-semibold h-5 px-2.5 text-[9px] uppercase bg-primary/5 text-primary border-primary/10"
                         >
-                          {selectedAssignment.course_code}
+                          {(selectedAssignment as any).course_code}
                         </Badge>
                       </div>
                       <div className="flex items-center justify-between px-1">
@@ -364,7 +364,7 @@ export default function NewWorkspacePage() {
                           variant="outline"
                           className="rounded-full font-medium h-5 px-2.5 text-[9px] uppercase border-muted-foreground/20 text-muted-foreground"
                         >
-                          {selectedAssignment.class_section_name}
+                          {(selectedAssignment as any).class_section_name}
                         </Badge>
                       </div>
                     </div>

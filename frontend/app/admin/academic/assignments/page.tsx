@@ -553,7 +553,7 @@ export default function AdminAssignmentPanel() {
                                                     />
                                                     <div className="flex-1 min-w-0">
                                                         <p className="text-sm font-semibold truncate text-foreground/80 leading-none">
-                                                            {course.title || course.name}
+                                                            {(course as any).title || course.name}
                                                             {isAssigned && <span className="ml-2 text-[10px] text-muted-foreground italic">(Assigned)</span>}
                                                         </p>
                                                         <p className="text-[11px] font-mono font-medium text-primary/60 mt-1.5 uppercase">{course.code}</p>

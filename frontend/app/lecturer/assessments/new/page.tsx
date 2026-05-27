@@ -1068,7 +1068,7 @@ function ReviewQuestionCard({
               </div>
             )}
 
-            {(question.type === "fillblank" || question.type === "fill_blank") && (
+            {((question.type as string) === "fillblank" || (question.type as string) === "fill_blank") && (
               <div className="flex flex-wrap gap-2">
                 {question.options.map((opt, i) => (
                   <Badge
@@ -1161,6 +1161,7 @@ export default function NewAssessmentBuilder() {
     option_ids: [] as string[],
     class_group_ids: [] as string[],
     academic_year: "",
+    academic_period_id: "",
     date: undefined as Date | undefined,
     startTime: "09:00",
     endTime: "11:00",
@@ -1986,7 +1987,8 @@ export default function NewAssessmentBuilder() {
                             setMetadata({ 
                                 ...metadata, 
                                 academic_year: val,
-                                academic_period_id: p?.id 
+                                academic_period_id: p?.id || "",
+ 
                             });
                           }}
                         >

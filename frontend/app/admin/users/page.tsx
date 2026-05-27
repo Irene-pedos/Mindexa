@@ -108,12 +108,8 @@ export default function AdminUsersPage() {
   const loadUsers = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await adminApi.getUsers(
-        currentPage,
-        pageSize,
-        roleFilter !== "all" ? roleFilter : undefined,
-        statusFilter !== "all" ? statusFilter : undefined,
-      );
+      const data = await adminApi.getUsers(currentPage, pageSize);
+
       setUsers(data.items);
       setTotalUsers(data.total);
     } catch (err) {

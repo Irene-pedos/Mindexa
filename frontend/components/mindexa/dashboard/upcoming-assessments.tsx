@@ -37,7 +37,7 @@ export function UpcomingAssessments({
   // 2. Available (Open but not started)
   const available = upcomingAssessments.filter(a => {
     const isStarted = (!a.window_start || new Date(a.window_start) <= now);
-    const isNotEnded = (!a.window_end || new Date(a.window_end) >= now);
+    const isNotEnded = (!(a as any).window_end || new Date((a as any).window_end) >= now);
     const hasNoAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
     return isStarted && isNotEnded && hasNoAttempt;
   });
@@ -52,7 +52,7 @@ export function UpcomingAssessments({
 
   // 5. Missed
   const missed = upcomingAssessments.filter(a => {
-    const hasEnded = a.window_end && new Date(a.window_end) < now;
+    const hasEnded = (a as any).window_end && new Date((a as any).window_end) < now;
     const noAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
     return hasEnded && noAttempt;
   });

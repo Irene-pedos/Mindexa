@@ -130,7 +130,7 @@ export default function LecturerIntegrityPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
-                        {log.is_automated && (
+                        {(log as any).is_automated && (
                           <Badge variant="outline" className="rounded-full h-5 text-[8px] font-black bg-red-600 text-white border-none">
                             AUTO-TERMINATED
                           </Badge>

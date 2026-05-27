@@ -15,6 +15,10 @@ export interface AssessmentConfig {
   is_password_protected?: boolean;
   access_password?: string;
   
+  // Security Fields
+  is_supervised?: boolean;
+  fullscreen_required?: boolean;
+
   // Group Work Fields
   is_group_assessment?: boolean;
   max_group_size?: number;

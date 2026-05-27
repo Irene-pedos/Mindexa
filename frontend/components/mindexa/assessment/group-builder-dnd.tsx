@@ -137,7 +137,7 @@ export function GroupBuilderDnd({ courseId, initialGroups = [], maxGroupSize, on
       if (!courseId) return;
       setLoading(true);
       try {
-        const detail = await lecturerApi.getCourseDetail(courseId);
+        const detail = await lecturerApi.getWorkspaceDetail(courseId);
         // Filter out students already in initialGroups
         const assignedIds = new Set(initialGroups.flatMap(g => g.members.map(m => m.id)));
         const students = detail.roster

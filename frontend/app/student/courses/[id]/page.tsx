@@ -350,7 +350,7 @@ export default function StudentWorkspaceDetailPage() {
               </Button>
               <Button
                 asChild
-                variant="dim"
+                variant="secondary"
                 className="w-full justify-between h-10.5 px-4 text-xs font-bold rounded-lg"
                 size="sm"
               >
@@ -363,7 +363,7 @@ export default function StudentWorkspaceDetailPage() {
               </Button>
               <Button
                 asChild
-                variant="dim"
+                variant="secondary"
                 className="w-full justify-between h-10.5 px-4 text-xs font-bold rounded-lg"
                 size="sm"
               >

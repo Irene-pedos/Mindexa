@@ -127,12 +127,12 @@ export default function AdminAnalyticsPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {loading ? (
                 [1, 2, 3].map(i => <Skeleton key={i} className="h-24 rounded-2xl border" />)
-              ) : data?.ai_grading_stats.map((stat, idx) => (
+              ) : (data as any)?.ai_grading_stats?.map((stat: any, idx: number) => (
                 <div key={idx} className="p-4 rounded-2xl bg-muted/30 border border-muted/50 flex flex-col justify-center items-center text-center gap-1">
                   <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{stat.mode.replace(/_/g, ' ')}</div>
                   <div className="text-2xl font-black">{stat.count}</div>
                   <div className="text-[9px] font-medium text-primary bg-primary/10 px-2 py-0.5 rounded-full">
-                    {Math.round((stat.count / (data.ai_grading_stats.reduce((acc, curr) => acc + curr.count, 0) || 1)) * 100)}% Usage
+                    {Math.round((stat.count / ((data as any)?.ai_grading_stats?.reduce((acc: number, curr: any) => acc + curr.count, 0) || 1)) * 100)}% Usage
                   </div>
                 </div>
               ))}

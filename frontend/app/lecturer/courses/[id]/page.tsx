@@ -358,7 +358,7 @@ export default function LecturerWorkspaceDetail() {
                         </TableCell>
                         <TableCell className="text-right pr-6">
                           <Button
-                            variant="dim"
+                            variant="secondary"
                             size="sm"
                             className="rounded-lg h-8 px-4 text-[10px] font-bold uppercase tracking-tight border-none"
                             onClick={() => openRecord(student.id, student.name)}
@@ -387,7 +387,7 @@ export default function LecturerWorkspaceDetail() {
             <CardContent className="p-4 space-y-2">
               <Button
                 asChild
-                variant="dim"
+                variant="secondary"
                 className="w-full justify-between h-10 px-4 text-xs font-semibold uppercase rounded-xl border border-primary/5 shadow-none"
                 size="sm"
               >
@@ -401,7 +401,7 @@ export default function LecturerWorkspaceDetail() {
               </Button>
               <Button
                 asChild
-                variant="dim"
+                variant="secondary"
                 className="w-full justify-between h-10 px-4 text-xs font-semibold uppercase rounded-xl border border-primary/5 shadow-none"
                 size="sm"
               >
@@ -423,7 +423,7 @@ export default function LecturerWorkspaceDetail() {
                 Library Vault
               </CardTitle>
               <Button
-                variant="dim"
+                variant="secondary"
                 size="sm"
                 className="size-8 rounded-full border border-primary/10 shadow-sm"
                 disabled={uploading}

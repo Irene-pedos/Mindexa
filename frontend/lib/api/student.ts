@@ -7,7 +7,7 @@ export interface DashboardMetric {
   value: number;
   delta: number;
   last_month: number;
-  positive: bool;
+  positive: boolean;
 }
 
 export interface StudentDashboardSummary {

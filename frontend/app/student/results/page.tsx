@@ -94,8 +94,8 @@ export default function StudentResultsPage() {
 
   const getSortedResults = (items: StudentRecentResult[]) => {
     return [...items].sort((a, b) => {
-      const dateA = new Date(a.released_at || a.submitted_at || 0).getTime();
-      const dateB = new Date(b.released_at || b.submitted_at || 0).getTime();
+      const dateA = new Date(a.released_at || (a as any).submitted_at || 0).getTime();
+      const dateB = new Date(b.released_at || (b as any).submitted_at || 0).getTime();
       if (sortBy === "newest") return dateB - dateA;
       if (sortBy === "oldest") return dateA - dateB;
       if (sortBy === "highest") return b.percentage - a.percentage;
@@ -141,7 +141,7 @@ export default function StudentResultsPage() {
             )}
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground/60 font-medium">
               <Calendar className="size-2.5" />{" "}
-              {new Date(result.released_at || result.submitted_at || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              {new Date(result.released_at || (result as any).submitted_at || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
             </span>
           </div>
           <p className={cn(
@@ -209,14 +209,14 @@ export default function StudentResultsPage() {
   }, {});
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto p-4 pb-12 pt-2">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 px-1">
+    <div className="space-y-4 max-w-7xl mx-auto px-4 pb-12 pt-2">
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-2 px-1">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-foreground/90">
             Results & Feedback
           </h1>
           <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-widest mt-0.5 flex items-center gap-1.5">
-            <TrendingUp className="size-3 text-emerald-500" /> Academic Registry Active
+            <TrendingUp className="size-3 text-primary" /> Academic Registry Active
           </p>
         </div>
         <Button variant="outline" size="sm" className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest gap-2">
@@ -227,20 +227,20 @@ export default function StudentResultsPage() {
       {/* Summary Metrics */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {[
-          { label: "Cumulative GPA", value: overallGPA.toFixed(2), icon: TrendingUp, color: "text-primary", progress: (overallGPA / 4.0) * 100 },
-          { label: "Avg Performance", value: `${averagePerformance.toFixed(1)}%`, icon: TrendingUp, color: "text-primary" },
-          { label: "Best Mark", value: `${bestPerformance?.percentage || 0}%`, icon: Trophy, color: "text-primary" },
-          { label: "Total Records", value: results.length, icon: FileText, color: "text-primary" },
+          { label: "Cumulative GPA", value: overallGPA.toFixed(2), icon: TrendingUp, progress: (overallGPA / 4.0) * 100 },
+          { label: "Avg Performance", value: `${averagePerformance.toFixed(1)}%`, icon: TrendingUp },
+          { label: "Best Mark", value: `${bestPerformance?.percentage || 0}%`, icon: Trophy },
+          { label: "Total Records", value: results.length, icon: FileText },
         ].map((stat, i) => (
-          <Card key={i} className="shadow-none border-muted/20 bg-muted/5 rounded-xl overflow-hidden">
-            <CardContent className="p-3 space-y-1">
+          <Card key={i} className="shadow-none border-muted/20 bg-muted/5 rounded-xl overflow-hidden border-none">
+            <CardContent className="p-2 space-y-1">
               <div className="flex items-center justify-between">
                 <span className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">{stat.label}</span>
-                <stat.icon className="size-3 text-muted-foreground/40" />
+                <stat.icon className="size-3 text-primary/40" />
               </div>
-              <div className="text-2xl font-bold text-foreground/80 tracking-tight">{stat.value}</div>
+              <div className="text-2xl font-bold text-primary tracking-tight">{stat.value}</div>
               {stat.progress !== undefined && (
-                <div className="pt-1">
+                <div className="pt-0.5">
                    <Progress value={stat.progress} className="h-1 bg-primary/10" />
                 </div>
               )}
