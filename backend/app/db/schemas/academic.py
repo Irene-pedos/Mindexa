@@ -11,7 +11,7 @@ from datetime import date, datetime
 
 from pydantic import Field, field_validator
 
-from app.db.enums import AcademicPeriodType, EnrollmentStatus, LecturerAssignmentRole
+from app.db.enums import AcademicPeriodType, EnrollmentStatus, LecturerAssignmentRole, LocationType
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,13 +127,15 @@ CampusResponse.model_rebuild()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class CollegeCreate(MindexaSchema):
-    campus_id: uuid.UUID
+    institution_id: uuid.UUID
+    campus_id: uuid.UUID | None = None
     name: str = Field(min_length=2, max_length=255)
     code: str = Field(min_length=2, max_length=20)
 
 
 class CollegeResponse(BaseAuditedResponse):
-    campus_id: uuid.UUID
+    institution_id: uuid.UUID
+    campus_id: uuid.UUID | None
     name: str
     code: str
     is_active: bool
@@ -214,7 +216,7 @@ class CourseCreate(MindexaSchema):
     option_ids: list[uuid.UUID] | None = Field(default=None, description="Options this course is offered to")
     class_group_ids: list[uuid.UUID] | None = Field(default=None, description="Classes this course is offered to")
     academic_period_id: uuid.UUID | None = None
-    academic_year: str = Field(min_length=9, max_length=20)
+    academic_year: str = Field(min_length=9, max_length=100)
     code: str = Field(min_length=2, max_length=20)
     title: str = Field(min_length=2, max_length=255)
     description: str | None = None
@@ -266,17 +268,21 @@ CourseSummaryResponse.model_rebuild()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class ClassSectionCreate(MindexaSchema):
-    course_id: uuid.UUID
     name: str = Field(min_length=1, max_length=100)
+    class_group_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
     capacity: int | None = Field(default=None, ge=1)
+    location_type: LocationType = LocationType.PHYSICAL_ROOM
     room: str | None = Field(default=None, max_length=100)
     schedule_notes: str | None = None
 
 
 class ClassSectionResponse(BaseAuditedResponse):
-    course_id: uuid.UUID
     name: str
+    class_group_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
     capacity: int | None
+    location_type: str
     room: str | None
     schedule_notes: str | None
     is_active: bool

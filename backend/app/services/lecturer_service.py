@@ -83,20 +83,49 @@ class LecturerService:
             from app.core.exceptions import ValidationError
             raise ValidationError(f"Student with email '{email}' not found")
 
-        # 4. Check if already enrolled in the section
-        enroll_stmt = select(StudentEnrollment).where(
-            StudentEnrollment.student_id == user.id,
-            StudentEnrollment.class_section_id == ws.class_section_id,
-            StudentEnrollment.is_deleted == False
-        )
+        # 4. Check if already enrolled
+        if ws.class_section_id:
+            enroll_stmt = select(StudentEnrollment).where(
+                StudentEnrollment.student_id == user.id,
+                StudentEnrollment.class_section_id == ws.class_section_id,
+                StudentEnrollment.is_deleted == False
+            )
+        else:
+            # Check if enrolled in ANY section of the course
+            from app.db.models.academic import TeachingAssignment
+            enroll_stmt = select(StudentEnrollment).join(ClassSection).join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id).where(
+                StudentEnrollment.student_id == user.id,
+                TeachingAssignment.course_id == ws.course_id,
+                StudentEnrollment.is_deleted == False
+            )
+
         enroll_res = await self.db.execute(enroll_stmt)
         if enroll_res.scalars().first():
             return True # Already enrolled
 
         # 5. Create enrollment
+        target_section_id = ws.class_section_id
+        if not target_section_id:
+            # For global workspaces, pick the first active section
+            from app.db.models.academic import ClassSection, TeachingAssignment
+            section_stmt = (
+                select(ClassSection.id)
+                .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+                .where(
+                    TeachingAssignment.course_id == ws.course_id,
+                    ClassSection.is_active == True
+                )
+                .limit(1)
+            )
+            target_section_id = (await self.db.execute(section_stmt)).scalar_one_or_none()
+            
+            if not target_section_id:
+                from app.core.exceptions import ValidationError
+                raise ValidationError("Cannot add student: This course has no active class sections.")
+
         enrollment = StudentEnrollment(
             student_id=user.id,
-            class_section_id=ws.class_section_id,
+            class_section_id=target_section_id,
             enrollment_status=EnrollmentStatus.ACTIVE,
             enrolled_at=datetime.now(UTC)
         )
@@ -216,13 +245,13 @@ class LecturerService:
                 id=ws.id,
                 title=ws.title,
                 code=ws.course.code,
-                academic_year=ws.academic_period.name,
+                academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
                 student_count=student_count,
                 status=ws.status,
                 performance_avg=float(avg_perf),
                 lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
                 institution_name=ws.course.institution.name,
-                class_name=ws.class_section.name
+                class_name=ws.class_section.name if ws.class_section else "GLOBAL"
             ))
 
         return items, total
@@ -237,16 +266,34 @@ class LecturerService:
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
         
-        roster_stmt = (
-            select(User, UserProfile)
-            .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
-            .join(UserProfile, UserProfile.user_id == User.id)
-            .where(
-                StudentEnrollment.class_section_id == ws.class_section_id,
-                StudentEnrollment.is_deleted == False
+        from app.db.enums import EnrollmentStatus
+
+        if ws.class_section_id:
+            roster_stmt = (
+                select(User, UserProfile)
+                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+                .join(UserProfile, UserProfile.user_id == User.id)
+                .where(
+                    StudentEnrollment.class_section_id == ws.class_section_id,
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                    StudentEnrollment.is_deleted == False
+                )
+                .order_by(UserProfile.last_name.asc())
             )
-            .order_by(UserProfile.last_name.asc())
-        )
+        else:
+            roster_stmt = (
+                select(User, UserProfile)
+                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+                .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
+                .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+                .join(UserProfile, UserProfile.user_id == User.id)
+                .where(
+                    TeachingAssignment.course_id == ws.course_id,
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                    StudentEnrollment.is_deleted == False
+                )
+                .order_by(UserProfile.last_name.asc())
+            )
         rows = (await self.db.execute(roster_stmt)).all()
 
         roster = []
@@ -300,12 +347,12 @@ class LecturerService:
             student_count=student_count,
             performance_avg=float(avg_perf),
             institution_name=ws.course.institution.name,
-            academic_year=ws.academic_period.name,
+            academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
             lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
             status=ws.status,
-            class_name=ws.class_section.name,
+            class_name=ws.class_section.name if ws.class_section else "GLOBAL",
             roster=roster,
-            sections=[ws.class_section.name]
+            sections=[ws.class_section.name] if ws.class_section else ["GLOBAL"]
         )
 
     async def initialize_workspace(self, lecturer_id: uuid.UUID, data: WorkspaceCreate) -> TeachingWorkspace:
@@ -329,14 +376,18 @@ class LecturerService:
             raise ValidationError("Workspace for this assignment already exists.")
 
         course = await self.db.get(Course, assignment.course_id)
-        section = await self.db.get(ClassSection, assignment.class_section_id)
+        section_name = "GLOBAL"
+        if assignment.class_section_id:
+            section = await self.db.get(ClassSection, assignment.class_section_id)
+            if section:
+                section_name = section.name
 
         workspace = TeachingWorkspace(
             teaching_assignment_id=assignment.id,
             course_id=assignment.course_id,
             class_section_id=assignment.class_section_id,
             academic_period_id=assignment.academic_period_id,
-            title=data.title or f"{course.name} ({section.name})",
+            title=data.title or f"{course.name} ({section_name})",
             description=data.description or course.description,
             status="ACTIVE",
             created_by_id=lecturer_id
@@ -626,10 +677,12 @@ class LecturerService:
             raise NotFoundError("Course not found")
 
         # 2. Fetch student count
+        from app.db.models.academic import TeachingAssignment
         student_count_stmt = (
             select(func.count(StudentEnrollment.id))
             .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
-            .where(ClassSection.course_id == course_id, StudentEnrollment.is_deleted == False)
+            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+            .where(TeachingAssignment.course_id == course_id, StudentEnrollment.is_deleted == False)
         )
         student_count_res = await self.db.execute(student_count_stmt)
         count = student_count_res.scalar_one()
@@ -639,8 +692,9 @@ class LecturerService:
             select(User, UserProfile)
             .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
             .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
+            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
             .join(UserProfile, UserProfile.user_id == User.id)
-            .where(ClassSection.course_id == course_id, StudentEnrollment.is_deleted == False)
+            .where(TeachingAssignment.course_id == course_id, StudentEnrollment.is_deleted == False)
             .order_by(UserProfile.last_name.asc())
         )
         res = await self.db.execute(stmt)
@@ -679,7 +733,11 @@ class LecturerService:
             ))
 
         # 4. Fetch sections
-        sections_stmt = select(ClassSection).where(ClassSection.course_id == course_id, ClassSection.is_deleted == False)
+        sections_stmt = (
+            select(ClassSection)
+            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+            .where(TeachingAssignment.course_id == course_id, ClassSection.is_deleted == False)
+        )
         sections_res = await self.db.execute(sections_stmt)
         sections = [s.name for s in sections_res.scalars().all()]
 
@@ -738,16 +796,16 @@ class LecturerService:
 
     async def delete_course(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> bool:
         """Soft delete a course if the lecturer is the primary owner."""
-        from app.db.models.academic import LecturerCourseAssignment
+        from app.db.models.academic import TeachingAssignment
         from app.db.enums import LecturerAssignmentRole
         from app.core.exceptions import AuthorizationError
 
         # 1. Verify lecturer is primary assigned to this course
-        assign_stmt = select(LecturerCourseAssignment).where(
-            LecturerCourseAssignment.lecturer_id == lecturer_id,
-            LecturerCourseAssignment.course_id == course_id,
-            LecturerCourseAssignment.assignment_role == LecturerAssignmentRole.MAIN_LECTURER,
-            LecturerCourseAssignment.is_active == True
+        assign_stmt = select(TeachingAssignment).where(
+            TeachingAssignment.lecturer_id == lecturer_id,
+            TeachingAssignment.course_id == course_id,
+            TeachingAssignment.role == LecturerAssignmentRole.MAIN_LECTURER,
+            TeachingAssignment.is_active == True
         )
         assign_res = await self.db.execute(assign_stmt)
         if not assign_res.scalars().first():

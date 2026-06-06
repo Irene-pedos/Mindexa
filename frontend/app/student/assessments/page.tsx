@@ -34,6 +34,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
+import { apiClient } from "@/lib/api/client";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import {
   getAssessmentProgressStatus,
@@ -47,13 +48,18 @@ export default function StudentAssessmentsPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<string>("all");
   const [filterTab, setFilterTab] = useState<string>("active");
+  const [visitedTabs, setVisitedTabs] = useState<string[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
 
   useEffect(() => {
     async function load() {
       try {
-        const data = await assessmentApi.getAssessments();
-        const items = data.items || [];
-        setAssessments(items);
+        const [assessData, notifData] = await Promise.all([
+            assessmentApi.getAssessments(),
+            apiClient("/notifications/me?unread_only=true")
+        ]);
+        setAssessments(assessData.items || []);
+        setNotifications(notifData.items || []);
       } catch (err) {
         console.error(err);
       } finally {
@@ -62,6 +68,33 @@ export default function StudentAssessmentsPage() {
     }
     load();
   }, []);
+
+  const hasNewInCategory = (tab: string) => {
+    if (visitedTabs.includes(tab)) return false;
+    
+    if (tab === "active") {
+        return assessments.some(a => {
+            const cat = getAssessmentCategory(a);
+            return (cat === "ACTIVE" || cat === "IN_PROGRESS") && 
+                   notifications.some(n => n.reference_id === a.id && !n.is_read);
+        });
+    }
+    if (tab === "upcoming") {
+        return assessments.some(a => {
+            const cat = getAssessmentCategory(a);
+            return cat === "UPCOMING" && 
+                   notifications.some(n => n.reference_id === a.id && !n.is_read);
+        });
+    }
+    if (tab === "submitted") {
+        return assessments.some(a => {
+            const cat = getAssessmentCategory(a);
+            return (cat === "SUBMITTED" || cat === "GRADED") && 
+                   notifications.some(n => n.reference_id === a.id && !n.is_read);
+        });
+    }
+    return false;
+  };
 
   const filteredAssessments = assessments.filter((ass) => {
     const category = getAssessmentCategory(ass);
@@ -380,25 +413,41 @@ export default function StudentAssessmentsPage() {
         </div>
       </div>
 
-      <Tabs value={filterTab} onValueChange={setFilterTab} className="w-full">
+      <Tabs 
+        value={filterTab} 
+        onValueChange={(v) => {
+            setFilterTab(v);
+            if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]);
+        }} 
+        className="w-full"
+      >
         <TabsList className="bg-muted/30 p-1 rounded-lg w-full md:w-fit h-10 overflow-x-auto justify-start">
           <TabsTrigger
             value="active"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 gap-2"
+            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 gap-2 relative"
           >
             Active / In Progress
+            {hasNewInCategory("active") && (
+                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
+            )}
           </TabsTrigger>
           <TabsTrigger
             value="upcoming"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8"
+            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 relative"
           >
             Upcoming
+            {hasNewInCategory("upcoming") && (
+                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
+            )}
           </TabsTrigger>
           <TabsTrigger
             value="submitted"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8"
+            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 relative"
           >
             Submitted & Graded
+            {hasNewInCategory("submitted") && (
+                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
+            )}
           </TabsTrigger>
           <TabsTrigger
             value="missed"

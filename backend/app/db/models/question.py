@@ -77,8 +77,19 @@ class Question(BaseModel, table=True):
         ),
     )
 
+    course_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("course.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+
     question_type: QuestionType = Field(nullable=False, index=True)
     content: str = Field(nullable=False)
+    image_url: str | None = Field(default=None, nullable=True)
     explanation: str | None = Field(default=None, nullable=True)
 
     marks: int = Field(default=1, nullable=False)

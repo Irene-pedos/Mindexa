@@ -60,7 +60,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, update, and_, or_, exists, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col, select
 
@@ -126,11 +126,13 @@ class QuestionRepository:
         question_type: str,
         content: str,
         difficulty: str,
+        image_url: str | None = None,
         marks: int = 1,
         source_type: str = QuestionSourceType.MANUAL,
         is_approved: bool = True,
         explanation: str | None = None,
         subject_id: uuid.UUID | None = None,
+        course_id: uuid.UUID | None = None,
         topic_tag: str | None = None,
         rubric_id: uuid.UUID | None = None,
         source_assessment_id: uuid.UUID | None = None,
@@ -160,12 +162,14 @@ class QuestionRepository:
             created_by_id=created_by_id,
             question_type=QuestionType(question_type.upper()),
             content=content,
+            image_url=image_url,
             difficulty=DifficultyLevel(difficulty.upper()),
             marks=marks,
             source_type=QuestionSourceType(source_type.upper()),
             is_approved=is_approved,
             explanation=explanation,
             subject_id=subject_id,
+            course_id=course_id,
             topic_tag=topic_tag,
             rubric_id=rubric_id,
             source_assessment_id=source_assessment_id,
@@ -229,6 +233,7 @@ class QuestionRepository:
         question_type: str | None = None,
         difficulty: str | None = None,
         subject_id: uuid.UUID | None = None,
+        course_id: uuid.UUID | None = None,
         topic_tag: str | None = None,
         source_type: str | None = None,
         created_by_id: uuid.UUID | None = None,
@@ -273,6 +278,9 @@ class QuestionRepository:
 
         if subject_id is not None:
             filters.append(col(Question.subject_id) == subject_id)
+
+        if course_id is not None:
+            filters.append(col(Question.course_id) == course_id)
 
         if topic_tag is not None:
             escaped_tag = _escape_like(topic_tag)

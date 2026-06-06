@@ -34,7 +34,7 @@ export interface UserProfileResponse {
   display_name?: string;
   bio?: string;
   phone_number?: string;
-  profile_picture_url?: string;
+  avatar_url?: string;
   student_id?: string;
   staff_id?: string;
   college?: string;
@@ -142,12 +142,22 @@ export interface AdminCourseCreate {
   primary_lecturer_id?: string;
 }
 
+export interface AdminInstitutionSummary {
+  active_partners: number;
+  total_capacity: number;
+  integrations_count: number;
+  suspended_partners: number;
+}
+
 export const adminApi = {
   getDashboard: async (): Promise<AdminDashboardResponse> => {
     return apiClient("/admin/dashboard");
   },
   getAnalytics: async (): Promise<AdminAnalyticsResponse> => {
     return apiClient("/admin/analytics");
+  },
+  getInstitutionSummary: async (): Promise<AdminInstitutionSummary> => {
+    return apiClient("/admin/institutions/summary");
   },
   getIntegrityOverview: async (): Promise<AdminIntegrityOverview> => {
     return apiClient("/admin/integrity-overview");

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from typing import List, Tuple
-from sqlalchemy import func, select
+from sqlalchemy import func, select, and_, or_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -40,12 +40,14 @@ class CourseRepository:
         return result.scalar_one()
 
     async def get_student_count(self, course_id: uuid.UUID) -> int:
-        # Count students across all sections of this course
+        from app.db.models.academic import TeachingAssignment
+        # Count students across all sections of this course via assignments
         result = await self.db.execute(
-            select(func.count(StudentEnrollment.id))
+            select(func.count(func.distinct(StudentEnrollment.id)))
             .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
+            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
             .where(
-                ClassSection.course_id == course_id,
+                TeachingAssignment.course_id == course_id,
                 StudentEnrollment.is_deleted == False
             )
         )
@@ -55,9 +57,11 @@ class CourseRepository:
         self, student_id: uuid.UUID
     ) -> list[Course]:
         """List all courses where the student has an active enrollment in any section."""
+        from app.db.models.academic import TeachingAssignment
         result = await self.db.execute(
             select(Course)
-            .join(ClassSection, ClassSection.course_id == Course.id)
+            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
+            .join(ClassSection, ClassSection.id == TeachingAssignment.class_section_id)
             .join(StudentEnrollment, StudentEnrollment.class_section_id == ClassSection.id)
             .where(
                 StudentEnrollment.student_id == student_id,

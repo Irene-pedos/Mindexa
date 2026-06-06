@@ -22,7 +22,7 @@ type AuthUser = {
     first_name?: string | null;
     last_name?: string | null;
     display_name?: string | null;
-    profile_picture_url?: string | null;
+    avatar_url?: string | null;
     student_id?: string | null;
     staff_id?: string | null;
     phone_number?: string | null;
@@ -121,6 +121,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsInitializing(false);
   }, [clearSession]);
 
+  const handleSessionInvalidated = useCallback(() => {
+    console.warn("[AuthProvider] Session invalidated event received.");
+    clearSession();
+    setIsInitializing(false);
+    setLoading(false);
+
+    if (!sessionExpiredToastShown) {
+      toast.error("Your session has expired", {
+        description: "Please log in again to continue.",
+        id: "session-expired",
+      });
+      setSessionExpiredToastShown(true);
+      // Reset after 5 seconds to allow showing it again if it happens later
+      setTimeout(() => setSessionExpiredToastShown(false), 5000);
+    }
+    
+    // Proactively redirect to login if we are on a protected route.
+    // RoleGuard also handles this, but a direct redirect here is more robust
+    // especially when multiple API calls fail simultaneously.
+    if (typeof window !== "undefined") {
+      const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/reset-password"];
+      const isPublic = publicRoutes.some(route => 
+        window.location.pathname === route || window.location.pathname.startsWith(route + "/")
+      );
+      
+      if (!isPublic) {
+        router.replace("/login");
+      }
+    }
+  }, [clearSession, router, sessionExpiredToastShown]);
+
   useEffect(() => {
     // Initial check on mount
     checkAuth();
@@ -141,38 +172,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     window.addEventListener("storage", handleStorageChange);
 
-    // Listen for internal session invalidation from apiClient
-    const handleSessionInvalidated = () => {
-      console.warn("[AuthProvider] Session invalidated event received.");
-      clearSession();
-      setIsInitializing(false);
-      setLoading(false);
-
-      if (!sessionExpiredToastShown) {
-        toast.error("Your session has expired", {
-          description: "Please log in again to continue.",
-          id: "session-expired",
-        });
-        setSessionExpiredToastShown(true);
-        // Reset after 5 seconds to allow showing it again if it happens later
-        setTimeout(() => setSessionExpiredToastShown(false), 5000);
-      }
-      
-      // Proactively redirect to login if we are on a protected route.
-      // RoleGuard also handles this, but a direct redirect here is more robust
-      // especially when multiple API calls fail simultaneously.
-      if (typeof window !== "undefined") {
-        const publicRoutes = ["/", "/login", "/signup", "/forgot-password", "/reset-password"];
-        const isPublic = publicRoutes.some(route => 
-          window.location.pathname === route || window.location.pathname.startsWith(route + "/")
-        );
-        
-        if (!isPublic) {
-          router.replace("/login");
-        }
-      }
-    };
-
     window.addEventListener(
       "mindexa-session-invalidated",
       handleSessionInvalidated,
@@ -185,7 +184,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         handleSessionInvalidated,
       );
     };
-  }, [checkAuth, clearSession, router]);
+  }, [checkAuth, clearSession, router, handleSessionInvalidated]);
 
   const login = async (credentials: LoginCredentials) => {
     setLoading(true);

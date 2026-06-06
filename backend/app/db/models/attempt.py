@@ -1346,13 +1346,33 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     ai_suggested_score: Optional[float] = Field(default=None, nullable=True)
     ai_rationale: Optional[str] = Field(default=None, nullable=True)
     ai_confidence: Optional[float] = Field(default=None, nullable=True)
+    
+    # AI Feedback Drafts (Phase 4)
+    ai_feedback_draft: Optional[str] = Field(default=None, nullable=True)
+    ai_feedback_strengths: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    ai_feedback_improvements: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    ai_feedback_suggestions: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+
     internal_notes: Optional[str] = Field(default=None, nullable=True)
     rubric_scores: Optional[list] = Field(
         default=None,
         sa_column=Column(JSONB, nullable=True),
     )
     is_final: bool = Field(default=False, nullable=False, index=True)
-    graded_at: Optional[datetime] = Field(default=None, nullable=True)
+    graded_at: Optional[datetime] = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),
+        nullable=True,
+    )
     lecturer_override: bool = Field(default=False, nullable=False)
 
     # ── Feedback ──────────────────────────────────────────────────────────────
@@ -1363,6 +1383,7 @@ class SubmissionGrade(AuditedBaseModel, table=True):
 
     released_at: Optional[datetime] = Field(
         default=None,
+        sa_type=DateTime(timezone=True),
         nullable=True,
         index=True,
     )
@@ -1374,7 +1395,11 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         nullable=False,
         index=True,
     )
-    superseded_at: Optional[datetime] = Field(default=None, nullable=True)
+    superseded_at: Optional[datetime] = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),
+        nullable=True,
+    )
     superseded_by_id: Optional[uuid.UUID] = Field(
         default=None,
         nullable=True,
@@ -1690,6 +1715,7 @@ class ResultAppeal(BaseModel, table=True):
     )
     submitted_at: datetime = Field(
         default_factory=utcnow,
+        sa_type=DateTime(timezone=True),
         nullable=False,
         index=True,
     )

@@ -186,8 +186,8 @@ export function SiteHeader() {
   const backendBaseUrl =
     process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") ||
     "http://localhost:8000";
-  const profilePictureUrl = user?.profile?.profile_picture_url
-    ? `${backendBaseUrl}${user.profile.profile_picture_url}`
+  const profilePictureUrl = user?.profile?.avatar_url
+    ? `${backendBaseUrl}${user.profile.avatar_url}`
     : undefined;
 
   // Initials for fallback

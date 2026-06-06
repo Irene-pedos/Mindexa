@@ -568,7 +568,6 @@ def process_ai_generation_batch(
 async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
     from app.core.ai.question_generator import (
         GenerationContext,
-        build_prompt,
         generate_questions,
     )
     from app.db.enums import AIBatchStatus
@@ -603,18 +602,11 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             bloom_level=batch.bloom_level,
             additional_context=batch.additional_context,
             request_id=str(batch.id),
+            lecturer_id=batch.created_by_id,
         )
 
-        full_prompt = build_prompt(context)
-        # Store the prompt back to the batch
-        await session.execute(
-            update(AIGenerationBatch)
-            .where(col(AIGenerationBatch.id) == batch.id)
-            .values(full_prompt=full_prompt)
-        )
-
-        # Call AI generator
-        result = await generate_questions(context)
+        # Call AI generator - pass session for auditing
+        result = await generate_questions(context, db=session)
 
         # Store each generated question
         for generated in result.questions:
@@ -626,7 +618,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 generated_content=generated.raw_content,
                 question_type=generated.question_type,
                 difficulty=generated.difficulty,
-                raw_prompt=full_prompt,
+                raw_prompt=result.full_prompt,
                 parsed_successfully=generated.parsed_successfully,
                 parsed_question_text=generated.question_text,
                 parsed_options_json=options_json,
@@ -660,6 +652,79 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             "status": final_status.value,
             "generated": result.total_generated,
         }
+
+
+# ---------------------------------------------------------------------------
+# TASK 7 — PROCESS STUDENT RESOURCE (RAG)
+# ---------------------------------------------------------------------------
+
+@celery.task(
+    bind=True,
+    base=MindexaTask,
+    name="app.workers.tasks.process_student_resource",
+    max_retries=2,
+    queue="default",
+)
+def process_student_resource(self: MindexaTask, resource_id: str) -> dict[str, Any]:
+    """Parse, chunk, and embed a student resource in the background."""
+    try:
+        return _run(_process_student_resource_async(resource_id))
+    except Exception as exc:
+        countdown = (2 ** self.request.retries) * self.default_retry_delay
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+async def _process_student_resource_async(resource_id: str) -> dict[str, Any]:
+    from app.core.ai.gateway import AIGateway
+    from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+    from app.db.session import AsyncSessionLocal
+    from app.services.rag_service import RAGService
+
+    async with AsyncSessionLocal() as session:
+        # Use embedding provider for RAG
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(session, chat_provider, embed_provider)
+        rag_service = RAGService(session, gateway)
+        
+        await rag_service.process_student_resource(uuid.UUID(resource_id))
+        return {"resource_id": resource_id, "status": "processed"}
+
+
+# ---------------------------------------------------------------------------
+# TASK 8 — PROCESS LECTURER MATERIAL (RAG)
+# ---------------------------------------------------------------------------
+
+@celery.task(
+    bind=True,
+    base=MindexaTask,
+    name="app.workers.tasks.process_lecturer_material",
+    max_retries=2,
+    queue="default",
+)
+def process_lecturer_material(self: MindexaTask, material_id: str) -> dict[str, Any]:
+    """Parse, chunk, and embed a lecturer material in the background."""
+    try:
+        return _run(_process_lecturer_material_async(material_id))
+    except Exception as exc:
+        countdown = (2 ** self.request.retries) * self.default_retry_delay
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+async def _process_lecturer_material_async(material_id: str) -> dict[str, Any]:
+    from app.core.ai.gateway import AIGateway
+    from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+    from app.db.session import AsyncSessionLocal
+    from app.services.rag_service import RAGService
+
+    async with AsyncSessionLocal() as session:
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(session, chat_provider, embed_provider)
+        rag_service = RAGService(session, gateway)
+        
+        await rag_service.process_lecturer_material(uuid.UUID(material_id))
+        return {"material_id": material_id, "status": "processed"}
 
 
 async def _mark_batch_failed(batch_id: str, error: str) -> None:

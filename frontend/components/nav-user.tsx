@@ -35,8 +35,8 @@ export function NavUser() {
   const rolePrefix = user.role?.toLowerCase() || "student";
   const name = user.profile ? `${user.profile.first_name} ${user.profile.last_name || ""}`.trim() : "User";
   const email = user.email;
-  const avatar = user.profile?.profile_picture_url 
-    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.profile_picture_url}`
+  const avatar = user.profile?.avatar_url 
+    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
     : "/avatars/user avatar.png";
 
   const initials = name

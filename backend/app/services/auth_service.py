@@ -74,7 +74,6 @@ from app.db.models.academic import (
     Institution,
     LecturerDepartment,
     LecturerInstitution,
-    LecturerOption,
     Option,
 )
 from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfile
@@ -172,6 +171,13 @@ class AuthService:
             if result.scalar_one_or_none():
                 raise AlreadyExistsError("Registration Number", code="REG_NUMBER_TAKEN")
 
+        # Phone Number Uniqueness (if provided)
+        if phone_number:
+            stmt = select(UserProfile).where(UserProfile.phone_number == phone_number)
+            result = await self.db.execute(stmt)
+            if result.scalar_one_or_none():
+                raise AlreadyExistsError("Phone Number", code="PHONE_NUMBER_TAKEN")
+
         hashed = hash_password(password)
 
         # Role-specific status logic
@@ -243,10 +249,14 @@ class AuthService:
         campus_id: uuid.UUID | None = None,
         college_id: uuid.UUID | None = None,
         class_section_id: uuid.UUID | None = None,
+        avatar_url: str | None = None,
     ) -> User:
         """
         Complete Phase 2 onboarding for a student.
         """
+        from app.db.models.academic import StudentEnrollment, Institution, Department, Option
+        from app.db.enums import EnrollmentStatus
+
         user = await self._users.get_by_id(user_id)
         if not user:
             raise NotFoundError("User not found")
@@ -260,15 +270,36 @@ class AuthService:
         user.profile.level = level
         user.profile.year = year
         user.profile.class_section_id = class_section_id
+        if avatar_url:
+            user.profile.avatar_url = avatar_url
         
         # Pull text names for legacy fields from relational models
         inst = await self.db.get(Institution, institution_id)
         dept = await self.db.get(Department, department_id)
         opt = await self.db.get(Option, option_id)
         
-        if inst: user.profile.college = inst.name # legacy field might be misused but keeping for now
+        if inst: user.profile.college = inst.name 
         if dept: user.profile.department = dept.name
         if opt: user.profile.option = opt.name
+
+        # ── CREATE ENROLLMENT ────────────────────────────────────────────────
+        # If a section was picked, ensure the student is enrolled in it
+        if class_section_id:
+            # Check if enrollment already exists
+            enroll_stmt = select(StudentEnrollment).where(
+                StudentEnrollment.student_id == user.id,
+                StudentEnrollment.class_section_id == class_section_id,
+                StudentEnrollment.is_deleted == False
+            )
+            enroll_res = await self.db.execute(enroll_stmt)
+            if not enroll_res.scalars().first():
+                enrollment = StudentEnrollment(
+                    student_id=user.id,
+                    class_section_id=class_section_id,
+                    enrollment_status=EnrollmentStatus.ACTIVE,
+                    enrolled_at=datetime.now(UTC)
+                )
+                self.db.add(enrollment)
 
         user.onboarding_completed = True
         self.db.add(user.profile)
@@ -281,7 +312,7 @@ class AuthService:
         self,
         user_id: uuid.UUID,
         bio: str | None = None,
-        profile_picture_url: str | None = None,
+        avatar_url: str | None = None,
         phone_number: str | None = None,
     ) -> User:
         """
@@ -294,8 +325,8 @@ class AuthService:
 
         if bio is not None:
             user.profile.bio = bio
-        if profile_picture_url:
-            user.profile.avatar_url = profile_picture_url
+        if avatar_url:
+            user.profile.avatar_url = avatar_url
         if phone_number:
             user.profile.phone_number = phone_number
 

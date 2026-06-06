@@ -53,8 +53,11 @@ export default function ResultDetailPage() {
         const data = await resultApi.getResultByAttempt(attemptId);
         setResult(data);
       } catch (err: any) {
-        console.error("Failed to load results", err);
-        if (!err.message?.toLowerCase().includes("available")) {
+        if (err.message?.toLowerCase().includes("available")) {
+          // Result not released yet - this is expected behavior
+          console.debug("Result pending release:", attemptId);
+        } else {
+          console.error("Failed to load results", err);
           toast.error("Failed to load results registry trace.");
         }
       } finally {
@@ -275,6 +278,11 @@ export default function ResultDetailPage() {
                         item.is_correct === true ? "bg-emerald-500 text-white" : 
                         item.is_correct === false ? "bg-red-500 text-white" : "bg-muted-foreground/20 text-muted-foreground",
                       )}>{idx + 1}</div>
+                      {item.section_title && (
+                        <Badge variant="secondary" className="text-[8px] uppercase font-bold h-4.5 px-1.5 bg-muted/50 border-none">
+                            {item.section_title}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="text-[8px] uppercase font-bold h-4.5 px-1.5 border-muted-foreground/20 bg-white">{item.question_type}</Badge>
                     </div>
                     <div className="text-right">
@@ -283,6 +291,12 @@ export default function ResultDetailPage() {
                   </div>
 
                   <h4 className="text-[13px] font-semibold leading-relaxed mb-4 pr-6 text-foreground/90">{item.question_text}</h4>
+
+                  {item.imageUrl && (
+                    <div className="mb-4 p-1.5 border border-muted/30 rounded-xl bg-muted/5 inline-block">
+                        <img src={item.imageUrl} alt="Context Media" className="max-h-[240px] rounded-lg object-contain" />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-dashed border-border/40">
                     <div className="space-y-1.5">

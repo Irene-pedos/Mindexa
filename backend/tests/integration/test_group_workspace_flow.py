@@ -33,9 +33,25 @@ async def test_group_workspace_collaboration_flow(client: AsyncClient, make_auth
     period = AcademicPeriod(institution_id=inst.id, name="P", period_type=AcademicPeriodType.SEMESTER, start_date=date(2026,1,1), end_date=date(2026,12,31)); db.add(period); await db.flush()
     dept = Department(institution_id=inst.id, name="D", code="D"); db.add(dept); await db.flush()
     opt = Option(department_id=dept.id, name="O", code="O"); db.add(opt); await db.flush()
-    course = Course(institution_id=inst.id, academic_period_id=period.id, name="C", code="C"); db.add(course); await db.flush()
+    course = Course(institution_id=inst.id, academic_period_id=period.id, name="C", code="C", academic_year="2026"); db.add(course); await db.flush()
     cg = ClassGroup(course_id=course.id, option_id=opt.id, name="G", code="G"); db.add(cg); await db.flush()
-    cs = ClassSection(course_id=course.id, class_group_id=cg.id, name="S"); db.add(cs); await db.flush()
+    cs = ClassSection(class_group_id=cg.id, name="S"); db.add(cs); await db.flush()
+
+    from app.db.models.academic import TeachingAssignment, TeachingWorkspace
+    from app.db.enums import LecturerAssignmentRole
+    assignment = TeachingAssignment(
+        lecturer_id=lid, institution_id=inst.id, department_id=dept.id,
+        course_id=course.id, academic_period_id=period.id, academic_year="2026",
+        role=LecturerAssignmentRole.MAIN_LECTURER, class_section_id=cs.id, option_id=opt.id
+    )
+    db.add(assignment); await db.flush()
+
+    workspace = TeachingWorkspace(
+        teaching_assignment_id=assignment.id, course_id=course.id,
+        class_section_id=cs.id, academic_period_id=period.id,
+        title="W", created_by_id=lid
+    )
+    db.add(workspace); await db.flush()
     
     # Students (2)
     s1_id = uuid.uuid4(); s2_id = uuid.uuid4()
@@ -52,7 +68,9 @@ async def test_group_workspace_collaboration_flow(client: AsyncClient, make_auth
         assessment_type=AssessmentType.GROUP_WORK,
         status=AssessmentStatus.PUBLISHED,
         created_by_id=lid,
+        teaching_workspace_id=workspace.id,
         course_id=course.id,
+        academic_year="2026",
         is_group_assessment=True,
         require_all_member_participation=True,
         require_all_member_approval=True

@@ -13,6 +13,7 @@ export interface QuestionOption {
 export interface QuestionBankItem {
   id: string;
   content: string;
+  image_url?: string;
   explanation?: string;
   hint?: string;
   question_type: string;
@@ -38,6 +39,7 @@ export interface QuestionBankResponse {
 
 export interface QuestionCreateRequest {
   content: string;
+  image_url?: string;
   explanation?: string;
   hint?: string;
   question_type: string;

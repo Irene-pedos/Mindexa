@@ -1,7 +1,7 @@
 // components/mindexa/dashboard/performance-chart.tsx
 "use client"
 
-import { TrendingUp } from "lucide-react"
+import { TrendingUp, Activity } from "lucide-react"
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts"
 import {
   Card,
@@ -24,15 +24,6 @@ interface PerformanceChartProps {
   description?: string
 }
 
-const defaultData = [
-  { month: "Jan", score: 78, average: 72 },
-  { month: "Feb", score: 85, average: 74 },
-  { month: "Mar", score: 82, average: 76 },
-  { month: "Apr", score: 91, average: 79 },
-  { month: "May", score: 88, average: 81 },
-  { month: "Jun", score: 94, average: 83 },
-]
-
 const chartConfig = {
   score: {
     label: "Your Score",
@@ -45,45 +36,74 @@ const chartConfig = {
 } satisfies ChartConfig
 
 export function PerformanceChart({
-  data = defaultData,
+  data,
   title = "Academic Performance Trend",
   description = "Your scores vs class average (Last 6 months)",
 }: PerformanceChartProps) {
+  const hasData = data && data.length > 0 && data.some(d => d.score > 0 || d.average > 0);
+
   return (
-    <Card className="col-span-full">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          {title}
-          <TrendingUp className="h-4 w-4 text-emerald-500" />
-        </CardTitle>
-        <CardDescription>{description}</CardDescription>
-      </CardHeader>
-      <CardContent>
-        <ChartContainer config={chartConfig} className="h-[260px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={data} accessibilityLayer>
-              <CartesianGrid vertical={false} strokeDasharray="3 3" />
-              <XAxis
-                dataKey="month"
-                tickLine={false}
-                tickMargin={10}
-                axisLine={false}
-              />
-              <YAxis domain={[0, 100]} tickLine={false} axisLine={false} />
-              <ChartTooltip
-                cursor={false}
-                content={<ChartTooltipContent indicator="dashed" />}
-              />
-              <Bar dataKey="score" fill="var(--color-score)" radius={6} />
-              <Bar dataKey="average" fill="var(--color-average)" radius={6} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartContainer>
-      </CardContent>
-      <CardFooter className="flex-col items-start gap-2 text-sm">
-        <div className="leading-none text-muted-foreground">
-          Based on your recently released results and class statistics
+    <Card className="col-span-full shadow-none border rounded-xl overflow-hidden">
+      <CardHeader className="py-3 px-4 bg-muted/5 border-b">
+        <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                <Activity className="size-3 text-primary" />
+                {title}
+            </CardTitle>
+            <TrendingUp className="h-3.5 w-3.5 text-emerald-500 opacity-50" />
         </div>
+        <CardDescription className="text-[9px] font-medium uppercase tracking-tight text-muted-foreground/60">{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="pt-6 pb-2">
+        {!hasData ? (
+           <div className="h-[260px] w-full flex flex-col items-center justify-center border-2 border-dashed border-muted/20 rounded-lg bg-muted/5">
+              <Activity className="size-8 text-muted-foreground/20 mb-2" />
+              <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">No Performance Data Available</p>
+              <p className="text-[9px] text-muted-foreground/30 mt-1 uppercase font-medium">Complete assessments to see your trend</p>
+           </div>
+        ) : (
+          <ChartContainer config={chartConfig} className="h-[260px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={data} accessibilityLayer margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="var(--border)" opacity={0.4} />
+                <XAxis
+                  dataKey="month"
+                  tickLine={false}
+                  tickMargin={10}
+                  axisLine={false}
+                  tick={{ fontSize: 10, fontWeight: 600 }}
+                  className="uppercase tracking-tighter"
+                />
+                <YAxis 
+                  domain={[0, 100]} 
+                  tickLine={false} 
+                  axisLine={false} 
+                  tick={{ fontSize: 10, fontWeight: 600 }}
+                  tickFormatter={(v) => `${v}%`}
+                />
+                <ChartTooltip
+                  cursor={{ fill: 'var(--muted)', opacity: 0.1 }}
+                  content={<ChartTooltipContent indicator="dashed" />}
+                />
+                <Bar dataKey="score" fill="var(--color-score)" radius={[4, 4, 0, 0]} barSize={24} />
+                <Bar dataKey="average" fill="var(--color-average)" radius={[4, 4, 0, 0]} barSize={24} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartContainer>
+        )}
+      </CardContent>
+      <CardFooter className="py-2 px-4 border-t bg-muted/5 flex-row items-center justify-between text-[9px] font-semibold uppercase tracking-widest text-muted-foreground/60">
+        <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5">
+                <div className="size-1.5 rounded-full bg-[var(--chart-1)]" />
+                <span>Student</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+                <div className="size-1.5 rounded-full bg-[var(--chart-2)]" />
+                <span>Platform Avg</span>
+            </div>
+        </div>
+        <span>Last updated: {new Date().toLocaleDateString()}</span>
       </CardFooter>
     </Card>
   )

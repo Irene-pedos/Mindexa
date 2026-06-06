@@ -43,15 +43,22 @@ class StudentService:
         """Aggregate student-scoped data for the main dashboard view."""
         from app.schemas.student import DashboardMetric
         
-        # 1. Fetch Summary Stats
-        results, total_results = await self.result_repo.list_by_student(
-            student_id, is_released=True
-        )
+        # 1. Fetch ALL released results for calculation accuracy
+        # Note: For students with 1000s of results, we might want to optimize this,
+        # but for typical academic use, fetching all results is fine for the dashboard.
+        all_results_stmt = select(AssessmentResult).where(
+            AssessmentResult.student_id == student_id,
+            AssessmentResult.is_released == True,
+            AssessmentResult.is_deleted == False
+        ).order_by(AssessmentResult.released_at.desc())
+        
+        res = await self.db.execute(all_results_stmt)
+        results = list(res.scalars().all())
         
         now = datetime.now(UTC)
         first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        # GPA Calculation
+        # GPA Calculation (using all results)
         async def calculate_gpa(rows):
             if not rows: return 0.0
             total_points = sum((r.percentage / 25.0) * 3 for r in rows)
@@ -87,7 +94,7 @@ class StudentService:
         delta_comp = round(((curr_comp - last_comp) / last_comp * 100), 1) if last_comp > 0 else 0
         comp_metric = DashboardMetric(value=curr_comp, delta=delta_comp, last_month=last_comp, positive=curr_comp >= last_comp)
 
-        # 4. Avg Performance
+        # 4. Avg Performance (using all results)
         curr_avg = round(sum(r.percentage for r in results) / len(results), 1) if results else 0.0
         last_avg = round(sum(r.percentage for r in prev_results) / len(prev_results), 1) if prev_results else 0.0
         delta_avg = round(((curr_avg - last_avg) / last_avg * 100), 1) if last_avg > 0 else 0
@@ -127,10 +134,16 @@ class StudentService:
                 expires_at=a.expires_at,
             ))
 
-        # 7. Recent Results
+        # 7. Recent Results (Top 5 from our all_results list)
         recent_results_data = []
         for r in results[:5]:
-            assessment = r.attempt.assessment if r.attempt else None
+            # Load attempt and assessment for display
+            stmt_r = select(AssessmentResult).where(AssessmentResult.id == r.id).options(
+                selectinload(AssessmentResult.attempt).selectinload(AssessmentAttempt.assessment)
+            )
+            r_full = (await self.db.execute(stmt_r)).scalar_one()
+            assessment = r_full.attempt.assessment if r_full.attempt else None
+            
             recent_results_data.append(StudentRecentResult(
                 id=r.attempt_id,
                 assessment_title=assessment.title if assessment else "Unknown",
@@ -145,22 +158,35 @@ class StudentService:
                 released_at=r.released_at,
             ))
 
-        # 8. Performance Trend
-        trend_map = {}
-        for r in results:
-            if r.released_at:
-                month_key = r.released_at.strftime("%b")
-                if month_key not in trend_map: trend_map[month_key] = []
-                trend_map[month_key].append(r.percentage)
-        
+        # 8. Performance Trend (Real data from DB)
         from dateutil.relativedelta import relativedelta
         trend_data = []
+        
+        # We look back 6 months
         for i in range(5, -1, -1):
             month_date = now - relativedelta(months=i)
-            m = month_date.strftime("%b")
-            avg = sum(trend_map[m]) / len(trend_map[m]) if m in trend_map else 0.0
+            start_of_month = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end_of_month = (start_of_month + relativedelta(months=1))
+            m = start_of_month.strftime("%b")
+            
+            # Student's average for this month (using our pre-fetched all_results)
+            student_month_results = [r.percentage for r in results if r.released_at and start_of_month <= r.released_at < end_of_month]
+            student_avg = sum(student_month_results) / len(student_month_results) if student_month_results else 0.0
+            
+            # Real Platform average for this month (all released results)
+            global_avg_stmt = select(func.avg(AssessmentResult.percentage)).where(
+                AssessmentResult.is_released == True,
+                AssessmentResult.is_deleted == False,
+                AssessmentResult.released_at >= start_of_month,
+                AssessmentResult.released_at < end_of_month
+            )
+            global_avg_res = await self.db.execute(global_avg_stmt)
+            global_avg = global_avg_res.scalar() or 0.0
+            
             trend_data.append(PerformanceTrendItem(
-                month=m, score=round(avg, 1), average=round(random.uniform(70, 80), 1)
+                month=m,
+                score=round(float(student_avg), 1),
+                average=round(float(global_avg), 1)
             ))
 
         return StudentDashboardResponse(
@@ -169,8 +195,9 @@ class StudentService:
             active_attempts=active_attempts_data,
             recent_results=recent_results_data,
             performance_trend=trend_data,
-            upcoming_assessments=[] # Needs separate load if required
+            upcoming_assessments=[] 
         )
+
 
     async def list_workspaces(self, student_id: uuid.UUID) -> list[StudentCourseListItem]:
         """List all operational teaching workspaces the student is enrolled in."""
@@ -188,7 +215,7 @@ class StudentService:
                 lecturer_name=f"{lecturer.first_name} {lecturer.last_name}",
                 status="Active",
                 progress=progress,
-                academic_year=ws.academic_period.name,
+                academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
                 workspace_id=ws.id
             ))
         return items
@@ -225,7 +252,7 @@ class StudentService:
             "nextAssessment": "Check Assessment Registry",
             "materials": materials_count,
             "assessments": assessments_count,
-            "academic_year": ws.academic_period.name,
+            "academic_year": ws.academic_period.name if ws.academic_period else "GLOBAL",
         }
 
     async def _calculate_workspace_progress(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> int:

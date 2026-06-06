@@ -24,9 +24,9 @@ from app.schemas.admin import (
     AdminUserCreate,
     AdminCourseCreate,
     AdminCourseUpdate,
-    AdminAnalyticsResponse,
     AdminIntegrityOverview,
     SystemSettingsSchema,
+    AdminInstitutionSummary,
 )
 from app.db.schemas.academic import (
     CourseResponse,
@@ -324,6 +324,19 @@ async def update_institution(
 ) -> InstitutionResponse:
     service = AdminService(db)
     return await service.update_institution(institution_id, body)
+
+
+@router.get(
+    "/institutions/summary",
+    response_model=AdminInstitutionSummary,
+    summary="Get summary stats for all institutions",
+)
+async def get_institution_summary(
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AdminInstitutionSummary:
+    service = AdminService(db)
+    return await service.get_institution_summary()
 
 
 @router.get(

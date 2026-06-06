@@ -18,38 +18,32 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 
-export const description = "A multiple bar chart"
+interface ChartBarMultipleProps {
+  data: any[]
+  config: ChartConfig
+  title?: string
+  description?: string
+  footerTitle?: string
+  footerDescription?: string
+}
 
-const chartData = [
-  { month: "January", desktop: 186, mobile: 80 },
-  { month: "February", desktop: 305, mobile: 200 },
-  { month: "March", desktop: 237, mobile: 120 },
-  { month: "April", desktop: 73, mobile: 190 },
-  { month: "May", desktop: 209, mobile: 130 },
-  { month: "June", desktop: 214, mobile: 140 },
-]
-
-const chartConfig = {
-  desktop: {
-    label: "Desktop",
-    color: "var(--chart-1)",
-  },
-  mobile: {
-    label: "Mobile",
-    color: "var(--chart-2)",
-  },
-} satisfies ChartConfig
-
-export function ChartBarMultiple() {
+export function ChartBarMultiple({
+  data,
+  config,
+  title = "Assessments & Violations Overview",
+  description = "Monthly distribution",
+  footerTitle,
+  footerDescription = "Showing total assessments versus integrity violations"
+}: ChartBarMultipleProps) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Assessments & Violations Overview</CardTitle>
-        <CardDescription>October 2025 - March 2026</CardDescription>
+    <Card className="border-none shadow-none">
+      <CardHeader className="px-0 pt-0">
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent>
-        <ChartContainer config={chartConfig} className="h-[250px] w-full">
-          <BarChart accessibilityLayer data={chartData}>
+      <CardContent className="px-0">
+        <ChartContainer config={config} className="h-[250px] w-full">
+          <BarChart accessibilityLayer data={data}>
             <CartesianGrid vertical={false} />
             <XAxis
               dataKey="month"
@@ -62,17 +56,25 @@ export function ChartBarMultiple() {
               cursor={false}
               content={<ChartTooltipContent indicator="dashed" />}
             />
-            <Bar dataKey="desktop" fill="var(--color-desktop)" radius={4} />
-            <Bar dataKey="mobile" fill="var(--color-mobile)" radius={4} />
+            {Object.keys(config).map((key, index) => (
+              <Bar 
+                key={key} 
+                dataKey={key} 
+                fill={`var(--color-${key})`} 
+                radius={4} 
+              />
+            ))}
           </BarChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter className="flex-col items-start gap-2 text-sm">
-        <div className="flex gap-2 leading-none font-medium">
-          Violations decreased by 12% this month <TrendingDown className="h-4 w-4 text-emerald-500" />
-        </div>
+      <CardFooter className="flex-col items-start gap-2 text-sm px-0 pb-0">
+        {footerTitle && (
+          <div className="flex gap-2 leading-none font-medium">
+            {footerTitle}
+          </div>
+        )}
         <div className="leading-none text-muted-foreground">
-          Showing total assessments versus integrity violations for the last 6 months
+          {footerDescription}
         </div>
       </CardFooter>
     </Card>

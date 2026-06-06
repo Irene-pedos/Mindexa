@@ -22,6 +22,7 @@ from app.db.models.academic import (
     Department,
     Option,
     Course,
+    ClassGroup,
     ClassSection,
     TeachingAssignment,
 )
@@ -96,7 +97,10 @@ async def list_my_assignments(
             Department.name.label("department_name"),
             Option.name.label("option_name"),
             Course.name.label("course_name"),
-            ClassSection.name.label("class_section_name")
+            Course.code.label("course_code"),
+            ClassSection.name.label("class_section_name"),
+            ClassGroup.name.label("class_group_name"),
+            ClassGroup.level.label("class_group_level")
         )
         .outerjoin(Institution, TeachingAssignment.institution_id == Institution.id)
         .outerjoin(Campus, TeachingAssignment.campus_id == Campus.id)
@@ -105,6 +109,7 @@ async def list_my_assignments(
         .outerjoin(Option, TeachingAssignment.option_id == Option.id)
         .outerjoin(Course, TeachingAssignment.course_id == Course.id)
         .outerjoin(ClassSection, TeachingAssignment.class_section_id == ClassSection.id)
+        .outerjoin(ClassGroup, ClassSection.class_group_id == ClassGroup.id)
         .where(TeachingAssignment.lecturer_id == current_user.id, TeachingAssignment.is_active == True)
     )
     
@@ -124,7 +129,10 @@ async def list_my_assignments(
             "department_name": row.department_name,
             "option_name": row.option_name,
             "course_name": row.course_name,
-            "class_section_name": row.class_section_name
+            "course_code": row.course_code,
+            "class_section_name": row.class_section_name,
+            "class_group_name": row.class_group_name,
+            "class_group_level": row.class_group_level
         })
         
         items.append(TeachingAssignmentDetailResponse(**data))

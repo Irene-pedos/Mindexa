@@ -155,7 +155,7 @@ export function GroupBuilderDnd({ courseId, initialGroups = [], maxGroupSize, on
       }
     }
     loadRoster();
-  }, [courseId]);
+  }, [courseId, initialGroups]);
 
   const addGroup = () => {
     setGroups([

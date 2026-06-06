@@ -159,7 +159,7 @@ def _build_user_response(user) -> UserResponse:
             display_name=getattr(user.profile, "display_name", None),
             bio=getattr(user.profile, "bio", None),
             phone_number=getattr(user.profile, "phone_number", None),
-            profile_picture_url=getattr(user.profile, "avatar_url", None),
+            avatar_url=getattr(user.profile, "avatar_url", None),
             student_id=getattr(user.profile, "student_id", None),
             staff_id=getattr(user.profile, "staff_id", None),
             college=getattr(user.profile, "college", None),
@@ -889,7 +889,7 @@ async def complete_lecturer_onboarding(
     user = await service.complete_lecturer_onboarding(
         user_id=current_user.id,
         bio=body.bio,
-        profile_picture_url=body.profile_picture_url,
+        avatar_url=body.avatar_url,
         phone_number=body.phone_number,
     )
     return _build_user_response(user)

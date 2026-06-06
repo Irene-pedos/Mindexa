@@ -191,6 +191,31 @@ async def resolve_flag(
 
 
 
+# ── AI FLAG EXPLAINER ─────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/flag/{flag_id}/explain",
+    response_model=dict,
+    summary="Get AI explanation for an integrity flag (lecturer/admin)",
+)
+async def explain_flag(
+    flag_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Use the AI Integrity Explainer Agent to generate a narrative summary
+    and timeline for a specific integrity flag.
+    """
+    service = IntegrityService(db)
+    explanation = await service.explain_flag_with_ai(
+        flag_id=flag_id,
+        lecturer_id=current_user.id,
+    )
+    return explanation.model_dump()
+
+
 # ── LIVE EVENT FEED FOR ASSESSMENT (Supervisor) ───────────────────────────────
 
 

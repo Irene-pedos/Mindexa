@@ -34,17 +34,37 @@ export interface TeachingAssignment {
   academic_period_id: string;
   role: "MAIN_LECTURER" | "ASSISTANT_LECTURER" | "SUPERVISOR" | "REVIEWER";
   is_active: boolean;
+  academic_year?: string;
+  institution_name?: string;
+  campus_name?: string;
+  college_name?: string;
+  department_name?: string;
+  option_name?: string;
+  course_name?: string;
+  course_code?: string;
+  class_section_name?: string;
+  class_group_name?: string;
+  class_group_level?: number;
 }
 
 export const academicApi = {
+  getLevels: async (institutionId?: string): Promise<number[]> => {
+    const url = institutionId 
+      ? `/academic-hierarchy/levels?institution_id=${institutionId}` 
+      : "/academic-hierarchy/levels";
+    return apiClient(url);
+  },
   getInstitutions: async (): Promise<AcademicInstitution[]> => {
     return apiClient("/academic-hierarchy/institutions");
   },
   getCampuses: async (institutionId: string): Promise<AcademicCampus[]> => {
     return apiClient(`/academic-hierarchy/campuses?institution_id=${institutionId}`);
   },
-  getColleges: async (campusId: string): Promise<AcademicCollege[]> => {
-    return apiClient(`/academic-hierarchy/colleges?campus_id=${campusId}`);
+  getColleges: async (params: { institution_id?: string; campus_id?: string }): Promise<AcademicCollege[]> => {
+    const query = new URLSearchParams();
+    if (params.institution_id) query.append("institution_id", params.institution_id);
+    if (params.campus_id) query.append("campus_id", params.campus_id);
+    return apiClient(`/academic-hierarchy/colleges?${query.toString()}`);
   },
   getDepartments: async (params: { institution_id?: string; campus_id?: string; college_id?: string }): Promise<AcademicDepartment[]> => {
     const query = new URLSearchParams();
@@ -59,8 +79,14 @@ export const academicApi = {
   getClassGroups: async (optionId: string): Promise<AcademicClassGroup[]> => {
     return apiClient(`/academic-hierarchy/class-groups?option_id=${optionId}`);
   },
-  getSections: async (classGroupId: string): Promise<AcademicClassSection[]> => {
-    return apiClient(`/academic-hierarchy/sections?class_group_id=${classGroupId}`);
+  getSections: async (params: { class_group_id?: string; department_id?: string } | string): Promise<AcademicClassSection[]> => {
+    if (typeof params === "string") {
+      return apiClient(`/academic-hierarchy/sections?class_group_id=${params}`);
+    }
+    const query = new URLSearchParams();
+    if (params.class_group_id) query.append("class_group_id", params.class_group_id);
+    if (params.department_id) query.append("department_id", params.department_id);
+    return apiClient(`/academic-hierarchy/sections?${query.toString()}`);
   },
   getCourses: async (departmentId: string): Promise<AcademicCourse[]> => {
     return apiClient(`/academic-hierarchy/courses?department_id=${departmentId}`);
@@ -87,8 +113,11 @@ export const adminAcademicApi = {
       body: JSON.stringify(data),
     });
   },
-  getLecturerAssignments: async (lecturerId: string): Promise<TeachingAssignment[]> => {
-    return apiClient(`/admin/academic/assignments?lecturer_id=${lecturerId}`);
+  getLecturerAssignments: async (lecturerId?: string): Promise<TeachingAssignment[]> => {
+    const url = lecturerId 
+      ? `/admin/academic/assignments?lecturer_id=${lecturerId}`
+      : "/admin/academic/assignments";
+    return apiClient(url);
   },
   removeAssignment: async (assignmentId: string) => {
     return apiClient(`/admin/academic/assignments/${assignmentId}`, {
@@ -132,6 +161,12 @@ export const adminAcademicApi = {
       method: "POST",
       body: JSON.stringify(data),
     });
+  },
+  getAcademicPeriods: async (institutionId?: string): Promise<AcademicPeriod[]> => {
+    const url = institutionId 
+      ? `/admin/academic/academic-periods?institution_id=${institutionId}`
+      : "/admin/academic/academic-periods";
+    return apiClient(url);
   },
   createAcademicPeriod: async (data: any) => {
     return apiClient("/admin/academic/academic-periods", {

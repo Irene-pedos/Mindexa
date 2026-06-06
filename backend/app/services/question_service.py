@@ -61,11 +61,13 @@ class QuestionService:
         return QuestionSummaryResponse(
             id=question.id,
             content=question.content,
+            image_url=question.image_url,
             question_type=str(self._enum_value(question.question_type)),
             difficulty=str(self._enum_value(question.difficulty)),
             grading_mode=str(getattr(question, "grading_mode", "auto")),
             status="active" if getattr(question, "is_active", True) else "archived",
             subject=None,
+            course_id=question.course_id,
             topic=getattr(question, "topic_tag", None),
             bloom_level=None,
             suggested_marks=getattr(question, "marks", None),
@@ -102,10 +104,12 @@ class QuestionService:
             content=data.content,
             question_type=data.question_type,
             difficulty=data.difficulty,
+            image_url=data.image_url,
             marks=(1 if data.suggested_marks is None else data.suggested_marks),
             created_by_id=created_by.id,
             source_type="manual",
             explanation=data.explanation,
+            course_id=data.course_id,
             topic_tag=data.topic,
         )
         await self._repo.update_fields(question.id, grading_mode=grading_mode)
@@ -141,6 +145,7 @@ class QuestionService:
             await self._repo.archive(existing.id)
 
             new_content = data.content if data.content is not None else existing.content
+            new_image_url = data.image_url if data.image_url is not None else existing.image_url
             existing_qtype = (
                 existing.question_type.value
                 if hasattr(existing.question_type, "value")
@@ -154,6 +159,7 @@ class QuestionService:
                 difficulty=(
                     data.difficulty if data.difficulty is not None else existing.difficulty
                 ),
+                image_url=new_image_url,
                 marks=(
                     data.suggested_marks if data.suggested_marks is not None else existing.marks
                 ),
@@ -167,6 +173,7 @@ class QuestionService:
                     data.explanation if data.explanation is not None else existing.explanation
                 ),
                 subject_id=existing.subject_id,
+                course_id=data.course_id if data.course_id is not None else existing.course_id,
                 topic_tag=data.topic if data.topic is not None else existing.topic_tag,
                 parent_question_id=existing.id,
                 version=existing.version + 1,
@@ -199,6 +206,8 @@ class QuestionService:
         update_fields: dict[str, Any] = {}
         if data.content is not None:
             update_fields["content"] = data.content
+        if data.image_url is not None:
+            update_fields["image_url"] = data.image_url
         if data.explanation is not None:
             update_fields["explanation"] = data.explanation
         if data.difficulty is not None:
@@ -207,6 +216,8 @@ class QuestionService:
             update_fields["grading_mode"] = data.grading_mode
         if data.suggested_marks is not None:
             update_fields["marks"] = data.suggested_marks
+        if data.course_id is not None:
+            update_fields["course_id"] = data.course_id
         if data.topic is not None:
             update_fields["topic_tag"] = data.topic
 
@@ -249,6 +260,7 @@ class QuestionService:
             q=params.q,
             question_type=params.question_type,
             difficulty=params.difficulty,
+            course_id=params.course_id,
             topic_tag=params.topic,
             source_type=params.source_type,
             created_by_id=created_by_id,

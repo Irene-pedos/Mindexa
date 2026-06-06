@@ -65,6 +65,8 @@ class ResultBreakdownItem(BaseModel):
     # UI fields for the student (populated by result_service)
     question_text: str | None = None
     question_type: str | None = None
+    section_title: str | None = None
+    imageUrl: str | None = None
     student_answer: str | None = None
     correct_answer: str | None = None
     options: list[dict] | None = None

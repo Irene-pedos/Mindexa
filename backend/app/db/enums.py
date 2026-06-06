@@ -44,12 +44,21 @@ class LecturerAssignmentRole(str, Enum):
     # New Standard (Academic OS)
     MAIN_LECTURER = "MAIN_LECTURER"
     ASSISTANT_LECTURER = "ASSISTANT_LECTURER"
+    CO_LECTURER = "CO_LECTURER"
     REVIEWER = "REVIEWER"
+    SUPERVISOR = "SUPERVISOR"
+    GUEST_LECTURER = "GUEST_LECTURER"
     
     # Legacy/General
-    PRIMARY = "PRIMARY" # Map to MAIN_LECTURER in future
-    ASSISTANT = "ASSISTANT" # Map to ASSISTANT_LECTURER
-    SUPERVISOR = "SUPERVISOR"
+    PRIMARY = "PRIMARY" 
+    ASSISTANT = "ASSISTANT" 
+
+
+class ClassSectionStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    ARCHIVED = "ARCHIVED"
+    GRADUATED = "GRADUATED"
+    SUSPENDED = "SUSPENDED"
 
 
 class EnrollmentStatus(str, Enum):
@@ -218,6 +227,7 @@ class AIActionType(str, Enum):
     ANALYZE_INTEGRITY = "ANALYZE_INTEGRITY"
     STUDY_SUPPORT = "STUDY_SUPPORT"
     DOCUMENT_SUMMARY = "DOCUMENT_SUMMARY"
+    NARRATE_ANALYTICS = "NARRATE_ANALYTICS"
     ANSWER_KEY_GENERATION = "ANSWER_KEY_GENERATION"
     # Old names for compatibility if needed
     QUESTION_GENERATION = "QUESTION_GENERATION"
@@ -534,3 +544,10 @@ class IntegrityFlagRaisedBy(str, Enum):
 class SupervisionSessionStatus(str, Enum):
     ACTIVE = "ACTIVE"
     ENDED = "ENDED"
+
+
+class LocationType(str, Enum):
+    PHYSICAL_ROOM = "PHYSICAL_ROOM"
+    ONLINE = "ONLINE"
+    HYBRID = "HYBRID"
+    NOT_APPLICABLE = "NOT_APPLICABLE"

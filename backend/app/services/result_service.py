@@ -94,7 +94,7 @@ class ResultService:
         total_score = await self.grading_repo.sum_final_scores(attempt_id)
         max_score = await self.grading_repo.sum_max_scores(attempt_id)
         graded_count = await self.grading_repo.count_final_grades(attempt_id)
-        total_responses = await self.submission_repo.count_responses(attempt_id)
+        aq_count = await self.assessment_repo.count_assessment_questions(attempt.assessment_id)
 
         # Percentage (guard against divide-by-zero)
         percentage = round((total_score / max_score) * 100, 2) if max_score > 0 else 0.0
@@ -118,8 +118,12 @@ class ResultService:
             letter_grade=letter_grade,
             is_passing=is_passing,
             graded_question_count=graded_count,
-            total_question_count=total_responses,
+            total_question_count=aq_count,
         )
+
+        # Set integrity hold if attempt is flagged
+        if attempt.is_flagged:
+            await self.result_repo.set_integrity_hold(result.id, True)
 
         # Update cached score on attempt
         await self.attempt_repo.set_total_score(attempt_id, total_score)
@@ -128,16 +132,35 @@ class ResultService:
         await self.generate_breakdown(result.id, attempt_id)
 
         # Gate: Automatic Release for IMMEDIATE mode closed-question assessments
-        if assessment and assessment.result_release_mode == ResultReleaseMode.IMMEDIATE:
+        from app.db.enums import ResultReleaseMode
+        
+        # Safe Enum to String conversion for release mode
+        release_mode = assessment.result_release_mode
+        if hasattr(release_mode, "value"):
+            release_mode = release_mode.value
+
+        if assessment and release_mode == ResultReleaseMode.IMMEDIATE.value:
             from app.services.grading_service import AUTO_GRADABLE
             
             # Load questions to check types
             questions = await self.assessment_repo.list_assessment_questions(attempt.assessment_id)
-            has_open = any(q.question.question_type not in AUTO_GRADABLE for q in questions if q.question)
+            
+            # Convert AUTO_GRADABLE values to set of strings for easier comparison
+            auto_gradable_values = {t.value if hasattr(t, "value") else str(t) for t in AUTO_GRADABLE}
+            
+            has_open = False
+            for aq in questions:
+                if not aq.question:
+                    continue
+                q_type = aq.question.question_type
+                q_type_str = q_type.value if hasattr(q_type, "value") else str(q_type)
+                if q_type_str not in auto_gradable_values:
+                    has_open = True
+                    break
             
             # Only auto-release if it's fully graded (all responses have final grades)
             # and there are no open-ended questions requiring manual review.
-            if not has_open and graded_count >= total_responses and total_responses > 0:
+            if not has_open and graded_count >= aq_count and aq_count > 0 and not attempt.is_flagged:
                 await self.result_repo.bulk_release([result.id], released_by_id=None)
                 result.is_released = True # Update local object for return
 
@@ -304,6 +327,10 @@ class ResultService:
         responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id)
         response_map = {r.question_id: r for r in responses}
         
+        # Map for section titles
+        aq_rows = await self.assessment_repo.list_assessment_questions(result.assessment_id)
+        aq_map = {aq.question_id: aq for aq in aq_rows}
+        
         for bd in resp.breakdowns:
             response = response_map.get(bd.question_id)
             if not response:
@@ -311,6 +338,12 @@ class ResultService:
                 
             q = response.question
             bd.question_text = q.content
+            bd.imageUrl = q.image_url
+            
+            # Populate section title
+            aq = aq_map.get(bd.question_id)
+            if aq and aq.assessment_section:
+                bd.section_title = aq.assessment_section.title
             
             # Safe Enum to string conversion
             q_type = q.question_type
@@ -328,10 +361,10 @@ class ResultService:
                 opt_id = response.selected_option_ids[0] if response.selected_option_ids else None
                 if opt_id:
                     opt = next((o for o in q.options if str(o.id) == str(opt_id)), None)
-                    bd.student_answer = opt.option_text if opt else "Unknown Option"
+                    bd.student_answer = opt.content if opt else "Unknown Option"
             elif ans_type == "MULTI_OPTION":
                 bd.student_answer = ", ".join([
-                    next((o.option_text for o in q.options if str(o.id) == str(oid)), "Unknown")
+                    next((o.content for o in q.options if str(o.id) == str(oid)), "Unknown")
                     for oid in (response.selected_option_ids or [])
                 ])
             elif ans_type == "MATCH_PAIRS":
@@ -347,14 +380,14 @@ class ResultService:
                 raw_q_type = raw_q_type.value
 
             if raw_q_type in ["MCQ", "TRUE_FALSE"]:
-                correct_opts = [o.option_text for o in q.options if o.is_correct]
+                correct_opts = [o.content for o in q.options if o.is_correct]
                 bd.correct_answer = ", ".join(correct_opts)
             elif raw_q_type == "MATCHING":
                 # Show matches
-                bd.correct_answer = ", ".join([f"{o.option_text} -> {o.option_text_right}" for o in q.options])
+                bd.correct_answer = ", ".join([f"{o.content} -> {o.match_value}" for o in q.options])
             
             bd.options = [
-                {"id": str(o.id), "text": o.option_text, "is_correct": o.is_correct}
+                {"id": str(o.id), "text": o.content, "is_correct": o.is_correct}
                 for o in (q.options or [])
             ]
 

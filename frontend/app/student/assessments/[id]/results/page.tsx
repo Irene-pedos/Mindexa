@@ -46,8 +46,13 @@ export default function StudentAssessmentResult() {
         const data = await resultApi.getResultByAttempt(attemptId)
         setResult(data)
       } catch (err: any) {
-        console.error("Failed to load results", err)
-        toast.error("Results not yet available or attempt not found")
+        if (err.message?.toLowerCase().includes("available")) {
+          // Result not released yet - this is expected behavior
+          console.debug("Result pending release:", attemptId)
+        } else {
+          console.error("Failed to load results", err)
+          toast.error("Results not yet available or attempt not found")
+        }
       } finally {
         setLoading(false);
       }
@@ -206,6 +211,11 @@ export default function StudentAssessmentResult() {
                       )}>
                         {idx + 1}
                       </div>
+                      {item.section_title && (
+                        <Badge variant="secondary" className="text-[9px] uppercase font-bold h-4 px-1.5 bg-muted/50 border-none">
+                            {item.section_title}
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="text-[9px] uppercase font-bold h-4 px-1.5">{item.question_type}</Badge>
                       <Badge variant="secondary" className="text-[9px] uppercase font-bold h-4 px-1.5">
                         {openQuestion ? "Open Review" : "Auto-Graded"}
@@ -217,6 +227,12 @@ export default function StudentAssessmentResult() {
                   </div>
 
                   <h4 className="text-sm font-semibold leading-relaxed mb-4">{item.question_text}</h4>
+
+                  {item.imageUrl && (
+                    <div className="mb-4 p-1.5 border border-muted/30 rounded-xl bg-muted/5 inline-block">
+                        <img src={item.imageUrl} alt="Context Media" className="max-h-[240px] rounded-lg object-contain" />
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-3 border-t border-dashed">
                     <div className="space-y-1">

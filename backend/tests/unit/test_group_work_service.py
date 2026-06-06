@@ -30,11 +30,23 @@ class TestGroupWorkServiceExtended:
         db.add(lecturer)
         await db.flush()
         
+        from app.db.models.academic import TeachingWorkspace
+        workspace = TeachingWorkspace(
+            lecturer_id=lecturer.id,
+            class_section_id=uuid.uuid4(), # Dummy
+            academic_period_id=uuid.uuid4(), # Dummy
+            course_id=uuid.uuid4(), # Dummy
+            title="Test Workspace"
+        )
+        db.add(workspace)
+        await db.flush()
+
         assessment = Assessment(
             title="Per Group Test",
             assessment_type=AssessmentType.SUMMATIVE,
             status=AssessmentStatus.PUBLISHED,
             created_by_id=lecturer.id,
+            teaching_workspace_id=workspace.id,
             is_group_assessment=True,
             question_distribution_mode=QuestionDistributionMode.PER_GROUP
         )

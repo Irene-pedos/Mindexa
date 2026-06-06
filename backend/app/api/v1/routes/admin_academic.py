@@ -1,7 +1,7 @@
 import uuid
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import select, func, and_, or_, exists, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.session import get_db
 from app.db.models.academic import (
@@ -16,7 +16,7 @@ from app.db.models.academic import (
     AcademicPeriod,
     Course,
 )
-from app.db.schemas.teaching_assignment import TeachingAssignmentCreate, TeachingAssignmentResponse
+from app.db.schemas.teaching_assignment import TeachingAssignmentCreate, TeachingAssignmentResponse, TeachingAssignmentDetailResponse
 from app.db.schemas.academic import (
     CampusCreate,
     CampusResponse,
@@ -104,18 +104,66 @@ async def create_assignment(
     await db.refresh(new_assignment)
     return new_assignment
 
-@router.get("/assignments", response_model=List[TeachingAssignmentResponse])
+from app.db.models.academic import (
+    Institution, Campus, College, Department, Option, ClassSection, AcademicPeriod, Course
+)
+
+@router.get("/assignments", response_model=List[TeachingAssignmentDetailResponse])
 async def get_assignments(
     lecturer_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db)
 ):
     """List teaching assignments, optionally filtered by lecturer."""
-    stmt = select(TeachingAssignment).where(TeachingAssignment.is_active == True)
+    stmt = (
+        select(
+            TeachingAssignment,
+            Institution.name.label("institution_name"),
+            Campus.name.label("campus_name"),
+            College.name.label("college_name"),
+            Department.name.label("department_name"),
+            Option.name.label("option_name"),
+            Course.name.label("course_name"),
+            Course.code.label("course_code"),
+            ClassSection.name.label("class_section_name"),
+            ClassGroup.name.label("class_group_name"),
+            ClassGroup.level.label("class_group_level")
+        )
+        .outerjoin(Institution, TeachingAssignment.institution_id == Institution.id)
+        .outerjoin(Campus, TeachingAssignment.campus_id == Campus.id)
+        .outerjoin(College, TeachingAssignment.college_id == College.id)
+        .outerjoin(Department, TeachingAssignment.department_id == Department.id)
+        .outerjoin(Option, TeachingAssignment.option_id == Option.id)
+        .outerjoin(Course, TeachingAssignment.course_id == Course.id)
+        .outerjoin(ClassSection, TeachingAssignment.class_section_id == ClassSection.id)
+        .outerjoin(ClassGroup, ClassSection.class_group_id == ClassGroup.id)
+        .where(TeachingAssignment.is_active == True)
+    )
+
     if lecturer_id:
         stmt = stmt.where(TeachingAssignment.lecturer_id == lecturer_id)
     
     result = await db.execute(stmt)
-    return result.scalars().all()
+    rows = result.all()
+    
+    assignments = []
+    for row in rows:
+        assignment_obj, inst_name, camp_name, coll_name, dept_name, opt_name, crs_name, crs_code, sec_name, group_name, group_level = row
+        assignment_dict = assignment_obj.model_dump()
+        assignment_dict.update({
+            "institution_name": inst_name,
+            "campus_name": camp_name,
+            "college_name": coll_name,
+            "department_name": dept_name,
+            "option_name": opt_name,
+            "course_name": crs_name,
+            "course_code": crs_code,
+            "class_section_name": sec_name,
+            "class_group_name": group_name,
+            "class_group_level": group_level
+        })
+        assignments.append(assignment_dict)
+
+    return assignments
 
 @router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def remove_assignment(
@@ -138,7 +186,6 @@ async def remove_assignment(
 
 @router.post("/campuses", response_model=CampusResponse)
 async def create_campus(body: CampusCreate, db: AsyncSession = Depends(get_db)):
-    from app.db.models.academic import Campus
     new_campus = Campus(**body.model_dump())
     db.add(new_campus)
     await db.commit()
@@ -147,7 +194,6 @@ async def create_campus(body: CampusCreate, db: AsyncSession = Depends(get_db)):
 
 @router.post("/colleges", response_model=CollegeResponse)
 async def create_college(body: CollegeCreate, db: AsyncSession = Depends(get_db)):
-    from app.db.models.academic import College
     new_college = College(**body.model_dump())
     db.add(new_college)
     await db.commit()
@@ -248,6 +294,20 @@ async def update_section(id: uuid.UUID, body: dict, db: AsyncSession = Depends(g
     await db.refresh(section)
     return section
 
+@router.get("/academic-periods", response_model=List[AcademicPeriodResponse])
+async def get_all_periods(
+    institution_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all academic periods for admin management."""
+    stmt = select(AcademicPeriod)
+    if institution_id:
+        stmt = stmt.where(AcademicPeriod.institution_id == institution_id)
+    
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
 @router.post("/academic-periods", response_model=AcademicPeriodResponse)
 async def create_period(body: AcademicPeriodCreate, db: AsyncSession = Depends(get_db)):
     new_period = AcademicPeriod(**body.model_dump())
@@ -255,6 +315,17 @@ async def create_period(body: AcademicPeriodCreate, db: AsyncSession = Depends(g
     await db.commit()
     await db.refresh(new_period)
     return new_period
+
+@router.patch("/academic-periods/{id}", response_model=AcademicPeriodResponse)
+async def update_period(id: uuid.UUID, body: dict, db: AsyncSession = Depends(get_db)):
+    period = await db.get(AcademicPeriod, id)
+    if not period: raise HTTPException(status_code=404, detail="Period not found")
+    for k, v in body.items():
+        if hasattr(period, k): setattr(period, k, v)
+    await db.commit()
+    await db.refresh(period)
+    return period
+
 
 @router.post("/courses", response_model=CourseResponse)
 async def create_course(body: CourseCreate, db: AsyncSession = Depends(get_db)):

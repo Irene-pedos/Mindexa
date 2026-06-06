@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, and_, or_, exists, not_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.enums import IntegrityFlagStatus, SupervisionSessionStatus

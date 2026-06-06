@@ -3,6 +3,8 @@ export interface InstitutionResponse {
   name: string;
   code: string;
   logo_url?: string | null;
+  timezone: string;
+  is_active: boolean;
 }
 
 export interface CampusResponse {
@@ -10,13 +12,16 @@ export interface CampusResponse {
   institution_id: string;
   name: string;
   code: string;
+  is_active: boolean;
 }
 
 export interface CollegeResponse {
   id: string;
-  campus_id: string;
+  institution_id: string;
+  campus_id?: string | null;
   name: string;
   code: string;
+  is_active: boolean;
 }
 
 export interface DepartmentResponse {
@@ -26,6 +31,7 @@ export interface DepartmentResponse {
   college_id?: string | null;
   name: string;
   code: string;
+  is_active: boolean;
 }
 
 export interface OptionResponse {
@@ -61,5 +67,8 @@ export interface AcademicPeriodResponse {
   id: string;
   institution_id: string;
   name: string;
+  period_type: string;
+  start_date: string;
+  end_date: string;
   is_active: boolean;
 }

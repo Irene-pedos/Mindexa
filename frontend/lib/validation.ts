@@ -131,6 +131,7 @@ export function validateSignupForm(data: {
   password: string;
   confirmPassword: string;
   role: "STUDENT" | "LECTURER" | "ADMIN";
+  phoneNumber?: string;
   regNumber?: string;
   staffId?: string;
 }): SignupValidationResult {
@@ -156,13 +157,21 @@ export function validateSignupForm(data: {
     if (matchError) errors[matchError.field] = matchError.message;
   }
 
+  // Phone validation
+  if (!data.phoneNumber || data.phoneNumber.trim() === "") {
+    errors.phoneNumber = "Contact phone number is required";
+  } else if (!/^\+?[1-9]\d{1,14}$/.test(data.phoneNumber.replace(/\s/g, ""))) {
+    errors.phoneNumber = "Please enter a valid international phone number";
+  }
+
   // Role-specific validation
   if (data.role === "STUDENT") {
-    const regError = validateRequired(data.regNumber || "", "Registration Number", "regNumber");
-    if (regError) errors.regNumber = regError.message;
+    if (!data.regNumber || data.regNumber.trim() === "") {
+        errors.regNumber = "Official Student ID (Registration Number) is required";
+    }
   } else if (data.role === "LECTURER" || data.role === "ADMIN") {
     const staffError = validateRequired(data.staffId || "", "Staff ID", "staffId");
-    if (staffError) errors.staffId = staffError.message;
+    if (staffError) errors[staffError.field] = staffError.message;
   }
 
   return {

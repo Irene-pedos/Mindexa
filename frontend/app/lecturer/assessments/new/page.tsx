@@ -1272,7 +1272,7 @@ export default function NewAssessmentBuilder() {
           lecturerApi.getPeriods(),
           lecturerApi.getLecturers(),
         ]);
-        setCourses(workspaceRes as any); // Type assertion until AdminCourseListItem is fully retired
+        setCourses(workspaceRes as any);
         setInstitutions(instRes);
         setPeriods(periodRes);
         setAvailableLecturers(lectRes);
@@ -1285,6 +1285,103 @@ export default function NewAssessmentBuilder() {
                 academic_year: periodRes[0].name
             }));
         }
+
+        // Load draft if ID exists
+        if (draftId) {
+            setIsLoadingDraft(true);
+            try {
+                const data = await assessmentApi.getAssessmentById(draftId);
+                
+                // Populate metadata
+                setMetadata({
+                    title: data.title || "",
+                    description: data.description || "",
+                    mode: (data.assessment_type === "GROUP_WORK" ? "Groupwork" : data.assessment_type) as AssessmentMode,
+                    institution_id: data.institution_id || "",
+                    course_id: data.course_id || "",
+                    teaching_workspace_id: data.teaching_workspace_id || "",
+                    department_ids: data.target_sections?.map((ts: any) => ts.department_id).filter(Boolean) || [],
+                    option_ids: data.target_sections?.map((ts: any) => ts.option_id).filter(Boolean) || [],
+                    class_group_ids: data.target_sections?.map((ts: any) => ts.class_group_id).filter(Boolean) || [],
+                    academic_year: data.academic_year || "",
+                    academic_period_id: data.academic_period_id || "",
+                    date: data.window_start ? new Date(data.window_start) : undefined,
+                    startTime: data.window_start ? format(new Date(data.window_start), "HH:mm") : "09:00",
+                    endTime: data.window_end ? format(new Date(data.window_end), "HH:mm") : "11:00",
+                    durationMinutes: data.duration_minutes || 120,
+                    passing_marks: data.passing_marks || 70,
+                    selectedInstructions: data.instructions?.split("\n").filter((i: string) => PREDEFINED_INSTRUCTIONS.includes(i)) || [],
+                    customInstructions: data.instructions?.split("\n").filter((i: string) => !PREDEFINED_INSTRUCTIONS.includes(i)).join("\n") || "",
+                    max_group_size: data.max_group_size || 4,
+                    group_formation_mode: data.group_formation_mode || "self_enrol",
+                    group_assignment_mode: data.group_assignment_mode || "AUTOMATIC",
+                    question_distribution_mode: data.question_distribution_mode || "SHARED",
+                    require_all_member_approval: data.require_all_member_approval || false,
+                    require_all_member_participation: data.require_all_member_participation || false,
+                    appeal_window_days: data.appeal_window_days || 7,
+                });
+
+                // Populate blueprint
+                if (data.sections?.length > 0) {
+                    setBlueprint(data.sections.map((s: any) => ({
+                        id: s.id,
+                        section: s.title,
+                        topics: s.description || "",
+                        marks: s.allocated_marks || 0,
+                        questions: s.question_count_target || 0,
+                        difficulty: "Medium", // TODO: fetch from metadata if stored
+                        allowedTypes: s.allowed_question_types?.types || ["mcq"],
+                    })));
+                }
+
+                // Populate rules
+                setRules({
+                    openBook: data.is_open_book || false,
+                    supervised: data.is_supervised || false,
+                    aiAllowed: data.ai_assistance_allowed || false,
+                    browserRestricted: data.fullscreen_required || false,
+                    shuffleQuestions: data.randomise_questions || false,
+                    shuffleOptions: data.randomise_options || false,
+                    resultRelease: data.result_release_mode || "manual",
+                    resultReleaseAt: data.result_release_at ? new Date(data.result_release_at) : undefined,
+                    attempts: data.max_attempts || 1,
+                    passwordProtected: data.is_password_protected || false,
+                    accessPassword: "", // Don't populate password
+                    latePenaltyPercent: data.late_penalty_percent || 0,
+                    gracePeriodMinutes: data.grace_period_minutes || 0,
+                    autosaveToken: data.autosave_token || crypto.randomUUID(),
+                    supervisor_ids: data.supervisors?.map((s: any) => s.supervisor_id) || [],
+                });
+
+                // Populate questions
+                if (data.assessment_questions?.length > 0) {
+                    setQuestions(data.assessment_questions.map((aq: any) => ({
+                        id: aq.question.id,
+                        sectionId: aq.assessment_section_id,
+                        groupId: aq.group_id,
+                        text: aq.question.content,
+                        imageUrl: aq.question.image_url,
+                        type: aq.question.question_type.toLowerCase().replace("_", "") as QuestionType,
+                        marks: aq.marks_override || aq.question.marks,
+                        options: aq.question.options?.map((o: any) => ({
+                            id: o.id,
+                            option_text: o.content,
+                            option_text_right: o.match_value,
+                            is_correct: o.is_correct,
+                            order_index: o.order_index,
+                        })) || [],
+                        aiGenerated: aq.added_via === "ai_generated",
+                    })));
+                }
+
+                if (data.draft_step) setActiveStep(data.draft_step);
+
+            } catch (err) {
+                toast.error("Failed to load draft assessment.");
+            } finally {
+                setIsLoadingDraft(false);
+            }
+        }
       } catch (err) {
         toast.error("Failed to initialize builder.");
       } finally {
@@ -1293,7 +1390,7 @@ export default function NewAssessmentBuilder() {
       }
     }
     init();
-  }, []);
+  }, [draftId]);
 
   const handleInstitutionChange = async (val: string) => {
     setMetadata((prev) => ({
@@ -1522,6 +1619,7 @@ export default function NewAssessmentBuilder() {
 
       await questionApi.createQuestion({
         content: q.text,
+        image_url: q.imageUrl,
         question_type: typeMap[q.type] || "short_answer",
         difficulty: "medium",
         suggested_marks: Math.max(1, q.marks),
@@ -1800,18 +1898,17 @@ export default function NewAssessmentBuilder() {
         <StepperPanel>
           {/* STEP 1: IDENTITY */}
           <StepperContent value={1}>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              <div className="lg:col-span-2 space-y-6">
-                <Card className="shadow-none border">
-                  <CardHeader className="py-5 border-b">
-                    <CardTitle className="text-lg">
-                      Assessment Identity
-                    </CardTitle>
-                    <CardDescription>
-                      Define the core details and schedule for this assessment.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-6 space-y-6">
+            <div className="space-y-6">
+              <Card className="shadow-none border">
+                <CardHeader className="py-5 border-b">
+                  <CardTitle className="text-lg">
+                    Assessment Identity
+                  </CardTitle>
+                  <CardDescription>
+                    Define the core details and schedule for this assessment.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
                         <Label>Assessment Title</Label>
@@ -1925,6 +2022,9 @@ export default function NewAssessmentBuilder() {
                                 setMetadata({ ...metadata, date: d });
                                 setDatePopoverOpen(false);
                               }}
+                              disabled={(date) =>
+                                date < new Date(new Date().setHours(0, 0, 0, 0))
+                              }
                             />
                           </PopoverContent>
                         </Popover>
@@ -1934,12 +2034,23 @@ export default function NewAssessmentBuilder() {
                         <Input
                           type="time"
                           value={metadata.startTime}
-                          onChange={(e) =>
+                          onChange={(e) => {
+                            const now = new Date();
+                            const selectedTime = e.target.value;
+                            if (metadata.date && format(metadata.date, "yyyy-MM-dd") === format(now, "yyyy-MM-dd")) {
+                                const [hours, minutes] = selectedTime.split(":").map(Number);
+                                const selectedDateTime = new Date(metadata.date);
+                                selectedDateTime.setHours(hours, minutes, 0, 0);
+                                if (selectedDateTime < now) {
+                                    toast.error("Start time cannot be in the past for today.");
+                                    return;
+                                }
+                            }
                             setMetadata({
                               ...metadata,
-                              startTime: e.target.value,
-                            })
-                          }
+                              startTime: selectedTime,
+                            });
+                          }}
                           className="h-10"
                         />
                       </div>
@@ -2094,17 +2205,7 @@ export default function NewAssessmentBuilder() {
                   </CardContent>
                 </Card>
 
-                {metadata.mode === "Groupwork" && (
-                  <GroupWorkConfigSection
-                    config={metadata as any}
-                    onConfigChange={(updates) =>
-                      setMetadata((prev) => ({ ...prev, ...updates }))
-                    }
-                  />
-                )}
-              </div>
-
-              <div className="space-y-6">
+                {/* Move Target Enrollment here */}
                 <Card className="shadow-none border">
                   <CardHeader className="py-4 border-b">
                     <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
@@ -2112,12 +2213,12 @@ export default function NewAssessmentBuilder() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-5 space-y-6">
-                    <div className="space-y-4">
-                      <div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      <div className="space-y-2">
                         <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
                           Departments
                         </Label>
-                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                        <ScrollArea className="h-40 border rounded-md p-2 bg-muted/10">
                           {availableDepartments.map((d) => (
                             <div
                               key={d.id}
@@ -2139,11 +2240,11 @@ export default function NewAssessmentBuilder() {
                           )}
                         </ScrollArea>
                       </div>
-                      <div>
+                      <div className="space-y-2">
                         <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
                           Class Options
                         </Label>
-                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                        <ScrollArea className="h-40 border rounded-md p-2 bg-muted/10">
                           {availableOptions.map((o) => (
                             <div
                               key={o.id}
@@ -2165,11 +2266,11 @@ export default function NewAssessmentBuilder() {
                           )}
                         </ScrollArea>
                       </div>
-                      <div>
+                      <div className="space-y-2">
                         <Label className="text-[11px] font-bold text-muted-foreground mb-1.5 block">
-                          Classes
+                          Level / Stream
                         </Label>
-                        <ScrollArea className="h-32 border rounded-md p-2 bg-muted/10">
+                        <ScrollArea className="h-40 border rounded-md p-2 bg-muted/10">
                           {availableClasses.map((c) => (
                             <div
                               key={c.id}
@@ -2196,8 +2297,16 @@ export default function NewAssessmentBuilder() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {metadata.mode === "Groupwork" && (
+                  <GroupWorkConfigSection
+                    config={metadata as any}
+                    onConfigChange={(updates) =>
+                      setMetadata((prev) => ({ ...prev, ...updates }))
+                    }
+                  />
+                )}
               </div>
-            </div>
             <div className="flex justify-end mt-8">
               <Button
                 size="lg"

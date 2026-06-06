@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -97,8 +97,8 @@ class SubmissionResponse(BaseModel):
     submitted_at: datetime | None
     time_spent_seconds: int | None
     is_skipped: bool
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class SubmissionSummary(BaseModel):
@@ -132,3 +132,7 @@ class AttemptSubmissionsResponse(BaseModel):
     attempt_id: uuid.UUID
     submissions: list[SubmissionResponse]
     total: int
+
+# Rebuild models to resolve forward references
+SubmissionResponse.model_rebuild()
+AttemptSubmissionsResponse.model_rebuild()

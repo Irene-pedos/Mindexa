@@ -613,9 +613,9 @@ class AssessmentService:
         await self._repo.delete_draft_progress(assessment_id)
 
         # Notify students if it's a group assessment
+        from app.db.enums import NotificationType
         if assessment.is_group_assessment:
-            from app.db.enums import NotificationType
-            groups = await self._group_repo.list_groups_by_assessment(assessment_id, include_members=True)
+            groups = await self._group_repo.list_groups_by_assessment(assessment.id, include_members=True)
             for group in groups:
                 for member in group.members:
                     if member.is_deleted:
@@ -628,6 +628,33 @@ class AssessmentService:
                         reference_id=assessment.id,
                         reference_type="assessment",
                         action_url=f"/student/group-work/{assessment.id}",
+                    )
+        else:
+            lecturer_name = current_user.profile.display_name if current_user.profile and current_user.profile.display_name else "Your Lecturer"
+            # General assessment publication notification
+            student_ids = await self._repo.list_enrolled_students(assessment.id)
+            for s_id in student_ids:
+                await self._notification_repo.create(
+                    recipient_id=s_id,
+                    notification_type=NotificationType.ASSESSMENT_PUBLISHED,
+                    title="New assessment published",
+                    body=f"Lecturer {lecturer_name} has published a new assessment: '{assessment.title}'.",
+                    reference_id=assessment.id,
+                    reference_type="assessment",
+                    action_url=f"/student/assessments",
+                )
+                
+                # If already active, send start work notification too
+                now = datetime.now(tz=UTC)
+                if assessment.window_start and assessment.window_start <= now:
+                     await self._notification_repo.create(
+                        recipient_id=s_id,
+                        notification_type=NotificationType.ASSESSMENT_PUBLISHED, # Using published for now, or add new type
+                        title="Assessment now active",
+                        body=f"The assessment '{assessment.title}' is now active. You can start working on it.",
+                        reference_id=assessment.id,
+                        reference_type="assessment",
+                        action_url=f"/student/assessments/{assessment.id}/take",
                     )
 
         return FinalizeAssessmentResponse(
@@ -1087,10 +1114,13 @@ class AssessmentService:
 
         if data.metadata.class_group_ids:
             for cg_id in data.metadata.class_group_ids:
-                # Find the ClassSection for this course and this class group
+                # Find the ClassSection for this course and this class group via assignments
+                from app.db.models.academic import TeachingAssignment
                 res = await self.db.execute(
-                    select(ClassSection.id).where(
-                        ClassSection.course_id == course_id,
+                    select(ClassSection.id)
+                    .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+                    .where(
+                        TeachingAssignment.course_id == course_id,
                         ClassSection.class_group_id == cg_id,
                         ClassSection.is_deleted == False
                     )
@@ -1140,12 +1170,13 @@ class AssessmentService:
 
             new_q = QuestionModel(
                 content=q.text or "",
+                image_url=q.imageUrl,
                 question_type=db_q_type,
                 marks=q.marks or 0,
                 difficulty=DifficultyLevel.MEDIUM,
                 created_by_id=current_user.id,
                 is_approved=True,
-                is_in_question_bank=True,
+                is_in_question_bank=False,
                 source_type=QuestionSourceType.MANUAL,
                 grading_mode=GradingMode.MANUAL if db_q_type in [
                     DbQuestionType.SHORT_ANSWER, 

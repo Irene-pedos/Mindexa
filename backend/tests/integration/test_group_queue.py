@@ -60,7 +60,7 @@ async def test_group_grading_queue_endpoint(client: AsyncClient, db, make_auth_h
     cg = ClassGroup(course_id=course.id, name="Q Group", code="QG", option_id=opt.id)
     db.add(cg); await db.flush()
 
-    cs = ClassSection(course_id=course.id, class_group_id=cg.id, name="Q Section")
+    cs = ClassSection(class_group_id=cg.id, name="Q Section")
     db.add(cs); await db.flush()
     
     lecturer = User(

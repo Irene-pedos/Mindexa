@@ -41,7 +41,10 @@ class TeachingAssignmentDetailResponse(TeachingAssignmentResponse):
     department_name: str | None = None
     option_name: str | None = None
     course_name: str | None = None
+    course_code: str | None = None
     class_section_name: str | None = None
+    class_group_name: str | None = None
+    class_group_level: int | None = None
 
 TeachingAssignmentCreate.model_rebuild()
 TeachingAssignmentResponse.model_rebuild()

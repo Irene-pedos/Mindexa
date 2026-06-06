@@ -136,16 +136,20 @@ class UserProfile(BaseModel, table=True):
     first_name: Optional[str] = Field(default=None, max_length=100)
     last_name: Optional[str] = Field(default=None, max_length=100)
     display_name: Optional[str] = Field(default=None, max_length=150)
-    phone_number: Optional[str] = Field(default=None, max_length=30)
+    phone_number: Optional[str] = Field(
+        default=None, 
+        max_length=30,
+        sa_column_kwargs={"unique": True}
+    )
     bio: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
-    avatar_url: Optional[str] = Field(default=None, max_length=500)
+    avatar_url: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
     student_id: Optional[str] = Field(default=None, max_length=50, index=True, unique=True)
     staff_id: Optional[str] = Field(default=None, max_length=50, index=True)
     college: Optional[str] = Field(default=None, max_length=150)
     department: Optional[str] = Field(default=None, max_length=150)
     option: Optional[str] = Field(default=None, max_length=150)
     level: Optional[str] = Field(default=None, max_length=20)
-    year: Optional[str] = Field(default=None, max_length=20)
+    year: Optional[str] = Field(default=None, max_length=100)
 
     # ── Relational Academic Assignment ────────────────────────────────────────
     institution_id: Optional[uuid.UUID] = Field(

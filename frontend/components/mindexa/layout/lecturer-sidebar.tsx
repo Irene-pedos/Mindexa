@@ -14,6 +14,7 @@ import {
   AlertTriangle,
   Bot,
   Eye,
+  Briefcase
 } from "lucide-react";
 
 import {
@@ -30,10 +31,12 @@ import {
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
+import { notificationApi } from "@/lib/api/notification";
 
 const mainNav = [
   { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard },
-  { title: "My Courses", url: "/lecturer/courses", icon: BookOpen },
+  { title: "My Assignments", url: "/lecturer/assignments", icon: Briefcase, badge: true },
+  { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen },
   { title: "Assessments", url: "/lecturer/assessments", icon: FileText },
   {
     title: "Question Bank",
@@ -58,6 +61,27 @@ export function LecturerSidebar({
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const [hasNewAssignments, setHasNewAssignments] = React.useState(false);
+
+  React.useEffect(() => {
+    async function checkNotifications() {
+      if (!user) return;
+      try {
+        const res = await notificationApi.getNotifications(true);
+        const hasAssignmentNotif = res.items.some(
+          n => n.notification_type === "TEACHING_ASSIGNMENT_CREATED"
+        );
+        setHasNewAssignments(hasAssignmentNotif);
+      } catch (err) {
+        console.error("Failed to check notifications", err);
+      }
+    }
+    
+    checkNotifications();
+    // Refresh every 2 minutes
+    const interval = setInterval(checkNotifications, 120000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const displayName =
     (user?.profile as any)?.display_name ||
@@ -69,7 +93,7 @@ export function LecturerSidebar({
     name: displayName,
     email: (user as any)?.email || "",
     avatar:
-      (user?.profile as any)?.profile_picture_url || "/avatars/user avatar.png",
+      (user?.profile as any)?.avatar_url || "/avatars/user avatar.png",
   };
 
   return (
@@ -114,6 +138,8 @@ export function LecturerSidebar({
             {mainNav.map((item) => {
               const isActive =
                 pathname === item.url || pathname.startsWith(item.url + "/");
+              const showBadge = item.badge && hasNewAssignments;
+              
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
@@ -121,9 +147,15 @@ export function LecturerSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                   >
-                    <Link href={item.url}>
+                    <Link href={item.url} className="relative">
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
+                      {showBadge && (
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+                        </span>
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

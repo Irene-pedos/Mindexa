@@ -16,6 +16,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ChartBarMultiple } from "@/components/chart-bar-multiple";
 import { ChartLineMultiple } from "@/components/chart-line-multiple";
+import { type ChartConfig } from "@/components/ui/chart";
 
 export default function AdminAnalyticsPage() {
   const [data, setData] = useState<AdminAnalyticsResponse | null>(null);
@@ -38,6 +39,17 @@ export default function AdminAnalyticsPage() {
   }, []);
 
   const icons = [Users, Activity, BookOpen, Shield];
+
+  const chartConfig = {
+    assessments: {
+      label: "Assessments",
+      color: "hsl(var(--chart-1))",
+    },
+    violations: {
+      label: "Violations",
+      color: "hsl(var(--chart-2))",
+    },
+  } satisfies ChartConfig;
 
   return (
     <div className="space-y-5">
@@ -95,22 +107,32 @@ export default function AdminAnalyticsPage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <Card className="border shadow-none overflow-hidden">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="text-sm">Assessment Activity</CardTitle>
-            <CardDescription className="text-xs">Monthly distribution of conducted assessments</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4 px-2">
-            <ChartBarMultiple />
+          <CardContent className="pt-6">
+            {loading ? (
+              <Skeleton className="h-[300px] w-full" />
+            ) : (
+              <ChartBarMultiple 
+                data={data?.activity_data || []} 
+                config={chartConfig}
+                title="Assessment Activity"
+                description="Monthly distribution of conducted assessments"
+              />
+            )}
           </CardContent>
         </Card>
 
         <Card className="border shadow-none overflow-hidden">
-          <CardHeader className="pb-4 border-b">
-            <CardTitle className="text-sm">System Load & Integrity</CardTitle>
-            <CardDescription className="text-xs">User traffic vs recorded integrity events</CardDescription>
-          </CardHeader>
-          <CardContent className="pt-4 px-2">
-            <ChartLineMultiple />
+          <CardContent className="pt-6">
+            {loading ? (
+              <Skeleton className="h-[300px] w-full" />
+            ) : (
+              <ChartLineMultiple 
+                data={data?.activity_data || []} 
+                config={chartConfig}
+                title="System Load & Integrity"
+                description="Assessment volume vs recorded integrity events"
+              />
+            )}
           </CardContent>
         </Card>
       </div>

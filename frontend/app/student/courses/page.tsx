@@ -194,7 +194,7 @@ export default function StudentWorkspacesPage() {
                         {ws.title}
                       </CardTitle>
                       <CardDescription className="text-[11px] font-medium uppercase opacity-60 mt-0.5">
-                        {ws.code} • {ws.academic_year}
+                        {ws.code} • {ws.academic_year || "GLOBAL"}
                       </CardDescription>
                     </div>
                   </div>

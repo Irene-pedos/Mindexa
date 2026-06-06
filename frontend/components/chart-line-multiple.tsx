@@ -18,40 +18,34 @@ import {
   type ChartConfig,
 } from "@/components/ui/chart"
 
-export const description = "A multiple line chart showing assessment trends"
+interface ChartLineMultipleProps {
+  data: any[]
+  config: ChartConfig
+  title?: string
+  description?: string
+  footerTitle?: string
+  footerDescription?: string
+}
 
-const chartData = [
-  { month: "January", assessments: 186, violations: 80 },
-  { month: "February", assessments: 305, violations: 200 },
-  { month: "March", assessments: 237, violations: 120 },
-  { month: "April", assessments: 73, violations: 190 },
-  { month: "May", assessments: 209, violations: 130 },
-  { month: "June", assessments: 214, violations: 140 },
-]
-
-const chartConfig = {
-  assessments: {
-    label: "Assessments",
-    color: "var(--chart-1)",
-  },
-  violations: {
-    label: "Violations",
-    color: "var(--chart-2)",
-  },
-} satisfies ChartConfig
-
-export function ChartLineMultiple() {
+export function ChartLineMultiple({
+  data,
+  config,
+  title = "Assessments vs Violations Trends",
+  description = "Timeline view",
+  footerTitle,
+  footerDescription = "Comparing total assessments and violations"
+}: ChartLineMultipleProps) {
   return (
-    <Card className="flex flex-col">
-      <CardHeader>
-        <CardTitle>Assessments vs Violations Trends</CardTitle>
-        <CardDescription>January - June 2026</CardDescription>
+    <Card className="flex flex-col border-none shadow-none">
+      <CardHeader className="px-0 pt-0">
+        <CardTitle>{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
-      <CardContent className="flex-1">
-        <ChartContainer config={chartConfig}>
+      <CardContent className="flex-1 px-0">
+        <ChartContainer config={config}>
           <LineChart
             accessibilityLayer
-            data={chartData}
+            data={data}
             margin={{
               left: 12,
               right: 12,
@@ -66,31 +60,29 @@ export function ChartLineMultiple() {
               tickFormatter={(value) => value.slice(0, 3)}
             />
             <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
-            <Line
-              dataKey="assessments"
-              type="monotone"
-              stroke="var(--color-assessments)"
-              strokeWidth={2}
-              dot={false}
-            />
-            <Line
-              dataKey="violations"
-              type="monotone"
-              stroke="var(--color-violations)"
-              strokeWidth={2}
-              dot={false}
-            />
+            {Object.keys(config).map((key) => (
+              <Line
+                key={key}
+                dataKey={key}
+                type="monotone"
+                stroke={`var(--color-${key})`}
+                strokeWidth={2}
+                dot={false}
+              />
+            ))}
           </LineChart>
         </ChartContainer>
       </CardContent>
-      <CardFooter>
+      <CardFooter className="px-0 pb-0">
         <div className="flex w-full items-start gap-2 text-sm">
-          <div className="grid gap-2">
-            <div className="flex items-center gap-2 leading-none font-medium">
-              Integrity violations down by 4.2% this month <TrendingUp className="h-4 w-4 text-emerald-500" />
-            </div>
+          <div className="grid gap-1">
+            {footerTitle && (
+              <div className="flex items-center gap-2 leading-none font-medium">
+                {footerTitle}
+              </div>
+            )}
             <div className="flex items-center gap-2 leading-none text-muted-foreground">
-              Comparing total assessments and violations for the last 6 months
+              {footerDescription}
             </div>
           </div>
         </div>

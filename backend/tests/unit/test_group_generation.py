@@ -20,11 +20,23 @@ from app.core.exceptions import ValidationError
 class TestGroupGeneration:
 
     async def _setup_assessment(self, db, lecturer):
+        from app.db.models.academic import TeachingWorkspace
+        workspace = TeachingWorkspace(
+            lecturer_id=lecturer.id,
+            class_section_id=uuid.uuid4(),
+            academic_period_id=uuid.uuid4(),
+            course_id=uuid.uuid4(),
+            title="Generation Test Workspace"
+        )
+        db.add(workspace)
+        await db.flush()
+
         assessment = Assessment(
             title="Test Group Assessment",
             assessment_type=AssessmentType.SUMMATIVE,
             status=AssessmentStatus.DRAFT,
             created_by_id=lecturer.id,
+            teaching_workspace_id=workspace.id,
             is_group_assessment=True,
             max_group_size=4,
         )

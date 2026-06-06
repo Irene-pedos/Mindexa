@@ -40,7 +40,7 @@ class AssessmentStep1Request(MindexaSchema):
     assessment_type: AssessmentType
     course_id: uuid.UUID
     subject_id: uuid.UUID | None = None
-    academic_year: str = Field(min_length=9, max_length=20)
+    academic_year: str = Field(min_length=9, max_length=100)
     total_marks: int = Field(default=100, ge=1, le=1000)
     passing_marks: int | None = Field(default=None, ge=0)
     duration_minutes: int | None = Field(default=None, ge=1, le=480)

@@ -452,6 +452,60 @@ class IntegrityService:
         }
 
     # -----------------------------------------------------------------------
+    # AI EXPLAINER (Phase 6)
+    # -----------------------------------------------------------------------
+
+    async def explain_flag_with_ai(
+        self,
+        *,
+        flag_id: uuid.UUID,
+        lecturer_id: uuid.UUID,
+    ) -> IntegrityExplainerOutput:
+        """
+        Generate an AI narrative explanation for an integrity flag.
+        """
+        # 1. Load flag and context
+        flag = await self.integrity_repo.get_flag_by_id(flag_id)
+        if not flag:
+            raise NotFoundError("Integrity flag not found")
+
+        report = await self.get_attempt_integrity_report(flag.attempt_id)
+        
+        # Load assessment title
+        from app.db.models.assessment import Assessment
+        assessment = await self.db.get(Assessment, flag.assessment_id)
+        assessment_title = assessment.title if assessment else "Unknown Assessment"
+
+        # 2. Call AI Explainer Agent
+        from app.agents.integrity_explainer_agent import IntegrityExplainerAgent, IntegrityExplainerOutput
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+
+        provider = get_ai_provider()
+        gateway = AIGateway(self.db, provider)
+        agent = IntegrityExplainerAgent(gateway)
+
+        # Convert SQLModel objects to dicts for the agent
+        events_json = [
+            {
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "event_type": e.event_type,
+                "metadata_json": e.metadata_json
+            }
+            for e in report["events"]
+        ]
+
+        return await agent.explain_flag(
+            lecturer_id=lecturer_id,
+            attempt_id=flag.attempt_id,
+            assessment_title=assessment_title,
+            total_warnings=report["total_warnings"],
+            flag_description=flag.description,
+            event_counts=report["event_counts"],
+            events=events_json
+        )
+
+    # -----------------------------------------------------------------------
     # SUPERVISION SESSION
     # -----------------------------------------------------------------------
 

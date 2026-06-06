@@ -1,37 +1,30 @@
 // app/student/study/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
 import {
   Brain,
   FileText,
   Lightbulb,
   Target,
   BookOpen,
-  ArrowRight,
   ShieldCheck,
-  Sparkles
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { studentApi, StudentResourceResponse } from "@/lib/api/student";
 import Link from "next/link";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Separator } from "@/components/ui/separator";
+import { AISupportChat } from "@/components/mindexa/student/ai-support-chat";
 
 export default function StudentStudySupportPage() {
-  const [prompt, setPrompt] = useState("");
-  const [isThinking, setIsThinking] = useState(false);
-  const [response, setResponse] = useState("");
   const [resources, setResources] = useState<StudentResourceResponse[]>([]);
   const [selectedResource, setSelectedResource] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -50,25 +43,19 @@ export default function StudentStudySupportPage() {
     loadData();
   }, []);
 
-  const handleAskAI = async () => {
-    if (!prompt.trim()) return;
-    setIsThinking(true);
-
-    // AI simulation logic
-    setTimeout(() => {
-      setResponse(
-        `Based on your query "${prompt}":\n\n` +
-          `• Core concept: Clear, structured explanation of the requested topic.\n` +
-          `• Common pitfalls: Typical mistakes students make during CATs.\n` +
-          `• Revision priority: High – this appears frequently in summatives.\n\n` +
-          `Would you like to:\n` +
-          `• Generate 5 practice questions\n` +
-          `• Create a mind map summary\n` +
-          `• Identify weak topics from your resources?`,
-      );
-      setIsThinking(false);
-    }, 1350);
-  };
+  // Compute selected contexts based on the selected resource
+  const selectedContexts = useMemo(() => {
+    if (!selectedResource) return [];
+    const resource = resources.find(r => r.id === selectedResource);
+    if (!resource) return [];
+    
+    return [
+      {
+        title: resource.display_name || resource.original_filename,
+        content: "Content from this resource will be retrieved via RAG.", // Real implementation relies on backend RAG fetching by id, but our prompt takes explicit contexts. Since Phase 1.5 RAG does its own embedding retrieval, we don't need to pass the full content here, but we can pass a hint or let RAG handle it. Actually, RAG handles it. We can just send an empty array or a pointer. Let's just send empty array for now since backend RAG gets ALL student chunks.
+      }
+    ];
+  }, [selectedResource, resources]);
 
   if (loading) {
      return (
@@ -106,44 +93,7 @@ export default function StudentStudySupportPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Main AI Interaction Area */}
         <div className="lg:col-span-7 space-y-6">
-          <Card className="shadow-none border">
-            <CardHeader className="border-b bg-muted/5">
-              <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <Sparkles className="size-4 text-primary" /> Ask Your Personal Assistant
-              </CardTitle>
-              <CardDescription className="text-xs font-medium uppercase tracking-wider">
-                Explain • Identify Weak Areas • Suggest Priorities
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              <Textarea
-                placeholder="e.g., Explain ACID properties with banking examples... or Suggest a revision plan for Database Normalization."
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                className="min-h-[140px] text-base leading-relaxed"
-              />
-
-              <Button
-                onClick={handleAskAI}
-                disabled={isThinking || !prompt.trim()}
-                className="w-full h-12 text-sm font-bold shadow-sm"
-              >
-                {isThinking ? (
-                  "Analyzing Requirements..."
-                ) : (
-                  <><ArrowRight className="mr-2 size-4" /> Generate Study Guidance</>
-                )}
-              </Button>
-
-              {response && (
-                <div className="animate-in fade-in slide-in-from-top-4 duration-500 pt-4">
-                  <div className="p-6 rounded-xl border bg-primary/5 text-sm text-foreground/90 leading-relaxed whitespace-pre-line border-primary/20">
-                    {response}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <AISupportChat selectedContexts={selectedContexts} />
         </div>
 
         {/* Sidebar – Resources & Rules */}

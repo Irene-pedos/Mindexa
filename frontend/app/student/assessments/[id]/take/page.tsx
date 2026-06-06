@@ -529,6 +529,42 @@ export default function TakeAssessmentPage() {
 
   const isHighSecurity = useMemo(() => isHighSecurityAssessment(assessment?.assessment_type, assessment?.is_supervised), [assessment]);
 
+  const autoSubmit = useCallback(async () => {
+     if (!attemptId || !attemptToken) return;
+     try {
+        await attemptApi.submitAttempt(attemptId, attemptToken, true);
+        toast.info("Session ended and responses preserved.");
+     } catch (e) {
+        console.error("Auto-submit failed", e);
+     }
+  }, [attemptId, attemptToken]);
+
+  const terminateSession = useCallback((reason: string) => {
+    setTerminationReason(reason);
+    setStage("terminated");
+    autoSubmit();
+  }, [autoSubmit]);
+
+  const handleIntegrityEvent = useCallback(async (type: string) => {
+     if (!attemptId || !attemptToken) return;
+     try {
+        const { warning } = await attemptApi.recordIntegrityEvent(attemptId, attemptToken, type);
+        if (warning) {
+            setWarnings(prev => {
+                const newCount = prev + 1;
+                if (newCount >= 3) {
+                    terminateSession(`Maximum integrity warnings exceeded (${type}). Session automatically submitted.`);
+                } else {
+                    setShowWarningModal(true);
+                }
+                return newCount;
+            });
+        }
+     } catch (err) {
+        console.error("Failed to log integrity event", err);
+     }
+  }, [attemptId, attemptToken, terminateSession]);
+
   // 1. Initial Load
   useEffect(() => {
     async function loadAssessment() {
@@ -560,7 +596,7 @@ export default function TakeAssessmentPage() {
 
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, [stage, assessment]);
+  }, [stage, assessment, handleIntegrityEvent]);
 
   // 2b. Tab switch monitor (High Security only)
   useEffect(() => {
@@ -574,7 +610,7 @@ export default function TakeAssessmentPage() {
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [stage, isHighSecurity]);
+  }, [stage, isHighSecurity, handleIntegrityEvent]);
 
   // 3. Timer logic
   useEffect(() => {
@@ -592,7 +628,7 @@ export default function TakeAssessmentPage() {
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [stage, timeLeft]);
+  }, [stage, timeLeft, autoSubmit]);
 
   // 4. Autosave logic
   const saveAnswer = useCallback(async (questionId: string, qType: string, answerVal: any) => {
@@ -660,26 +696,6 @@ export default function TakeAssessmentPage() {
     document.documentElement.requestFullscreen().catch(() => {
       toast.error("Fullscreen request denied. Please enable manually.");
     });
-  };
-
-  const handleIntegrityEvent = async (type: string) => {
-     if (!attemptId || !attemptToken) return;
-     try {
-        const { warning } = await attemptApi.recordIntegrityEvent(attemptId, attemptToken, type);
-        if (warning) {
-            setWarnings(prev => {
-                const newCount = prev + 1;
-                if (newCount >= 3) {
-                    terminateSession(`Maximum integrity warnings exceeded (${type}). Session automatically submitted.`);
-                } else {
-                    setShowWarningModal(true);
-                }
-                return newCount;
-            });
-        }
-     } catch (err) {
-        console.error("Failed to log integrity event", err);
-     }
   };
 
   const handleExitEnvironment = () => {
@@ -758,22 +774,6 @@ export default function TakeAssessmentPage() {
     if (assessment.fullscreen_required && !document.fullscreenElement) {
         enterFullscreen();
     }
-  };
-
-  const terminateSession = (reason: string) => {
-    setTerminationReason(reason);
-    setStage("terminated");
-    autoSubmit();
-  };
-
-  const autoSubmit = async () => {
-     if (!attemptId || !attemptToken) return;
-     try {
-        await attemptApi.submitAttempt(attemptId, attemptToken, true);
-        toast.info("Session ended and responses preserved.");
-     } catch (e) {
-        console.error("Auto-submit failed", e);
-     }
   };
 
   const submitAssessment = async () => {
@@ -1159,6 +1159,13 @@ export default function TakeAssessmentPage() {
                 </div>
 
                 <Card className="shadow-none border border-muted/40 rounded-xl overflow-hidden bg-background">
+                  <CardHeader className="py-4 px-10 border-b bg-muted/5">
+                      <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                              {currentQ?.section_title || "General Section"}
+                          </span>
+                      </div>
+                  </CardHeader>
                   <CardContent className="p-10">
                     <div className="space-y-6 mb-10">
                         <div className="flex items-start gap-4">
@@ -1212,26 +1219,41 @@ export default function TakeAssessmentPage() {
                 <p className="text-[9px] font-semibold text-muted-foreground/50 uppercase">Session Navigator</p>
             </div>
             
-            <div className="grid grid-cols-4 gap-2">
-              {questions.map((q, idx) => {
-                const isAnswered = !!answers[q.id];
-                const isCurrent = idx === currentQuestionIndex;
-
+            <div className="space-y-6 overflow-y-auto pr-2 pb-10">
+              {Array.from(new Set(questions.map(q => q.assessment_section_id))).map(sectionId => {
+                const sectionQuestions = questions.filter(q => q.assessment_section_id === sectionId);
+                const sectionTitle = sectionQuestions[0]?.section_title || "General";
+                
                 return (
-                  <button
-                    key={q.id}
-                    onClick={() => setCurrentQuestionIndex(idx)}
-                    className={cn(
-                      "h-9 rounded-lg border text-[11px] font-bold transition-all flex items-center justify-center shadow-none",
-                      isCurrent 
-                          ? "border-primary bg-primary text-primary-foreground" 
-                          : isAnswered 
-                              ? "border-emerald-100 bg-emerald-50 text-emerald-700" 
-                              : "bg-muted/10 border-muted/20 text-muted-foreground/40 hover:bg-muted/20"
-                    )}
-                  >
-                    {(idx + 1).toString().padStart(2, '0')}
-                  </button>
+                    <div key={sectionId || 'general'} className="space-y-2">
+                        <h4 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/70 mb-2 truncate" title={sectionTitle}>
+                            {sectionTitle}
+                        </h4>
+                        <div className="grid grid-cols-4 gap-2">
+                          {sectionQuestions.map((q) => {
+                            const idx = questions.findIndex(globalQ => globalQ.id === q.id);
+                            const isAnswered = !!answers[q.id];
+                            const isCurrent = idx === currentQuestionIndex;
+
+                            return (
+                              <button
+                                key={q.id}
+                                onClick={() => setCurrentQuestionIndex(idx)}
+                                className={cn(
+                                  "h-9 rounded-lg border text-[11px] font-bold transition-all flex items-center justify-center shadow-none",
+                                  isCurrent 
+                                      ? "border-primary bg-primary text-primary-foreground" 
+                                      : isAnswered 
+                                          ? "border-emerald-100 bg-emerald-50 text-emerald-700" 
+                                          : "bg-muted/10 border-muted/20 text-muted-foreground/40 hover:bg-muted/20"
+                                )}
+                              >
+                                {(idx + 1).toString().padStart(2, '0')}
+                              </button>
+                            );
+                          })}
+                        </div>
+                    </div>
                 );
               })}
             </div>

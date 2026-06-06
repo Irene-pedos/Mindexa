@@ -63,6 +63,7 @@ from app.db.enums import (
     SupervisorRole,
     UserRole,
     UserStatus,
+    LocationType,
 )
 from app.db.models import (
     AcademicPeriod,
@@ -327,7 +328,7 @@ async def seed_academic_structure(
     db_subject_id = await _ensure_subject(
         session, inst_id, cs_dept_id, db_course_id, "DB_SUB", "Database Design & SQL"
     )
-    db_section_id = await _ensure_class_section(session, db_course_id, "Y2 IT")
+    db_section_id = await _ensure_class_section(session, cs_dept_id, "Y2 IT")
     await _ensure_lecturer_assignment(session, lecturer_id, db_course_id)
     await _ensure_enrollment(session, student_id, db_section_id)
 
@@ -335,7 +336,7 @@ async def seed_academic_structure(
     vet_course_id = await _ensure_course(
         session, inst_id, vet_dept_id, period_id, "VET301", "Animal Anatomy"
     )
-    await _ensure_class_section(session, vet_course_id, "Y2 Veterinary")
+    await _ensure_class_section(session, vet_dept_id, "Y2 Veterinary")
     await _ensure_lecturer_assignment(session, lecturer_id, vet_course_id)
 
     # Course 3: Software Engineering
@@ -345,7 +346,7 @@ async def seed_academic_structure(
     se_subject_id = await _ensure_subject(
         session, inst_id, cs_dept_id, se_course_id, "CS101_SUB", "Programming Fundamentals"
     )
-    se_section_id = await _ensure_class_section(session, se_course_id, "Y1 CS")
+    se_section_id = await _ensure_class_section(session, cs_dept_id, "Y1 CS")
     await _ensure_lecturer_assignment(session, lecturer_id, se_course_id)
 
     await session.commit()
@@ -511,13 +512,13 @@ async def _ensure_subject(
 
 async def _ensure_class_section(
     session: AsyncSession,
-    course_id: uuid.UUID,
+    department_id: uuid.UUID,
     name: str,
 ) -> uuid.UUID:
     """Upsert a class section."""
     stmt = select(ClassSection)
     stmt = stmt.where(ClassSection.name == name)  # type: ignore[misc]
-    stmt = stmt.where(ClassSection.course_id == course_id)  # type: ignore[misc]
+    stmt = stmt.where(ClassSection.department_id == department_id)  # type: ignore[misc]
     result = await session.execute(stmt)
     section = result.scalar_one_or_none()
     if section:
@@ -525,9 +526,10 @@ async def _ensure_class_section(
         return section.id
 
     section = ClassSection(
-        course_id=course_id,
+        department_id=department_id,
         name=name,
         capacity=50,
+        location_type=LocationType.PHYSICAL_ROOM,
         is_active=True,
     )
     session.add(section)

@@ -27,12 +27,14 @@ RULES ENFORCED HERE:
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.logger import get_logger
 from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus, QuestionType
 from app.db.models.attempt import GradingQueueItem, StudentResponse, SubmissionGrade
 from app.db.models.question import Question
@@ -40,6 +42,8 @@ from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
+
+logger = get_logger("mindexa.grading_service")
 
 # AUTO-GRADABLE question types (can be fully graded by code)
 AUTO_GRADABLE = {
@@ -214,29 +218,60 @@ class GradingService:
         if not response:
             raise NotFoundError(f"StudentResponse {item.response_id} not found.")
 
-        # 3. Fetch question
+        # 3. Fetch question and rubric
         question = await self.question_repo.get_by_id_simple(response.question_id)
         if not question:
             raise NotFoundError(f"Question {response.question_id} not found.")
 
-        # 4. Mock AI Provider Call
-        # In a real implementation, we would call an AI service here.
-        mock_score = float(question.marks) * 0.8  # Assume 80% correct
-        mock_rationale = (
-            "The student demonstrated a strong understanding of the core concepts, "
-            "but missed minor nuances in the second paragraph."
-        )
-        mock_confidence = 0.95
+        rubric = await self.assessment_repo.get_rubric_for_question(response.question_id)
+        rubric_content = "Generic academic standards"
+        if rubric:
+            # Format rubric for AI context
+            rubric_content = "\n".join([
+                f"- {c.name}: {c.description} ({c.weight} marks)"
+                for c in rubric.criteria
+            ])
 
-        # 5. Apply suggestion
-        await self.apply_ai_grading(
-            response_id=response.id,
-            ai_suggested_score=mock_score,
-            ai_rationale=mock_rationale,
-            ai_confidence=mock_confidence,
-            max_score=float(question.marks),
-            graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
-        )
+        # 4. Call AI Review Agent
+        from app.agents.review_agent import ReviewAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+
+        provider = get_ai_provider()
+        gateway = AIGateway(self.db, provider)
+        agent = ReviewAgent(gateway)
+
+        # Get student answer (assuming TEXT for now, handle others as needed)
+        student_answer = response.answer_text or "No answer provided"
+        
+        try:
+            ai_output = await agent.review_response(
+                question_text=question.question_text,
+                student_answer=student_answer,
+                rubric_content=rubric_content,
+                max_score=float(question.marks),
+                question_type=question.question_type,
+                attempt_id=item.attempt_id,
+                response_id=response.id,
+            )
+
+            # 5. Apply suggestion
+            await self.apply_ai_grading(
+                response_id=response.id,
+                ai_suggested_score=ai_output.suggested_score,
+                ai_rationale=ai_output.rationale,
+                ai_confidence=ai_output.confidence,
+                max_score=float(question.marks),
+                graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+            )
+        except Exception as exc:
+            logger.error("AI grading failed for item %s: %s", item_id, str(exc))
+            await self.grading_repo.update_queue_item(
+                item.id,
+                status=GradingQueueStatus.FAILED,
+            )
+            raise
+
         await self.grading_repo.update_queue_item(
             item.id,
             status=GradingQueueStatus.COMPLETED,
@@ -246,7 +281,7 @@ class GradingService:
             "status": "completed",
             "item_id": str(item_id),
             "response_id": str(response.id),
-            "suggested_score": mock_score,
+            "suggested_score": ai_output.suggested_score,
         }
 
     # -----------------------------------------------------------------------
@@ -342,19 +377,19 @@ class GradingService:
             )
 
         # 0. Authorization: Verify lecturer is assigned to this assessment's course
-        from app.db.models.academic import LecturerCourseAssignment, Course
+        from app.db.models.academic import TeachingAssignment, Course
         from app.db.models.assessment import Assessment
         from sqlalchemy import select
         from app.core.exceptions import AuthorizationError
 
         auth_stmt = (
-            select(LecturerCourseAssignment.id)
-            .join(Course, Course.id == LecturerCourseAssignment.course_id)
+            select(TeachingAssignment.id)
+            .join(Course, Course.id == TeachingAssignment.course_id)
             .join(Assessment, Assessment.course_id == Course.id)
             .where(
-                LecturerCourseAssignment.lecturer_id == lecturer_id,
+                TeachingAssignment.lecturer_id == lecturer_id,
                 Assessment.id == existing.assessment_id,
-                LecturerCourseAssignment.is_active == True
+                TeachingAssignment.is_active == True
             )
         )
         auth_res = await self.db.execute(auth_stmt)
@@ -416,6 +451,87 @@ class GradingService:
         return existing
 
     # -----------------------------------------------------------------------
+    # GENERATE AI FEEDBACK DRAFT (Phase 4)
+    # -----------------------------------------------------------------------
+
+    async def generate_feedback_draft(
+        self,
+        *,
+        grade_id: uuid.UUID,
+        lecturer_id: uuid.UUID,
+    ) -> SubmissionGrade:
+        """
+        Generate a professional feedback draft using the FeedbackAgent.
+        
+        The draft is stored in the SubmissionGrade record for the lecturer
+        to review, edit, and eventually release.
+        """
+        grade = await self.grading_repo.get_grade_by_id(grade_id)
+        if not grade:
+            raise NotFoundError("Grade not found")
+
+        assessment = await self.assessment_repo.get_by_id(grade.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found")
+
+        # 1. Gather context
+        rubric_content = "Standard academic evaluation"
+        if grade.rubric_scores:
+            # Reconstruct rubric context from stored scores/notes if available
+            rubric_content = json.dumps(grade.rubric_scores)
+        
+        student_response_summary = "Performance evaluation"
+        if grade.response_id:
+            resp = await self.submission_repo.get_response_by_id(grade.response_id)
+            if resp:
+                student_response_summary = f"Student Answer: {resp.answer_text[:500]}..."
+
+        # 2. Call AI Feedback Agent
+        from app.agents.feedback_agent import FeedbackAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+
+        provider = get_ai_provider()
+        gateway = AIGateway(self.db, provider)
+        agent = FeedbackAgent(gateway)
+
+        try:
+            ai_output = await agent.draft_feedback(
+                lecturer_id=lecturer_id,
+                assessment_title=assessment.title,
+                score=grade.score or grade.ai_suggested_score or 0.0,
+                max_score=grade.max_score,
+                rubric_content=rubric_content,
+                lecturer_notes=grade.internal_notes,
+                student_response_summary=student_response_summary,
+                attempt_id=grade.attempt_id,
+                grade_id=grade.id,
+            )
+
+            # 3. Store draft separately from final feedback
+            # Using update_grade to store the new fields
+            await self.grading_repo.update_grade(
+                grade_id=grade.id,
+                updated_by_id=lecturer_id,
+                ai_feedback_draft=ai_output.draft_feedback,
+                ai_feedback_strengths=ai_output.strengths,
+                ai_feedback_improvements=ai_output.areas_for_improvement,
+                ai_feedback_suggestions=ai_output.suggestions,
+            )
+            
+            # Refresh local object
+            grade.ai_feedback_draft = ai_output.draft_feedback
+            grade.ai_feedback_strengths = ai_output.strengths
+            grade.ai_feedback_improvements = ai_output.areas_for_improvement
+            grade.ai_feedback_suggestions = ai_output.suggestions
+
+        except Exception as exc:
+            logger.error("AI feedback generation failed for grade %s: %s", grade_id, str(exc))
+            raise
+
+        return grade
+
+    # -----------------------------------------------------------------------
     # GRADE ALL RESPONSES FOR AN ATTEMPT (post-submission)
     # -----------------------------------------------------------------------
 
@@ -427,31 +543,50 @@ class GradingService:
         student_id: uuid.UUID,
     ) -> dict:
         """
-        Grade all final responses for an attempt.
+        Grade all questions for an attempt.
 
-        For each question:
+        For each question in the assessment:
+            - If no response exists, treat as skipped.
             - AUTO_GRADABLE types → auto_grade_response()
             - OPEN_ENDED types → queue_manual_grading()
 
         Returns a summary dict with counts by mode.
         """
-        responses = await self.submission_repo.list_final_responses(attempt_id)
         counts = {"auto": 0, "queued": 0, "skipped": 0}
 
-        for response in responses:
-            # Load question with options via assessment question link
-            aq_rows = await self.assessment_repo.list_assessment_questions(assessment_id)
-            aq_map = {row.question_id: row for row in aq_rows}
-            aq = aq_map.get(response.question_id)
-            if not aq or not aq.question:
+        # 1. Get all questions in the assessment
+        aq_rows = await self.assessment_repo.list_assessment_questions(assessment_id)
+        
+        # 2. Get existing responses (grade everything available for this attempt)
+        responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
+        response_map = {r.question_id: r for r in responses}
+
+        for aq in aq_rows:
+            if not aq.question:
                 continue
 
             question = aq.question
             max_score = float(
                 aq.marks_override if aq.marks_override is not None else question.marks
             )
-
             q_type = QuestionType(question.question_type)
+
+            # Find or mock response
+            response = response_map.get(question.id)
+            if not response:
+                # Create an empty, skipped response
+                from datetime import UTC, datetime
+                response, _ = await self.submission_repo.upsert_response(
+                    attempt_id=attempt_id,
+                    question_id=question.id,
+                    answer_type="TEXT", # Default fallback
+                    is_skipped=True
+                )
+                # Explicitly mark as final to ensure it's picked up by calculation
+                response.is_final = True
+                response.submitted_at = datetime.now(UTC)
+                await self.db.flush()
+
             if response.is_skipped:
                 await self.auto_grade_response(
                     response=response,
@@ -501,7 +636,7 @@ class GradingService:
             2. Find all assessments belonging to those courses.
             3. Filter the queue by those assessment IDs.
         """
-        from app.db.models.academic import LecturerCourseAssignment, Course
+        from app.db.models.academic import TeachingAssignment, Course
         from app.db.models.assessment import Assessment
         from sqlalchemy import select
 
@@ -509,8 +644,8 @@ class GradingService:
         stmt = (
             select(Assessment.id)
             .join(Course, Course.id == Assessment.course_id)
-            .join(LecturerCourseAssignment, LecturerCourseAssignment.course_id == Course.id)
-            .where(LecturerCourseAssignment.lecturer_id == lecturer_id)
+            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
+            .where(TeachingAssignment.lecturer_id == lecturer_id)
         )
         res = await self.db.execute(stmt)
         allowed_assessment_ids = res.scalars().all()

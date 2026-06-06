@@ -205,11 +205,17 @@ class AIActionLog(AppendOnlyModel, table=True):
 
     # ── Model & performance ───────────────────────────────────────────────────
 
+    provider_name: Optional[str] = Field(
+        default=None,
+        nullable=True,
+        max_length=50,
+    )
     model_name: str = Field(nullable=False, max_length=100)
     prompt_tokens: Optional[int] = Field(default=None, nullable=True)
     completion_tokens: Optional[int] = Field(default=None, nullable=True)
     total_tokens: Optional[int] = Field(default=None, nullable=True)
     latency_ms: Optional[int] = Field(default=None, nullable=True)
+    cost_estimate: Optional[float] = Field(default=None, nullable=True)
 
     # ── Input / Output ────────────────────────────────────────────────────────
 

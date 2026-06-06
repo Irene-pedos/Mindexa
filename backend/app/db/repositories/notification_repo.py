@@ -4,7 +4,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import List, Tuple
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, update, and_, or_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.notification import Notification

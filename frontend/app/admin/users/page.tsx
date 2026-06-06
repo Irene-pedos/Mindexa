@@ -118,7 +118,7 @@ export default function AdminUsersPage() {
     } finally {
       setLoading(false);
     }
-  }, [currentPage, pageSize, roleFilter, statusFilter]);
+  }, [currentPage, pageSize]);
 
   useEffect(() => {
     loadUsers();

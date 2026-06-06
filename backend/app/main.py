@@ -26,9 +26,12 @@ from app.api.v1.routes import (
     resource,
     result,
     student,
+    student_ai,
     submission,
     academic,
     admin_academic,
+    analytics,
+    admin_ai_audit,
     )
 
 from app.core.config import settings
@@ -58,11 +61,14 @@ def create_app() -> FastAPI:
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
+    app.include_router(admin_ai_audit.router, prefix=settings.API_V1_STR)
+    app.include_router(analytics.router, prefix=settings.API_V1_STR)
     app.include_router(auth.router, prefix=settings.API_V1_STR)
     app.include_router(academic.router, prefix=settings.API_V1_STR)
     app.include_router(admin.router, prefix=settings.API_V1_STR)
     app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
+    app.include_router(student_ai.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)
     app.include_router(resource.router, prefix=settings.API_V1_STR)
     app.include_router(question.router, prefix=settings.API_V1_STR)
@@ -84,7 +90,6 @@ def create_app() -> FastAPI:
 
     # ── MIDDLEWARE (reverse registration order = outermost first) ─────────────
 
-    # Outermost: CORS handles preflight first
     from app.middleware.rate_limit import RateLimitMiddleware
     app.add_middleware(RateLimitMiddleware)
 
@@ -94,6 +99,8 @@ def create_app() -> FastAPI:
     from app.middleware.security_headers import SecurityHeadersMiddleware
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # Outermost: CORS must handle preflight (OPTIONS) BEFORE all other logic.
+    # Middlewares execute in reverse order of registration.
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,

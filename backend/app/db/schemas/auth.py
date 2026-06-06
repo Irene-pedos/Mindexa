@@ -284,13 +284,13 @@ class StudentOnboardingRequest(MindexaSchema):
     level: str = Field(description="Academic level (e.g. Level 6)")
     year: str = Field(description="Academic year (e.g. 2024 - 2025)")
     class_section_id: uuid.UUID | None = None
-    profile_picture_url: str | None = None
+    avatar_url: str | None = None
 
 
 class LecturerOnboardingRequest(MindexaSchema):
     """Phase 2: Lecturer profile completion."""
     bio: str | None = Field(default=None, max_length=1000)
-    profile_picture_url: str | None = None
+    avatar_url: str | None = None
     phone_number: str | None = None
 
 
@@ -348,12 +348,12 @@ class UserProfileResponse(MindexaSchema):
     """
 
     user_id: uuid.UUID
-    first_name: str
-    last_name: str
+    first_name: str | None = None
+    last_name: str | None = None
     display_name: str | None = None
     bio: str | None = None
     phone_number: str | None = None
-    profile_picture_url: str | None = None
+    avatar_url: str | None = None
     student_id: str | None = None
     staff_id: str | None = None
     college: str | None = None

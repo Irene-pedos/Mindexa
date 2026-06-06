@@ -14,6 +14,7 @@ import {
   Settings,
   GraduationCap,
   Building2,
+  Calendar,
 } from "lucide-react";
 
 import {
@@ -36,6 +37,7 @@ const mainNav = [
   { title: "Users & Roles", url: "/admin/users", icon: Users },
   { title: "Institutions", url: "/admin/institutions", icon: Building2 },
   { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
+  { title: "Academic Periods", url: "/admin/academic/periods", icon: Calendar },
   { title: "Academic Assignments", url: "/admin/academic/assignments", icon: Users },
   { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen },
 ];
@@ -58,7 +60,7 @@ export function AdminSidebar({
   const userData = {
     name: displayName,
     email: (user as any)?.email || "",
-    avatar: (user?.profile as any)?.profile_picture_url || "/avatars/user avatar.png"
+    avatar: (user?.profile as any)?.avatar_url || "/avatars/user avatar.png"
   }
 
   return (

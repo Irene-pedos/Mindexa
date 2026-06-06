@@ -31,11 +31,23 @@ class TestGroupAppeals:
         db.add(lecturer)
         await db.flush()
         
+        from app.db.models.academic import TeachingWorkspace
+        workspace = TeachingWorkspace(
+            lecturer_id=lecturer.id,
+            class_section_id=uuid.uuid4(),
+            academic_period_id=uuid.uuid4(),
+            course_id=uuid.uuid4(),
+            title="Test Appeals Workspace"
+        )
+        db.add(workspace)
+        await db.flush()
+
         assessment = Assessment(
             title="Test Appeals",
             assessment_type=AssessmentType.SUMMATIVE,
             status=AssessmentStatus.PUBLISHED,
             created_by_id=lecturer.id,
+            teaching_workspace_id=workspace.id,
             is_group_assessment=True,
             passing_marks=50
         )

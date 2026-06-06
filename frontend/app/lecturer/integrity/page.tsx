@@ -15,10 +15,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AIIntegrityExplainer } from "@/components/mindexa/integrity/ai-explainer";
 
 export default function LecturerIntegrityPage() {
   const [flags, setFlags] = useState<IntegrityFlag[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchFlags();
@@ -164,17 +166,33 @@ export default function LecturerIntegrityPage() {
                           <Clock className="size-3.5" />{" "}
                           {new Date(log.created_at).toLocaleString()}
                         </div>
-                        {log.status === "OPEN" && (
-                          <Button
+                        <div className="flex gap-2">
+                           <Button
                             size="sm"
-                            variant="outline"
+                            variant="ghost"
                             className="rounded-full h-8 text-[10px] font-bold"
-                            onClick={() => handleResolve(log.id)}
+                            onClick={() => setExpandedId(expandedId === log.id ? null : log.id)}
                           >
-                            Resolve Flag
+                            {expandedId === log.id ? "Hide Details" : "View Details & AI Analysis"}
                           </Button>
-                        )}
+                          {log.status === "OPEN" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="rounded-full h-8 text-[10px] font-bold"
+                              onClick={() => handleResolve(log.id)}
+                            >
+                              Resolve Flag
+                            </Button>
+                          )}
+                        </div>
                       </div>
+
+                      {expandedId === log.id && (
+                        <div className="mt-8 pt-8 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-300">
+                           <AIIntegrityExplainer flagId={log.id} />
+                        </div>
+                      )}
                     </div>
                   </div>
                 ))

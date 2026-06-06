@@ -42,19 +42,37 @@ async def test_auto_generate_groups_route(client: AsyncClient, make_auth_headers
     opt = Option(department_id=dept.id, name="O1", code="O1")
     db.add(opt); await db.flush()
     
-    course = Course(institution_id=inst.id, academic_period_id=period.id, name="C1", code="C1")
+    course = Course(institution_id=inst.id, academic_period_id=period.id, name="C1", code="C1", academic_year="2026")
     db.add(course); await db.flush()
     cg = ClassGroup(course_id=course.id, option_id=opt.id, name="G1", code="G1")
     db.add(cg); await db.flush()
-    cs = ClassSection(course_id=course.id, class_group_id=cg.id, name="S1")
+    cs = ClassSection(class_group_id=cg.id, name="S1")
     db.add(cs); await db.flush()
+
+    from app.db.models.academic import TeachingAssignment, TeachingWorkspace
+    from app.db.enums import LecturerAssignmentRole
+    assignment = TeachingAssignment(
+        lecturer_id=lecturer_id, institution_id=inst.id, department_id=dept.id,
+        course_id=course.id, academic_period_id=period.id, academic_year="2026",
+        role=LecturerAssignmentRole.MAIN_LECTURER, class_section_id=cs.id, option_id=opt.id
+    )
+    db.add(assignment); await db.flush()
+
+    workspace = TeachingWorkspace(
+        teaching_assignment_id=assignment.id, course_id=course.id,
+        class_section_id=cs.id, academic_period_id=period.id,
+        title="W1", created_by_id=lecturer_id
+    )
+    db.add(workspace); await db.flush()
     
     assessment = Assessment(
         title="Group API Test",
         assessment_type=AssessmentType.GROUP_WORK,
         status=AssessmentStatus.DRAFT,
         created_by_id=lecturer_id,
+        teaching_workspace_id=workspace.id,
         course_id=course.id,
+        academic_year="2026",
         is_group_assessment=True,
         max_group_size=3
     )

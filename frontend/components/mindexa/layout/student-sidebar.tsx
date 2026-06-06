@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/sidebar";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
+import { notificationApi } from "@/lib/api/notification";
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
@@ -48,6 +49,22 @@ export function StudentSidebar({
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const { user } = useAuth();
+  const [hasNewAssessments, setHasNewAssessments] = React.useState(false);
+
+  React.useEffect(() => {
+    async function checkNotifications() {
+        try {
+            const res = await notificationApi.getNotifications(true); // unread only
+            const hasNew = res.items.some(n => 
+                ["ASSESSMENT_PUBLISHED", "GROUP_WORK_ASSIGNED"].includes(n.notification_type)
+            );
+            setHasNewAssessments(hasNew);
+        } catch (e) {
+            console.error("Failed to check notifications", e);
+        }
+    }
+    if (user) checkNotifications();
+  }, [user, pathname]);
 
   const displayName =
     (user?.profile as any)?.display_name ||
@@ -59,7 +76,7 @@ export function StudentSidebar({
     name: displayName,
     email: (user as any)?.email || "",
     avatar:
-      (user?.profile as any)?.profile_picture_url || "/avatars/user avatar.png",
+      (user?.profile as any)?.avatar_url || "/avatars/user avatar.png",
   };
 
   return (
@@ -104,6 +121,8 @@ export function StudentSidebar({
             {mainNav.map((item) => {
               const isActive =
                 pathname === item.url || pathname.startsWith(item.url + "/");
+              const showDot = item.title === "Assessments" && hasNewAssessments;
+              
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
@@ -111,9 +130,12 @@ export function StudentSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                   >
-                    <Link href={item.url}>
+                    <Link href={item.url} className="relative">
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
+                      {showDot && (
+                          <span className="absolute top-1.5 left-4 size-2 rounded-full bg-red-500 border-2 border-background" />
+                      )}
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

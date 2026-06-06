@@ -73,7 +73,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, update, or_, not_
+from sqlalchemy import delete, func, update, or_, not_, and_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -694,6 +694,15 @@ class AssessmentRepository:
         )
         return list(result.scalars().all())
 
+    async def count_assessment_questions(self, assessment_id: uuid.UUID) -> int:
+        """Return the number of questions linked to this assessment."""
+        result = await self.db.execute(
+            select(func.count(AssessmentQuestion.id)).where(
+                col(AssessmentQuestion.assessment_id) == assessment_id
+            )
+        )
+        return result.scalar_one()
+
     async def list_assessment_questions_for_group(
         self,
         assessment_id: uuid.UUID,
@@ -1309,6 +1318,26 @@ class AssessmentRepository:
         )
         await self.db.flush()
 
+    async def list_enrolled_students(self, assessment_id: uuid.UUID) -> list[uuid.UUID]:
+        """
+        Return a list of student user IDs who are enrolled in class sections 
+        targeted by this assessment.
+        """
+        from app.db.models.academic import StudentEnrollment
+        
+        stmt = (
+            select(StudentEnrollment.student_id)
+            .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
+            .where(
+                AssessmentTargetSection.assessment_id == assessment_id,
+                AssessmentTargetSection.is_deleted == False,
+                StudentEnrollment.is_deleted == False
+            )
+            .distinct()
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
     async def list_available_for_student(
         self,
         *,
@@ -1326,7 +1355,7 @@ class AssessmentRepository:
             - Student is enrolled in a class section targeted by this assessment
               OR (no targets defined AND student enrolled in assessment's course)
         """
-        from app.db.models.academic import Course, StudentEnrollment, ClassSection, TeachingWorkspace
+        from app.db.models.academic import Course, StudentEnrollment, ClassSection, TeachingWorkspace, TeachingAssignment
         now = _utcnow()
         
         # Base filters
@@ -1361,7 +1390,8 @@ class AssessmentRepository:
         course_stmt = (
             select(Assessment.id)
             .join(Course, Course.id == Assessment.course_id)
-            .join(ClassSection, ClassSection.course_id == Course.id)
+            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
+            .join(ClassSection, ClassSection.id == TeachingAssignment.class_section_id)
             .join(StudentEnrollment, StudentEnrollment.class_section_id == ClassSection.id)
             .where(
                 StudentEnrollment.student_id == student_id,

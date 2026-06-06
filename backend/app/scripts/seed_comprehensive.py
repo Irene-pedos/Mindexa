@@ -41,7 +41,6 @@ from app.db.models.academic import (
     CourseOption,
     LecturerInstitution,
     LecturerDepartment,
-    LecturerOption,
     LecturerCourseAssignment,
     StudentEnrollment
 )
@@ -61,7 +60,6 @@ async def clear_data(db):
         LecturerCourseAssignment,
         TeachingWorkspace,
         TeachingAssignment,
-        LecturerOption,
         LecturerDepartment,
         LecturerInstitution,
         CourseOption,
@@ -230,7 +228,6 @@ async def seed_comprehensive():
         
         # Create Class Sections
         section1 = ClassSection(
-            course_id=course1.id,
             class_group_id=cg1.id,
             name="Group A",
             capacity=60,
@@ -258,14 +255,6 @@ async def seed_comprehensive():
         db.add(ta)
         await db.flush()
         
-        # Assign Lecturer to specific course (Legacy model link)
-        db.add(LecturerCourseAssignment(
-            lecturer_id=lecturer.id,
-            course_id=course1.id,
-            assignment_role=LecturerAssignmentRole.MAIN_LECTURER,
-            is_active=True
-        ))
-
         # 13. Enroll Student
         enroll = StudentEnrollment(
             student_id=student.id,

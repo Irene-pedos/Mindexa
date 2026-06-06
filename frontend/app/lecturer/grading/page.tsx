@@ -45,6 +45,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
@@ -56,6 +57,8 @@ import { GroupSubmissionList } from "@/components/mindexa/grading/group-submissi
 import { GroupSubmissionReview } from "@/components/mindexa/grading/group-submission-review";
 import { GroupAppealReview } from "@/components/mindexa/grading/group-appeal-review";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
+import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
 
 export default function LecturerGradingQueue() {
   const [data, setData] = useState<any[]>([]);
@@ -69,6 +72,7 @@ export default function LecturerGradingQueue() {
   >(null);
   const [activeTab, setActiveTab] = useState("individuals");
   const [overrideScore, setOverrideScore] = useState<string>("");
+  const [finalFeedback, setFinalFeedback] = useState<string>("");
 
   useEffect(() => {
     if (activeTab === "individuals") {
@@ -207,10 +211,12 @@ export default function LecturerGradingQueue() {
       await gradingApi.saveGrade(selectedStudent.response_id, {
         accept_ai_suggestion: false,
         override_score: scoreNum,
+        feedback: finalFeedback,
       });
-      toast.success(`Score manually updated to ${scoreNum}`);
+      toast.success(`Result confirmed: ${scoreNum}% with feedback`);
       setSelectedStudent(null);
       setOverrideScore("");
+      setFinalFeedback("");
       fetchSubmissions();
     } catch (e: any) {
       toast.error(e.message || "Failed to update score.");
@@ -460,6 +466,7 @@ export default function LecturerGradingQueue() {
                                   setOverrideScore(
                                     detail.ai_suggested_score?.toString() || "",
                                   );
+                                  setFinalFeedback(detail.feedback || "");
                                 } catch (e) {
                                   toast.error(
                                     "Failed to load submission details",
@@ -556,56 +563,56 @@ export default function LecturerGradingQueue() {
                   </p>
                 </div>
 
-                <div className="space-y-4 border rounded-xl p-5 bg-blue-50/50 border-blue-100">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2 text-blue-700">
-                      <BrainCircuit className="size-5" />
-                      <h3 className="font-semibold">Review Analysis</h3>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className="bg-white border-blue-200 text-blue-700"
-                    >
-                      Suggested: {selectedStudent.ai_suggested_score}% (
-                      {selectedStudent.ai_confidence}% Signal)
-                    </Badge>
-                  </div>
-                  <p className="text-sm text-blue-900/80 leading-relaxed">
-                    {selectedStudent.ai_rationale ||
-                      "Structured guidance for open-question review will appear here. In the future AI phase, rubric-aligned suggestions will be advisory only and never final."}
-                  </p>
-                  {selectedStudent.ai_confidence < 75 && (
-                    <div className="flex items-center gap-2 text-amber-600 bg-amber-50 p-2 rounded-md text-xs font-medium">
-                      <MessageSquareWarning className="size-4" />
-                      Review signal is weak. Lecturer judgment should dominate
-                      this decision.
-                    </div>
-                  )}
-                </div>
+                {/* Real AI Suggestion Panel */}
+                <AIReviewPanel 
+                  queueItemId={selectedStudent.id}
+                  responseId={selectedStudent.response_id}
+                  maxScore={selectedStudent.assessment?.total_marks || selectedStudent.maxScore || 10}
+                  onSuggestionApplied={(score) => setOverrideScore(score.toString())}
+                />
+
+                {/* AI Feedback Editor */}
+                <AIFeedbackEditor
+                  responseId={selectedStudent.response_id}
+                  initialDraft={selectedStudent.ai_feedback_draft}
+                  initialStrengths={selectedStudent.ai_feedback_strengths}
+                  initialImprovements={selectedStudent.ai_feedback_improvements}
+                  initialSuggestions={selectedStudent.ai_feedback_suggestions}
+                  onDraftApplied={(text) => setFinalFeedback(text)}
+                />
 
                 <div className="space-y-4 pt-4 border-t">
                   <Label className="text-sm font-semibold">
-                    Final Lecturer Score
+                    Final Lecturer Score & Feedback
                   </Label>
-                  <div className="flex items-center gap-4">
-                    <div className="relative">
-                      <Input
-                        type="number"
-                        value={overrideScore}
-                        onChange={(e) => setOverrideScore(e.target.value)}
-                        className="w-24 text-lg font-bold pl-3 pr-8 h-12"
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                        %
-                      </span>
+
+                  <div className="space-y-4">
+                    <Textarea 
+                      placeholder="Final feedback visible to student..." 
+                      value={finalFeedback}
+                      onChange={(e) => setFinalFeedback(e.target.value)}
+                      className="min-h-[100px]"
+                    />
+                    <div className="flex items-center gap-4">
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          value={overrideScore}
+                          onChange={(e) => setOverrideScore(e.target.value)}
+                          className="w-24 text-lg font-bold pl-3 pr-8 h-12"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
+                          %
+                        </span>
+                      </div>
+                      <Button
+                        onClick={handleOverrideScore}
+                        size="lg"
+                        className="h-12"
+                      >
+                        Save & Confirm
+                      </Button>
                     </div>
-                    <Button
-                      onClick={handleOverrideScore}
-                      size="lg"
-                      className="h-12"
-                    >
-                      Save & Confirm Score
-                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     By saving, you finalize the academic decision. Future

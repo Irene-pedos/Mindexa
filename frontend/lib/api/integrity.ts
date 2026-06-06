@@ -26,6 +26,13 @@ export const integrityApi = {
     return apiClient(endpoint);
   },
   
+  getFlagExplanation: (flagId: string): Promise<{
+    explanation: string;
+    timeline_summary: string;
+    escalation_rationale: string;
+    risk_level_context?: string;
+  }> => apiClient(`/integrity/flag/${flagId}/explain`),
+
   resolveFlag: (flagId: string, data: { status: string; resolution_notes: string }) => 
     apiClient(`/integrity/flag/${flagId}/resolve`, {
       method: "PATCH",

@@ -15,7 +15,9 @@ from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from sqlalchemy.exc import IntegrityError
 
+from app.core.config import settings
 from app.core.exceptions import MindexaError
 from app.core.logging import get_logger
 
@@ -39,6 +41,34 @@ def _error_response(
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+
+    @app.exception_handler(IntegrityError)
+    async def handle_integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
+        request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        error_msg = str(exc.orig) if exc.orig else str(exc)
+        
+        # Determine user-friendly message
+        friendly_message = "A resource with these details already exists."
+        if "unique" in error_msg.lower() or "already exists" in error_msg.lower():
+            if "code" in error_msg.lower():
+                friendly_message = "This entity code is already in use within this scope."
+            elif "email" in error_msg.lower():
+                friendly_message = "This email address is already registered."
+            elif "name" in error_msg.lower():
+                friendly_message = "This entity name is already in use within this scope."
+
+        logger.info(
+            "integrity_error",
+            message=error_msg,
+            path=str(request.url),
+            request_id=request_id,
+        )
+        return _error_response(
+            status_code=status.HTTP_409_CONFLICT,
+            error_code="ALREADY_EXISTS",
+            message=friendly_message,
+            request_id=request_id,
+        )
 
     @app.exception_handler(MindexaError)
     async def handle_mindexa_exception(request: Request, exc: MindexaError) -> JSONResponse:
@@ -114,6 +144,8 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def handle_unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+        
+        # Log full traceback for server-side monitoring
         logger.error(
             "unhandled_exception",
             exc_type=type(exc).__name__,
@@ -123,9 +155,16 @@ def register_exception_handlers(app: FastAPI) -> None:
             request_id=request_id,
             traceback=traceback.format_exc(),
         )
+
+        error_message = f"An unexpected error occurred. Reference ID: {request_id}"
+        
+        # Surface internal error details ONLY if in DEBUG mode
+        if settings.DEBUG:
+            error_message += f" | Detail: [{type(exc).__name__}] {str(exc)}"
+
         return _error_response(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             error_code="INTERNAL_ERROR",
-            message=f"An unexpected error occurred. Reference ID: {request_id}",
+            message=error_message,
             request_id=request_id,
         )

@@ -275,9 +275,8 @@ class AttemptService:
         
         # 3.5. Trigger Automatic Grading & Result Calculation
         try:
-            from app.services.grading_service import GradingService, AUTO_GRADABLE
+            from app.services.grading_service import GradingService
             from app.services.result_service import ResultService
-            from app.db.enums import ResultReleaseMode, QuestionType
             
             grading_service = GradingService(self.db)
             result_service = ResultService(self.db)
@@ -291,31 +290,8 @@ class AttemptService:
             )
             
             # Calculate initial result based on the grades we just created
-            result, _ = await result_service.calculate_result(attempt_id=attempt_id)
-            
-            # Determine if we should auto-release
-            # We need to check if the assessment is set to IMMEDIATE release
-            # and if it consists ONLY of auto-gradable questions.
-            assessment_full = await self.assessment_repo.get_by_id(attempt.assessment_id)
-            if assessment_full and assessment_full.result_release_mode == ResultReleaseMode.IMMEDIATE:
-                # Check if ANY question is open-ended (not auto-gradable)
-                has_open = False
-                for aq in (assessment_full.assessment_questions or []):
-                    if not aq.question:
-                        continue
-                    # Safely convert to Enum member for comparison
-                    q_type = aq.question.question_type
-                    if q_type not in AUTO_GRADABLE:
-                        has_open = True
-                        break
-                
-                if not has_open:
-                    # Auto-release if all are closed questions
-                    await result_service.release_results(
-                        assessment_id=assessment_full.id,
-                        released_by_id=None, # System-level release
-                        attempt_ids=[attempt_id]
-                    )
+            # ResultService internally handles auto-release if conditions are met
+            await result_service.calculate_result(attempt_id=attempt_id)
         except Exception as e:
             # We log but don't fail the whole submission if background grading/release fails
             print(f"FAILED automatic grading/result cycle for attempt {attempt_id}: {e}")

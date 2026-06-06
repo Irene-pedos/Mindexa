@@ -152,6 +152,33 @@ async def confirm_ai_grade(
     return SubmissionGradeResponse.model_validate(grade)
 
 
+@router.post(
+    "/response/{response_id}/draft-feedback",
+    response_model=SubmissionGradeResponse,
+    summary="Generate an AI feedback draft for a response",
+)
+async def draft_feedback(
+    response_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionGradeResponse:
+    """
+    Triggers the AI FeedbackAgent to draft professional feedback for this response.
+    The draft is stored in the database for the lecturer to review.
+    """
+    repo = GradingRepository(db)
+    grade = await repo.get_grade_by_response(response_id)
+    if not grade:
+        raise NotFoundError("Grade not found for this response")
+
+    service = GradingService(db)
+    updated_grade = await service.generate_feedback_draft(
+        grade_id=grade.id,
+        lecturer_id=current_user.id,
+    )
+    return SubmissionGradeResponse.model_validate(updated_grade)
+
+
 # ── GET GRADE FOR RESPONSE ────────────────────────────────────────────────────
 
 

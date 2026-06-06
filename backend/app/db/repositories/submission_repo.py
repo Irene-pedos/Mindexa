@@ -64,6 +64,7 @@ class SubmissionRepository:
             existing.fill_blank_answers = fill_blank_answers
             existing.file_url = file_url
             existing.saved_at = _utcnow()
+            existing.updated_at = _utcnow() # Manually set to prevent lazy-load crash
             if time_spent_seconds is not None:
                 existing.time_spent_seconds = time_spent_seconds
             existing.is_skipped = is_skipped
@@ -75,6 +76,7 @@ class SubmissionRepository:
             await self.db.flush()
             return existing, not was_deleted # Mark as created if it was effectively gone
 
+        now = _utcnow()
         response = StudentResponse(
             attempt_id=attempt_id,
             question_id=question_id,
@@ -87,7 +89,9 @@ class SubmissionRepository:
             file_url=file_url,
             time_spent_seconds=time_spent_seconds,
             is_skipped=is_skipped,
-            saved_at=_utcnow(),
+            saved_at=now,
+            created_at=now, # Manually set
+            updated_at=now, # Manually set
             is_final=False,
         )
         self.db.add(response)
@@ -123,6 +127,7 @@ class SubmissionRepository:
     async def list_responses_for_attempt(
         self, attempt_id: uuid.UUID
     ) -> list[StudentResponse]:
+        from app.db.models.question import Question
         result = await self.db.execute(
             select(StudentResponse)
             .options(

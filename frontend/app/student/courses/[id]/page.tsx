@@ -172,7 +172,7 @@ export default function StudentWorkspaceDetailPage() {
               {workspace.title}
             </h1>
             <p className="text-[15px] text-muted-foreground/80 mt-0.5">
-              {workspace.code} • {workspace.academic_year} • Instructor:{" "}
+              {workspace.code} • {workspace.academic_year || "GLOBAL"} • Instructor:{" "}
               {workspace.lecturer}
             </p>
           </div>

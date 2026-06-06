@@ -50,6 +50,64 @@ export default function RootLayout({
           "antialiased bg-background text-foreground",
         )}
       >
+        {/* Global Error Suppression for Browser Extensions (e.g., MetaMask) */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              (function() {
+                const suppressedErrors = [
+                  'Failed to connect to MetaMask',
+                  'MetaMask: Disconnected from chain',
+                  'Ethereum provider',
+                  'inpage.js',
+                  'Unexpected token <', // Common when script injection fails
+                  'Extension context invalidated'
+                ];
+                
+                function shouldSuppress(msg) {
+                  if (!msg) return false;
+                  const str = String(msg);
+                  return suppressedErrors.some(err => str.includes(err));
+                }
+
+                const originalError = console.error;
+                console.error = function(...args) {
+                  const firstArg = String(args[0]);
+                  if (suppressedErrors.some(error => firstArg.includes(error))) {
+                    return;
+                  }
+                  originalError.apply(console, args);
+                };
+
+                const originalWarn = console.warn;
+                console.warn = function(...args) {
+                  const firstArg = String(args[0]);
+                  if (suppressedErrors.some(error => firstArg.includes(error))) {
+                    return;
+                  }
+                  originalWarn.apply(console, args);
+                };
+
+                window.addEventListener('error', function(event) {
+                  const msg = event.message || (event.error && event.error.message);
+                  if (msg && suppressedErrors.some(error => String(msg).includes(error))) {
+                    event.stopImmediatePropagation();
+                    event.preventDefault();
+                    return false;
+                  }
+                }, true);
+
+                window.addEventListener('unhandledrejection', function(event) {
+                  const msg = event.reason && (event.reason.message || event.reason);
+                  if (msg && suppressedErrors.some(error => String(msg).includes(error))) {
+                    event.stopImmediatePropagation();
+                    event.preventDefault();
+                  }
+                }, true);
+              })();
+            `,
+          }}
+        />
         <ThemeProvider
           attribute="class"
           defaultTheme="light" // Force light mode for academic feel

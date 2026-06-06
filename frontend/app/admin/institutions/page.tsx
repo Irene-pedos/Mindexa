@@ -48,6 +48,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 
 export default function InstitutionsPage() {
   const [institutions, setInstitutions] = useState<any[]>([])
+  const [summary, setSummary] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
@@ -75,10 +76,27 @@ export default function InstitutionsPage() {
   const loadInstitutions = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await adminApi.getInstitutions()
-      setInstitutions(data)
+      // Use allSettled or separate try/catch if we want to know exactly what failed
+      const [dataRes, sumRes] = await Promise.allSettled([
+        adminApi.getInstitutions(),
+        adminApi.getInstitutionSummary()
+      ])
+
+      if (dataRes.status === "fulfilled") {
+        setInstitutions(dataRes.value)
+      } else {
+        console.error("Institutions fetch failed:", dataRes.reason)
+        toast.error("Partial failure: Could not load institutions list")
+      }
+
+      if (sumRes.status === "fulfilled") {
+        setSummary(sumRes.value)
+      } else {
+        console.error("Summary fetch failed:", sumRes.reason)
+        toast.error("Partial failure: Could not load institution metrics")
+      }
     } catch (err) {
-      toast.error("Failed to load institutions")
+      toast.error("Critical error: Failed to load institution data")
     } finally {
       setLoading(false)
     }
@@ -337,15 +355,23 @@ export default function InstitutionsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {[
-            { label: "Active Partners", value: institutions.filter(i => i.is_active).length, color: "text-emerald-600" },
-            { label: "Total Capacity", value: "24.5k", color: "text-primary" },
-            { label: "Integrations", value: 12, color: "text-amber-600" },
-            { label: "Suspended", value: institutions.filter(i => !i.is_active).length, color: "text-destructive" }
+            { label: "Active Partners", value: summary?.active_partners || 0, color: "text-emerald-600" },
+            { 
+              label: "Total Capacity", 
+              value: (summary?.total_capacity || 0) >= 1000 
+                ? ((summary?.total_capacity || 0) / 1000).toFixed(1) + "k" 
+                : summary?.total_capacity || 0, 
+              color: "text-primary" 
+            },
+            { label: "Integrations", value: summary?.integrations_count || 0, color: "text-amber-600" },
+            { label: "Suspended", value: summary?.suspended_partners || 0, color: "text-destructive" }
         ].map((stat, i) => (
             <Card key={i} className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
                 <CardContent className="px-4 py-3 flex flex-col gap-0.5">
                     <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{stat.label}</p>
-                    <h3 className={cn("text-xl font-semibold leading-tight", stat.color)}>{stat.value}</h3>
+                    <h3 className={cn("text-xl font-semibold leading-tight", stat.color)}>
+                      {loading ? <Skeleton className="h-6 w-10" /> : stat.value}
+                    </h3>
                 </CardContent>
             </Card>
         ))}

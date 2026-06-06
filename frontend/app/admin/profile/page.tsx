@@ -121,8 +121,8 @@ export default function AdminProfilePage() {
             <Avatar className="h-24 w-24 border">
               <AvatarImage
                 src={
-                  user?.profile?.profile_picture_url
-                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.profile_picture_url}`
+                  user?.profile?.avatar_url
+                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
                     : "/avatars/user avatar.png"
                 }
               />

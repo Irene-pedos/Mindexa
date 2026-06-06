@@ -167,7 +167,7 @@ class Assessment(AuditedBaseModel, table=True):
             nullable=True,
         )
     )
-    academic_year: str = Field(nullable=False, max_length=20)
+    academic_year: str = Field(nullable=False, max_length=100)
 
     # ── Identity ──────────────────────────────────────────────────────────────
 
@@ -351,7 +351,7 @@ class Assessment(AuditedBaseModel, table=True):
 # ASSESSMENT TARGET SECTION (junction)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class AssessmentTargetSection(AuditedBaseModel, table=True):
+class AssessmentTargetSection(BaseModel, table=True):
     """
     Junction table: Assessment ↔ ClassSection (many-to-many).
 

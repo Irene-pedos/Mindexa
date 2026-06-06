@@ -147,7 +147,7 @@ export const authApi = {
 
   completeLecturerOnboarding: async (data: {
     bio?: string;
-    profile_picture_url?: string;
+    avatar_url?: string;
     phone_number?: string;
   }) => {
     return apiClient("/auth/me/onboarding/lecturer", {
@@ -165,7 +165,6 @@ export const authApi = {
     return apiClient("/auth/me/avatar", {
       method: "POST",
       body: formData,
-      // Do not set Content-Type header, browser will set it with boundary
     });
   },
 };

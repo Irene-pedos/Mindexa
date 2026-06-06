@@ -23,7 +23,8 @@ from app.db.enums import (
     UserRole, 
     UserStatus, 
     AcademicPeriodType, 
-    LecturerAssignmentRole
+    LecturerAssignmentRole,
+    LocationType
 )
 from app.db.models.auth import User, UserProfile
 from app.db.models.academic import (
@@ -38,7 +39,6 @@ from app.db.models.academic import (
     CourseOption,
     LecturerInstitution,
     LecturerDepartment,
-    LecturerOption,
     LecturerCourseAssignment
 )
 
@@ -174,12 +174,7 @@ async def seed_v2():
                 logger.info(f"Linked lecturer to {dept.name}")
 
         # Associate with SE and NET Options
-        for opt_code in ["SE", "NET"]:
-            opt = opts[opt_code]
-            res = await db.execute(select(LecturerOption).where(LecturerOption.lecturer_id == lecturer.id, LecturerOption.option_id == opt.id))
-            if not res.scalars().first():
-                db.add(LecturerOption(lecturer_id=lecturer.id, option_id=opt.id))
-                logger.info(f"Linked lecturer to {opt.name}")
+        # (Logic removed as LecturerOption is obsolete)
 
         # 8. Seed a Course
         course_code = "CS-ADV-101"
@@ -189,6 +184,7 @@ async def seed_v2():
             course = Course(
                 institution_id=institution.id,
                 academic_period_id=period.id,
+                academic_year="2025/2026",
                 name="Advanced System Architecture",
                 code=course_code,
                 description="Complex distributed systems and high-availability patterns.",
@@ -209,10 +205,10 @@ async def seed_v2():
             for cg_code in ["Y3SEA", "Y3SEB"]:
                 cg = cgs[cg_code]
                 section = ClassSection(
-                    course_id=course.id,
                     class_group_id=cg.id,
                     name=cg.name,
                     capacity=40,
+                    location_type=LocationType.PHYSICAL_ROOM,
                     is_active=True
                 )
                 db.add(section)

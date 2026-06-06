@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
@@ -119,6 +119,7 @@ class AssessmentResult(BaseModel, table=True):
     )
     released_at: datetime | None = Field(
         default=None,
+        sa_type=DateTime(timezone=True),
         nullable=True,
         description="UTC timestamp of release",
     )
@@ -143,6 +144,7 @@ class AssessmentResult(BaseModel, table=True):
 
     calculated_at: datetime = Field(
         default_factory=utcnow,
+        sa_type=DateTime(timezone=True),
         nullable=False,
         description="When calculate_result() last ran for this attempt",
     )

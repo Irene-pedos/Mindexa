@@ -55,6 +55,8 @@ export function SignupForm({
     staffId: "",
   });
 
+  const [resending, setResending] = useState(false);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -64,6 +66,33 @@ export function SignupForm({
         delete newErrors[name];
         return newErrors;
       });
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    try {
+      const apiUrl =
+        process.env.NEXT_PUBLIC_API_URL?.trim().replace(/\/$/, "") ||
+        "http://localhost:8000/api/v1";
+      const res = await fetch(`${apiUrl}/auth/resend-verification`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email: formData.email }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to resend code");
+      }
+
+      toast.success("A new verification code has been sent to your email.");
+      setOtp("");
+    } catch (err: any) {
+      toast.error(err.message || "Resend failed");
+    } finally {
+      setResending(false);
     }
   };
 
@@ -103,11 +132,21 @@ export function SignupForm({
         toast.success("Account created! Please check your email for the OTP.");
       }
       setShowVerification(true);
-    } catch (err: unknown) {
-      const errorMessage =
-        err instanceof Error ? err.message : "Failed to create account";
-      setErrors({ form: errorMessage });
-      toast.error(errorMessage);
+    } catch (err: any) {
+      const errorMsg = err.message || "Failed to create account";
+      
+      // Handle field-specific backend errors
+      if (errorMsg.includes("Registration Number")) {
+        setErrors({ regNumber: "This Student ID is already registered" });
+      } else if (errorMsg.includes("Phone Number")) {
+        setErrors({ phoneNumber: "This phone number is already in use" });
+      } else if (errorMsg.includes("email")) {
+        setErrors({ email: "This email is already registered" });
+      } else {
+        setErrors({ form: errorMsg });
+      }
+      
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
@@ -182,8 +221,22 @@ export function SignupForm({
                   <Loader2 className="size-4 animate-spin" /> Verifying...
                 </div>
               ) : (
-                <div className="text-xs text-muted-foreground font-medium uppercase tracking-widest opacity-60">
-                  Institutional Security Protocol
+                <div className="flex flex-col gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleResend}
+                    disabled={resending}
+                    className="text-xs font-semibold text-primary hover:bg-primary/5 h-8 rounded-full"
+                  >
+                    {resending ? (
+                      <Loader2 className="size-3 animate-spin mr-2" />
+                    ) : null}
+                    Didn&apos;t receive a code? Resend
+                  </Button>
+                  <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest opacity-60">
+                    Institutional Security Protocol
+                  </div>
                 </div>
               )}
 
@@ -331,8 +384,14 @@ export function SignupForm({
                     placeholder="+250..."
                     value={formData.phoneNumber}
                     onChange={handleChange}
+                    aria-invalid={!!errors.phoneNumber}
                     className="h-10"
                   />
+                  {errors.phoneNumber && (
+                    <p className="text-destructive text-[10px] font-medium">
+                      {errors.phoneNumber}
+                    </p>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   {role === "LECTURER" ? (

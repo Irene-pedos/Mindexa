@@ -59,15 +59,17 @@ class QuestionTagResponse(BaseModel):
 
 class QuestionCreateRequest(BaseModel):
     content: str = Field(
-        ..., min_length=5,
+        ...,
         description="The question stem / prompt text"
     )
+    image_url: str | None = None
     explanation: str | None = None
     hint: str | None = None
     question_type: str = Field(...)
     difficulty: str = Field(default="medium")
     grading_mode: str | None = None
     subject: str | None = Field(default=None, max_length=200)
+    course_id: uuid.UUID | None = None
     topic: str | None = Field(default=None, max_length=200)
     bloom_level: str | None = None
     suggested_marks: int | None = Field(default=None, ge=1)
@@ -137,12 +139,13 @@ class QuestionUpdateRequest(BaseModel):
     All fields are optional — only provided fields are changed.
     """
 
-    content: str | None = Field(default=None, min_length=5)
+    content: str | None = Field(default=None)
     explanation: str | None = None
     hint: str | None = None
     difficulty: str | None = None
     grading_mode: str | None = None
     subject: str | None = Field(default=None, max_length=200)
+    course_id: uuid.UUID | None = None
     topic: str | None = Field(default=None, max_length=200)
     bloom_level: str | None = None
     suggested_marks: int | None = Field(default=None, ge=1)
@@ -181,11 +184,13 @@ class QuestionSummaryResponse(BaseModel):
 
     id: uuid.UUID
     content: str
+    image_url: str | None = None
     question_type: str
     difficulty: str
     grading_mode: str
     status: str | None = None
     subject: str | None = None
+    course_id: uuid.UUID | None = None
     topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None = None
     suggested_marks: int | None = Field(None, alias="marks")
@@ -204,6 +209,7 @@ class QuestionDetailResponse(BaseModel):
 
     id: uuid.UUID
     content: str
+    image_url: str | None = None
     explanation: str | None = None
     hint: str | None = None
     question_type: str
@@ -212,6 +218,7 @@ class QuestionDetailResponse(BaseModel):
     status: str | None = None
     source_type: str
     subject: str | None = None
+    course_id: uuid.UUID | None = None
     topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None = None
     suggested_marks: int | None = Field(None, alias="marks")
@@ -249,6 +256,7 @@ class QuestionSearchParams(BaseModel):
     question_type: str | None = None
     difficulty: str | None = None
     subject: str | None = None
+    course_id: uuid.UUID | None = None
     topic: str | None = None
     bloom_level: str | None = None
     source_type: str | None = None

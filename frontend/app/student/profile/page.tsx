@@ -116,8 +116,8 @@ export default function ProfileSettingsPage() {
             <Avatar className="h-24 w-24 border">
               <AvatarImage
                 src={
-                  user?.profile?.profile_picture_url
-                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.profile_picture_url}`
+                  user?.profile?.avatar_url
+                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
                     : "/avatars/user avatar.png"
                 }
               />
@@ -244,15 +244,15 @@ export default function ProfileSettingsPage() {
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Level</Label>
+                  <Label>Academic Level</Label>
                   <Input
-                    value={user?.profile?.level || "N/A"}
+                    value={user?.profile?.level ? `Level ${user.profile.level}` : "N/A"}
                     readOnly
-                    className="bg-muted text-center"
+                    className="bg-muted text-center font-bold"
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label>Academic Year</Label>
+                  <Label>Academic Year / Period</Label>
                   <Input
                     value={user?.profile?.year || "N/A"}
                     readOnly

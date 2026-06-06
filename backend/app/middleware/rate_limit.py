@@ -59,6 +59,8 @@ _ROUTE_TIERS: list[tuple[str, str]] = [
     # Auth — strict
     ("/api/v1/auth/login", "login"),
     ("/api/v1/auth/refresh", "refresh"),
+    # AI — quota protection
+    ("/api/v1/student/ai/support", "student_ai_support"),
     # Health / metrics — exempt
     ("/health", "exempt"),
     ("/metrics", "exempt"),
@@ -81,14 +83,23 @@ def _resolve_tier(path: str) -> str:
 # ---------------------------------------------------------------------------
 
 def _limit_for_tier(tier: str) -> int:
-    """Return requests-per-minute limit for a tier."""
+    """Return request limit for a tier."""
     if tier == "exempt":
         return 0   # 0 = no limit applied
     if tier == "login":
         return settings.RATE_LIMIT_LOGIN_PER_MINUTE
     if tier == "refresh":
         return settings.RATE_LIMIT_REFRESH_PER_MINUTE
+    if tier == "student_ai_support":
+        return settings.RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR
     return settings.RATE_LIMIT_DEFAULT_PER_MINUTE
+
+
+def _window_for_tier(tier: str) -> int:
+    """Return rate-limit window size in seconds for a tier."""
+    if tier == "student_ai_support":
+        return 60 * 60
+    return 60
 
 
 # ---------------------------------------------------------------------------
@@ -120,8 +131,13 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        # Preflight requests (OPTIONS) should always bypass rate limiting
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
         tier = _resolve_tier(request.url.path)
         limit = _limit_for_tier(tier)
+        window_seconds = _window_for_tier(tier)
 
         # Exempt paths bypass all rate checking
         if tier == "exempt" or limit <= 0:
@@ -131,7 +147,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         try:
             current_count, window_remaining = await _check_rate_limit(
-                ip=client_ip, tier=tier, limit=limit
+                ip=client_ip,
+                tier=tier,
+                limit=limit,
+                window_seconds=window_seconds,
             )
         except Exception as exc:
             # Redis unavailable — fail open, log a warning
@@ -167,6 +186,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                         "code": "RATE_LIMIT_EXCEEDED",
                         "message": (
                             f"Too many requests. Limit: {limit} per minute. "
+                            if window_seconds == 60
+                            else f"Too many requests. Limit: {limit} per hour. "
                             f"Try again in {window_remaining} seconds."
                         ),
                         "details": {
@@ -193,7 +214,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 # ---------------------------------------------------------------------------
 
 async def _check_rate_limit(
-    ip: str, tier: str, limit: int
+    ip: str, tier: str, limit: int, window_seconds: int = 60
 ) -> tuple[int, int]:
     """
     Increment the per-IP-per-tier-per-minute counter in Redis.
@@ -204,11 +225,11 @@ async def _check_rate_limit(
     from app.core.redis import get_redis
 
     now = time.time()
-    window_minute = math.floor(now / 60)  # minute-resolution window
-    window_start = window_minute * 60
-    window_remaining = int(60 - (now - window_start))
+    window_bucket = math.floor(now / window_seconds)
+    window_start = window_bucket * window_seconds
+    window_remaining = int(window_seconds - (now - window_start))
 
-    key = f"rl:{tier}:{ip}:{window_minute}"
+    key = f"rl:{tier}:{ip}:{window_bucket}"
     redis = await get_redis()
 
     # INCR is atomic — safe for concurrent requests
@@ -216,6 +237,6 @@ async def _check_rate_limit(
 
     # Set TTL on first increment so the key auto-expires
     if count == 1:
-        await redis.expire(key, 65)  # 65s: window + small buffer
+        await redis.expire(key, window_seconds + 5)
 
     return count, window_remaining

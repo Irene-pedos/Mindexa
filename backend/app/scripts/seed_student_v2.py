@@ -116,11 +116,20 @@ async def seed_student_v2():
             await db.flush()
             logger.info(f"Created Course: {course.name}")
         
-        section_res = await db.execute(select(ClassSection).where(ClassSection.course_id == course.id, ClassSection.class_group_id == cg.id))
+        # Find the ClassSection for this course and this class group via assignments
+        from app.db.models.academic import TeachingAssignment
+        section_stmt = (
+            select(ClassSection)
+            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+            .where(
+                TeachingAssignment.course_id == course.id,
+                ClassSection.class_group_id == cg.id
+            )
+        )
+        section_res = await db.execute(section_stmt)
         section = section_res.scalars().first()
         if not section:
             section = ClassSection(
-                course_id=course.id,
                 class_group_id=cg.id,
                 name=cg.name,
                 capacity=40,

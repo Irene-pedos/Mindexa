@@ -30,11 +30,23 @@ class TestGroupSubmissionRules:
         db.add(lecturer)
         await db.flush()
         
+        from app.db.models.academic import TeachingWorkspace
+        workspace = TeachingWorkspace(
+            lecturer_id=lecturer.id,
+            class_section_id=uuid.uuid4(),
+            academic_period_id=uuid.uuid4(),
+            course_id=uuid.uuid4(),
+            title="Test Rules Workspace"
+        )
+        db.add(workspace)
+        await db.flush()
+
         assessment = Assessment(
             title="Test Rules",
             assessment_type=AssessmentType.SUMMATIVE,
             status=AssessmentStatus.PUBLISHED,
             created_by_id=lecturer.id,
+            teaching_workspace_id=workspace.id,
             is_group_assessment=True,
             require_all_member_participation=True,
             require_all_member_approval=True

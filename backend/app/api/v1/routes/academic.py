@@ -28,6 +28,24 @@ from app.db.session import get_db
 router = APIRouter(prefix="/academic-hierarchy", tags=["Academic Hierarchy"])
 
 
+@router.get("/levels", response_model=List[int])
+async def get_levels(
+    institution_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db)
+):
+    """List all distinct academic levels defined in the system or institution."""
+    from sqlalchemy import func
+    stmt = select(func.distinct(ClassGroup.level)).where(ClassGroup.level != None)
+    if institution_id:
+        # Join through Option and Department to filter by institution
+        stmt = stmt.join(Option).join(Department).where(Department.institution_id == institution_id)
+        
+    result = await db.execute(stmt)
+    # Sort levels numerically
+    levels = sorted([row for row in result.scalars().all()])
+    return levels
+
+
 @router.get("/institutions", response_model=List[InstitutionResponse])
 async def get_institutions(db: AsyncSession = Depends(get_db)):
     """List all active institutions."""
@@ -52,14 +70,18 @@ async def get_campuses(
 
 @router.get("/colleges", response_model=List[CollegeResponse])
 async def get_colleges(
-    campus_id: uuid.UUID, 
+    institution_id: uuid.UUID | None = None,
+    campus_id: uuid.UUID | None = None, 
     db: AsyncSession = Depends(get_db)
 ):
-    """List colleges within a campus."""
-    stmt = select(College).where(
-        College.campus_id == campus_id,
-        College.is_active == True
-    )
+    """List colleges within a campus or institution."""
+    stmt = select(College).where(College.is_active == True)
+    if campus_id:
+        stmt = stmt.where(College.campus_id == campus_id)
+    elif institution_id:
+        stmt = stmt.where(College.institution_id == institution_id)
+    else:
+        return []
     result = await db.execute(stmt)
     return result.scalars().all()
 
@@ -116,14 +138,26 @@ async def get_class_groups(
 
 @router.get("/sections", response_model=List[ClassSectionResponse])
 async def get_sections(
-    class_group_id: uuid.UUID, 
+    class_group_id: uuid.UUID | None = None,
+    department_id: uuid.UUID | None = None,
+    course_id: uuid.UUID | None = None,
     db: AsyncSession = Depends(get_db)
 ):
-    """List specific sections within a class group."""
-    stmt = select(ClassSection).where(
-        ClassSection.class_group_id == class_group_id,
-        ClassSection.is_active == True
-    )
+    """List specific sections within a class group, department, or for a specific course."""
+    stmt = select(ClassSection).where(ClassSection.is_active == True)
+    if class_group_id:
+        stmt = stmt.where(ClassSection.class_group_id == class_group_id)
+    if department_id:
+        stmt = stmt.where(ClassSection.department_id == department_id)
+    if course_id:
+        from app.db.models.academic import TeachingAssignment
+        stmt = stmt.join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id).where(
+            TeachingAssignment.course_id == course_id
+        ).distinct()
+
+    if not class_group_id and not department_id and not course_id:
+        return []
+
     result = await db.execute(stmt)
     return result.scalars().all()
 

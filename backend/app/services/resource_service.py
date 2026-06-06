@@ -89,6 +89,10 @@ class ResourceService:
         await self.db.commit()
         await self.db.refresh(material)
 
+        # 7. Enqueue background RAG processing
+        from app.workers.tasks import process_lecturer_material
+        process_lecturer_material.delay(str(material.id))
+
         return material
 
     async def list_workspace_materials(self, workspace_id: uuid.UUID) -> List[LecturerMaterial]:
@@ -156,6 +160,10 @@ class ResourceService:
         await self.repo.create_student_resource(resource)
         await self.db.commit()
         await self.db.refresh(resource)
+
+        # 6. Enqueue background RAG processing
+        from app.workers.tasks import process_student_resource
+        process_student_resource.delay(str(resource.id))
 
         return resource
 

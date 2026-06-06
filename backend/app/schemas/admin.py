@@ -106,6 +106,7 @@ class AdminAnalyticsChartData(BaseModel):
 class AdminAnalyticsResponse(BaseModel):
     summary: List[AdminAnalyticsMetric]
     user_distribution: List[dict] # [{name: 'Student', value: 400}, ...]
+    activity_data: List[dict] # [{month: 'January', assessments: 10, violations: 2}, ...]
     assessment_trends: List[dict] # [{date: '2024-01', count: 10}, ...]
     integrity_hotspots: List[dict] # [{course: 'Database', flags: 5}, ...]
     ai_grading_stats: List[dict] = [] # [{mode: 'AI Fully Auto', count: 120}, ...]
@@ -136,6 +137,12 @@ class SystemSettingsSchema(BaseModel):
     auto_flag_threshold: str
     default_duration: int
 
+class AdminInstitutionSummary(BaseModel):
+    active_partners: int
+    total_capacity: int
+    integrations_count: int
+    suspended_partners: int
+
 # Rebuild models
 DashboardMetric.model_rebuild()
 AdminDashboardSummary.model_rebuild()
@@ -156,3 +163,4 @@ AdminIntegrityOverview.model_rebuild()
 AdminBulkUserApproveRequest.model_rebuild()
 AdminBulkUserStatusUpdateRequest.model_rebuild()
 SystemSettingsSchema.model_rebuild()
+AdminInstitutionSummary.model_rebuild()
