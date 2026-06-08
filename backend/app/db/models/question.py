@@ -144,13 +144,16 @@ class Question(BaseModel, table=True):
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
-    rubric: Optional["Rubric"] = Relationship()
+    rubric: Optional["Rubric"] = Relationship(
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
 
     options: list["QuestionOption"] = Relationship(
         back_populates="question",
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
             "order_by": "QuestionOption.order_index",
+            "lazy": "selectin",
         },
     )
     blanks: list["QuestionBlank"] = Relationship(
@@ -158,12 +161,13 @@ class Question(BaseModel, table=True):
         sa_relationship_kwargs={
             "cascade": "all, delete-orphan",
             "order_by": "QuestionBlank.blank_index",
+            "lazy": "selectin",
         },
     )
     assessment_questions: list["AssessmentQuestion"] = Relationship(back_populates="question")
     bank_entry: Optional["QuestionBankEntry"] = Relationship(
         back_populates="question",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},
     )
     responses: list["StudentResponse"] = Relationship(back_populates="question")
 
@@ -312,7 +316,10 @@ class AssessmentQuestion(BaseModel, table=True):
         """Alias for assessment_section_id for schema alignment."""
         return self.assessment_section_id
 
-    question: Optional["Question"] = Relationship(back_populates="assessment_questions")
+    question: Optional["Question"] = Relationship(
+        back_populates="assessment_questions",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
     assessment: Optional["Assessment"] = Relationship(back_populates="assessment_questions")
     assessment_section: Optional["AssessmentSection"] = Relationship(
         back_populates="assessment_questions"

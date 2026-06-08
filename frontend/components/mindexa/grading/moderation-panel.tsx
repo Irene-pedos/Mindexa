@@ -109,10 +109,13 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
     }
   };
 
-  if (loading) {
+  if (loading || !stats) {
     return <div className="space-y-4">
-      <Skeleton className="h-[200px] w-full rounded-xl" />
-      <Skeleton className="h-[300px] w-full rounded-xl" />
+      <Skeleton className="h-[100px] w-full rounded-md" />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <Skeleton className="h-[250px] w-full rounded-md" />
+        <Skeleton className="h-[250px] w-full rounded-md" />
+      </div>
     </div>;
   }
 

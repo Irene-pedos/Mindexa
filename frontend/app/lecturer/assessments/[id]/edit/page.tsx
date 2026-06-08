@@ -22,42 +22,24 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
   Plus,
   Trash2,
   Save,
-  Eye,
   Clock,
   Shield,
   ChevronRight,
   ChevronLeft,
-  CheckCircle2,
-  FileText,
-  Layout,
-  BrainCircuit,
-  ChevronDown,
-  Check,
-  X,
-  GripVertical,
   Database,
-  Info,
-  Image as ImageIcon,
   Loader2 as LoaderCircleIcon,
   Calendar as CalendarIcon,
-  Users,
   Upload,
+  X,
 } from "lucide-react";
 import { format } from "date-fns";
-import { Calendar } from "@/components/ui/calendar";
 
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import {
   Stepper,
   StepperContent,
@@ -65,7 +47,6 @@ import {
   StepperItem,
   StepperNav,
   StepperPanel,
-  StepperSeparator,
   StepperTitle,
   StepperTrigger,
 } from "@/components/ui/stepper";
@@ -86,9 +67,7 @@ import {
   AcademicPeriodResponse,
   UserResponse,
 } from "@/lib/api/lecturer";
-import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { summarizeQuestionMix } from "@/lib/grading-architecture";
 
 type AssessmentMode = "Practice" | "Formative" | "Homework" | "CAT" | "Summative" | "Groupwork";
 type Difficulty = "Easy" | "Medium" | "Hard";
@@ -174,12 +153,12 @@ function QuestionCard({
   };
 
   return (
-    <Card className="shadow-none border hover:border-primary/20 transition-colors rounded-2xl overflow-hidden">
-      <CardContent className="p-8 space-y-8">
+    <Card className="shadow-none border hover:border-primary/20 transition-colors rounded-lg overflow-hidden">
+      <CardContent className="p-4 space-y-4">
         {/* Header Row */}
-        <div className="flex items-start justify-between gap-6">
-          <div className="flex items-center gap-4">
-            <Badge variant="outline" className="size-10 flex items-center justify-center rounded-xl font-black text-sm bg-muted/5 border-muted-foreground/10">{index + 1}</Badge>
+        <div className="flex items-center justify-between gap-4 border-b border-border/40 pb-3">
+          <div className="flex items-center gap-3">
+            <Badge variant="outline" className="size-6 flex items-center justify-center rounded text-[10px] font-bold bg-muted/5 border-muted-foreground/20">{index + 1}</Badge>
             <Select
               value={question.type}
               onValueChange={(v: QuestionType) => {
@@ -198,96 +177,87 @@ function QuestionCard({
                 onUpdate({ type: v, options: newOptions });
               }}
             >
-              <SelectTrigger className="w-[180px] h-10 rounded-xl font-bold text-xs uppercase tracking-widest"><SelectValue /></SelectTrigger>
-              <SelectContent className="rounded-xl">
+              <SelectTrigger className="w-[140px] h-8 rounded text-[10px] font-bold uppercase tracking-widest bg-muted/5"><SelectValue /></SelectTrigger>
+              <SelectContent className="rounded">
                 {allowedTypes.map((t) => (
-                  <SelectItem key={t} value={t} className="capitalize text-xs font-bold tracking-tight">{t}</SelectItem>
+                  <SelectItem key={t} value={t} className="capitalize text-[10px] font-bold tracking-tight">{t}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center gap-6">
-            <div className="flex items-center gap-3">
-              <Label className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60">Marks</Label>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Marks</Label>
               <Input
                 type="number"
-                className="w-20 h-10 text-center font-bold rounded-xl bg-muted/5"
+                className="w-14 h-8 text-center font-bold rounded text-xs bg-muted/5 focus-visible:ring-0"
                 value={question.marks ?? 0}
                 onChange={(e) => onUpdate({ marks: parseInt(e.target.value) || 0 })}
               />
             </div>
-            <div className="flex items-center gap-2 border-l pl-6 border-muted-foreground/10">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onSaveToBank}
-                className="text-primary hover:bg-primary/5 h-10 w-10 rounded-xl"
-                title="Save to Bank"
-              >
-                <Database className="size-5" />
+            <div className="flex items-center gap-1 border-l pl-3 border-border/40">
+              <Button variant="ghost" size="icon" onClick={onSaveToBank} className="text-primary hover:bg-primary/5 h-8 w-8 rounded" title="Save to Bank">
+                <Database className="size-3.5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={onDelete}
-                className="text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 h-10 w-10 rounded-xl"
-                title="Delete Question"
-              >
-                <Trash2 className="size-5" />
+              <Button variant="ghost" size="icon" onClick={onDelete} className="text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 h-8 w-8 rounded" title="Delete Question">
+                <Trash2 className="size-3.5" />
               </Button>
             </div>
           </div>
         </div>
 
         {/* Question Text & Media */}
-        <div className="space-y-6">
-          <div className="space-y-3">
-            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40 ml-1">Question Domain Content</Label>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-2">
+            {question.type === "casestudy" && (
+                <div className="space-y-1.5 mb-3">
+                    <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Case Study Context</Label>
+                    <Textarea
+                        placeholder="Provide the case study scenario or context here..."
+                        value={question.caseStudyContext || ""}
+                        onChange={(e) => onUpdate({ caseStudyContext: e.target.value })}
+                        className="min-h-[80px] text-xs font-medium p-3 rounded bg-amber-50/10 border-amber-100 focus-visible:ring-primary/10"
+                    />
+                </div>
+            )}
+            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Question Domain Content</Label>
             <Textarea
               placeholder="Write your question text here..."
               value={question.text}
               onChange={(e) => onUpdate({ text: e.target.value })}
-              className="min-h-[120px] text-base font-semibold p-6 rounded-2xl bg-muted/[0.02] border-muted-foreground/10 focus-visible:ring-primary/10"
+              className="min-h-[80px] text-xs font-medium p-3 rounded bg-muted/[0.02] border-border/40 focus-visible:ring-primary/10"
             />
           </div>
 
-          <div className="space-y-3">
-            <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40 ml-1">Contextual Media Integration</Label>
+          <div className="space-y-2">
+            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Contextual Media</Label>
             {question.imageUrl ? (
-              <div className="relative inline-block border rounded-2xl p-2 bg-muted/30 group overflow-hidden shadow-sm">
-                <img src={question.imageUrl} alt="Diagram" className="max-h-72 rounded-xl object-contain" />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-all flex flex-col items-center justify-center rounded-xl">
-                  <Button variant="destructive" size="sm" onClick={() => onUpdate({ imageUrl: undefined })} className="rounded-xl font-bold uppercase tracking-widest text-[10px]">
-                    <Trash2 className="size-4 mr-2" /> Remove Image Trace
+              <div className="relative inline-block border rounded p-1 bg-muted/30 group overflow-hidden w-full h-[80px]">
+                <img src={question.imageUrl} alt="Diagram" className="w-full h-full object-contain rounded-sm" />
+                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-all flex items-center justify-center">
+                  <Button variant="destructive" size="sm" onClick={() => onUpdate({ imageUrl: undefined })} className="h-6 rounded text-[9px] font-bold uppercase tracking-widest">
+                    <Trash2 className="size-3 mr-1.5" /> Remove
                   </Button>
                 </div>
               </div>
             ) : (
-              <div className="flex items-center gap-6">
-                <label className="flex flex-col items-center justify-center gap-2 size-32 rounded-2xl border-2 border-dashed border-muted-foreground/20 cursor-pointer hover:bg-muted/5 hover:border-primary/30 transition-all group">
-                  <Upload className="size-6 text-muted-foreground/40 group-hover:text-primary/60" />
-                  <span className="text-[9px] font-bold text-muted-foreground/60 group-hover:text-primary/70 uppercase tracking-tighter">Upload Diagram</span>
-                  <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
-                </label>
-                <div className="space-y-1">
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Guideline Sync</p>
-                    <p className="text-[10px] text-muted-foreground/50 leading-relaxed font-medium">Standard JPG, PNG, SVG supported.<br/>Maximum allocation 5MB per trace.<br/>Visual context increases pedagogical accuracy.</p>
-                </div>
-              </div>
+              <label className="flex flex-col items-center justify-center gap-1.5 h-[80px] w-full rounded border border-dashed border-border/60 cursor-pointer hover:bg-muted/5 transition-all group">
+                <Upload className="size-4 text-muted-foreground/40 group-hover:text-primary/60" />
+                <span className="text-[9px] font-bold text-muted-foreground/60 group-hover:text-primary/70 uppercase">Upload Diagram</span>
+                <input type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
+              </label>
             )}
           </div>
         </div>
 
-        <Separator className="bg-border/50" />
-
         {/* Answer Options Editors */}
         {(question.type === "mcq" || question.type === "truefalse") && (
-          <div className="space-y-6">
+          <div className="space-y-3 pt-3 border-t border-border/40">
             <div className="flex items-center justify-between">
-                <Label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40 ml-1">Response Candidates</Label>
+                <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Response Candidates</Label>
                 {question.type === "mcq" && (
-                    <Button variant="outline" size="sm" onClick={onAddOption} className="h-8 rounded-lg text-[10px] font-bold uppercase tracking-widest border-primary/20 text-primary">
-                        <Plus className="size-3.5 mr-2" /> Add Candidate
+                    <Button variant="outline" size="sm" onClick={onAddOption} className="h-6 rounded text-[9px] font-bold uppercase tracking-widest border-border/60 text-muted-foreground">
+                        <Plus className="size-3 mr-1" /> Add
                     </Button>
                 )}
             </div>
@@ -299,20 +269,20 @@ function QuestionCard({
                   options: question.options.map((opt, i) => ({ ...opt, is_correct: i === idx })),
                 });
               }}
-              className="space-y-3"
+              className="grid grid-cols-1 md:grid-cols-2 gap-2"
             >
               {question.options.map((opt, oIdx) => (
-                <div key={oIdx} className="flex items-center gap-4 p-4 rounded-xl border bg-muted/[0.02] hover:border-muted-foreground/20 transition-all focus-within:bg-background">
-                  <RadioGroupItem value={oIdx.toString()} className="size-5 border-muted-foreground/30 text-emerald-500" />
+                <div key={oIdx} className="flex items-center gap-2 p-2 rounded border border-border/40 bg-muted/[0.02] hover:border-primary/20 transition-all focus-within:bg-background">
+                  <RadioGroupItem value={oIdx.toString()} className="size-3.5 border-muted-foreground/30 text-emerald-500" />
                   <Input
                     value={opt.option_text || ""}
                     onChange={(e) => onUpdateOption(oIdx, { option_text: e.target.value })}
-                    className="h-10 border-none bg-transparent shadow-none focus-visible:ring-0 font-bold text-sm"
+                    className="h-7 border-none bg-transparent shadow-none focus-visible:ring-0 font-medium text-xs px-1"
                     placeholder={`Candidate Trace ${oIdx + 1}`}
                     disabled={question.type === "truefalse"}
                   />
                   {question.type === "mcq" && question.options.length > 2 && (
-                    <Button variant="ghost" size="icon" onClick={() => onRemoveOption(oIdx)} className="text-muted-foreground/20 hover:text-destructive h-9 w-9 rounded-xl"><X className="size-4" /></Button>
+                    <Button variant="ghost" size="icon" onClick={() => onRemoveOption(oIdx)} className="text-muted-foreground/30 hover:text-destructive h-6 w-6 rounded"><X className="size-3" /></Button>
                   )}
                 </div>
               ))}
@@ -326,22 +296,14 @@ function QuestionCard({
 
 function ReviewQuestionCard({ question, index }: { question: Question; index: number }) {
   return (
-    <div className="space-y-4 group p-6 border rounded-2xl hover:bg-muted/5 transition-all">
-      <div className="flex gap-6">
-        <span className="text-muted-foreground/30 font-black text-3xl tabular-nums shrink-0 leading-none">{(index + 1).toString().padStart(2, "0")}</span>
-        <div className="space-y-4 flex-1">
-          <div>
-            <p className="font-bold text-lg leading-snug text-foreground/90">{question.text || <em className="text-muted-foreground font-normal italic opacity-40">No question context provided</em>}</p>
-            {question.imageUrl && (
-              <div className="mt-4 inline-block p-1 border rounded-2xl overflow-hidden bg-white shadow-sm">
-                <img src={question.imageUrl} alt="Diagram" className="max-h-60 rounded-xl object-contain" />
-              </div>
-            )}
-          </div>
-          <div className="flex items-center gap-3">
-            <Badge variant="secondary" className="h-6 text-[10px] font-black uppercase tracking-widest px-3 rounded-lg">{question.type}</Badge>
-            <Badge variant="outline" className="h-6 text-[10px] font-bold px-3 rounded-lg border-muted-foreground/10">{question.marks} Marks</Badge>
-          </div>
+    <div className="flex gap-4 p-3 border border-border/40 rounded-lg hover:bg-muted/5 transition-all bg-card/50">
+      <span className="text-muted-foreground/40 font-bold text-sm tabular-nums shrink-0 mt-0.5">{(index + 1).toString().padStart(2, "0")}</span>
+      <div className="space-y-2 flex-1 min-w-0">
+        <p className="font-semibold text-xs leading-snug text-foreground/80 line-clamp-2">{question.text || <em className="text-muted-foreground font-normal italic opacity-40">No question context provided</em>}</p>
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className="h-4.5 text-[8px] font-bold uppercase tracking-widest px-1.5 rounded-sm bg-muted/20 border-border/60">{question.type}</Badge>
+          <Badge variant="outline" className="h-4.5 text-[8px] font-bold px-1.5 rounded-sm border-border/40 text-muted-foreground/60">{question.marks} PTS</Badge>
+          {question.caseStudyContext && <Badge variant="outline" className="h-4.5 text-[8px] font-bold uppercase tracking-widest px-1.5 rounded-sm border-amber-200/50 bg-amber-50 text-amber-700">Case Study</Badge>}
         </div>
       </div>
     </div>
@@ -507,6 +469,7 @@ export default function EditAssessmentPage() {
             groupId: aq.group_id,
             text: aq.question.content,
             imageUrl: aq.question.image_url,
+            caseStudyContext: aq.question.case_study_context,
             type: aq.question.question_type.toLowerCase().replace("_", "") as QuestionType,
             marks: aq.marks_override || aq.question.marks,
             options: aq.question.options?.map((o: any) => ({
@@ -558,6 +521,7 @@ export default function EditAssessmentPage() {
             ...q,
             marks: parseInt(q.marks as any),
             imageUrl: q.imageUrl,
+            caseStudyContext: q.caseStudyContext,
             options: q.options.map(o => ({...o, order_index: parseInt(o.order_index as any)}))
         })),
         rules: {
@@ -595,6 +559,7 @@ export default function EditAssessmentPage() {
         await questionApi.createQuestion({
             content: q.text,
             image_url: q.imageUrl,
+            case_study_context: q.caseStudyContext,
             question_type: typeMap[q.type] || "short_answer",
             difficulty: "medium",
             suggested_marks: Math.max(1, q.marks),
@@ -612,110 +577,110 @@ export default function EditAssessmentPage() {
     }
   };
 
-  if (isLoading) return <div className="p-24 text-center"><LoaderCircleIcon className="animate-spin mx-auto mb-4 size-8 text-primary/40" /><p className="text-sm font-bold uppercase tracking-widest text-muted-foreground/60">Loading Registry Matrix</p></div>;
+  if (isLoading) return <div className="p-20 text-center"><LoaderCircleIcon className="animate-spin mx-auto mb-3 size-6 text-primary/40" /><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Loading Registry Matrix</p></div>;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-24 px-4">
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h1 className="text-3xl font-bold tracking-tight text-foreground/90">Modify Assessment</h1>
-          <p className="text-muted-foreground text-xs uppercase tracking-[0.2em] font-medium">Registry ID: {id.split('-')[0]} • Status: Verified</p>
+    <div className="max-w-5xl mx-auto space-y-4 pb-16 p-4">
+      <div className="flex items-center justify-between border-b border-border/40 pb-3 px-1">
+        <div className="space-y-0.5">
+          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">Modify Assessment</h1>
+          <p className="text-muted-foreground text-[9px] uppercase tracking-widest font-bold">Registry ID: {id.split('-')[0]} • Status: Verified</p>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" onClick={() => router.back()} className="h-10 px-6 rounded-xl border text-xs font-bold uppercase tracking-widest">Abort</Button>
-          <Button onClick={handleSave} disabled={isSaving} className="h-10 px-8 rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-lg shadow-primary/10">
-            {isSaving ? <LoaderCircleIcon className="animate-spin mr-2 size-4" /> : <Save className="mr-2 size-4" />}
-            Finalize Changes
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => router.back()} className="h-8 px-4 rounded-md border border-border/60 text-[10px] font-bold uppercase tracking-widest hover:bg-muted/50">Abort</Button>
+          <Button onClick={handleSave} disabled={isSaving} className="h-8 px-5 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">
+            {isSaving ? <LoaderCircleIcon className="animate-spin mr-1.5 size-3" /> : <Save className="mr-1.5 size-3" />}
+            Finalize
           </Button>
         </div>
       </div>
 
-      <Stepper value={activeStep} onValueChange={setActiveStep} className="space-y-8">
-        <StepperNav className="flex w-full gap-2 border-b bg-muted/5 rounded-t-2xl p-1">
+      <Stepper value={activeStep} onValueChange={setActiveStep} className="space-y-6">
+        <StepperNav className="flex w-full gap-1 border-b border-border/40 bg-muted/5 p-1 rounded-t-md">
           {["Identity", "Blueprint", "Structure", "Review"].map((title, idx) => (
             <StepperItem key={idx} step={idx + 1} className="flex-1">
-              <StepperTrigger className="flex w-full items-center justify-center gap-3 p-4 rounded-xl border-b-2 border-transparent data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border-primary transition-all">
-                <StepperIndicator className="size-6 text-[10px] font-bold">{idx + 1}</StepperIndicator>
-                <StepperTitle className="text-[10px] font-black uppercase tracking-[0.15em]">{title}</StepperTitle>
+              <StepperTrigger className="flex w-full items-center justify-center gap-2 p-2 rounded data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border border border-transparent border-b-0 transition-all">
+                <StepperIndicator className="size-4 text-[9px] font-bold">{idx + 1}</StepperIndicator>
+                <StepperTitle className="text-[9px] font-bold uppercase tracking-widest">{title}</StepperTitle>
               </StepperTrigger>
             </StepperItem>
           ))}
         </StepperNav>
 
         <StepperPanel>
-          <StepperContent value={1} className="space-y-6 focus-visible:outline-none">
-            <Card className="shadow-none border rounded-2xl overflow-hidden">
-                <CardHeader className="bg-muted/5 border-b py-6 px-10"><CardTitle className="text-lg font-bold">Assessment Identity</CardTitle></CardHeader>
-                <CardContent className="p-10 space-y-10">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-10">
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Display Title</Label>
-                            <Input value={metadata.title} onChange={(e) => setMetadata({...metadata, title: e.target.value})} className="h-12 font-semibold rounded-xl text-base shadow-[inset_0_2px_4px_rgba(0,0,0,0.02)]" />
+          <StepperContent value={1} className="space-y-4 focus-visible:outline-none">
+            <Card className="shadow-none border border-border/60 rounded-md overflow-hidden bg-card/30">
+                <CardHeader className="bg-muted/5 border-b border-border/40 py-3 px-5"><CardTitle className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Assessment Identity</CardTitle></CardHeader>
+                <CardContent className="p-5 space-y-5">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Display Title</Label>
+                            <Input value={metadata.title} onChange={(e) => setMetadata({...metadata, title: e.target.value})} className="h-9 font-semibold text-sm rounded bg-white shadow-none focus-visible:ring-1" />
                         </div>
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Assessment Protocol</Label>
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Assessment Protocol</Label>
                             <Select value={metadata.mode} onValueChange={(v) => setMetadata({...metadata, mode: v})}>
-                                <SelectTrigger className="h-12 rounded-xl font-bold text-sm bg-muted/5"><SelectValue /></SelectTrigger>
-                                <SelectContent className="rounded-xl">
-                                    {["CAT", "Summative", "Homework", "Formative", "Practice", "Groupwork"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                                <SelectTrigger className="h-9 rounded font-bold text-xs bg-white shadow-none"><SelectValue /></SelectTrigger>
+                                <SelectContent className="rounded">
+                                    {["CAT", "Summative", "Homework", "Formative", "Practice", "Groupwork"].map(m => <SelectItem key={m} value={m} className="text-xs font-bold">{m}</SelectItem>)}
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
-                    <div className="space-y-3">
-                        <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Description & Context</Label>
-                        <Textarea value={metadata.description} onChange={(e) => setMetadata({...metadata, description: e.target.value})} className="min-h-[140px] rounded-2xl bg-muted/[0.02] p-6 text-sm font-medium leading-relaxed" />
+                    <div className="space-y-1.5">
+                        <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Description & Context</Label>
+                        <Textarea value={metadata.description} onChange={(e) => setMetadata({...metadata, description: e.target.value})} className="min-h-[80px] rounded bg-white p-3 text-xs font-medium focus-visible:ring-1" />
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-10 pt-10 border-t border-dashed">
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Scheduled Date</Label>
-                            <Input type="date" value={metadata.date ? format(metadata.date, "yyyy-MM-dd") : ""} onChange={(e) => setMetadata({...metadata, date: new Date(e.target.value)})} className="h-12 rounded-xl font-bold" />
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-5 border-t border-border/40">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Scheduled Date</Label>
+                            <Input type="date" value={metadata.date ? format(metadata.date, "yyyy-MM-dd") : ""} onChange={(e) => setMetadata({...metadata, date: new Date(e.target.value)})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Access Start</Label>
-                            <Input type="time" value={metadata.startTime} onChange={(e) => setMetadata({...metadata, startTime: e.target.value})} className="h-12 rounded-xl font-bold" />
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access Start</Label>
+                            <Input type="time" value={metadata.startTime} onChange={(e) => setMetadata({...metadata, startTime: e.target.value})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Access End</Label>
-                            <Input type="time" value={metadata.endTime} onChange={(e) => setMetadata({...metadata, endTime: e.target.value})} className="h-12 rounded-xl font-bold" />
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access End</Label>
+                            <Input type="time" value={metadata.endTime} onChange={(e) => setMetadata({...metadata, endTime: e.target.value})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
                     </div>
                 </CardContent>
             </Card>
 
-            <Card className="shadow-none border rounded-2xl overflow-hidden">
-                <CardHeader className="bg-muted/5 border-b py-6 px-10"><CardTitle className="text-lg font-bold">Target Enrollment</CardTitle></CardHeader>
-                <CardContent className="p-10 space-y-10">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Departments</Label>
-                            <ScrollArea className="h-48 border rounded-xl p-4 bg-muted/[0.02]">
+            <Card className="shadow-none border border-border/60 rounded-md overflow-hidden bg-card/30">
+                <CardHeader className="bg-muted/5 border-b border-border/40 py-3 px-5"><CardTitle className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Target Enrollment</CardTitle></CardHeader>
+                <CardContent className="p-5 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Departments</Label>
+                            <ScrollArea className="h-32 border border-border/60 rounded p-2 bg-white">
                                 {availableDepartments.map(d => (
-                                    <div key={d.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer" onClick={() => toggleDept(d.id)}>
-                                        <Checkbox checked={metadata.department_ids.includes(d.id)} />
-                                        <span className="text-xs font-bold text-foreground/70 truncate">{d.name}</span>
+                                    <div key={d.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/10 transition-colors cursor-pointer" onClick={() => toggleDept(d.id)}>
+                                        <Checkbox checked={metadata.department_ids.includes(d.id)} className="size-3.5 rounded-sm" />
+                                        <span className="text-[10px] font-bold text-foreground/70 truncate">{d.name}</span>
                                     </div>
                                 ))}
                             </ScrollArea>
                         </div>
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Class Options</Label>
-                            <ScrollArea className="h-48 border rounded-xl p-4 bg-muted/[0.02]">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Class Options</Label>
+                            <ScrollArea className="h-32 border border-border/60 rounded p-2 bg-white">
                                 {availableOptions.map(o => (
-                                    <div key={o.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer" onClick={() => toggleOption(o.id)}>
-                                        <Checkbox checked={metadata.option_ids.includes(o.id)} />
-                                        <span className="text-xs font-bold text-foreground/70 truncate">{o.name}</span>
+                                    <div key={o.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/10 transition-colors cursor-pointer" onClick={() => toggleOption(o.id)}>
+                                        <Checkbox checked={metadata.option_ids.includes(o.id)} className="size-3.5 rounded-sm" />
+                                        <span className="text-[10px] font-bold text-foreground/70 truncate">{o.name}</span>
                                     </div>
                                 ))}
                             </ScrollArea>
                         </div>
-                        <div className="space-y-3">
-                            <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Level / Stream</Label>
-                            <ScrollArea className="h-48 border rounded-xl p-4 bg-muted/[0.02]">
+                        <div className="space-y-1.5">
+                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Level / Stream</Label>
+                            <ScrollArea className="h-32 border border-border/60 rounded p-2 bg-white">
                                 {availableClasses.map(c => (
-                                    <div key={c.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer" onClick={() => setMetadata({...metadata, class_group_ids: metadata.class_group_ids.includes(c.id) ? metadata.class_group_ids.filter((i:any)=>i!==c.id) : [...metadata.class_group_ids, c.id]})}>
-                                        <Checkbox checked={metadata.class_group_ids.includes(c.id)} />
-                                        <span className="text-xs font-bold text-foreground/70 truncate">{c.name}</span>
+                                    <div key={c.id} className="flex items-center gap-2 p-1.5 rounded hover:bg-muted/10 transition-colors cursor-pointer" onClick={() => setMetadata({...metadata, class_group_ids: metadata.class_group_ids.includes(c.id) ? metadata.class_group_ids.filter((i:any)=>i!==c.id) : [...metadata.class_group_ids, c.id]})}>
+                                        <Checkbox checked={metadata.class_group_ids.includes(c.id)} className="size-3.5 rounded-sm" />
+                                        <span className="text-[10px] font-bold text-foreground/70 truncate">{c.name}</span>
                                     </div>
                                 ))}
                             </ScrollArea>
@@ -724,72 +689,72 @@ export default function EditAssessmentPage() {
                 </CardContent>
             </Card>
 
-            <div className="flex justify-end pt-6">
-                <Button onClick={() => setActiveStep(2)} className="h-12 px-10 rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-sm">
-                  Next Step: Blueprint <ChevronRight className="ml-2 size-4" />
+            <div className="flex justify-end pt-2">
+                <Button onClick={() => setActiveStep(2)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">
+                  Blueprint <ChevronRight className="ml-1 size-3" />
                 </Button>
             </div>
           </StepperContent>
 
-          <StepperContent value={2} className="space-y-6 focus-visible:outline-none">
+          <StepperContent value={2} className="space-y-4 focus-visible:outline-none">
             <div className="flex items-center justify-between px-1">
-                <h2 className="text-2xl font-bold tracking-tight">Assessment Blueprint</h2>
-                <Button variant="outline" size="sm" onClick={() => setBlueprint([...blueprint, { id: `sec-${Date.now()}`, section: "New Section", topics: "", marks: 0, questions: 0, difficulty: "Medium", allowedTypes: ["mcq"] }])} className="rounded-xl h-10 border-primary/20 text-primary px-5 hover:bg-primary/5">
-                    <Plus className="size-4 mr-2" /> Add Section Node
+                <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Blueprint</h2>
+                <Button variant="outline" size="sm" onClick={() => setBlueprint([...blueprint, { id: `sec-${Date.now()}`, section: "New Section", topics: "", marks: 0, questions: 0, difficulty: "Medium", allowedTypes: ["mcq"] }])} className="rounded-md h-8 text-[10px] font-bold uppercase border-primary/20 text-primary px-3 hover:bg-primary/5">
+                    <Plus className="size-3 mr-1.5" /> Add Section
                 </Button>
             </div>
             
-            <div className="space-y-4">
+            <div className="space-y-3">
                 {blueprint.map((sec, idx) => (
-                    <Card key={sec.id} className="shadow-none border rounded-2xl overflow-hidden group">
-                        <CardHeader className="py-5 border-b bg-muted/[0.02] flex flex-row items-center justify-between px-8">
-                            <div className="flex items-center gap-4">
-                                <Badge className="rounded-lg size-7 flex items-center justify-center p-0 font-black bg-primary/10 text-primary border-none shadow-none">{idx + 1}</Badge>
-                                <Input value={sec.section} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, section: e.target.value} : s))} className="h-9 border-none bg-transparent font-bold text-lg focus-visible:ring-0 p-0 w-80 shadow-none" />
+                    <Card key={sec.id} className="shadow-none border border-border/60 rounded-lg overflow-hidden group bg-card/30">
+                        <CardHeader className="py-2.5 border-b border-border/40 bg-muted/5 flex flex-row items-center justify-between px-4">
+                            <div className="flex items-center gap-3">
+                                <Badge className="rounded size-5 flex items-center justify-center p-0 font-bold bg-primary/10 text-primary border-none shadow-none text-[10px]">{idx + 1}</Badge>
+                                <Input value={sec.section} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, section: e.target.value} : s))} className="h-7 border-none bg-transparent font-bold text-xs focus-visible:ring-0 p-0 w-64 shadow-none uppercase" />
                             </div>
-                            <Button variant="ghost" size="icon" onClick={() => setBlueprint(blueprint.filter(s => s.id !== sec.id))} className="text-muted-foreground/30 hover:text-destructive hover:bg-destructive/5 h-9 w-9 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 className="size-4" /></Button>
+                            <Button variant="ghost" size="icon" onClick={() => setBlueprint(blueprint.filter(s => s.id !== sec.id))} className="text-muted-foreground/40 hover:text-destructive hover:bg-destructive/5 h-7 w-7 rounded"><Trash2 className="size-3.5" /></Button>
                         </CardHeader>
-                        <CardContent className="p-8 grid grid-cols-1 md:grid-cols-2 gap-10">
-                            <div className="space-y-6">
-                                <div className="space-y-3">
-                                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Marks Allocation</Label>
-                                    <Input type="number" value={sec.marks} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, marks: parseInt(e.target.value) || 0} : s))} className="h-11 rounded-xl font-bold bg-muted/5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.01)]" />
+                        <CardContent className="p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="space-y-3">
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Marks Allocation</Label>
+                                    <Input type="number" value={sec.marks} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, marks: parseInt(e.target.value) || 0} : s))} className="h-8 rounded bg-white text-xs font-bold shadow-none focus-visible:ring-1" />
                                 </div>
-                                <div className="space-y-3">
-                                    <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Target Question Nodes</Label>
-                                    <Input type="number" value={sec.questions} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, questions: parseInt(e.target.value) || 0} : s))} className="h-11 rounded-xl font-bold bg-muted/5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.01)]" />
+                                <div className="space-y-1">
+                                    <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Target Question Nodes</Label>
+                                    <Input type="number" value={sec.questions} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, questions: parseInt(e.target.value) || 0} : s))} className="h-8 rounded bg-white text-xs font-bold shadow-none focus-visible:ring-1" />
                                 </div>
                             </div>
-                            <div className="space-y-3">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60 ml-1">Topic Coverage Domain</Label>
-                                <Textarea value={sec.topics} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, topics: e.target.value} : s))} className="min-h-[128px] rounded-2xl bg-muted/[0.01] p-5 text-sm font-medium leading-relaxed" placeholder="Describe topics covered in this section..." />
+                            <div className="space-y-1">
+                                <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Topic Domain</Label>
+                                <Textarea value={sec.topics} onChange={(e) => setBlueprint(blueprint.map(s => s.id === sec.id ? {...s, topics: e.target.value} : s))} className="min-h-[85px] rounded bg-white p-3 text-xs font-medium focus-visible:ring-1" placeholder="Topics covered..." />
                             </div>
                         </CardContent>
                     </Card>
                 ))}
             </div>
 
-            <div className="flex justify-between pt-10 border-t border-dashed">
-                <Button variant="ghost" onClick={() => setActiveStep(1)} className="h-12 px-8 rounded-xl font-bold uppercase tracking-widest text-[10px] text-muted-foreground/60"><ChevronLeft className="mr-2 size-4" /> Identity Registry</Button>
-                <Button onClick={() => setActiveStep(3)} className="h-12 px-10 rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-sm">Next: Structure Domain <ChevronRight className="ml-2 size-4" /></Button>
+            <div className="flex justify-between pt-2 border-t border-border/40 mt-4">
+                <Button variant="ghost" onClick={() => setActiveStep(1)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50"><ChevronLeft className="mr-1.5 size-3" /> Identity</Button>
+                <Button onClick={() => setActiveStep(3)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">Structure <ChevronRight className="ml-1.5 size-3" /></Button>
             </div>
           </StepperContent>
 
-          <StepperContent value={3} className="space-y-8 focus-visible:outline-none">
+          <StepperContent value={3} className="space-y-4 focus-visible:outline-none">
             <div className="flex items-center justify-between px-1">
-                <div className="space-y-1">
-                    <h2 className="text-2xl font-bold tracking-tight">Question Architecture</h2>
-                    <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Constructing {questions.length} logical nodes</p>
+                <div className="space-y-0.5">
+                    <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Architecture</h2>
+                    <p className="text-[9px] font-bold text-muted-foreground/50 uppercase">{questions.length} logical nodes</p>
                 </div>
                 <Button size="sm" onClick={() => setQuestions([...questions, { id: `q-${Date.now()}`, sectionId: blueprint[0]?.id || "", text: "", marks: 2, type: "mcq", options: [
                     { option_text: "Option 1", is_correct: true, order_index: 0 },
                     { option_text: "Option 2", is_correct: false, order_index: 1 },
-                ], aiGenerated: false }])} className="rounded-xl h-11 px-8 font-bold uppercase tracking-widest text-[10px]">
-                    <Plus className="size-4 mr-2" /> Add Question Node
+                ], aiGenerated: false }])} className="rounded-md h-8 px-4 font-bold uppercase text-[10px] shadow-none">
+                    <Plus className="size-3 mr-1.5" /> Add Node
                 </Button>
             </div>
 
-            <div className="space-y-5">
+            <div className="space-y-3">
                 {questions.map((q, idx) => (
                     <QuestionCard 
                         key={q.id}
@@ -823,63 +788,63 @@ export default function EditAssessmentPage() {
                 ))}
             </div>
 
-            <div className="flex justify-between pt-10 border-t border-dashed">
-                <Button variant="ghost" onClick={() => setActiveStep(2)} className="h-12 px-8 rounded-xl font-bold uppercase tracking-widest text-[10px] text-muted-foreground/60"><ChevronLeft className="mr-2 size-4" /> Blueprint Mapping</Button>
-                <Button onClick={() => setActiveStep(4)} className="h-12 px-10 rounded-xl font-bold uppercase tracking-widest text-[11px] shadow-sm">Final Sync Review <ChevronRight className="ml-2 size-4" /></Button>
+            <div className="flex justify-between pt-4 border-t border-border/40 mt-4">
+                <Button variant="ghost" onClick={() => setActiveStep(2)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50"><ChevronLeft className="mr-1.5 size-3" /> Blueprint</Button>
+                <Button onClick={() => setActiveStep(4)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">Review <ChevronRight className="ml-1.5 size-3" /></Button>
             </div>
           </StepperContent>
 
-          <StepperContent value={4} className="space-y-10 focus-visible:outline-none">
-            <Card className="shadow-none border rounded-[2rem] overflow-hidden">
-                <CardHeader className="bg-primary/5 border-b py-10 px-12 relative">
-                    <div className="absolute top-8 right-12 flex gap-4">
-                        <Badge variant="outline" className="h-8 px-4 rounded-xl border-primary/20 bg-background text-primary font-black uppercase tracking-widest text-[10px]">{metadata.mode}</Badge>
-                        <Badge variant="outline" className="h-8 px-4 rounded-xl border-primary/20 bg-background text-primary font-black uppercase tracking-widest text-[10px]">{totalMarks} PTS</Badge>
+          <StepperContent value={4} className="space-y-4 focus-visible:outline-none">
+            <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-card/30">
+                <CardHeader className="bg-muted/5 border-b border-border/40 py-5 px-6 relative">
+                    <div className="absolute top-4 right-6 flex gap-2">
+                        <Badge variant="outline" className="h-6 px-2 rounded border-primary/20 bg-white text-primary font-bold uppercase tracking-widest text-[9px]">{metadata.mode}</Badge>
+                        <Badge variant="outline" className="h-6 px-2 rounded border-primary/20 bg-white text-primary font-bold uppercase tracking-widest text-[9px]">{totalMarks} PTS</Badge>
                     </div>
-                    <CardTitle className="text-4xl font-black tracking-tighter text-foreground/90 uppercase pr-40">{metadata.title || "Untitled Registry Trace"}</CardTitle>
-                    <CardDescription className="text-xs mt-3 font-bold uppercase tracking-[0.3em] text-primary/40 leading-relaxed max-w-2xl">{metadata.description || "No pedagogical context provided."}</CardDescription>
+                    <CardTitle className="text-lg font-bold tracking-tight text-foreground/90 uppercase pr-24">{metadata.title || "Untitled Trace"}</CardTitle>
+                    <CardDescription className="text-[10px] mt-1 font-bold uppercase tracking-widest text-muted-foreground/60 leading-relaxed truncate">{metadata.description || "No pedagogical context provided."}</CardDescription>
                 </CardHeader>
-                <CardContent className="p-12 space-y-16">
-                    <div className="space-y-8">
-                        <h3 className="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground/40 flex items-center gap-4">
-                            <Separator className="flex-1" /> Protocol Matrix <Separator className="flex-1" />
+                <CardContent className="p-6 space-y-6">
+                    <div className="space-y-3">
+                        <h3 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            Protocol Matrix <Separator className="flex-1 border-border/40" />
                         </h3>
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="p-6 rounded-[1.5rem] border bg-muted/5 space-y-4 hover:border-primary/20 transition-all">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-10 rounded-2xl bg-white shadow-sm flex items-center justify-center border border-muted-foreground/10"><CalendarIcon className="size-5 text-primary/60" /></div>
-                                    <div className="space-y-0.5">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50">Execution Date</p>
-                                        <p className="text-sm font-bold tracking-tight">{metadata.date ? format(metadata.date, "EEEE, MMMM do") : "Not Scheduled"}</p>
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="p-3 rounded border border-border/60 bg-white space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="size-6 rounded bg-muted/10 flex items-center justify-center border border-border/40"><CalendarIcon className="size-3 text-primary/60" /></div>
+                                    <div className="space-y-0">
+                                        <p className="text-[8px] font-bold uppercase tracking-widest text-muted-foreground">Date</p>
+                                        <p className="text-[11px] font-bold">{metadata.date ? format(metadata.date, "MMM do, yyyy") : "Not Scheduled"}</p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-6 rounded-[1.5rem] border bg-muted/5 space-y-4 hover:border-primary/20 transition-all">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-10 rounded-2xl bg-white shadow-sm flex items-center justify-center border border-muted-foreground/10"><Clock className="size-5 text-primary/60" /></div>
-                                    <div className="space-y-0.5">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50">Temporal Window</p>
-                                        <p className="text-sm font-bold tracking-tight">{metadata.startTime} — {metadata.endTime} <span className="text-[10px] text-muted-foreground/40 ml-2">({metadata.durationMinutes}m)</span></p>
+                            <div className="p-3 rounded border border-border/60 bg-white space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="size-6 rounded bg-muted/10 flex items-center justify-center border border-border/40"><Clock className="size-3 text-primary/60" /></div>
+                                    <div className="space-y-0">
+                                        <p className="text-[8px] font-bold uppercase tracking-widest text-muted-foreground">Window</p>
+                                        <p className="text-[11px] font-bold">{metadata.startTime} — {metadata.endTime} <span className="text-[9px] text-muted-foreground ml-1">({metadata.durationMinutes}m)</span></p>
                                     </div>
                                 </div>
                             </div>
-                            <div className="p-6 rounded-[1.5rem] border bg-muted/5 space-y-4 hover:border-primary/20 transition-all">
-                                <div className="flex items-center gap-3">
-                                    <div className="size-10 rounded-2xl bg-white shadow-sm flex items-center justify-center border border-muted-foreground/10"><Shield className="size-5 text-primary/60" /></div>
-                                    <div className="space-y-0.5">
-                                        <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/50">Integrity Vector</p>
-                                        <p className="text-sm font-bold tracking-tight">{rules.supervised ? "Proctored" : "Self-paced"} • {rules.browserRestricted ? "Lockdown" : "Open"}</p>
+                            <div className="p-3 rounded border border-border/60 bg-white space-y-2">
+                                <div className="flex items-center gap-2">
+                                    <div className="size-6 rounded bg-muted/10 flex items-center justify-center border border-border/40"><Shield className="size-3 text-primary/60" /></div>
+                                    <div className="space-y-0">
+                                        <p className="text-[8px] font-bold uppercase tracking-widest text-muted-foreground">Integrity</p>
+                                        <p className="text-[11px] font-bold">{rules.supervised ? "Proctored" : "Self-paced"} • {rules.browserRestricted ? "Lockdown" : "Open"}</p>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
 
-                    <div className="space-y-8">
-                        <h3 className="text-xs font-black uppercase tracking-[0.4em] text-muted-foreground/40 flex items-center gap-4">
-                            <Separator className="flex-1" /> Node Hierarchy <Separator className="flex-1" />
+                    <div className="space-y-3">
+                        <h3 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
+                            Node Hierarchy <Separator className="flex-1 border-border/40" />
                         </h3>
-                        <div className="space-y-4 pr-2 max-h-[600px] overflow-y-auto custom-scrollbar">
+                        <div className="space-y-2 pr-1 max-h-[400px] overflow-y-auto">
                             {questions.map((q, idx) => (
                                 <ReviewQuestionCard key={q.id} question={q} index={idx} />
                             ))}
@@ -888,11 +853,11 @@ export default function EditAssessmentPage() {
                 </CardContent>
             </Card>
 
-            <div className="flex justify-between pt-4">
-                <Button variant="ghost" onClick={() => setActiveStep(3)} className="h-14 px-8 rounded-2xl font-black uppercase tracking-[0.2em] text-[10px] text-muted-foreground/40 hover:text-foreground transition-all">Back to Architecture</Button>
-                <Button onClick={handleSave} disabled={isSaving} className="h-14 px-12 rounded-2xl font-black uppercase tracking-[0.2em] text-[11px] shadow-xl shadow-primary/20 bg-primary hover:scale-[1.02] active:scale-[0.98] transition-all">
-                    {isSaving ? <LoaderCircleIcon className="animate-spin mr-3 size-5" /> : <Save className="mr-3 size-5" />}
-                    Sync Registry State
+            <div className="flex justify-between pt-4 border-t border-border/40 mt-4">
+                <Button variant="ghost" onClick={() => setActiveStep(3)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50">Architecture</Button>
+                <Button onClick={handleSave} disabled={isSaving} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none bg-primary hover:bg-primary/90">
+                    {isSaving ? <LoaderCircleIcon className="animate-spin mr-1.5 size-3" /> : <Save className="mr-1.5 size-3" />}
+                    Sync State
                 </Button>
             </div>
           </StepperContent>

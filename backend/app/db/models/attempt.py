@@ -1431,10 +1431,11 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     )
     rubric_grades: List["RubricGrade"] = Relationship(
         back_populates="submission_grade",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"},
     )
     appeals: List["ResultAppeal"] = Relationship(
-        back_populates="submission_grade"
+        back_populates="submission_grade",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
 
 
