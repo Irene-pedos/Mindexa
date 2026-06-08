@@ -92,6 +92,7 @@ from app.db.models.attempt import (
     GroupSubmissionComment,
     ResultAppeal,
     RubricGrade,
+    GradingQueueItem,
     StudentGroup,
     StudentGroupMember,
     StudentResponse,
@@ -175,6 +176,7 @@ __all__: list[str] = [
     "SubmissionGrade",
     "RubricGrade",
     "ResultAppeal",
+    "GradingQueueItem",
     # ── Integrity ──────────────────────────────────────────────────────────────
     "IntegrityEvent",
     "IntegrityWarning",

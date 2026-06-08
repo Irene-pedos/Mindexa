@@ -116,13 +116,18 @@ class TeachingAssignment(BaseModel, table=True):
     external_id: Optional[str] = Field(default=None, max_length=100, index=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────
-    lecturer: Optional["User"] = Relationship()
+    lecturer: Optional["User"] = Relationship(
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
     institution: Optional["Institution"] = Relationship()
     campus: Optional["Campus"] = Relationship()
     college: Optional["College"] = Relationship()
     department: Optional["Department"] = Relationship()
     option: Optional["Option"] = Relationship()
-    course: Optional["Course"] = Relationship(back_populates="assignments")
+    course: Optional["Course"] = Relationship(
+        back_populates="assignments",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
     class_section: Optional["ClassSection"] = Relationship()
     academic_period: Optional["AcademicPeriod"] = Relationship()
 
@@ -181,10 +186,21 @@ class TeachingWorkspace(AuditedBaseModel, table=True):
     status: str = Field(default="ACTIVE", max_length=50)
 
     # ── Relationships ─────────────────────────────────────────────────────────
-    teaching_assignment: "TeachingAssignment" = Relationship(back_populates="workspaces")
-    course: "Course" = Relationship(back_populates="workspaces")
-    class_section: Optional["ClassSection"] = Relationship(back_populates="workspaces")
-    academic_period: Optional["AcademicPeriod"] = Relationship()
+    teaching_assignment: "TeachingAssignment" = Relationship(
+        back_populates="workspaces",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    course: "Course" = Relationship(
+        back_populates="workspaces",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    class_section: Optional["ClassSection"] = Relationship(
+        back_populates="workspaces",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    academic_period: Optional["AcademicPeriod"] = Relationship(
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
 
     # Link operational content
     assessments: List["Assessment"] = Relationship(back_populates="workspace")

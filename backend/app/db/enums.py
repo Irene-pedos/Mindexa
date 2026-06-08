@@ -339,6 +339,7 @@ class GradeStatus(str, Enum):
 class GradingQueueStatus(str, Enum):
     PENDING = "PENDING"
     ASSIGNED = "ASSIGNED"
+    AI_SUGGESTED = "AI_SUGGESTED"
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     CANCELLED = "CANCELLED"

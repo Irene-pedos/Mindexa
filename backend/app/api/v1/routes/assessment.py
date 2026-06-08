@@ -37,6 +37,7 @@ from app.schemas.assessment import (
     AssessmentDetailResponse,
     AssessmentGeneralUpdate,
     AssessmentListResponse,
+    AssessmentQuestionResponse,
     AssessmentSectionCreate,
     AssessmentSectionResponse,
     AssessmentSectionUpdate,
@@ -326,6 +327,21 @@ async def delete_section(
 # ---------------------------------------------------------------------------
 # QUESTIONS
 # ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{assessment_id}/questions",
+    response_model=list[AssessmentQuestionResponse],
+    summary="List all questions in an assessment",
+)
+async def list_assessment_questions_endpoint(
+    assessment_id: uuid.UUID,
+    current_user: User = Depends(require_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[AssessmentQuestionResponse]:
+    svc = _service(db)
+    questions = await svc.list_questions(assessment_id, current_user)
+    return [AssessmentQuestionResponse.model_validate(q) for q in questions]
 
 
 @router.post(

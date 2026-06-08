@@ -42,6 +42,8 @@ class AIGradeReviewResponse(BaseAuditedResponse):
     attempt_id: uuid.UUID
     assessment_id: uuid.UUID
     student_id: uuid.UUID
+    response_id: uuid.UUID | None = None
+    submission_grade_id: uuid.UUID | None = None
     grading_decision: str
     ai_suggested_total: float | None
     lecturer_final_total: float | None

@@ -224,6 +224,7 @@ class AssessmentRepository:
         Excludes soft-deleted records.
         """
         from app.db.models.question import AssessmentQuestion, Question
+        from sqlalchemy.orm import selectinload
 
         result = await self.db.execute(
             select(Assessment)
@@ -254,10 +255,13 @@ class AssessmentRepository:
         Lightweight load — minimal relationships for schema properties.
         """
         from app.db.models.academic import TeachingWorkspace
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
-                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course)
+                selectinload(Assessment.course),
+                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course),
+                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.academic_period)
             )
             .where(
                 col(Assessment.id) == assessment_id,
@@ -300,6 +304,7 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
@@ -346,6 +351,7 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
@@ -683,11 +689,12 @@ class AssessmentRepository:
         Return all AssessmentQuestion rows for an assessment,
         ordered by order_index. Each row has question selectin-loaded.
         """
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(AssessmentQuestion)
             .options(
-                selectinload("question"),
-                selectinload("assessment_section"),
+                selectinload(AssessmentQuestion.question),
+                selectinload(AssessmentQuestion.assessment_section),
             )
             .where(col(AssessmentQuestion.assessment_id) == assessment_id)
             .order_by(col(AssessmentQuestion.order_index))
@@ -708,11 +715,11 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         group_id: uuid.UUID | None = None,
     ) -> list[AssessmentQuestion]:
+        from sqlalchemy.orm import selectinload
         stmt = (
             select(AssessmentQuestion)
             .options(
-                selectinload("question"),
-                selectinload("question.options"),
+                selectinload(AssessmentQuestion.question).selectinload(Question.options),
             )
             .where(col(AssessmentQuestion.assessment_id) == assessment_id)
         )
@@ -1418,6 +1425,7 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(

@@ -473,7 +473,7 @@ async def _ensure_subject(
 ) -> uuid.UUID:
     """Upsert a subject."""
     stmt = select(Subject)
-    stmt = stmt.where(Subject.title == title)  # type: ignore[misc]
+    stmt = stmt.where(Subject.name == title)  # type: ignore[misc]
     stmt = stmt.where(Subject.institution_id == institution_id)  # type: ignore[misc]
     result = await session.execute(stmt)
     row = result.fetchone()

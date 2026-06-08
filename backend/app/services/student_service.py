@@ -5,6 +5,7 @@ import random
 from datetime import UTC, datetime
 from sqlalchemy import select, func, and_, not_, exists
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db.enums import AttemptStatus, AssessmentType, AssessmentStatus
 from app.db.models.academic import Course, TeachingWorkspace, StudentEnrollment, ClassSection
@@ -136,10 +137,11 @@ class StudentService:
 
         # 7. Recent Results (Top 5 from our all_results list)
         recent_results_data = []
+        from sqlalchemy.orm import selectinload
         for r in results[:5]:
             # Load attempt and assessment for display
             stmt_r = select(AssessmentResult).where(AssessmentResult.id == r.id).options(
-                selectinload(AssessmentResult.attempt).selectinload(AssessmentAttempt.assessment)
+                selectinload(AssessmentResult.attempt).selectinload(AssessmentAttempt.assessment).selectinload(Assessment.course)
             )
             r_full = (await self.db.execute(stmt_r)).scalar_one()
             assessment = r_full.attempt.assessment if r_full.attempt else None

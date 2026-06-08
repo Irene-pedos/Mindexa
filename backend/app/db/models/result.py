@@ -161,10 +161,16 @@ class AssessmentResult(BaseModel, table=True):
 
     # -- Relationships --------------------------------------------------------
 
-    attempt: Optional["AssessmentAttempt"] = Relationship(back_populates="result")
+    attempt: Optional["AssessmentAttempt"] = Relationship(
+        back_populates="result",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
     breakdowns: List["ResultBreakdown"] = Relationship(
         back_populates="result",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "lazy": "selectin"
+        },
     )
 
 

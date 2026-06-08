@@ -45,6 +45,8 @@ export const assessmentApi = {
   
   getAssessmentById: (id: string) => apiClient(`/assessments/${id}`),
   
+  getAssessmentQuestions: (id: string) => apiClient(`/assessments/${id}/questions`),
+  
   createAssessment: (data: AssessmentConfig) => 
     apiClient("/assessments", { 
       method: "POST", 

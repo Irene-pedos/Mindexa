@@ -309,11 +309,15 @@ class AssessmentAttempt(BaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     assessment: Optional["Assessment"] = Relationship(
-        back_populates="attempts"
+        back_populates="attempts",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
-    student: Optional["User"] = Relationship()
+    student: Optional["User"] = Relationship(
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
     group: Optional["StudentGroup"] = Relationship(
-        back_populates="attempts"
+        back_populates="attempts",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
     responses: List["StudentResponse"] = Relationship(
         back_populates="attempt",
@@ -1111,14 +1115,16 @@ class StudentResponse(BaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="responses"
+        back_populates="responses",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
     question: Optional["Question"] = Relationship(
-        back_populates="responses"
+        back_populates="responses",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
     grade: Optional["SubmissionGrade"] = Relationship(
         back_populates="student_response",
-        sa_relationship_kwargs={"uselist": False},
+        sa_relationship_kwargs={"uselist": False, "lazy": "selectin"},
     )
     rubric_grades: List["RubricGrade"] = Relationship(
         back_populates="student_response",
@@ -1416,10 +1422,12 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     # ── Relationships ─────────────────────────────────────────────────────────
 
     attempt: Optional["AssessmentAttempt"] = Relationship(
-        back_populates="submission_grades"
+        back_populates="submission_grades",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
     student_response: Optional["StudentResponse"] = Relationship(
-        back_populates="grade"
+        back_populates="grade",
+        sa_relationship_kwargs={"lazy": "selectin"}
     )
     rubric_grades: List["RubricGrade"] = Relationship(
         back_populates="submission_grade",

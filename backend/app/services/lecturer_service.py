@@ -5,6 +5,7 @@ from typing import List
 from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, cast, Date
+from sqlalchemy.orm import selectinload
 
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.assessment import Assessment
@@ -464,20 +465,23 @@ class LecturerService:
         pending_items_data = []
         assessment_counts = {}
         for item in queue_items:
-            aid = item.assessment_id
-            assessment_counts[aid] = assessment_counts.get(aid, 0) + 1
+            # item is a dict as returned by grading_repo.list_queue
+            aid = item.get("assessment_id")
+            title = item.get("assessment_title") or "Unknown Assessment"
+            if aid:
+                if aid not in assessment_counts:
+                    assessment_counts[aid] = {"count": 0, "title": title}
+                assessment_counts[aid]["count"] += 1
             
-        for aid, count in assessment_counts.items():
-            ass = await self.assessment_repo.get_by_id_simple(aid)
-            if ass:
-                pending_items_data.append(LecturerPendingItem(
-                    id=uuid.uuid4(),
-                    assessment_id=aid,
-                    assessment_title=ass.title,
-                    type="Manual Grading",
-                    count=count,
-                    urgency="high" if count > 10 else "medium"
-                ))
+        for aid, info in assessment_counts.items():
+            pending_items_data.append(LecturerPendingItem(
+                id=uuid.uuid4(),
+                assessment_id=aid,
+                assessment_title=info["title"],
+                type="Manual Grading",
+                count=info["count"],
+                urgency="high" if info["count"] > 10 else "medium"
+            ))
 
         # 3. Recent Submissions
         recent_attempts = await self.attempt_repo.list_recent_submissions_by_lecturer(lecturer_id)
@@ -489,11 +493,14 @@ class LecturerService:
                 p = a.student.profile
                 student_name = f"{p.first_name} {p.last_name}" if p.first_name else p.display_name or "Student"
 
+            # Use getattr for safety with relationships in dashboard aggregation
+            assessment_title = getattr(a.assessment, "title", "Unknown") if a.assessment else "Unknown"
+
             recent_submissions_data.append(LecturerRecentSubmission(
                 student_name=student_name,
-                assessment_title=a.assessment.title if a.assessment else "Unknown",
+                assessment_title=assessment_title,
                 submitted_at=a.submitted_at or a.started_at,
-                status=a.status
+                status=a.status.value if hasattr(a.status, "value") else str(a.status)
             ))
 
         # 4. Chart Data (Last 30 days)
@@ -540,7 +547,11 @@ class LecturerService:
         # 5. Recent Integrity Alerts
         from app.db.models.auth import User, UserProfile
         alert_stmt = (
-            select(IntegrityEvent, UserProfile, Assessment.title)
+            select(
+                IntegrityEvent, 
+                UserProfile, 
+                Assessment.title.label("assessment_title")
+            )
             .join(Assessment, Assessment.id == IntegrityEvent.assessment_id)
             .join(User, User.id == IntegrityEvent.student_id)
             .join(UserProfile, UserProfile.user_id == User.id)
@@ -553,7 +564,11 @@ class LecturerService:
         )
         alert_res = await self.db.execute(alert_stmt)
         recent_alerts = []
-        for event, profile, ass_title in alert_res.all():
+        for row in alert_res.all():
+            event = row[0]
+            profile = row[1]
+            ass_title = row[2]
+            
             severity = "low"
             risk_score = 10
             if event.event_type in ["DEVTOOLS_DETECTED", "SUSPICIOUS_DEVICE"]:
@@ -568,19 +583,25 @@ class LecturerService:
                 id=event.id,
                 student_name=f"{profile.first_name} {profile.last_name}",
                 student_id=profile.student_id or "N/A",
-                assessment_title=ass_title,
-                event_type=event.event_type,
+                assessment_title=ass_title or "Assessment",
+                event_type=event.event_type.value if hasattr(event.event_type, "value") else str(event.event_type),
                 created_at=event.created_at,
                 risk_score=risk_score,
                 severity=severity
             ))
+
+        # 6. Active Workspaces
+        workspaces_data = []
+        ws_items, _ = await self.list_workspaces(lecturer_id=lecturer_id, page_size=3)
+        workspaces_data = ws_items
 
         return LecturerDashboardResponse(
             summary=summary,
             pending_queue=pending_items_data,
             recent_submissions=recent_submissions_data,
             chart_data=chart_data,
-            recent_alerts=recent_alerts
+            recent_alerts=recent_alerts,
+            workspaces=workspaces_data
         )
 
     async def list_lecturer_courses(

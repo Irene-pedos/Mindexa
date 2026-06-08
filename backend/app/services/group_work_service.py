@@ -344,7 +344,7 @@ class GroupWorkService:
         profiles = await self._get_user_profiles([member.student_id for member in group.members if not member.is_deleted])
         approval_map = {approval.student_id: approval.status for approval in approvals}
         participation_map: dict[uuid.UUID, int] = {}
-        question_title_map = {str(question.id): question.text for question in questions}
+        question_title_map = {str(question.id): question.content for question in questions}
 
         for entry in activity:
             participation_map[entry.student_id] = participation_map.get(entry.student_id, 0) + 1

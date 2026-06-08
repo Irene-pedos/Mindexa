@@ -131,38 +131,42 @@ class ResultService:
         # Generate per-question breakdown
         await self.generate_breakdown(result.id, attempt_id)
 
-        # Gate: Automatic Release for IMMEDIATE mode closed-question assessments
-        from app.db.enums import ResultReleaseMode
-        
-        # Safe Enum to String conversion for release mode
+        # Gate: Automatic Release for IMMEDIATE mode
+        from app.db.enums import NotificationType, ResultReleaseMode
+        from app.db.models.auth import User
+        from app.workers.tasks import send_email_notification
+
         release_mode = assessment.result_release_mode
         if hasattr(release_mode, "value"):
             release_mode = release_mode.value
 
-        if assessment and release_mode == ResultReleaseMode.IMMEDIATE.value:
-            from app.services.grading_service import AUTO_GRADABLE
-            
-            # Load questions to check types
-            questions = await self.assessment_repo.list_assessment_questions(attempt.assessment_id)
-            
-            # Convert AUTO_GRADABLE values to set of strings for easier comparison
-            auto_gradable_values = {t.value if hasattr(t, "value") else str(t) for t in AUTO_GRADABLE}
-            
-            has_open = False
-            for aq in questions:
-                if not aq.question:
-                    continue
-                q_type = aq.question.question_type
-                q_type_str = q_type.value if hasattr(q_type, "value") else str(q_type)
-                if q_type_str not in auto_gradable_values:
-                    has_open = True
-                    break
-            
-            # Only auto-release if it's fully graded (all responses have final grades)
-            # and there are no open-ended questions requiring manual review.
-            if not has_open and graded_count >= aq_count and aq_count > 0 and not attempt.is_flagged:
-                await self.result_repo.bulk_release([result.id], released_by_id=None)
-                result.is_released = True # Update local object for return
+        if release_mode == ResultReleaseMode.IMMEDIATE.value and not result.integrity_hold:
+            await self.result_repo.release(result.id, released_by_id=None)
+            result.is_released = True
+
+            # Dispatch notification
+            student = await self.db.get(User, result.student_id)
+            if student and student.email:
+                first_name = student.profile.first_name if student.profile else "Student"
+                from app.core.config import settings
+                results_url = f"{settings.FRONTEND_URL}/student/results/{result.id}"
+                
+                send_email_notification.delay(
+                    to_email=student.email,
+                    subject=f"Results Released: {assessment.title}",
+                    template_name="result_released",
+                    context={
+                        "first_name": first_name,
+                        "assessment_title": assessment.title,
+                        "result_id": str(result.id),
+                        "results_url": results_url,
+                        "percentage": round(result.percentage, 1),
+                        "letter_grade": result.letter_grade.value if hasattr(result.letter_grade, "value") else str(result.letter_grade),
+                        "is_passing": result.is_passing,
+                        "notification_type": NotificationType.RESULT_RELEASED.value,
+                        "app_name": settings.APP_NAME
+                    }
+                )
 
         return result, created
 
@@ -253,6 +257,39 @@ class ResultService:
         released_count = await self.result_repo.bulk_release(
             released_ids, released_by_id=released_by_id
         )
+
+        # Dispatch notifications for released results
+        if released_ids:
+            from app.db.enums import NotificationType
+            from app.db.models.auth import User
+            from app.workers.tasks import send_email_notification
+            
+            assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
+            assessment_title = assessment.title if assessment else "Assessment"
+
+            for r in releasable:
+                student = await self.db.get(User, r.student_id)
+                if student and student.email:
+                    first_name = student.profile.first_name if student.profile else "Student"
+                    from app.core.config import settings
+                    results_url = f"{settings.FRONTEND_URL}/student/results/{r.id}"
+                    
+                    send_email_notification.delay(
+                        to_email=student.email,
+                        subject=f"Results Released: {assessment_title}",
+                        template_name="result_released",
+                        context={
+                            "first_name": first_name,
+                            "assessment_title": assessment_title,
+                            "result_id": str(r.id),
+                            "results_url": results_url,
+                            "percentage": round(r.percentage, 1),
+                            "letter_grade": r.letter_grade.value if hasattr(r.letter_grade, "value") else str(r.letter_grade),
+                            "is_passing": r.is_passing,
+                            "notification_type": NotificationType.RESULT_RELEASED.value,
+                            "app_name": settings.APP_NAME
+                        }
+                    )
 
         held_attempt_ids = [r.attempt_id for r in held]
 

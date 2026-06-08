@@ -692,6 +692,18 @@ class AssessmentService:
 
         return assessment
 
+    async def list_questions(
+        self,
+        assessment_id: uuid.UUID,
+        current_user: User,
+    ) -> list:
+        """
+        Return all questions linked to an assessment.
+        """
+        # Reuse auth logic from get_assessment
+        await self.get_assessment(assessment_id, current_user)
+        return await self._repo.list_assessment_questions(assessment_id)
+
     async def list_assessments(
         self,
         current_user: User,

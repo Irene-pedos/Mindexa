@@ -31,17 +31,20 @@ import json
 import uuid
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
+from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logger import get_logger
-from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus, QuestionType
-from app.db.models.attempt import GradingQueueItem, StudentResponse, SubmissionGrade
+from app.db.enums import (GradingMode, GradingQueuePriority,
+                          GradingQueueStatus, QuestionType)
+from app.db.models.attempt import (GradingQueueItem, StudentResponse,
+                                   SubmissionGrade)
 from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger("mindexa.grading_service")
 
@@ -180,6 +183,12 @@ class GradingService:
             grading_mode=grading_mode,
             priority=priority,
         )
+
+        # Trigger AI grading job if applicable
+        if grading_mode == GradingMode.SEMI: # AI_ASSISTED
+            from app.workers.tasks import process_ai_grading_job
+            process_ai_grading_job.delay(str(item.id))
+
         return item
 
     # -----------------------------------------------------------------------
@@ -243,10 +252,10 @@ class GradingService:
 
         # Get student answer (assuming TEXT for now, handle others as needed)
         student_answer = response.answer_text or "No answer provided"
-        
+
         try:
             ai_output = await agent.review_response(
-                question_text=question.question_text,
+                question_text=question.content,
                 student_answer=student_answer,
                 rubric_content=rubric_content,
                 max_score=float(question.marks),
@@ -274,8 +283,49 @@ class GradingService:
 
         await self.grading_repo.update_queue_item(
             item.id,
-            status=GradingQueueStatus.COMPLETED,
+            status=GradingQueueStatus.AI_SUGGESTED,
         )
+
+        # 6. Notify Lecturer(s)
+        # Find who to notify: assigned lecturer, or assessment supervisors
+        from app.db.enums import NotificationType
+        from app.db.models.assessment import AssessmentSupervisor
+        from app.db.models.auth import User
+        from app.db.repositories.assessment_repo import AssessmentRepository
+        from app.workers.tasks import send_email_notification
+
+        assessment_repo = AssessmentRepository(self.db)
+        assessment = await assessment_repo.get_by_id_simple(item.assessment_id)
+
+        # Get supervisors to notify
+        lecturers_to_notify = []
+        if item.assigned_to_id:
+            lecturers_to_notify.append(item.assigned_to_id)
+        else:
+            supervisors = await self.db.execute(
+                select(AssessmentSupervisor.supervisor_id)
+                .where(AssessmentSupervisor.assessment_id == item.assessment_id)
+            )
+            lecturers_to_notify.extend(supervisors.scalars().all())
+
+        # Dispatch notifications
+        for lecturer_id in set(lecturers_to_notify):
+            lecturer = await self.db.get(User, lecturer_id)
+            if lecturer and lecturer.email:
+                send_email_notification.delay(
+                    to_email=lecturer.email,
+                    subject=f"AI Grading Suggestion Ready: {assessment.title}",
+                    template_name="ai_suggestion_ready",
+                    context={
+                        "lecturer_name": getattr(getattr(lecturer, "profile", None), "first_name", None) or "Lecturer",
+                        "assessment_title": assessment.title,
+                        "student_name": item.student_name or "a student",
+                        "ai_confidence": round(ai_output.confidence * 100, 1),
+                        "grading_url": f"{settings.FRONTEND_URL.rstrip('/')}" \
+                            f"/lecturer/grading?assessment_id={item.assessment_id}",
+                        "notification_type": NotificationType.AI_ASSISTANCE_READY.value
+                    }
+                )
 
         return {
             "status": "completed",
@@ -357,14 +407,19 @@ class GradingService:
         internal_notes: str | None = None,
         rubric_scores: list | None = None,
         accept_ai_suggestion: bool = False,
+        is_final: bool = True,
+        review_started_at: datetime | None = None,
+        review_duration_seconds: int | None = None,
     ) -> SubmissionGrade:
         """
         Lecturer finalises a grade — sets is_final=True and awards the score.
+        If is_final=False, saves a draft for later.
 
         accept_ai_suggestion=True: uses the ai_suggested_score already stored.
         accept_ai_suggestion=False: uses the `score` argument (lecturer override).
 
         Sets lecturer_override=True if the score differs from the AI suggestion.
+        Records the decision trail in AIGradeReview.
         """
         existing = await self.grading_repo.get_grade_by_response(response_id)
         if not existing:
@@ -377,10 +432,9 @@ class GradingService:
             )
 
         # 0. Authorization: Verify lecturer is assigned to this assessment's course
-        from app.db.models.academic import TeachingAssignment, Course
-        from app.db.models.assessment import Assessment
-        from sqlalchemy import select
         from app.core.exceptions import AuthorizationError
+        from app.db.models.academic import Course, TeachingAssignment
+        from app.db.models.assessment import Assessment
 
         auth_stmt = (
             select(TeachingAssignment.id)
@@ -424,6 +478,19 @@ class GradingService:
             else GradingMode.MANUAL
         )
 
+        # Determine grading decision for audit
+        from app.db.enums import AIGradeDecision
+        decision = AIGradeDecision.NOT_APPLICABLE
+        score_delta = None
+
+        if existing.ai_suggested_score is not None:
+            score_delta = final_score - existing.ai_suggested_score
+            if accept_ai_suggestion or final_score == existing.ai_suggested_score:
+                decision = AIGradeDecision.ACCEPTED
+            else:
+                decision = AIGradeDecision.MODIFIED
+
+        # 1. Update/Create the grade
         await self.grading_repo.finalize_grade(
             grade_id=existing.id,
             score=final_score,
@@ -432,6 +499,7 @@ class GradingService:
             rubric_scores=rubric_scores,
             lecturer_override=lecturer_override,
             grading_mode=grading_mode,
+            is_final=is_final,
         )
 
         if internal_notes is not None:
@@ -441,13 +509,88 @@ class GradingService:
                 internal_notes=internal_notes,
             )
 
-        # Complete the queue item
-        queue_item = await self.grading_repo.get_active_queue_item_for_response(response_id)
-        if queue_item:
-            await self.grading_repo.complete_queue_item(queue_item.id)
+        # 2. Record audit trail in AIGradeReview
+        await self.grading_repo.create_ai_grade_review(
+            attempt_id=existing.attempt_id,
+            assessment_id=existing.assessment_id,
+            student_id=existing.student_id,
+            response_id=existing.response_id,
+            submission_grade_id=existing.id,
+            ai_action_log_id=existing.ai_action_log_id,
+            grading_decision=decision,
+            ai_suggested_total=existing.ai_suggested_score, # "total" means per-item here
+            lecturer_final_total=final_score,
+            score_delta=score_delta,
+            max_possible_score=existing.max_score,
+            lecturer_id=lecturer_id,
+            review_started_at=review_started_at,
+            review_completed_at=datetime.now(UTC),
+            review_duration_seconds=review_duration_seconds,
+            lecturer_notes=internal_notes,
+        )
+
+        # 3. Only if final, handle completion and result calculation
+        if is_final:
+            # Complete the queue item
+            queue_item = await self.grading_repo.get_active_queue_item_for_response(response_id)
+            if queue_item:
+                await self.grading_repo.complete_queue_item(queue_item.id)
+
+            # If all responses for this attempt are now graded, calculate the result
+            attempt_id = existing.attempt_id
+            graded_count = await self.grading_repo.count_final_grades(attempt_id)
+            response_count = await self.submission_repo.count_responses(attempt_id)
+
+            if graded_count == response_count and response_count > 0:
+                from app.db.enums import NotificationType, ResultReleaseMode
+                from app.db.models.auth import User
+                from app.db.repositories.assessment_repo import \
+                    AssessmentRepository
+                from app.db.repositories.result_repo import ResultRepository
+                from app.services.result_service import ResultService
+                from app.workers.tasks import send_email_notification
+
+                result_service = ResultService(self.db)
+                result, _ = await result_service.calculate_result(attempt_id=attempt_id)
+
+                # Check result_release_mode — if it is IMMEDIATE, release and notify
+                assessment_repo = AssessmentRepository(self.db)
+                assessment = await assessment_repo.get_by_id_simple(result.assessment_id)
+
+                release_mode = assessment.result_release_mode
+                if hasattr(release_mode, "value"):
+                    release_mode = release_mode.value
+
+                if release_mode == ResultReleaseMode.IMMEDIATE.value and not result.integrity_hold:
+                    result_repo = ResultRepository(self.db)
+                    await result_repo.release(result.id, released_by_id=None)
+
+                    # Dispatch notification for the student
+                    student = await self.db.get(User, result.student_id)
+                    if student and student.email:
+                        first_name = student.profile.first_name if student.profile else "Student"
+                        from app.core.config import settings
+                        results_url = f"{settings.FRONTEND_URL}/student/results/{result.id}"
+
+                        send_email_notification.delay(
+                            to_email=student.email,
+                            subject=f"Results Released: {assessment.title}",
+                            template_name="result_released",
+                            context={
+                                "first_name": first_name,
+                                "assessment_title": assessment.title,
+                                "result_id": str(result.id),
+                                "results_url": results_url,
+                                "percentage": round(result.percentage, 1),
+                                "letter_grade": result.letter_grade.value if hasattr(result.letter_grade, "value") else str(result.letter_grade),
+                                "is_passing": result.is_passing,
+                                "notification_type": NotificationType.RESULT_RELEASED.value,
+                                "app_name": settings.APP_NAME
+                            }
+                        )
 
         existing.score = final_score
-        existing.is_final = True
+        existing.is_final = is_final
         return existing
 
     # -----------------------------------------------------------------------
@@ -462,7 +605,7 @@ class GradingService:
     ) -> SubmissionGrade:
         """
         Generate a professional feedback draft using the FeedbackAgent.
-        
+
         The draft is stored in the SubmissionGrade record for the lecturer
         to review, edit, and eventually release.
         """
@@ -479,7 +622,7 @@ class GradingService:
         if grade.rubric_scores:
             # Reconstruct rubric context from stored scores/notes if available
             rubric_content = json.dumps(grade.rubric_scores)
-        
+
         student_response_summary = "Performance evaluation"
         if grade.response_id:
             resp = await self.submission_repo.get_response_by_id(grade.response_id)
@@ -518,7 +661,7 @@ class GradingService:
                 ai_feedback_improvements=ai_output.areas_for_improvement,
                 ai_feedback_suggestions=ai_output.suggestions,
             )
-            
+
             # Refresh local object
             grade.ai_feedback_draft = ai_output.draft_feedback
             grade.ai_feedback_strengths = ai_output.strengths
@@ -556,7 +699,7 @@ class GradingService:
 
         # 1. Get all questions in the assessment
         aq_rows = await self.assessment_repo.list_assessment_questions(assessment_id)
-        
+
         # 2. Get existing responses (grade everything available for this attempt)
         responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
         response_map = {r.question_id: r for r in responses}
@@ -623,20 +766,24 @@ class GradingService:
         self,
         lecturer_id: uuid.UUID,
         assessment_id: uuid.UUID | None = None,
+        class_section_id: uuid.UUID | None = None,
+        question_type: str | None = None,
         status: str | None = None,
         priority: str | None = None,
+        search_query: str | None = None,
+        sort_by: str | None = "date_asc",
         page: int = 1,
         page_size: int = 30,
-    ) -> tuple[list[GradingQueueItem], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """
         Fetch items from the grading queue, filtered by assessments the lecturer teaches.
-        
+
         Logic:
             1. Find all courses the lecturer is assigned to.
             2. Find all assessments belonging to those courses.
             3. Filter the queue by those assessment IDs.
         """
-        from app.db.models.academic import TeachingAssignment, Course
+        from app.db.models.academic import Course, TeachingAssignment
         from app.db.models.assessment import Assessment
         from sqlalchemy import select
 
@@ -654,30 +801,128 @@ class GradingService:
             return [], 0
 
         # 2. List queue with allowed assessment filter
-        # If assessment_id is provided, ensure it's in the allowed list
         if assessment_id and assessment_id not in allowed_assessment_ids:
             return [], 0
-            
+
         # Default status: show only active queue items if not specified
         statuses = [status] if status else [
             GradingQueueStatus.PENDING,
             GradingQueueStatus.ASSIGNED,
-            GradingQueueStatus.IN_PROGRESS
+            GradingQueueStatus.IN_PROGRESS,
+            GradingQueueStatus.AI_SUGGESTED, # Added this state from prompt
         ]
 
         items, total = await self.grading_repo.list_queue(
             assessment_ids=allowed_assessment_ids if not assessment_id else [assessment_id],
+            class_section_id=class_section_id,
+            question_type=question_type,
             statuses=statuses,
             priority=priority,
+            search_query=search_query,
+            sort_by=sort_by,
             page=page,
             page_size=page_size,
         )
-        
+
         return items, total
 
     # -----------------------------------------------------------------------
-    # INTERNAL: COMPUTE AUTO SCORE
+    # MODERATION LAYER (Phase 4)
     # -----------------------------------------------------------------------
+
+    async def get_moderation_data(
+        self,
+        question_id: uuid.UUID,
+        moderator_id: uuid.UUID
+    ) -> dict[str, Any]:
+        """
+        Returns analytics and outliers for a question to assist moderation.
+        """
+        from app.db.models.question import Question
+        q = await self.db.get(Question, question_id)
+        if not q:
+            raise NotFoundError("Question not found")
+
+        stats = await self.grading_repo.get_moderation_stats(question_id)
+        stats["question_title"] = q.content or "Untitled Question"
+
+        # Calculate median (simple Python side)
+        if stats["score_distribution"]:
+            scores = []
+            for dp in stats["score_distribution"]:
+                scores.extend([dp["score"]] * dp["count"])
+
+            if scores:
+                scores.sort()
+                mid = len(scores) // 2
+                median = (scores[mid] + scores[~mid]) / 2
+                stats["median_score"] = float(median)
+            else:
+                stats["median_score"] = 0.0
+        else:
+            stats["median_score"] = 0.0
+
+        return stats
+
+    async def moderate_submission_grade(
+        self,
+        *,
+        response_id: uuid.UUID,
+        moderator_id: uuid.UUID,
+        new_score: float,
+        revision_reason: str,
+        feedback_update: str | None = None,
+        internal_notes: str | None = None,
+    ) -> SubmissionGrade:
+        """
+        Moderator adjusts a grade. Old grade is superseded (immutable audit).
+        """
+        # 1. Get existing CURRENT grade
+        existing = await self.grading_repo.get_grade_by_response(response_id)
+        if not existing:
+            raise NotFoundError("Grade not found")
+
+        if not existing.is_final:
+            raise ConflictError("Only finalised grades can be moderated. Use manual grading for pending items.")
+
+        # 2. Implements the pattern: mark current False, insert new
+        new_grade = await self.grading_repo.supersede_grade(
+            old_grade_id=existing.id,
+            new_score=new_score,
+            moderator_id=moderator_id,
+            revision_reason=revision_reason,
+            feedback_update=feedback_update,
+            internal_notes=internal_notes
+        )
+
+        # 3. Trigger result recalculation for the attempt
+        from app.services.result_service import ResultService
+        result_service = ResultService(self.db)
+        result, _ = await result_service.calculate_result(attempt_id=existing.attempt_id)
+
+        # 4. Notify student
+        from app.core.config import settings
+        from app.db.enums import NotificationType
+        from app.db.models.auth import User
+        from app.workers.tasks import send_email_notification
+
+        student = await self.db.get(User, existing.student_id)
+        if student and student.email:
+            send_email_notification.delay(
+                to_email=student.email,
+                subject="Grade Updated (Moderation Review)",
+                template_name="grade_updated",
+                context={
+                    "first_name": student.profile.first_name if student.profile else "Student",
+                    "reason": revision_reason,
+                    "new_score": new_score,
+                    "max_score": existing.max_score,
+                    "results_url": f"{settings.FRONTEND_URL}/student/results/{result.id}",
+                    "notification_type": NotificationType.RESULT_RELEASED.value
+                }
+            )
+
+        return new_grade
 
     async def _compute_auto_score(
         self,

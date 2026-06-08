@@ -28,7 +28,9 @@ class WorkspaceRepository:
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),
                 selectinload(TeachingWorkspace.class_section),
                 selectinload(TeachingWorkspace.academic_period),
-                selectinload(TeachingWorkspace.teaching_assignment).selectinload(TeachingAssignment.lecturer)
+                selectinload(TeachingWorkspace.teaching_assignment)
+                .selectinload(TeachingAssignment.lecturer)
+                .selectinload(User.profile)
             )
         )
         result = await self.db.execute(stmt)
@@ -71,7 +73,9 @@ class WorkspaceRepository:
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),
                 selectinload(TeachingWorkspace.class_section),
                 selectinload(TeachingWorkspace.academic_period),
-                selectinload(TeachingWorkspace.teaching_assignment).selectinload(TeachingAssignment.lecturer)
+                selectinload(TeachingWorkspace.teaching_assignment)
+                .selectinload(TeachingAssignment.lecturer)
+                .selectinload(User.profile)
             )
         )
         # Note: The above SQL logic is a placeholder for the refactored joins.
@@ -112,7 +116,9 @@ class WorkspaceRepository:
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),
                 selectinload(TeachingWorkspace.class_section),
                 selectinload(TeachingWorkspace.academic_period),
-                selectinload(TeachingWorkspace.teaching_assignment).selectinload(TeachingAssignment.lecturer)
+                selectinload(TeachingWorkspace.teaching_assignment)
+                .selectinload(TeachingAssignment.lecturer)
+                .selectinload(User.profile)
             )
         )
 
@@ -127,7 +133,9 @@ class WorkspaceRepository:
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),
                 selectinload(TeachingWorkspace.class_section),
                 selectinload(TeachingWorkspace.academic_period),
-                selectinload(TeachingWorkspace.teaching_assignment).selectinload(TeachingAssignment.lecturer)
+                selectinload(TeachingWorkspace.teaching_assignment)
+                .selectinload(TeachingAssignment.lecturer)
+                .selectinload(User.profile)
             )
         )
         result = await self.db.execute(stmt)

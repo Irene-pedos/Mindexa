@@ -35,10 +35,60 @@ from app.schemas.grading import (
     QueueItemAssignRequest,
     SubmissionGradeResponse,
     GroupGradingQueueListResponse,
+    ModerationStatsResponse,
+    ModerateGradeRequest,
 )
 from app.services.grading_service import GradingService
 
 router = APIRouter(prefix="/grading", tags=["Grading"])
+
+
+# ── INSTITUTIONAL MODERATION (Phase 4) ─────────────────────────────────────────
+
+
+@router.get(
+    "/moderation/{question_id}",
+    response_model=ModerationStatsResponse,
+    summary="Get grading analytics and outliers for a specific question",
+)
+async def get_moderation_stats(
+    question_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ModerationStatsResponse:
+    """
+    Returns score distribution, outliers, and AI deviations for a question.
+    Used by senior lecturers and admins to ensure grading consistency.
+    """
+    service = GradingService(db)
+    data = await service.get_moderation_data(question_id, current_user.id)
+    return ModerationStatsResponse.model_validate(data)
+
+
+@router.post(
+    "/moderate",
+    response_model=SubmissionGradeResponse,
+    summary="Moderator revision of an existing grade (Immutable Supersede Pattern)",
+)
+async def moderate_grade(
+    body: ModerateGradeRequest,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionGradeResponse:
+    """
+    Moderator adjusts a finalized grade. 
+    The old grade is marked as superseded, and a new record is created.
+    """
+    service = GradingService(db)
+    new_grade = await service.moderate_submission_grade(
+        response_id=body.response_id,
+        moderator_id=current_user.id,
+        new_score=body.new_score,
+        revision_reason=body.revision_reason,
+        feedback_update=body.feedback_update,
+        internal_notes=body.internal_notes,
+    )
+    return SubmissionGradeResponse.model_validate(new_grade)
 
 
 # ── GRADE ATTEMPT (post-submission trigger) ────────────────────────────────────
@@ -115,6 +165,9 @@ async def manual_grade(
         internal_notes=body.internal_notes,
         rubric_scores=body.rubric_scores,
         accept_ai_suggestion=False,
+        is_final=body.is_final,
+        review_started_at=body.review_started_at,
+        review_duration_seconds=body.review_duration_seconds,
     )
     return SubmissionGradeResponse.model_validate(grade)
 
@@ -148,6 +201,9 @@ async def confirm_ai_grade(
         internal_notes=body.internal_notes,
         rubric_scores=body.rubric_scores,
         accept_ai_suggestion=body.accept_ai_suggestion,
+        is_final=True,
+        review_started_at=body.review_started_at,
+        review_duration_seconds=body.review_duration_seconds,
     )
     return SubmissionGradeResponse.model_validate(grade)
 
@@ -193,10 +249,22 @@ async def get_grade_for_response(
     db: AsyncSession = Depends(get_db),
 ) -> SubmissionGradeResponse:
     repo = GradingRepository(db)
-    grade = await repo.get_grade_by_response(response_id)
+    grade = await repo.get_full_grade_detail(response_id)
     if not grade:
         raise NotFoundError("Grade not found", code="GRADE_NOT_FOUND")
-    return SubmissionGradeResponse.model_validate(grade)
+    
+    # Map extra fields from the joined data
+    resp_obj = SubmissionGradeResponse.model_validate(grade)
+    
+    if grade.student_response:
+        resp_obj.student_answer = grade.student_response.answer_text
+        if grade.student_response.question:
+            q = grade.student_response.question
+            resp_obj.question_text = q.content
+            if q.rubric:
+                resp_obj.rubric = q.rubric
+                
+    return resp_obj
 
 
 # ── GET ALL GRADES FOR ATTEMPT ────────────────────────────────────────────────
@@ -251,8 +319,12 @@ async def get_attempt_grading_summary(
 )
 async def list_queue(
     assessment_id: uuid.UUID | None = Query(default=None),
+    class_section_id: uuid.UUID | None = Query(default=None),
+    question_type: str | None = Query(default=None),
     status: str | None = Query(default=None),
     priority: str | None = Query(default=None),
+    q: str | None = Query(default=None, description="Search by student name or assessment title"),
+    sort_by: str | None = Query(default="date_asc", description="Sorting: date_asc, date_desc, ai_confidence, risk_level"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
     current_user=Depends(require_lecturer_or_admin),
@@ -262,8 +334,12 @@ async def list_queue(
     items, total = await service.get_grading_queue(
         lecturer_id=current_user.id,
         assessment_id=assessment_id,
+        class_section_id=class_section_id,
+        question_type=question_type,
         status=status,
         priority=priority,
+        search_query=q,
+        sort_by=sort_by,
         page=page,
         page_size=page_size,
     )

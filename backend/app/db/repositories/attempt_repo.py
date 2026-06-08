@@ -75,6 +75,7 @@ class AttemptRepository:
         return result.scalar_one_or_none()
 
     async def get_by_id(self, attempt_id: uuid.UUID) -> AssessmentAttempt | None:
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(AssessmentAttempt)
             .options(

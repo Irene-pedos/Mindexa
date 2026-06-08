@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Mindexa Platform"
     APP_NAME: str = "mindexa-api"
     APP_VERSION: str = "1.0.0"
+    FRONTEND_URL: str = "http://localhost:3000"
     
     @property
     def docs_enabled(self) -> bool:

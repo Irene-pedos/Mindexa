@@ -2,10 +2,24 @@
 import { apiClient } from "./client";
 
 export const gradingApi = {
-  getGradingQueue: () => apiClient("/grading/queue"),
+  getGradingQueue: (params: Record<string, any> = {}) => {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        searchParams.append(key, value.toString());
+      }
+    });
+    const queryString = searchParams.toString();
+    return apiClient(`/grading/queue${queryString ? `?${queryString}` : ""}`);
+  },
   getGradeDetail: (responseId: string) => apiClient(`/grading/response/${responseId}`),
   saveGrade: (responseId: string, data: Record<string, unknown>) => apiClient(`/grading/confirm-ai`, { 
     method: "POST", 
     body: JSON.stringify({ response_id: responseId, ...data }) 
+  }),
+  getModerationStats: (questionId: string) => apiClient(`/grading/moderation/${questionId}`),
+  moderateGrade: (data: Record<string, unknown>) => apiClient(`/grading/moderate`, {
+    method: "POST",
+    body: JSON.stringify(data)
   }),
 };

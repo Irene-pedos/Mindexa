@@ -44,6 +44,14 @@ class ManualGradeRequest(BaseModel):
         default=True,
         description="False = save draft grade. True = lock the grade.",
     )
+    review_started_at: datetime | None = Field(
+        default=None,
+        description="When the lecturer opened the grading UI (for duration tracking)",
+    )
+    review_duration_seconds: int | None = Field(
+        default=None,
+        description="Duration of review in seconds (computed by frontend)",
+    )
 
 
 class AIGradeConfirmRequest(BaseModel):
@@ -63,6 +71,14 @@ class AIGradeConfirmRequest(BaseModel):
     feedback: str | None = None
     internal_notes: str | None = None
     rubric_scores: list[dict[str, Any]] | None = None
+    review_started_at: datetime | None = Field(
+        default=None,
+        description="When the lecturer opened the grading UI",
+    )
+    review_duration_seconds: int | None = Field(
+        default=None,
+        description="Duration of review in seconds",
+    )
 
     @field_validator("override_score")
     @classmethod
@@ -94,6 +110,30 @@ class RubricScoreDetail(BaseModel):
     feedback: str | None = None
 
 
+class RubricCriterionLevelResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None = None
+    marks: int
+    order_index: int
+
+
+class RubricCriterionResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None = None
+    max_marks: int
+    order_index: int
+    levels: list[RubricCriterionLevelResponse]
+
+
+class RubricResponse(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: str | None = None
+    criteria: list[RubricCriterionResponse]
+
+
 class SubmissionGradeResponse(BaseModel):
     """Full grade detail for one response."""
     model_config = {"from_attributes": True}
@@ -117,6 +157,11 @@ class SubmissionGradeResponse(BaseModel):
     updated_by_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    
+    # Contextual extras for grading UI
+    question_text: str | None = None
+    student_answer: str | None = None
+    rubric: RubricResponse | None = None
 
 
 class GradingQueueItemResponse(BaseModel):
@@ -131,13 +176,31 @@ class GradingQueueItemResponse(BaseModel):
     student_id: uuid.UUID
     student_name: str | None = None
     assessment_title: str | None = None
+    
+    # Dimensions
+    class_section_id: uuid.UUID | None = None
+    class_section_name: str | None = None
+    question_type: str | None = None
+    question_title: str | None = None
+    
+    # Decision State & Metadata
     status: GradingQueueStatus
     priority: GradingQueuePriority
     grading_mode: GradingMode
-    assigned_to_id: uuid.UUID | None
-    assigned_at: datetime | None
-    completed_at: datetime | None
     ai_pre_graded: bool
+    ai_suggested_score: float | None = None
+    ai_confidence: float | None = None
+    
+    # Risk & Timing
+    integrity_risk_score: float | None = None
+    is_flagged: bool = False
+    submitted_at: datetime | None = None
+    
+    # Assignments
+    assigned_to_id: uuid.UUID | None = None
+    assigned_to_name: str | None = None
+    assigned_at: datetime | None = None
+    completed_at: datetime | None = None
     created_at: datetime
 
 
@@ -185,3 +248,42 @@ class GroupGradingQueueListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ---------------------------------------------------------------------------
+# MODERATION SCHEMAS
+# ---------------------------------------------------------------------------
+
+class ModerationScorePoint(BaseModel):
+    score: float
+    count: int
+
+
+class ModerationOutlier(BaseModel):
+    response_id: uuid.UUID
+    student_name: str
+    score: float
+    ai_suggested_score: float | None
+    deviation: float | None
+    risk_score: float
+
+
+class ModerationStatsResponse(BaseModel):
+    """Analytics for a specific question to assist in moderation."""
+    question_id: uuid.UUID
+    question_title: str
+    total_graded: int
+    average_score: float
+    median_score: float
+    score_distribution: list[ModerationScorePoint]
+    significant_deviations_count: int
+    outliers: list[ModerationOutlier]
+
+
+class ModerateGradeRequest(BaseModel):
+    """Body for POST /grading/moderate — supersede an existing grade."""
+    response_id: uuid.UUID
+    new_score: float = Field(..., ge=0)
+    revision_reason: str = Field(..., min_length=10, max_length=1000)
+    feedback_update: str | None = None
+    internal_notes: str | None = None

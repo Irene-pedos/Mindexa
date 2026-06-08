@@ -336,6 +336,26 @@ class AIGradeReview(BaseModel, table=True):
             index=True,
         )
     )
+    # Linked to the specific response being reviewed
+    response_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("student_response.id", ondelete="CASCADE"),
+            nullable=True,
+            index=True,
+        )
+    )
+    # Linked to the resulting grade record
+    submission_grade_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("submission_grade.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        )
+    )
     # Denormalised for fast assessment-level grading queue queries
     assessment_id: uuid.UUID = Field(
         sa_column=Column(

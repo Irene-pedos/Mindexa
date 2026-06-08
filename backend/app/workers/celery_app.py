@@ -22,6 +22,7 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
         "app.workers.tasks",
+        "app.workers.tasks.grading",
     ],
 )
 
@@ -34,12 +35,14 @@ celery_app.conf.task_queues = (
 )
 
 celery_app.conf.task_routes = {
+    "app.workers.tasks.grading.trigger_grading_for_attempt": {"queue": "grading"},
     "app.workers.tasks.process_ai_grading_job":    {"queue": "grading"},
     "app.workers.tasks.send_email_notification":   {"queue": "email"},
     "app.workers.tasks.purge_old_logs":            {"queue": "cleanup"},
     "app.workers.tasks.cleanup_expired_tokens":    {"queue": "cleanup"},
     "app.workers.tasks.auto_submit_expired_attempts": {"queue": "default"},
     "app.workers.tasks.process_ai_generation_batch": {"queue": "default"},
+    "app.workers.tasks.grading_reminder":           {"queue": "cleanup"},
 }
 
 celery_app.conf.update(
@@ -76,6 +79,10 @@ celery_app.conf.beat_schedule = {
     "purge-old-logs": {
         "task": "app.workers.tasks.purge_old_logs",
         "schedule": 86400.0,  # Daily
+    },
+    "grading-reminder": {
+        "task": "app.workers.tasks.grading_reminder",
+        "schedule": 43200.0,  # Every 12 hours
     },
 }
 

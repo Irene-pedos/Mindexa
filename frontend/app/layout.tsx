@@ -9,7 +9,7 @@ import { AuthProvider } from "@/components/providers/auth-provider";
 import { RoleGuard } from "@/components/mindexa/layout/role-guard";
 import { Toaster } from "@/components/ui/sonner";
 
-const outfit = Outfit({subsets:['latin'],variable:'--font-sans'});
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -63,7 +63,7 @@ export default function RootLayout({
                   'Unexpected token <', // Common when script injection fails
                   'Extension context invalidated'
                 ];
-                
+
                 function shouldSuppress(msg) {
                   if (!msg) return false;
                   const str = String(msg);

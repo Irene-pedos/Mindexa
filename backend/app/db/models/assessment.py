@@ -284,11 +284,20 @@ class Assessment(AuditedBaseModel, table=True):
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
-    workspace: "TeachingWorkspace" = Relationship(back_populates="assessments")
-    course: Optional["Course"] = Relationship(back_populates="assessments")
+    workspace: "TeachingWorkspace" = Relationship(
+        back_populates="assessments",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
+    course: Optional["Course"] = Relationship(
+        back_populates="assessments",
+        sa_relationship_kwargs={"lazy": "selectin"}
+    )
     subject: Optional["Subject"] = Relationship(
         back_populates="assessments",
-        sa_relationship_kwargs={"primaryjoin": "Assessment.subject_id == Subject.id"}
+        sa_relationship_kwargs={
+            "primaryjoin": "Assessment.subject_id == Subject.id",
+            "lazy": "selectin"
+        }
     )
 
     @property

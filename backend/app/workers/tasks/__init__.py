@@ -32,14 +32,13 @@ from collections.abc import Awaitable
 from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
+from app.core.celery_app import celery
+from app.core.logger import get_logger
+from app.db.models.question import AIGenerationBatch
 from celery import Task
 from celery.exceptions import MaxRetriesExceededError, SoftTimeLimitExceeded
 from sqlalchemy import text, update
 from sqlmodel import col
-
-from app.core.celery_app import celery
-from app.core.logger import get_logger
-from app.db.models.question import AIGenerationBatch
 
 logger = get_logger("mindexa.tasks")
 _event_loop_local = threading.local()
@@ -221,6 +220,11 @@ async def _auto_submit_expired_attempts_async() -> dict[str, Any]:
                     "auto_submit: submitted attempt %s (student=%s)",
                     attempt_id, student_id,
                 )
+
+                # Dispatch background grading
+                from app.workers.tasks.grading import \
+                    trigger_grading_for_attempt
+                trigger_grading_for_attempt.delay(str(attempt_id))
             except Exception as exc:
                 error_count += 1
                 logger.error(
@@ -566,10 +570,8 @@ def process_ai_generation_batch(
 
 
 async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
-    from app.core.ai.question_generator import (
-        GenerationContext,
-        generate_questions,
-    )
+    from app.core.ai.question_generator import (GenerationContext,
+                                                generate_questions)
     from app.db.enums import AIBatchStatus
     from app.db.repositories.ai_generation_repo import AIGenerationRepository
     from app.db.session import AsyncSessionLocal
@@ -585,7 +587,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             raise ValueError(f"Batch not found: {batch_id}")
 
         # Mark as processing
-        now = datetime.now(datetime.UTC)
+        now = datetime.now(UTC)
         await repo.update_batch_status(
             batch_id=batch.id,
             status=AIBatchStatus.PROCESSING,
@@ -633,7 +635,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
         elif result.total_failed > 0:
             final_status = AIBatchStatus.PARTIAL_FAILURE
 
-        completed_at = datetime.now(datetime.UTC)
+        completed_at = datetime.now(UTC)
         await repo.update_batch_status(
             batch_id=batch.id,
             status=final_status,
@@ -676,7 +678,8 @@ def process_student_resource(self: MindexaTask, resource_id: str) -> dict[str, A
 
 async def _process_student_resource_async(resource_id: str) -> dict[str, Any]:
     from app.core.ai.gateway import AIGateway
-    from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+    from app.core.ai.provider_factory import (get_ai_provider,
+                                              get_embedding_provider)
     from app.db.session import AsyncSessionLocal
     from app.services.rag_service import RAGService
 
@@ -686,7 +689,7 @@ async def _process_student_resource_async(resource_id: str) -> dict[str, Any]:
         embed_provider = get_embedding_provider()
         gateway = AIGateway(session, chat_provider, embed_provider)
         rag_service = RAGService(session, gateway)
-        
+
         await rag_service.process_student_resource(uuid.UUID(resource_id))
         return {"resource_id": resource_id, "status": "processed"}
 
@@ -713,7 +716,8 @@ def process_lecturer_material(self: MindexaTask, material_id: str) -> dict[str, 
 
 async def _process_lecturer_material_async(material_id: str) -> dict[str, Any]:
     from app.core.ai.gateway import AIGateway
-    from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+    from app.core.ai.provider_factory import (get_ai_provider,
+                                              get_embedding_provider)
     from app.db.session import AsyncSessionLocal
     from app.services.rag_service import RAGService
 
@@ -722,7 +726,7 @@ async def _process_lecturer_material_async(material_id: str) -> dict[str, Any]:
         embed_provider = get_embedding_provider()
         gateway = AIGateway(session, chat_provider, embed_provider)
         rag_service = RAGService(session, gateway)
-        
+
         await rag_service.process_lecturer_material(uuid.UUID(material_id))
         return {"material_id": material_id, "status": "processed"}
 
@@ -754,4 +758,81 @@ async def _mark_batch_failed(batch_id: str, error: str) -> None:
             await session.commit()
     except Exception as exc:
         logger.error("_mark_batch_failed error: %s", str(exc))
+
+
+# ---------------------------------------------------------------------------
+# GRADING REMINDERS (Phase 5)
+# ---------------------------------------------------------------------------
+
+@celery.task(
+    bind=True,
+    base=MindexaTask,
+    name="app.workers.tasks.grading_reminder",
+    max_retries=1,
+    queue="cleanup",
+)
+def grading_reminder(self: MindexaTask) -> dict[str, Any]:
+    """Find and notify lecturers of pending grading work."""
+    return _run(_grading_reminder_async())
+
+
+async def _grading_reminder_async() -> dict[str, Any]:
+    from app.db.enums import GradingQueueStatus, NotificationType
+    from app.db.models.assessment import Assessment, AssessmentSupervisor
+    from app.db.models.attempt import GradingQueueItem
+    from app.db.models.auth import User
+    from app.db.session import AsyncSessionLocal
+    from sqlalchemy import and_, func, select
+
+    async with AsyncSessionLocal() as session:
+        # Find assessments with pending items older than 24 hours
+        threshold = _utcnow() - timedelta(hours=24)
+
+        stmt = (
+            select(
+                GradingQueueItem.assessment_id,
+                func.count(GradingQueueItem.id).label("pending_count")
+            )
+            .where(
+                and_(
+                    GradingQueueItem.status.in_([GradingQueueStatus.PENDING, GradingQueueStatus.AI_SUGGESTED]),
+                    GradingQueueItem.created_at <= threshold,
+                    GradingQueueItem.is_deleted == False
+                )
+            )
+            .group_by(GradingQueueItem.assessment_id)
+        )
+        res = await session.execute(stmt)
+        pending_assessments = res.all()
+
+        reminders_sent = 0
+        for assessment_id, count in pending_assessments:
+            assessment = await session.get(Assessment, assessment_id)
+            if not assessment:
+                continue
+
+            # Find supervisors to notify
+            sup_stmt = select(AssessmentSupervisor.supervisor_id).where(
+                AssessmentSupervisor.assessment_id == assessment_id
+            )
+            supervisors = (await session.execute(sup_stmt)).scalars().all()
+
+            for sup_id in set(supervisors):
+                lecturer = await session.get(User, sup_id)
+                if lecturer and lecturer.email:
+                    send_email_notification.delay(
+                        to_email=lecturer.email,
+                        subject=f"Grading Reminder: {assessment.title}",
+                        template_name="grading_reminder",
+                        context={
+                            "lecturer_name": lecturer.profile.first_name if lecturer.profile else "Lecturer",
+                            "assessment_title": assessment.title,
+                            "pending_count": count,
+                            "grading_url": f"/lecturer/grading?assessment_id={assessment_id}",
+                            "notification_type": NotificationType.ASSESSMENT_REMINDER.value
+                        }
+                    )
+                    reminders_sent += 1
+
+        return {"reminders_sent": reminders_sent}
 

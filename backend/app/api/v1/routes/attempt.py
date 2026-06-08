@@ -165,6 +165,11 @@ async def submit_attempt(
         student_id=current_user.id,
         access_token=body.access_token,
     )
+
+    # Dispatch background grading
+    from app.workers.tasks.grading import trigger_grading_for_attempt
+    trigger_grading_for_attempt.delay(str(attempt.id))
+
     return AttemptDetailResponse.model_validate(attempt)
 
 

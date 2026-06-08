@@ -91,8 +91,8 @@ class AnalyticsService:
         
         hard_questions_text = []
         if hard_questions_ids:
-            # Fetch first 50 chars of question text for context
-            text_stmt = select(Question.question_text).where(Question.id.in_(hard_questions_ids))
+            # Fetch first 50 chars of question content for context
+            text_stmt = select(Question.content).where(Question.id.in_(hard_questions_ids))
             text_res = await self.db.execute(text_stmt)
             hard_questions_text = [row[0][:50] + "..." for row in text_res.fetchall()]
 
