@@ -10,7 +10,6 @@ import { Progress } from "@/components/ui/progress";
 import {
   BookOpen,
   Users,
-  Calendar,
   Award,
   FileText,
   Loader2,
@@ -18,13 +17,15 @@ import {
   Download,
   ArrowRight,
   BrainCircuit,
-  Upload,
-  ChevronRight,
+  ChevronLeft,
+  Clock,
+  LayoutDashboard,
+  CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
 import { studentApi, StudentCourseDetail } from "@/lib/api/student";
 import { LecturerMaterialResponse } from "@/lib/api/lecturer";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -33,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 export default function StudentWorkspaceDetailPage() {
   const params = useParams();
@@ -50,7 +52,7 @@ export default function StudentWorkspaceDetailPage() {
   useEffect(() => {
     async function loadWorkspace() {
       try {
-        setLoading(false);
+        setLoading(true);
         const [wsData, materialsData] = await Promise.all([
           studentApi.getWorkspaceDetail(workspaceId),
           studentApi.getWorkspaceMaterials(workspaceId),
@@ -109,29 +111,25 @@ export default function StudentWorkspaceDetailPage() {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto space-y-6 p-6">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Skeleton className="size-12 rounded-xl" />
-            <div className="space-y-2">
-              <Skeleton className="h-8 w-80 rounded-md" />
-              <Skeleton className="h-4 w-56 rounded-md opacity-60" />
-            </div>
+      <div className="max-w-7xl mx-auto space-y-3 p-4 animate-pulse">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-8 w-8 rounded-md" />
+          <div className="space-y-1">
+            <Skeleton className="h-5 w-64 rounded-sm" />
+            <Skeleton className="h-3 w-40 rounded-sm opacity-50" />
           </div>
-          <Skeleton className="h-8 w-24 rounded-full" />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          <div className="lg:col-span-9 space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <Skeleton className="h-28 w-full rounded-xl" />
-              <Skeleton className="h-28 w-full rounded-xl" />
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+          <div className="lg:col-span-9 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <Skeleton className="h-16 w-full rounded-lg" />
+              <Skeleton className="h-16 w-full rounded-lg" />
             </div>
-            <Skeleton className="h-32 w-full rounded-xl" />
-            <Skeleton className="h-[400px] w-full rounded-xl" />
+            <Skeleton className="h-24 w-full rounded-lg" />
+            <Skeleton className="h-64 w-full rounded-lg" />
           </div>
-          <div className="lg:col-span-3 space-y-4">
-            <Skeleton className="h-48 w-full rounded-xl" />
-            <Skeleton className="h-56 w-full rounded-xl" />
+          <div className="lg:col-span-3 space-y-3">
+            <Skeleton className="h-40 w-full rounded-lg" />
           </div>
         </div>
       </div>
@@ -140,347 +138,198 @@ export default function StudentWorkspaceDetailPage() {
 
   if (!workspace) {
     return (
-      <div className="py-24 text-center max-w-xl mx-auto">
-        <h2 className="text-2xl font-semibold text-foreground/80 tracking-tight uppercase">
-          Workspace context not found
-        </h2>
-        <p className="text-sm text-muted-foreground mt-2 mb-8">
-          You may not be enrolled in this teaching workspace or it may have been
-          archived.
-        </p>
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="h-10 px-8 rounded-xl font-semibold text-sm uppercase"
-        >
-          <Link href="/student/courses">Back to Module Registry</Link>
+      <div className="py-20 text-center max-w-xl mx-auto px-4">
+        <h2 className="text-lg font-bold text-foreground/80 uppercase tracking-tight">Registry Node Null</h2>
+        <p className="text-[11px] text-muted-foreground mt-2 mb-6 uppercase tracking-wider">Node not identified in active index.</p>
+        <Button asChild variant="outline" className="h-8 px-6 rounded-md font-bold text-[10px] uppercase border-border/60">
+          <Link href="/student/courses">Back to Registry</Link>
         </Button>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 p-6">
-      <div className="flex items-center justify-between gap-6">
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="size-11 rounded-xl bg-primary/10 flex items-center justify-center text-primary border border-primary/20 shrink-0">
-            <BookOpen className="size-6" />
-          </div>
+    <div className="max-w-7xl mx-auto space-y-4 p-4 pb-12">
+      {/* Precision Navigation Header */}
+      <div className="flex items-center justify-between gap-4 border-b border-border/40 pb-4">
+        <div className="flex items-center gap-3 min-w-0">
+          <Button variant="ghost" size="icon" asChild className="h-7 w-7 rounded-md border border-border/60 hover:bg-muted/50 shrink-0">
+            <Link href="/student/courses"><ChevronLeft className="size-3.5 text-muted-foreground" /></Link>
+          </Button>
           <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground/90 truncate">
-              {workspace.title}
-            </h1>
-            <p className="text-[15px] text-muted-foreground/80 mt-0.5">
-              {workspace.code} • {workspace.academic_year || "GLOBAL"} • Instructor:{" "}
-              {workspace.lecturer}
-            </p>
+            <h1 className="text-base font-bold tracking-tight text-foreground/90 truncate uppercase">{workspace.title}</h1>
+            <div className="flex items-center gap-2 mt-0.5">
+              <Badge variant="outline" className="text-[8px] font-bold h-3.5 px-1.5 rounded-sm bg-primary/5 border-primary/20 text-primary/70 uppercase">{workspace.code}</Badge>
+              <span className="text-[9px] text-muted-foreground/60 font-bold uppercase tracking-wider">{workspace.academic_year || "GLOBAL"}</span>
+            </div>
           </div>
         </div>
-        <Badge
-          variant="outline"
-          className="text-[11px] font-semibold h-7 px-4 rounded-full border-emerald-200 text-emerald-700 bg-emerald-50/50 shrink-0"
-        >
-          Active
-        </Badge>
+        <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-[8px] font-bold h-4.5 px-2 rounded-full border-emerald-200/50 text-emerald-700 bg-emerald-50/30 uppercase tracking-tighter">Operational</Badge>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-        {/* Main Content */}
-        <div className="lg:col-span-9 space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <Card className="shadow-none border rounded-xl overflow-hidden hover:border-primary/20 transition-all">
-              <CardHeader className="bg-muted/5 border-b py-3 px-5">
-                <CardTitle className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Operational Progress
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-5">
-                <div className="mb-2.5 flex justify-between text-xs font-semibold">
-                  <span className="text-muted-foreground">
-                    Syllabus Coverage
-                  </span>
-                  <span className="text-primary font-bold">
-                    {workspace.progress}%
-                  </span>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+        {/* Core Assets */}
+        <div className="lg:col-span-9 space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="p-3.5 rounded-lg border border-border/60 bg-card/30">
+                <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-2">
+                  <CheckCircle2 className="size-2.5 text-emerald-500/70" /> progression saturation
+                </p>
+                <div className="flex justify-between items-end mb-1.5">
+                  <span className="text-[10px] font-bold text-foreground/60 uppercase">Syllabus Index</span>
+                  <span className="text-base font-bold text-primary tabular-nums">{workspace.progress}%</span>
                 </div>
-                <Progress value={workspace.progress} className="h-2" />
-              </CardContent>
-            </Card>
+                <Progress value={workspace.progress} className="h-1 bg-muted/40" />
+            </div>
 
-            <Card className="shadow-none border rounded-xl overflow-hidden hover:border-primary/20 transition-all">
-              <CardHeader className="bg-muted/5 border-b py-3 px-5">
-                <CardTitle className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Registry Summary
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-5 grid grid-cols-2 gap-4">
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold text-muted-foreground block uppercase">
-                    Enrolled
-                  </span>
-                  <span className="text-base font-bold tabular-nums text-foreground/80 flex items-center gap-1.5">
-                    <Users className="size-4 text-muted-foreground/60" />{" "}
-                    {workspace.enrolled}
-                  </span>
+            <div className="p-3.5 rounded-lg border border-border/60 bg-card/30 grid grid-cols-2 divide-x divide-border/20">
+                <div className="space-y-0.5">
+                  <span className="text-[8px] font-bold text-muted-foreground/60 block uppercase tracking-widest">Cohort Size</span>
+                  <span className="text-lg font-bold tabular-nums text-foreground/80 tracking-tighter">{workspace.enrolled}</span>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] font-semibold text-muted-foreground block uppercase">
-                    Evaluations
-                  </span>
-                  <span className="text-base font-bold tabular-nums text-foreground/80">
-                    {workspace.assessments}
-                  </span>
+                <div className="space-y-0.5 pl-3">
+                  <span className="text-[8px] font-bold text-muted-foreground/60 block uppercase tracking-widest">Evaluations</span>
+                  <span className="text-lg font-bold tabular-nums text-foreground/80 tracking-tighter">{workspace.assessments}</span>
                 </div>
-              </CardContent>
-            </Card>
+            </div>
           </div>
 
-          <Card className="shadow-none border rounded-xl overflow-hidden hover:border-primary/20 transition-all">
-            <CardHeader className="bg-muted/5 border-b py-3 px-5">
-              <CardTitle className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Workspace Description
-              </CardTitle>
+          <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-white/50">
+            <CardHeader className="bg-muted/5 border-b border-border/40 py-2 px-4">
+              <CardTitle className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider">Pedagogical context</CardTitle>
             </CardHeader>
-            <CardContent className="p-5">
-              <p className="text-[15px] text-muted-foreground leading-relaxed font-medium">
-                {workspace.description ||
-                  "No description provided for this teaching workspace."}
+            <CardContent className="p-4">
+              <p className="text-[12px] text-muted-foreground/80 leading-relaxed font-medium">
+                {workspace.description || "No operational description identified."}
               </p>
             </CardContent>
           </Card>
 
-          <Card className="shadow-none border rounded-xl overflow-hidden hover:border-primary/20 transition-all">
-            <CardHeader className="bg-muted/5 border-b py-3 px-5 flex flex-row items-center justify-between">
-              <CardTitle className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                Learning Materials ({materials.length})
+          {/* Library Vault */}
+          <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-white">
+            <CardHeader className="bg-muted/5 border-b border-border/40 py-2 px-4 flex flex-row items-center justify-between">
+              <CardTitle className="text-[9px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                <BookOpen className="size-3" /> Library Vault ({materials.length})
               </CardTitle>
-              <Badge
-                variant="secondary"
-                className="rounded-full h-5 px-3 text-[10px] font-bold bg-muted/50 border-none"
-              >
-                Library Vault
-              </Badge>
+              <div className="flex items-center gap-1">
+                <div className="size-1 rounded-full bg-primary animate-pulse" />
+                <span className="text-[8px] font-bold text-primary/60 uppercase">secured</span>
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               {materials.length > 0 ? (
-                <div className="divide-y divide-muted/10">
+                <div className="divide-y divide-border/10">
                   {materials.map((m) => (
-                    <div
-                      key={m.id}
-                      className="flex items-center justify-between p-4 hover:bg-muted/5 transition-colors group"
-                    >
-                      <div className="flex items-center gap-4 min-w-0">
-                        <div className="bg-primary/5 p-2 rounded-lg text-primary group-hover:bg-primary group-hover:text-white transition-all border border-primary/5">
-                          <FileText className="size-5" />
+                    <div key={m.id} className="flex items-center justify-between p-3 px-4 hover:bg-muted/[0.02] transition-colors group">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="bg-primary/5 border border-primary/10 p-1.5 rounded text-primary">
+                          <FileText className="size-3.5" />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-[15px] font-semibold text-foreground/80 truncate">
-                            {m.display_name || m.original_filename}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground/60 mt-0.5 font-bold uppercase">
-                            {m.file_extension?.replace(".", "").toUpperCase()} •{" "}
-                            {(m.file_size_bytes / 1024).toFixed(0)} KB • VERSION{" "}
-                            {m.version}
+                          <div className="text-[12px] font-bold text-foreground/80 truncate uppercase tracking-tight">{m.display_name || m.original_filename}</div>
+                          <div className="flex items-center gap-2 mt-0.5 text-[8px] text-muted-foreground/40 font-bold uppercase">
+                            <span>{m.file_extension?.replace(".", "").toUpperCase()}</span>
+                            <span className="size-0.5 rounded-full bg-border" />
+                            <span>{(m.file_size_bytes / 1024).toFixed(0)} KB</span>
+                            <span className="size-0.5 rounded-full bg-border" />
+                            <span className="text-primary/40">REL v{m.version}</span>
                           </div>
                         </div>
                       </div>
-                      <div className="flex items-center gap-3 ml-4">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleView(m)}
-                          className="h-9 w-9 rounded-lg hover:bg-primary/10"
-                        >
-                          <Eye className="size-4 text-primary" />
+                      <div className="flex items-center gap-1.5 ml-4">
+                        <Button variant="ghost" size="icon" onClick={() => handleView(m)} className="h-7 w-7 rounded hover:bg-primary/5 text-muted-foreground/40 hover:text-primary transition-all">
+                          <Eye className="size-3.5" />
                         </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleDownload(m)}
-                          disabled={downloadingId === m.id}
-                          className="h-9 px-5 rounded-lg text-[11px] font-bold border-border"
-                        >
-                          {downloadingId === m.id ? (
-                            <Loader2 className="size-3.5 animate-spin" />
-                          ) : (
-                            <>
-                              <Download className="size-4 mr-2" />
-                              Download
-                            </>
-                          )}
+                        <Button variant="outline" size="sm" onClick={() => handleDownload(m)} disabled={downloadingId === m.id} className="h-7 px-3 rounded text-[9px] font-bold uppercase border-border/60 hover:bg-muted/50">
+                          {downloadingId === m.id ? <Loader2 className="size-3 animate-spin" /> : "Fetch"}
                         </Button>
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="py-20 text-center bg-muted/5">
-                  <FileText className="size-10 mx-auto text-muted-foreground/10 mb-4" />
-                  <p className="text-[11px] font-bold text-muted-foreground/40 uppercase tracking-wider">
-                    No materials released yet.
-                  </p>
+                <div className="py-12 text-center bg-muted/[0.01]">
+                  <p className="text-[9px] font-bold text-muted-foreground/30 uppercase tracking-widest">Library Vault Empty</p>
                 </div>
               )}
             </CardContent>
           </Card>
         </div>
 
-        {/* Sidebar Info */}
-        <div className="lg:col-span-3 space-y-5">
-          <Card className="shadow-none border rounded-xl overflow-hidden bg-primary/5 border-primary/10 hover:border-primary/20 transition-all">
-            <CardHeader className="py-3 px-5 border-b border-primary/10 bg-primary/5 text-center">
-              <CardTitle className="text-[11px] font-bold text-primary uppercase tracking-widest">
-                Workflow Actions
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-3.5 space-y-2.5">
-              <Button
-                asChild
-                className="w-full justify-between h-10.5 px-4 text-xs font-bold rounded-lg shadow-none"
-                size="sm"
-              >
-                <Link href="/student/assessments">
-                  <div className="flex items-center gap-3">
-                    <FileText className="size-4" />
-                    Launch Evaluations
-                  </div>
-                  <ArrowRight className="size-4 opacity-40" />
+        {/* Sidebar */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="p-3.5 rounded-lg border border-primary/20 bg-primary/5 space-y-2">
+              <p className="text-[9px] font-bold text-primary uppercase tracking-[0.2em] mb-2 text-center">Node Operations</p>
+              <Button asChild className="w-full h-8 text-[10px] font-bold uppercase rounded shadow-none bg-primary hover:bg-primary/90">
+                <Link href="/student/assessments" className="flex items-center justify-between px-2">
+                    Assessments <ArrowRight className="size-3 opacity-60" />
                 </Link>
               </Button>
-              <Button
-                asChild
-                variant="secondary"
-                className="w-full justify-between h-10.5 px-4 text-xs font-bold rounded-lg"
-                size="sm"
-              >
-                <Link href="/student/study">
-                  <div className="flex items-center gap-3 text-primary">
-                    <BrainCircuit className="size-4" />
-                    Open Study Agent
-                  </div>
+              <Button asChild variant="outline" className="w-full h-8 text-[10px] font-bold uppercase rounded border-primary/10 hover:bg-primary/[0.02]">
+                <Link href="/student/study" className="flex items-center gap-2 justify-center text-primary/80">
+                    <BrainCircuit className="size-3" /> Study Agent
                 </Link>
               </Button>
-              <Button
-                asChild
-                variant="secondary"
-                className="w-full justify-between h-10.5 px-4 text-xs font-bold rounded-lg"
-                size="sm"
-              >
-                <Link href="/student/resources">
-                  <div className="flex items-center gap-3 text-foreground/70">
-                    <Upload className="size-4" />
-                    Private Notes Vault
-                  </div>
-                </Link>
-              </Button>
-            </CardContent>
-          </Card>
+          </div>
 
-          <Card className="shadow-none border rounded-xl overflow-hidden hover:border-primary/20 transition-all">
-            <CardHeader className="bg-muted/5 border-b py-3 px-5 text-center">
-              <CardTitle className="text-[11px] font-bold text-muted-foreground uppercase tracking-widest">
-                Instructor Node
-              </CardTitle>
+          <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-white/50">
+            <CardHeader className="bg-muted/5 border-b border-border/40 py-2 px-4 text-center">
+              <CardTitle className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">Lead Instructor</CardTitle>
             </CardHeader>
-            <CardContent className="p-6 text-center space-y-4">
-              <div className="size-16 rounded-full bg-muted mx-auto flex items-center justify-center border-2 border-background shadow-sm">
-                <Users className="size-7 text-muted-foreground" />
+            <CardContent className="p-4 text-center space-y-3">
+              <div className="size-11 rounded-full bg-muted/50 mx-auto flex items-center justify-center border border-border/40">
+                <Users className="size-4.5 text-muted-foreground/40" />
               </div>
-              <div>
-                <p className="text-[15px] font-bold text-foreground/90">{workspace.lecturer}</p>
-                <p className="text-[10px] text-muted-foreground font-bold mt-1 uppercase tracking-tighter">
-                  PRIMARY INSTRUCTOR
-                </p>
+              <div className="space-y-0">
+                <p className="text-[11px] font-bold text-foreground/90 uppercase truncate">{workspace.lecturer}</p>
+                <p className="text-[7px] text-muted-foreground/60 font-bold uppercase tracking-widest">Academic authority</p>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full h-9 text-[11px] font-bold rounded-lg border-muted-foreground/20"
-              >
-                Contact Lecturer
-              </Button>
+              <Button variant="outline" size="sm" className="w-full h-7 text-[8px] font-bold uppercase rounded-md border-border/60 hover:bg-muted/50">Contact</Button>
             </CardContent>
           </Card>
         </div>
       </div>
 
-      {/* Material Viewer Dialog */}
-      <Dialog
-        open={!!viewingMaterial}
-        onOpenChange={(open) => {
-          if (!open) {
-            setViewingMaterial(null);
-            if (previewUrl) window.URL.revokeObjectURL(previewUrl);
-            setPreviewUrl(null);
-          }
-        }}
-      >
-        <DialogContent className="max-w-5xl h-[85vh] flex flex-col p-0 overflow-hidden rounded-3xl border-none shadow-2xl">
-          <DialogHeader className="p-6 border-b bg-background">
-            <div className="flex items-center justify-between pr-10">
-              <DialogTitle className="text-lg font-bold uppercase tracking-tight truncate">
-                {viewingMaterial?.display_name ||
-                  viewingMaterial?.original_filename}
-              </DialogTitle>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 text-[11px] font-bold uppercase rounded-xl"
-                  onClick={() =>
-                    viewingMaterial && handleDownload(viewingMaterial)
-                  }
-                >
-                  <Download className="size-4 mr-2" /> Download Asset
-                </Button>
+      {/* Material Preview Protocol */}
+      <Dialog open={!!viewingMaterial} onOpenChange={(open) => { if (!open) { setViewingMaterial(null); if (previewUrl) window.URL.revokeObjectURL(previewUrl); setPreviewUrl(null); } }}>
+        <DialogContent className="max-w-4xl h-[80vh] flex flex-col p-0 overflow-hidden rounded-xl border border-border/40 shadow-2xl">
+          <DialogHeader className="p-3 border-b bg-background sticky top-0 z-10 px-5">
+            <div className="flex items-center justify-between pr-8">
+              <div className="min-w-0">
+                <DialogTitle className="text-xs font-bold uppercase tracking-tight truncate text-foreground/90">{viewingMaterial?.display_name || viewingMaterial?.original_filename}</DialogTitle>
+                <p className="text-[8px] font-bold text-muted-foreground/50 uppercase tracking-widest mt-0.5 flex items-center gap-1.5"><Clock className="size-2" /> secure stream</p>
               </div>
+              <Button variant="outline" size="sm" className="h-7 text-[9px] font-bold uppercase rounded-md border-border/60 hover:bg-muted/50" onClick={() => viewingMaterial && handleDownload(viewingMaterial)}>
+                <Download className="size-3 mr-1.5 opacity-60" /> Export
+              </Button>
             </div>
           </DialogHeader>
-          <div className="flex-1 bg-muted/20 relative">
+          <div className="flex-1 bg-muted/[0.02] relative">
             {loadingPreview ? (
-              <div className="absolute inset-0 flex flex-col items-center justify-center gap-5">
-                <Loader2 className="size-10 animate-spin text-primary/40" />
-                <p className="text-xs font-bold uppercase tracking-widest text-muted-foreground/40">
-                  Buffering Preview Stream...
-                </p>
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                <Loader2 className="size-6 animate-spin text-primary/30" />
+                <p className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/30">Syncing...</p>
               </div>
             ) : previewUrl ? (
-              viewingMaterial?.file_extension?.toLowerCase().includes("pdf") ||
-              viewingMaterial?.mime_type === "application/pdf" ? (
-                <iframe
-                  src={`${previewUrl}#toolbar=0`}
-                  className="w-full h-full border-none"
-                  title="Material Preview"
-                />
+              viewingMaterial?.file_extension?.toLowerCase().includes("pdf") || viewingMaterial?.mime_type === "application/pdf" ? (
+                <iframe src={`${previewUrl}#toolbar=0`} className="w-full h-full border-none" title="Material Preview" />
               ) : viewingMaterial?.mime_type?.startsWith("image/") ? (
-                <div className="w-full h-full flex items-center justify-center p-8">
-                  <img
-                    src={previewUrl}
-                    alt="Preview"
-                    className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl"
-                  />
+                <div className="w-full h-full flex items-center justify-center p-6 overflow-auto">
+                  <img src={previewUrl} alt="Asset Preview" className="max-w-full max-h-full object-contain rounded-md shadow-lg border border-border/10 bg-white" />
                 </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
-                  <div className="text-center p-12 max-w-sm">
-                    <FileText className="size-16 mx-auto text-muted-foreground/10 mb-6" />
-                    <h3 className="text-lg font-bold uppercase tracking-tight mb-3">
-                      Preview Unavailable
-                    </h3>
-                    <p className="text-sm text-muted-foreground font-medium leading-relaxed">
-                      Direct pedagogical preview is not supported for{" "}
-                      {viewingMaterial?.file_extension?.toUpperCase()} assets.
-                      Please download the file to view its contents.
-                    </p>
+                  <div className="text-center p-8 max-w-xs">
+                    <FileText className="size-8 mx-auto text-muted-foreground/20 mb-4" />
+                    <p className="text-[10px] text-muted-foreground font-bold leading-relaxed uppercase tracking-widest">Preview Restricted. Execute export to view locally.</p>
                   </div>
                 </div>
               )
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
-                <p className="text-[11px] font-bold text-muted-foreground uppercase opacity-40">
-                  Preview acquisition failed.
-                </p>
+                <p className="text-[9px] font-bold text-destructive/40 uppercase tracking-widest">Acquisition failed.</p>
               </div>
             )}
           </div>

@@ -68,6 +68,7 @@ class QuestionCreate(MindexaSchema):
     subject_id: uuid.UUID | None = None
     question_type: QuestionType
     content: str = Field(min_length=5, max_length=5000)
+    case_study_context: str | None = Field(default=None, max_length=10000)
     explanation: str | None = Field(default=None, max_length=2000)
     marks: int = Field(default=1, ge=1, le=100)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
@@ -109,6 +110,7 @@ class QuestionUpdate(MindexaSchema):
     """Partial update for a question. Only provided fields are changed."""
 
     content: str | None = Field(default=None, min_length=5, max_length=5000)
+    case_study_context: str | None = Field(default=None, max_length=10000)
     explanation: str | None = Field(default=None, max_length=2000)
     marks: int | None = Field(default=None, ge=1, le=100)
     difficulty: DifficultyLevel | None = None
@@ -142,6 +144,7 @@ class QuestionDetailResponse(BaseAuditedResponse):
     subject_id: uuid.UUID | None
     question_type: str
     content: str
+    case_study_context: str | None
     explanation: str | None
     marks: int
     difficulty: str

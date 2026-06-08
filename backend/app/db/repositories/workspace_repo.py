@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.models.academic import TeachingWorkspace, ClassSection, StudentEnrollment, TeachingAssignment, Course
+from app.db.models.auth import User
 from app.db.enums import EnrollmentStatus
 
 class WorkspaceRepository:

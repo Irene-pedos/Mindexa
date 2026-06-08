@@ -78,6 +78,7 @@ class AttemptQuestionResponse(BaseModel):
     type: str
     content: str
     text: Optional[str] = None
+    caseStudyContext: Optional[str] = Field(None, validation_alias="case_study_context")
     imageUrl: Optional[str] = None
     marks: int
     order_index: int

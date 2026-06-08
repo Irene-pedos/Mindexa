@@ -25,7 +25,6 @@ import {
   Calendar,
   Clock,
   BookOpen,
-  AlertTriangle,
   CheckCircle2,
   ShieldAlert,
   History,
@@ -39,8 +38,8 @@ import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import {
   getAssessmentProgressStatus,
   getAssessmentCategory,
-  AssessmentCategory,
 } from "@/lib/grading-architecture";
+import { format } from "date-fns";
 
 export default function StudentAssessmentsPage() {
   const [assessments, setAssessments] = useState<any[]>([]);
@@ -123,10 +122,7 @@ export default function StudentAssessmentsPage() {
 
     if (category === "VIOLATION") {
       return {
-        label: "Auto-Submitted / Violation",
-        description:
-          assessment.termination_reason ||
-          "Session ended due to integrity protocol violation.",
+        label: "Violation",
         variant: "destructive" as const,
         color: "bg-red-50 text-red-700 border-red-200",
         available: false,
@@ -136,7 +132,6 @@ export default function StudentAssessmentsPage() {
     if (category === "SUBMITTED" || category === "GRADED") {
       return {
         label: progressStatus.label,
-        description: progressStatus.description,
         variant: "outline" as const,
         color:
           progressStatus.tone === "success"
@@ -150,9 +145,7 @@ export default function StudentAssessmentsPage() {
 
     if (category === "MISSED") {
       return {
-        label: "Closed / Missed",
-        description:
-          "The submission window has ended and no attempt was recorded.",
+        label: "Missed",
         variant: "outline" as const,
         color: "bg-muted text-muted-foreground border-muted-foreground/20",
         available: false,
@@ -162,9 +155,7 @@ export default function StudentAssessmentsPage() {
     if (category === "UPCOMING") {
       const start = new Date(assessment.window_start);
       return {
-        label: `Opens ${start.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`,
-        description:
-          "Review instructions and duration while you wait for the session to open.",
+        label: `Opens ${format(start, "MMM d, HH:mm")}`,
         variant: "secondary" as const,
         color: "",
         available: false,
@@ -172,22 +163,11 @@ export default function StudentAssessmentsPage() {
     }
 
     return {
-      label:
-        category === "IN_PROGRESS" ? "Continue Assessment" : "Available Now",
-      description:
-        category === "IN_PROGRESS"
-          ? "You have an active session. Resume to complete your work."
-          : "Closed questions are graded automatically. Open responses may require lecturer review.",
+      label: category === "IN_PROGRESS" ? "Continue" : "Available",
       variant: category === "IN_PROGRESS" ? "default" : ("default" as const),
-      color: category === "IN_PROGRESS" ? "bg-primary shadow-md" : "",
+      color: category === "IN_PROGRESS" ? "bg-primary" : "",
       available: true,
     };
-  };
-
-  const getTypeColor = (type: string) => {
-    const t = type?.toLowerCase();
-    if (t === "cat" || t === "summative") return "text-primary font-bold";
-    return "text-muted-foreground font-medium";
   };
 
   const renderAssessmentCard = (assessment: any) => {
@@ -198,307 +178,148 @@ export default function StudentAssessmentsPage() {
       <Card
         key={assessment.id}
         className={cn(
-          "shadow-none border hover:border-primary/10 transition-all group",
+          "shadow-none border hover:border-primary/20 transition-all group rounded-md overflow-hidden",
           category === "VIOLATION" && "border-red-200 bg-red-50/10",
-          !status.available &&
-            category !== "SUBMITTED" &&
-            category !== "GRADED" &&
-            category !== "VIOLATION" &&
-            "opacity-80",
         )}
       >
-        <CardHeader className="py-4 px-5">
-          <div className="flex items-start justify-between">
-            <div className="space-y-1">
-              <CardTitle className="text-base font-semibold tracking-tight flex items-center gap-2">
-                {assessment.title}
-                {category === "IN_PROGRESS" && (
-                  <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+        <div className="flex flex-col md:flex-row">
+            <div className="flex-1 p-3.5 space-y-2">
+                <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-0.5">
+                            <CardTitle className="text-sm font-semibold tracking-tight text-foreground/90 truncate uppercase">
+                                {assessment.title}
+                            </CardTitle>
+                            {category === "IN_PROGRESS" && (
+                            <div className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                            )}
+                        </div>
+                        <div className="flex items-center gap-2 text-[10px] text-muted-foreground uppercase font-medium tracking-tight">
+                            <BookOpen className="size-3 opacity-60" />
+                            {assessment.course_code || "GEN-001"} • {assessment.assessment_type}
+                        </div>
+                    </div>
+                    <Badge variant={status.variant} className={cn("text-[9px] font-bold h-4.5 px-2 rounded-sm uppercase", status.color)}>
+                        {status.label}
+                    </Badge>
+                </div>
+                
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 pt-1">
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                        <Calendar className="size-3 opacity-40" />
+                        <span>{assessment.window_start ? format(new Date(assessment.window_start), "MMM d, HH:mm") : "Open"}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium">
+                        <Clock className="size-3 opacity-40" />
+                        <span>{assessment.duration_minutes || 90}m</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground font-medium col-span-2 md:col-span-1">
+                        <ShieldAlert className="size-3 opacity-40" />
+                        <span>{assessment.is_supervised ? "Secure Environment" : "Self-paced"}</span>
+                    </div>
+                </div>
+            </div>
+
+            <div className="bg-muted/5 border-t md:border-t-0 md:border-l border-border/40 p-3.5 flex items-center justify-between md:justify-center md:flex-col gap-3 min-w-[140px]">
+                <div className="text-center md:mb-1">
+                    <div className="text-[11px] font-bold tabular-nums text-foreground/80">{assessment.total_marks || 100} PTS</div>
+                    <div className="text-[8px] font-bold text-muted-foreground/50 uppercase tracking-tighter">Weight</div>
+                </div>
+
+                {category === "SUBMITTED" || category === "GRADED" || category === "VIOLATION" ? (
+                    <Button variant="outline" size="sm" className="h-7 text-[10px] font-bold px-4 rounded-md border-border/60" asChild>
+                        <Link href={`/student/results/${assessment.student_attempt_id}`}>
+                            {category === "VIOLATION" ? "Audit" : "Results"}
+                        </Link>
+                    </Button>
+                ) : (
+                    <Button asChild={status.available} size="sm" className="h-7 text-[10px] font-bold px-4 rounded-md shadow-none" disabled={!status.available} variant={status.available ? "default" : "secondary"}>
+                        {status.available ? (
+                            <Link href={assessment.assessment_type === "GROUP_WORK" ? `/student/group-work/${assessment.id}` : `/student/assessments/${assessment.id}/take`}>
+                                {category === "IN_PROGRESS" ? "Resume" : "Start"}
+                            </Link>
+                        ) : (
+                            <span className="flex items-center gap-1"><TimerOff className="size-3" /> Locked</span>
+                        )}
+                    </Button>
                 )}
-              </CardTitle>
-              <CardDescription className="flex items-center gap-1.5 text-[11px] font-medium">
-                <BookOpen className="size-3.5" />
-                {assessment.course_name
-                  ? `${assessment.course_name} (${assessment.course_code})`
-                  : "General Assessment"}
-              </CardDescription>
-              <p
-                className={cn(
-                  "text-[10px] leading-relaxed mt-1.5",
-                  category === "VIOLATION"
-                    ? "text-red-600 font-bold"
-                    : "text-muted-foreground",
-                )}
-              >
-                {status.description}
-              </p>
             </div>
-            <Badge
-              variant={status.variant}
-              className={cn(
-                "text-[10px] font-bold h-5 px-2 uppercase tracking-tight",
-                status.color,
-              )}
-            >
-              {status.label}
-            </Badge>
-          </div>
-        </CardHeader>
-
-        <CardContent className="py-4 px-5 pt-0">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-sm">
-            <div className="flex items-center gap-3">
-              <Calendar className="size-4 text-muted-foreground" />
-              <div className="min-w-0">
-                <div className="font-medium truncate text-xs">
-                  {assessment.window_start
-                    ? format(new Date(assessment.window_start), "MMM d, HH:mm")
-                    : "Anytime"}
-                </div>
-                <div className="text-[10px] text-muted-foreground truncate">
-                  {assessment.window_end
-                    ? `Until ${format(new Date(assessment.window_end), "MMM d, HH:mm")}`
-                    : "No deadline"}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <Clock className="size-4 text-muted-foreground" />
-              <div>
-                <div className="font-medium text-xs">
-                  {assessment.duration_minutes || 90} min
-                </div>
-                <div className="text-[10px] text-muted-foreground uppercase font-medium tracking-tight flex items-center gap-1.5">
-                  {assessment.is_supervised ? (
-                    <>
-                      <ShieldAlert className="size-3 text-primary" /> Proctored
-                    </>
-                  ) : (
-                    "Self-paced"
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between md:justify-end gap-6">
-              <div className="text-right">
-                <div
-                  className={cn(
-                    "text-[10px] uppercase tracking-wider font-semibold",
-                    getTypeColor(assessment.assessment_type),
-                  )}
-                >
-                  {assessment.assessment_type}
-                </div>
-                <div className="text-[10px] text-muted-foreground font-medium tabular-nums">
-                  {assessment.total_marks || 100} PTS
-                </div>
-              </div>
-
-              {category === "SUBMITTED" ||
-              category === "GRADED" ||
-              category === "VIOLATION" ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-[11px] font-bold px-4 gap-2"
-                  asChild
-                >
-                  <Link
-                    href={`/student/results/${assessment.student_attempt_id}`}
-                  >
-                    <History className="size-3.5" />
-                    {category === "VIOLATION" ? "Audit" : "Results"}
-                  </Link>
-                </Button>
-              ) : (
-                <Button
-                  asChild={status.available}
-                  size="sm"
-                  className="h-8 text-[11px] font-bold px-5"
-                  disabled={!status.available}
-                  variant={status.available ? "default" : "secondary"}
-                >
-                  {status.available ? (
-                    <Link
-                      href={
-                        assessment.assessment_type === "GROUP_WORK"
-                          ? `/student/group-work/${assessment.id}`
-                          : `/student/assessments/${assessment.id}/take`
-                      }
-                    >
-                      {category === "IN_PROGRESS"
-                        ? "Continue"
-                        : assessment.assessment_type === "GROUP_WORK"
-                          ? "Join"
-                          : "Start"}
-                    </Link>
-                  ) : (
-                    <span className="flex items-center gap-1.5">
-                      <TimerOff className="size-3.5" /> Locked
-                    </span>
-                  )}
-                </Button>
-              )}
-            </div>
-          </div>
-
-          {category === "VIOLATION" && (
-            <div className="mt-4 p-3 rounded-lg bg-red-50 border border-red-100 flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-red-700">
-              <div className="flex gap-4">
-                <span>Warnings: {assessment.warning_count || 0}</span>
-                <span>
-                  Activity:{" "}
-                  {assessment.detected_activity || "Suspicious Patterns"}
-                </span>
-              </div>
-              <Badge
-                variant="outline"
-                className="h-4 px-1.5 text-[8px] border-red-200 text-red-600 bg-white"
-              >
-                Under Institutional Review
-              </Badge>
-            </div>
-          )}
-        </CardContent>
+        </div>
       </Card>
     );
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 pb-12">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Assessments</h1>
-          <p className="text-muted-foreground text-xs font-medium">
-            Manage your academic lifecycle from upcoming tasks to finalized
-            evaluations.
-          </p>
+    <div className="space-y-4 max-w-7xl mx-auto p-4 pb-8">
+      {/* Precision Header */}
+      <div className="flex items-center justify-between gap-4 border-b border-border/40 pb-3">
+        <div className="space-y-0.5">
+          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">Assessments</h1>
+          <p className="text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Evaluation and protocol ledger.</p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <SearchIcon className="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+        <div className="flex items-center gap-2">
+          <div className="relative hidden sm:block">
+            <SearchIcon className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/40" />
             <Input
-              placeholder="Filter title..."
+              placeholder="Search title..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-52 h-9 pl-8 text-xs font-medium"
+              className="w-40 h-7 pl-7 text-[10px] font-medium rounded-md border-border/60 uppercase"
             />
           </div>
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-36 h-9 text-xs">
+            <SelectTrigger className="w-32 h-7 text-[10px] font-bold uppercase rounded-md border-border/60">
               <SelectValue placeholder="Protocol" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-xs">
-                All Modes
-              </SelectItem>
-              <SelectItem value="CAT" className="text-xs">
-                CAT
-              </SelectItem>
-              <SelectItem value="formative" className="text-xs">
-                Formative
-              </SelectItem>
-              <SelectItem value="summative" className="text-xs">
-                Summative
-              </SelectItem>
-              <SelectItem value="homework" className="text-xs">
-                Homework
-              </SelectItem>
+              <SelectItem value="all" className="text-[10px] uppercase font-bold">All Modes</SelectItem>
+              <SelectItem value="CAT" className="text-[10px] uppercase font-bold">CAT</SelectItem>
+              <SelectItem value="formative" className="text-[10px] uppercase font-bold">Formative</SelectItem>
+              <SelectItem value="summative" className="text-[10px] uppercase font-bold">Summative</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      <Tabs 
-        value={filterTab} 
-        onValueChange={(v) => {
-            setFilterTab(v);
-            if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]);
-        }} 
-        className="w-full"
-      >
-        <TabsList className="bg-muted/30 p-1 rounded-lg w-full md:w-fit h-10 overflow-x-auto justify-start">
-          <TabsTrigger
-            value="active"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 gap-2 relative"
-          >
-            Active / In Progress
-            {hasNewInCategory("active") && (
-                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
-            )}
+      <Tabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
+        <TabsList className="bg-muted/30 p-0.5 rounded-lg w-full md:w-fit h-8.5 overflow-x-auto justify-start border border-border/40">
+          <TabsTrigger value="active" className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 relative">
+            Active {hasNewInCategory("active") && <span className="absolute top-0.5 right-1 size-1.5 rounded-full bg-red-500" />}
           </TabsTrigger>
-          <TabsTrigger
-            value="upcoming"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 relative"
-          >
-            Upcoming
-            {hasNewInCategory("upcoming") && (
-                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
-            )}
+          <TabsTrigger value="upcoming" className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 relative">
+            Upcoming {hasNewInCategory("upcoming") && <span className="absolute top-0.5 right-1 size-1.5 rounded-full bg-red-500" />}
           </TabsTrigger>
-          <TabsTrigger
-            value="submitted"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 relative"
-          >
-            Submitted & Graded
-            {hasNewInCategory("submitted") && (
-                <span className="absolute -top-1 -left-1 size-2 rounded-full bg-red-500 border border-background" />
-            )}
+          <TabsTrigger value="submitted" className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 relative">
+            Submitted {hasNewInCategory("submitted") && <span className="absolute top-0.5 right-1 size-1.5 rounded-full bg-red-500" />}
           </TabsTrigger>
-          <TabsTrigger
-            value="missed"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8"
-          >
-            Missed / Expired
-          </TabsTrigger>
-          <TabsTrigger
-            value="violations"
-            className="text-[10px] font-bold uppercase tracking-tight px-4 h-8 data-[state=active]:text-red-600"
-          >
-            Violations
-          </TabsTrigger>
+          <TabsTrigger value="missed" className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5">Missed</TabsTrigger>
+          <TabsTrigger value="violations" className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 data-[state=active]:text-red-600">Violations</TabsTrigger>
         </TabsList>
 
-        <div className="mt-6 space-y-4">
+        <div className="mt-3 space-y-2">
           {loading ? (
             [1, 2, 3].map((i) => (
-              <Skeleton key={i} variant="media" className="h-28 w-full" />
+              <Skeleton key={i} variant="media" className="h-20 w-full rounded-md" />
             ))
           ) : filteredAssessments.length > 0 ? (
             filteredAssessments.map(renderAssessmentCard)
           ) : (
-            <div className="py-20 text-center border-2 border-dashed rounded-2xl bg-muted/5">
-              <div className="size-12 rounded-full bg-muted/20 flex items-center justify-center mx-auto mb-4">
-                <BookOpen className="size-6 text-muted-foreground/30" />
-              </div>
-              <p className="text-[11px] font-bold text-muted-foreground uppercase tracking-[0.2em]">
-                No records found in this category.
-              </p>
+            <div className="py-16 text-center border-2 border-dashed rounded-lg bg-muted/5 border-border/40">
+              <p className="text-[9px] font-bold text-muted-foreground uppercase tracking-[0.2em]">Zero records identified.</p>
             </div>
           )}
         </div>
       </Tabs>
 
-      {/* Quick Integrity Notice */}
-      <div className="p-5 rounded-xl border border-primary/20 bg-primary/5 flex items-start gap-4 shadow-sm">
-        <ShieldAlert className="size-5 text-primary mt-0.5" />
-        <div>
-          <p className="text-sm font-bold text-primary uppercase tracking-tight">
-            Institutional Integrity Guard
-          </p>
-          <p className="text-[11px] text-muted-foreground mt-1.5 font-medium leading-relaxed max-w-2xl">
-            High-security assessments (CATs, Exams) enforce a continuous session
-            lock. Unauthorized exits, tab switching, or integrity protocol
-            breaches will trigger automated warnings and may result in immediate
-            session termination and auto-submission for pedagogical review.
-          </p>
+      {/* Integrity Notice - Compact */}
+      <div className="p-3 rounded-lg border border-primary/20 bg-primary/5 flex items-start gap-3">
+        <ShieldAlert className="size-3.5 text-primary mt-0.5 opacity-60" />
+        <div className="space-y-0.5">
+          <p className="text-[10px] font-bold text-primary uppercase tracking-tight">Integrity Protocol Guard</p>
+          <p className="text-[9px] text-muted-foreground font-medium leading-relaxed max-w-2xl uppercase tracking-tighter">High-security sessions enforce environment locking. Violations trigger immediate termination and automated submission.</p>
         </div>
       </div>
     </div>
   );
 }
-import { format } from "date-fns";

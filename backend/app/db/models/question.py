@@ -91,6 +91,7 @@ class Question(BaseModel, table=True):
     content: str = Field(nullable=False)
     image_url: str | None = Field(default=None, nullable=True)
     explanation: str | None = Field(default=None, nullable=True)
+    case_study_context: str | None = Field(default=None, nullable=True)
 
     marks: int = Field(default=1, nullable=False)
     difficulty: DifficultyLevel = Field(default=DifficultyLevel.MEDIUM, nullable=False, index=True)
