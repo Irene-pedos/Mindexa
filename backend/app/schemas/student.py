@@ -58,6 +58,7 @@ class StudentUpcomingAssessment(BaseModel):
     course_name: Optional[str] = None
     academic_year: Optional[str] = None
     window_start: Optional[datetime] = None
+    window_end: Optional[datetime] = None
     duration_minutes: Optional[int] = None
     total_marks: Optional[int] = None
 

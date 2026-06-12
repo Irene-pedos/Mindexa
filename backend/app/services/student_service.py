@@ -77,10 +77,23 @@ class StudentService:
             student_id=student_id, page_size=100
         )
         upcoming_count = 0
+        upcoming_assessments_data = []
         for ass in available_assessments:
             count = await self.attempt_repo.count_attempts_by_student(student_id, ass.id)
             if count == 0:
                 upcoming_count += 1
+            upcoming_assessments_data.append(StudentUpcomingAssessment(
+                id=ass.id,
+                title=ass.title,
+                type=ass.assessment_type,
+                course_code=ass.course.code if ass.course else None,
+                course_name=ass.course.name if ass.course else None,
+                academic_year=ass.academic_year,
+                window_start=ass.window_start,
+                window_end=ass.window_end,
+                duration_minutes=ass.duration_minutes,
+                total_marks=ass.total_marks,
+            ))
         active_metric = DashboardMetric(value=upcoming_count, delta=0, last_month=upcoming_count, positive=True)
 
         # 3. Completed Assessments
@@ -197,7 +210,7 @@ class StudentService:
             active_attempts=active_attempts_data,
             recent_results=recent_results_data,
             performance_trend=trend_data,
-            upcoming_assessments=[] 
+            upcoming_assessments=upcoming_assessments_data
         )
 
 

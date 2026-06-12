@@ -30,6 +30,7 @@ import {
   History,
   TimerOff,
   SearchIcon,
+  Lock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
@@ -54,8 +55,8 @@ export default function StudentAssessmentsPage() {
     async function load() {
       try {
         const [assessData, notifData] = await Promise.all([
-            assessmentApi.getAssessments(),
-            apiClient("/notifications/me?unread_only=true")
+          assessmentApi.getAssessments(),
+          apiClient("/notifications/me?unread_only=true")
         ]);
         setAssessments(assessData.items || []);
         setNotifications(notifData.items || []);
@@ -72,25 +73,25 @@ export default function StudentAssessmentsPage() {
     if (visitedTabs.includes(tab)) return false;
     
     if (tab === "active") {
-        return assessments.some(a => {
-            const cat = getAssessmentCategory(a);
-            return (cat === "ACTIVE" || cat === "IN_PROGRESS") && 
-                   notifications.some(n => n.reference_id === a.id && !n.is_read);
-        });
+      return assessments.some(a => {
+        const cat = getAssessmentCategory(a);
+        return (cat === "ACTIVE" || cat === "IN_PROGRESS") && 
+               notifications.some(n => n.reference_id === a.id && !n.is_read);
+      });
     }
     if (tab === "upcoming") {
-        return assessments.some(a => {
-            const cat = getAssessmentCategory(a);
-            return cat === "UPCOMING" && 
-                   notifications.some(n => n.reference_id === a.id && !n.is_read);
-        });
+      return assessments.some(a => {
+        const cat = getAssessmentCategory(a);
+        return cat === "UPCOMING" && 
+               notifications.some(n => n.reference_id === a.id && !n.is_read);
+      });
     }
     if (tab === "submitted") {
-        return assessments.some(a => {
-            const cat = getAssessmentCategory(a);
-            return (cat === "SUBMITTED" || cat === "GRADED") && 
-                   notifications.some(n => n.reference_id === a.id && !n.is_read);
-        });
+      return assessments.some(a => {
+        const cat = getAssessmentCategory(a);
+        return (cat === "SUBMITTED" || cat === "GRADED") && 
+               notifications.some(n => n.reference_id === a.id && !n.is_read);
+      });
     }
     return false;
   };
@@ -178,25 +179,31 @@ export default function StudentAssessmentsPage() {
   const renderAssessmentCard = (assessment: any) => {
     const status = getStatusInfo(assessment);
     const category = getAssessmentCategory(assessment);
+    const isSupervised = assessment.is_supervised;
 
     return (
       <Card
         key={assessment.id}
         className={cn(
-          "shadow-none border border-border/50 hover:border-primary/25 hover:shadow-sm transition-all duration-300 group rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm",
-          category === "VIOLATION" && "border-destructive/30 bg-destructive/5 hover:border-destructive/50",
+          "shadow-none border border-border/50 hover:bg-muted/10 transition-all duration-300 rounded-xl overflow-hidden bg-card/30",
+          category === "VIOLATION" && "border-destructive/30 bg-destructive/5 hover:border-destructive/50"
         )}
       >
         <div className="flex flex-col md:flex-row">
           <div className="flex-1 p-5 space-y-3">
             <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <CardTitle className="text-base font-semibold tracking-tight text-foreground group-hover:text-primary transition-colors">
+              <div>
+                <div className="flex items-center gap-2 mb-1 flex-wrap">
+                  <h3 className="text-base font-semibold text-foreground">
                     {assessment.title}
-                  </CardTitle>
+                  </h3>
                   {category === "IN_PROGRESS" && (
                     <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                  )}
+                  {isSupervised && (
+                    <Badge variant="outline" className="text-[9px] uppercase font-bold px-1.5 h-4.5 flex items-center gap-1">
+                      <Lock className="size-2.5" /> Supervised
+                    </Badge>
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
@@ -206,28 +213,28 @@ export default function StudentAssessmentsPage() {
                   <span>{getAssessmentTypeLabel(assessment.assessment_type)}</span>
                 </div>
               </div>
-              <Badge variant={status.variant} className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize shadow-none", status.color)}>
+              <Badge variant={status.variant} className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full capitalize shadow-none border", status.color)}>
                 {status.label}
               </Badge>
             </div>
-            
+
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-                <Calendar className="size-3.5 opacity-60" />
+                <Calendar className="size-3.5 opacity-60 text-muted-foreground" />
                 <span>{assessment.window_start ? format(new Date(assessment.window_start), "MMM d, yyyy • HH:mm") : "Open window"}</span>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-                <Clock className="size-3.5 opacity-60" />
+                <Clock className="size-3.5 opacity-60 text-muted-foreground" />
                 <span>{assessment.duration_minutes || 90} mins</span>
               </div>
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
-                <ShieldAlert className="size-3.5 opacity-60" />
-                <span>{assessment.is_supervised ? "Secure Environment" : "Self-paced"}</span>
+                <ShieldAlert className="size-3.5 opacity-60 text-muted-foreground" />
+                <span>{isSupervised ? "Secure Environment" : "Self-paced"}</span>
               </div>
             </div>
           </div>
 
-          <div className="bg-muted/30 border-t md:border-t-0 md:border-l border-border/40 p-5 flex items-center justify-between md:justify-center md:flex-col gap-4 min-w-[160px]">
+          <div className="bg-muted/20 border-t md:border-t-0 md:border-l border-border/40 p-5 flex items-center justify-between md:justify-center md:flex-col gap-4 min-w-[160px]">
             <div className="text-center md:mb-1">
               <div className="text-sm font-semibold tabular-nums text-foreground">{assessment.total_marks || 100} Points</div>
               <div className="text-xs text-muted-foreground/70">Assessment Weight</div>
@@ -240,7 +247,7 @@ export default function StudentAssessmentsPage() {
                 </Link>
               </Button>
             ) : (
-              <Button asChild={status.available} size="sm" className="h-8 text-xs font-medium px-4 rounded-lg shadow-sm w-full transition-all" disabled={!status.available} variant={status.available ? "default" : "secondary"}>
+              <Button asChild={status.available} size="sm" className="h-8 text-xs font-medium px-4 rounded-lg shadow-none w-full" disabled={!status.available} variant={status.available ? "default" : "secondary"}>
                 {status.available ? (
                   <Link href={assessment.assessment_type === "GROUP_WORK" ? `/student/group-work/${assessment.id}` : `/student/assessments/${assessment.id}/take`}>
                     {category === "IN_PROGRESS" ? "Resume" : "Start Test"}
@@ -290,18 +297,18 @@ export default function StudentAssessmentsPage() {
       </div>
 
       <Tabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
-        <TabsList className="bg-muted/30 p-1 rounded-xl w-full md:w-fit h-11 overflow-x-auto justify-start border border-border/40">
-          <TabsTrigger value="active" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
+        <TabsList className="bg-muted/30 p-1 rounded-xl w-full md:w-fit h-11 overflow-x-auto justify-start border border-border/40 shadow-none">
+          <TabsTrigger value="active" className="text-xs font-semibold px-4 py-2 rounded-lg relative transition-all">
             Active {hasNewInCategory("active") && <span className="absolute top-1 right-2 size-2 rounded-full bg-red-500 animate-pulse" />}
           </TabsTrigger>
-          <TabsTrigger value="upcoming" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
+          <TabsTrigger value="upcoming" className="text-xs font-semibold px-4 py-2 rounded-lg relative transition-all">
             Upcoming {hasNewInCategory("upcoming") && <span className="absolute top-1 right-2 size-2 rounded-full bg-red-500 animate-pulse" />}
           </TabsTrigger>
-          <TabsTrigger value="submitted" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
+          <TabsTrigger value="submitted" className="text-xs font-semibold px-4 py-2 rounded-lg relative transition-all">
             Submitted {hasNewInCategory("submitted") && <span className="absolute top-1 right-2 size-2 rounded-full bg-red-500 animate-pulse" />}
           </TabsTrigger>
-          <TabsTrigger value="missed" className="text-xs font-medium px-4 py-2 rounded-lg transition-all">Missed</TabsTrigger>
-          <TabsTrigger value="violations" className="text-xs font-medium px-4 py-2 rounded-lg transition-all data-[state=active]:text-destructive data-[state=active]:bg-destructive/10">Violations</TabsTrigger>
+          <TabsTrigger value="missed" className="text-xs font-semibold px-4 py-2 rounded-lg transition-all">Missed</TabsTrigger>
+          <TabsTrigger value="violations" className="text-xs font-semibold px-4 py-2 rounded-lg transition-all data-[state=active]:text-destructive data-[state=active]:bg-destructive/10">Violations</TabsTrigger>
         </TabsList>
 
         <div className="mt-4 space-y-3">

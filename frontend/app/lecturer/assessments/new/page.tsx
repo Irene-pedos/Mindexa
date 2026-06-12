@@ -2470,16 +2470,21 @@ export default function NewAssessmentBuilder() {
       return d;
     };
 
-    if (metadata.date && metadata.startTime)
-      (payload.metadata as any).windowStart = parseTimeString(
-        metadata.startTime,
-        metadata.date,
-      ).toISOString();
-    if (metadata.date && metadata.endTime)
-      (payload.metadata as any).windowEnd = parseTimeString(
-        metadata.endTime,
-        metadata.date,
-      ).toISOString();
+    let startD: Date | undefined;
+    let endD: Date | undefined;
+
+    if (metadata.date && metadata.startTime) {
+      startD = parseTimeString(metadata.startTime, metadata.date);
+      (payload.metadata as any).windowStart = startD.toISOString();
+    }
+    if (metadata.date && metadata.endTime) {
+      endD = parseTimeString(metadata.endTime, metadata.date);
+      if (startD && endD <= startD) {
+        // Handle over midnight end time by adding 1 day
+        endD.setDate(endD.getDate() + 1);
+      }
+      (payload.metadata as any).windowEnd = endD.toISOString();
+    }
 
     return payload;
   };

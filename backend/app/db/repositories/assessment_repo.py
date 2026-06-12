@@ -1370,7 +1370,6 @@ class AssessmentRepository:
               OR (no targets defined AND student enrolled in assessment's course)
         """
         from app.db.models.academic import Course, StudentEnrollment, ClassSection, TeachingWorkspace, TeachingAssignment
-        now = _utcnow()
         
         # Base filters
         filters = [
@@ -1379,10 +1378,6 @@ class AssessmentRepository:
                 AssessmentStatus.ACTIVE,
             ]),
             col(Assessment.is_deleted) == False,  # noqa: E712
-            or_(
-                col(Assessment.window_end).is_(None),
-                col(Assessment.window_end) >= now,
-            ),
         ]
 
         # Targeted sections subquery

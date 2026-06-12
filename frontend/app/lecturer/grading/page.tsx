@@ -60,7 +60,6 @@ import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-edito
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import { ModerationPanel } from "@/components/mindexa/grading/moderation-panel";
 import { ResultReleasePanel } from "@/components/mindexa/grading/result-release-panel";
-import { GroupSubmissionList } from "@/components/mindexa/grading/group-submission-list";
 
 export default function LecturerGradingQueue() {
   const [data, setData] = useState<any[]>([]);
@@ -238,224 +237,160 @@ export default function LecturerGradingQueue() {
   );
 
   return (
-    <div className="max-w-7xl mx-auto space-y-4 p-4 pb-12">
+    <div className="space-y-6">
       {/* Precision Header */}
-      <div className="flex items-center justify-between border-b border-border/40 pb-3 px-0.5">
-        <div className="space-y-0.5">
-          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">
-            Grading Ledger
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border/40">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            Grading Queue
           </h1>
-          <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-            {total} pending nodes identified
+          <p className="text-sm text-muted-foreground">
+            {total} pending submission{total !== 1 ? "s" : ""} awaiting review and evaluation
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="hidden md:flex items-center gap-4 bg-muted/5 border border-border/60 rounded-md px-3 py-1">
-            <div className="flex items-center gap-1.5 border-r border-border/20 pr-4">
-              <span className="text-[8px] font-bold text-amber-600 uppercase">
-                Pending
-              </span>
-              <span className="text-[11px] font-bold tabular-nums">
-                {stats.pending}
-              </span>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="hidden md:flex items-center gap-3 bg-muted/20 border border-border/50 rounded-xl p-1 px-3 h-9">
+            <div className="flex items-center gap-1.5 border-r border-border/20 pr-3 h-5">
+              <span className="size-2 rounded-full bg-amber-500" />
+              <span className="text-xs font-semibold text-foreground/80">Pending:</span>
+              <span className="text-xs font-bold tabular-nums">{stats.pending}</span>
             </div>
-            <div className="flex items-center gap-1.5 border-r border-border/20 pr-4">
-              <span className="text-[8px] font-bold text-blue-600 uppercase">
-                AI-Ready
-              </span>
-              <span className="text-[11px] font-bold tabular-nums">
-                {stats.aiSuggested}
-              </span>
+            <div className="flex items-center gap-1.5 border-r border-border/20 pr-3 h-5">
+              <span className="size-2 rounded-full bg-blue-500 animate-pulse" />
+              <span className="text-xs font-semibold text-foreground/80">AI-Ready:</span>
+              <span className="text-xs font-bold tabular-nums">{stats.aiSuggested}</span>
             </div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[8px] font-bold text-red-600 uppercase">
-                Flagged
-              </span>
-              <span className="text-[11px] font-bold tabular-nums">
-                {stats.flagged}
-              </span>
+            <div className="flex items-center gap-1.5 h-5">
+              <span className="size-2 rounded-full bg-red-500" />
+              <span className="text-xs font-semibold text-foreground/80">Flagged:</span>
+              <span className="text-xs font-bold tabular-nums">{stats.flagged}</span>
             </div>
           </div>
           <Button
             variant="outline"
             size="sm"
             onClick={fetchSubmissions}
-            className="h-7 px-3 text-[10px] font-bold uppercase border-border/60 gap-1.5"
+            className="h-9 px-4 text-xs font-medium border-border/60 gap-1.5 rounded-lg hover:bg-muted/50 transition-colors"
           >
-            <RefreshCcw className="size-3 text-primary/60" /> Sync
+            <RefreshCcw className="size-3.5 text-muted-foreground" /> Sync Queue
           </Button>
         </div>
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="bg-muted/30 p-0.5 rounded-lg w-full md:w-fit h-8.5 overflow-x-auto justify-start border border-border/40">
+        <TabsList className="bg-muted/30 p-1 rounded-xl w-full md:w-fit h-11 overflow-x-auto justify-start border border-border/40">
           <TabsTrigger
             value="individuals"
-            className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 gap-1.5"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <User className="size-3 opacity-60" /> Individual
+            <User className="size-3.5 opacity-80" /> Individuals
           </TabsTrigger>
           <TabsTrigger
             value="moderation"
-            className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 gap-1.5"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <Scale className="size-3 opacity-60" /> Moderation
+            <Scale className="size-3.5 opacity-80" /> Moderation
           </TabsTrigger>
           <TabsTrigger
             value="release"
-            className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 gap-1.5"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <Send className="size-3 opacity-60" /> Release
+            <Send className="size-3.5 opacity-80" /> Release Results
           </TabsTrigger>
           <TabsTrigger
             value="groups"
-            className="text-[9px] font-bold uppercase tracking-tight px-3 h-7.5 gap-1.5"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <Users className="size-3 opacity-60" /> Groups
+            <Users className="size-3.5 opacity-80" /> Group Submissions
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="individuals" className="mt-3 space-y-3">
+        <TabsContent value="individuals" className="mt-4 space-y-4">
           {/* Compact Filter Bar */}
-          <div className="bg-card border border-border/60 rounded-md p-1.5 flex flex-wrap items-center gap-1.5 shadow-none">
-            <div className="relative flex-1 min-w-[180px]">
-              <Search className="absolute left-2 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/40" />
+          <div className="bg-card/30 border border-border/50 rounded-xl p-2.5 flex flex-wrap items-center gap-2.5 backdrop-blur-sm shadow-none">
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
               <Input
-                placeholder="Search nodes..."
-                className="pl-7 h-7 text-[10px] font-medium border-border/40 shadow-none uppercase placeholder:text-muted-foreground/30 focus-visible:ring-0"
+                placeholder="Search students, assessments..."
+                className="pl-9 h-9 text-xs border-border/60 bg-background/50 hover:bg-background/85 transition-all rounded-lg focus-visible:ring-1"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
 
-            <Select value={assessmentId} onValueChange={setAssessmentId}>
-              <SelectTrigger className="w-[150px] h-7 text-[9px] font-bold uppercase border-border/40 bg-muted/5">
-                <SelectValue placeholder="Assessment" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  value="all"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  All Assessments
-                </SelectItem>
-                {assessments.map((a) => (
-                  <SelectItem
-                    key={a.id}
-                    value={a.id}
-                    className="text-[9px] font-bold uppercase"
-                  >
-                    {a.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={assessmentId} onValueChange={setAssessmentId}>
+                <SelectTrigger className="w-[170px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
+                  <SelectValue placeholder="Assessment" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Assessments</SelectItem>
+                  {assessments.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.title}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-            <Select value={classSectionId} onValueChange={setClassSectionId}>
-              <SelectTrigger className="w-[130px] h-7 text-[9px] font-bold uppercase border-border/40 bg-muted/5">
-                <SelectValue placeholder="Section" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  value="all"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  All Sections
-                </SelectItem>
-                {workspaces.map((ws) => (
-                  <SelectItem
-                    key={ws.id}
-                    value={ws.id}
-                    className="text-[9px] font-bold uppercase"
-                  >
-                    {ws.class_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              <Select value={classSectionId} onValueChange={setClassSectionId}>
+                <SelectTrigger className="w-[140px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
+                  <SelectValue placeholder="Section" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Sections</SelectItem>
+                  {workspaces.map((ws) => (
+                    <SelectItem key={ws.id} value={ws.id}>{ws.class_name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-            <Select value={questionType} onValueChange={setQuestionType}>
-              <SelectTrigger className="w-[110px] h-7 text-[9px] font-bold uppercase border-border/40 bg-muted/5">
-                <SelectValue placeholder="Q-Type" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  value="all"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  All Types
-                </SelectItem>
-                <SelectItem
-                  value="SHORT_ANSWER"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  Short Answer
-                </SelectItem>
-                <SelectItem
-                  value="ESSAY"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  Essay
-                </SelectItem>
-                <SelectItem
-                  value="CASE_STUDY"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  Case Study
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              <Select value={questionType} onValueChange={setQuestionType}>
+                <SelectTrigger className="w-[120px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
+                  <SelectValue placeholder="Q-Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
+                  <SelectItem value="ESSAY">Essay</SelectItem>
+                  <SelectItem value="CASE_STUDY">Case Study</SelectItem>
+                </SelectContent>
+              </Select>
 
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-[120px] h-7 text-[9px] font-bold uppercase border-border/40 bg-muted/5">
-                <div className="flex items-center gap-1.5">
-                  <ArrowUpDown className="size-2.5 opacity-40" />
-                  <span>Sort</span>
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  value="date_asc"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  Oldest First
-                </SelectItem>
-                <SelectItem
-                  value="date_desc"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  Newest First
-                </SelectItem>
-                <SelectItem
-                  value="ai_confidence"
-                  className="text-[9px] font-bold uppercase"
-                >
-                  AI Confidence
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              <Select value={sortBy} onValueChange={setSortBy}>
+                <SelectTrigger className="w-[130px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
+                  <div className="flex items-center gap-1.5">
+                    <ArrowUpDown className="size-3.5 opacity-60" />
+                    <span>Sort</span>
+                  </div>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="date_asc">Oldest First</SelectItem>
+                  <SelectItem value="date_desc">Newest First</SelectItem>
+                  <SelectItem value="ai_confidence">AI Confidence</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
 
-          <div className="border border-border/60 rounded-md bg-card overflow-hidden">
+          <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
             <Table>
-              <TableHeader className="bg-muted/5">
-                <TableRow className="h-8 hover:bg-transparent border-b border-border/40">
-                  <TableHead className="text-[8px] font-bold uppercase px-4 text-muted-foreground/50">
-                    Node Identifier
+              <TableHeader className="bg-muted/15 border-b border-border/40">
+                <TableRow className="h-10 hover:bg-transparent border-none">
+                  <TableHead className="text-xs font-semibold px-4 text-muted-foreground">
+                    Student
                   </TableHead>
-                  <TableHead className="text-[8px] font-bold uppercase text-muted-foreground/50">
+                  <TableHead className="text-xs font-semibold text-muted-foreground">
                     Assessment Context
                   </TableHead>
-                  <TableHead className="text-[8px] font-bold uppercase text-muted-foreground/50">
+                  <TableHead className="text-xs font-semibold text-muted-foreground">
                     Question Trace
                   </TableHead>
-                  <TableHead className="text-[8px] font-bold uppercase text-muted-foreground/50">
-                    Operational State
+                  <TableHead className="text-xs font-semibold text-muted-foreground">
+                    Status
                   </TableHead>
-                  <TableHead className="text-[8px] font-bold uppercase text-muted-foreground/50">
-                    Risk
+                  <TableHead className="text-xs font-semibold text-muted-foreground">
+                    Integrity Risk
                   </TableHead>
-                  <TableHead className="text-right text-[8px] font-bold uppercase pr-4 text-muted-foreground/50">
+                  <TableHead className="text-right text-xs font-semibold pr-4 text-muted-foreground">
                     Actions
                   </TableHead>
                 </TableRow>
@@ -463,9 +398,9 @@ export default function LecturerGradingQueue() {
               <TableBody>
                 {loading ? (
                   Array.from({ length: 10 }).map((_, i) => (
-                    <TableRow key={i} className="h-10">
-                      <TableCell colSpan={6}>
-                        <Skeleton className="h-4 w-full" />
+                    <TableRow key={i} className="h-12 border-border/10">
+                      <TableCell colSpan={6} className="px-4">
+                        <Skeleton className="h-5 w-full rounded" />
                       </TableCell>
                     </TableRow>
                   ))
@@ -473,33 +408,37 @@ export default function LecturerGradingQueue() {
                   <TableRow>
                     <TableCell
                       colSpan={6}
-                      className="h-40 text-center text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest"
+                      className="h-44 text-center text-sm font-medium text-muted-foreground"
                     >
-                      Inbox Empty • Zero matching nodes identified
+                      <div className="flex flex-col items-center justify-center gap-3">
+                        <Users className="size-8 opacity-20" />
+                        <p>Grading queue is empty. No submissions require manual review.</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
                   data.map((item) => (
                     <TableRow
                       key={item.id}
-                      className="group hover:bg-primary/[0.01] h-10 border-border/10 transition-colors"
+                      className="group hover:bg-primary/5 h-12 border-border/10 transition-all duration-200"
                     >
-                      <TableCell className="px-4">
+                      <TableCell className="px-4 py-2">
                         <div className="flex flex-col">
-                          <span className="text-[11px] font-bold text-foreground/80 uppercase">
+                          <span className="text-sm font-semibold text-foreground/90 group-hover:text-primary transition-colors">
                             {item.student_name}
                           </span>
-                          <span className="text-[8px] text-muted-foreground/40 font-bold uppercase">
-                            {item.class_section_name || "Global"}
+                          <span className="text-[11px] text-muted-foreground/60">
+                            {item.class_section_name || "Global Course"}
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-2">
                         <div className="flex flex-col">
-                          <span className="text-[10px] font-semibold text-foreground/60 line-clamp-1 uppercase">
+                          <span className="text-sm font-medium text-foreground/85 line-clamp-1">
                             {item.assessment_title}
                           </span>
-                          <span className="text-[8px] text-muted-foreground/30 font-bold uppercase">
+                          <span className="text-[10px] text-muted-foreground/55 flex items-center gap-1">
+                            <Clock className="size-3 opacity-60" />
                             {item.submitted_at
                               ? formatDistanceToNow(
                                   new Date(item.submitted_at),
@@ -509,67 +448,73 @@ export default function LecturerGradingQueue() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-2">
                         <div className="flex flex-col">
-                          <span className="text-[10px] font-medium text-foreground/60 line-clamp-1 uppercase">
+                          <span className="text-sm font-medium text-foreground/80 line-clamp-1">
                             {item.question_title}
                           </span>
-                          <span className="text-[8px] font-bold text-primary/40 uppercase">
-                            {item.question_type?.replace("_", " ")}
+                          <span className="text-[10px] font-semibold text-primary/70 capitalize">
+                            {item.question_type?.replace("_", " ").toLowerCase()}
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="py-2">
                         <div className="flex items-center gap-2">
                           <Badge
                             variant="outline"
                             className={cn(
-                              "text-[8px] px-1.5 h-3.5 uppercase font-bold border-none",
+                              "text-[10px] px-2.5 py-0.5 rounded-full capitalize font-semibold shadow-none border",
                               item.status === "AI_SUGGESTED"
-                                ? "bg-blue-50 text-blue-700"
-                                : "bg-amber-50 text-amber-700",
+                                ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                                : "bg-amber-500/10 text-amber-600 border-amber-500/20",
                             )}
                           >
-                            {item.status.replace("_", " ")}
+                            <span className={cn(
+                              "size-1.5 rounded-full mr-1.5 inline-block",
+                              item.status === "AI_SUGGESTED" ? "bg-blue-500 animate-pulse" : "bg-amber-500"
+                            )} />
+                            {item.status.replace("_", " ").toLowerCase()}
                           </Badge>
                           {item.ai_confidence !== null && (
-                            <div className="flex items-center gap-1 opacity-40">
-                              <BrainCircuit className="size-2.5" />
-                              <span className="text-[9px] font-bold tabular-nums">
+                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
+                              <BrainCircuit className="size-3" />
+                              <span className="font-semibold tabular-nums">
                                 {Math.round(item.ai_confidence * 100)}%
                               </span>
                             </div>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-1.5">
-                          <div className="w-8 h-0.5 bg-muted rounded-full overflow-hidden">
+                      <TableCell className="py-2">
+                        <div className="flex items-center gap-2">
+                          <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden shrink-0 border border-border/20">
                             <div
                               className={cn(
-                                "h-full",
+                                "h-full rounded-full transition-all",
                                 item.integrity_risk_score > 70
                                   ? "bg-red-500"
-                                  : "bg-emerald-500",
+                                  : item.integrity_risk_score > 30
+                                    ? "bg-amber-500"
+                                    : "bg-emerald-500",
                               )}
                               style={{
                                 width: `${item.integrity_risk_score || 0}%`,
                               }}
                             />
                           </div>
-                          <span className="text-[8px] font-bold text-muted-foreground/30 uppercase">
+                          <span className="text-xs font-semibold tabular-nums text-muted-foreground/80">
                             {item.integrity_risk_score || 0}%
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right pr-4">
+                      <TableCell className="text-right pr-4 py-2">
                         <Button
-                          variant="ghost"
+                          variant="outline"
                           size="sm"
-                          className="h-6 px-2 text-[8px] font-bold uppercase rounded-md border border-border/40 hover:bg-primary/5 hover:text-primary transition-all group"
+                          className="h-8 px-3 text-xs font-medium rounded-lg border-border/60 hover:bg-primary hover:text-primary-foreground hover:border-primary active:scale-95 transition-all duration-300 h-8"
                           onClick={() => handleOpenReview(item)}
                         >
-                          Trace Audit
+                          Grade
                         </Button>
                       </TableCell>
                     </TableRow>
@@ -580,27 +525,23 @@ export default function LecturerGradingQueue() {
           </div>
         </TabsContent>
 
-        <TabsContent value="moderation" className="mt-3">
-          <Card className="shadow-none border border-border/60 bg-card/30 rounded-md">
-            <CardHeader className="p-4 border-b border-border/40 bg-muted/5 flex flex-row items-center gap-4 space-y-0">
-              <div className="flex-1 space-y-1">
-                <Label className="text-[8px] font-bold uppercase text-muted-foreground/60 tracking-widest">
-                  Assessment Reference
+        <TabsContent value="moderation" className="mt-4">
+          <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
+            <CardHeader className="p-4 border-b border-border/30 bg-muted/10 flex flex-col sm:flex-row items-start sm:items-center gap-4 space-y-0">
+              <div className="flex-1 w-full space-y-1.5">
+                <Label className="text-xs font-semibold text-muted-foreground/80">
+                  Select Assessment
                 </Label>
                 <Select
                   value={moderationAssessmentId}
                   onValueChange={setModerationAssessmentId}
                 >
-                  <SelectTrigger className="h-8 text-[10px] font-bold uppercase border-border/40 bg-white">
-                    <SelectValue placeholder="Reference..." />
+                  <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                    <SelectValue placeholder="Choose assessment..." />
                   </SelectTrigger>
                   <SelectContent>
                     {assessments.map((a) => (
-                      <SelectItem
-                        key={a.id}
-                        value={a.id}
-                        className="text-[10px] uppercase font-bold"
-                      >
+                      <SelectItem key={a.id} value={a.id}>
                         {a.title}
                       </SelectItem>
                     ))}
@@ -608,26 +549,21 @@ export default function LecturerGradingQueue() {
                 </Select>
               </div>
               {questions.length > 0 && (
-                <div className="flex-1 space-y-1">
-                  <Label className="text-[8px] font-bold uppercase text-muted-foreground/60 tracking-widest">
-                    Question Node
+                <div className="flex-1 w-full space-y-1.5">
+                  <Label className="text-xs font-semibold text-muted-foreground/80">
+                    Select Question Node
                   </Label>
                   <Select
                     value={moderationQuestionId || ""}
                     onValueChange={setModerationQuestionId}
                   >
-                    <SelectTrigger className="h-8 text-[10px] font-bold uppercase border-border/40 bg-white">
-                      <SelectValue placeholder="Node..." />
+                    <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                      <SelectValue placeholder="Choose question..." />
                     </SelectTrigger>
                     <SelectContent>
                       {questions.map((q, idx) => (
-                        <SelectItem
-                          key={q.id}
-                          value={q.id}
-                          className="text-[10px] uppercase font-bold"
-                        >
-                          Q{idx + 1}: {q.title || q.content?.substring(0, 40)}
-                          ...
+                        <SelectItem key={q.id} value={q.id}>
+                          Q{idx + 1}: {q.title || q.content?.substring(0, 45)}...
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -635,10 +571,10 @@ export default function LecturerGradingQueue() {
                 </div>
               )}
             </CardHeader>
-            <CardContent className="p-4">
+            <CardContent className="p-5">
               {!moderationQuestionId ? (
-                <div className="py-16 text-center text-[10px] font-bold text-muted-foreground/20 uppercase tracking-[0.2em] italic">
-                  Awaiting node selection for moderation.
+                <div className="py-20 text-center text-sm font-medium text-muted-foreground">
+                  <p className="italic">Awaiting node selection for moderation review.</p>
                 </div>
               ) : (
                 <ModerationPanel questionId={moderationQuestionId} />
@@ -647,33 +583,29 @@ export default function LecturerGradingQueue() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="release" className="mt-3">
-          <Card className="shadow-none border border-border/60 bg-card/30 rounded-md overflow-hidden">
-            <CardHeader className="p-4 border-b border-border/40 bg-muted/5 space-y-1">
-              <Label className="text-[8px] font-bold uppercase text-muted-foreground/60 tracking-widest">
-                Institutional Release Context
+        <TabsContent value="release" className="mt-4">
+          <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
+            <CardHeader className="p-4 border-b border-border/30 bg-muted/10 space-y-1.5">
+              <Label className="text-xs font-semibold text-muted-foreground/80">
+                Select Release Assessment Context
               </Label>
               <Select value={assessmentId} onValueChange={setAssessmentId}>
-                <SelectTrigger className="h-8 text-[10px] font-bold uppercase border-border/40 bg-white">
-                  <SelectValue placeholder="Reference..." />
+                <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                  <SelectValue placeholder="Choose assessment..." />
                 </SelectTrigger>
                 <SelectContent>
                   {assessments.map((a) => (
-                    <SelectItem
-                      key={a.id}
-                      value={a.id}
-                      className="text-[10px] uppercase font-bold"
-                    >
+                    <SelectItem key={a.id} value={a.id}>
                       {a.title}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </CardHeader>
-            <CardContent className="p-4">
+            <CardContent className="p-5">
               {assessmentId === "all" ? (
-                <div className="py-16 text-center text-[10px] font-bold text-muted-foreground/20 uppercase tracking-[0.2em] italic">
-                  Awaiting release context selection.
+                <div className="py-20 text-center text-sm font-medium text-muted-foreground">
+                  <p className="italic">Awaiting release context selection.</p>
                 </div>
               ) : (
                 <ResultReleasePanel assessmentId={assessmentId} />
@@ -682,19 +614,19 @@ export default function LecturerGradingQueue() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="groups" className="mt-3">
-          <Card className="shadow-none border border-border/60 rounded-md overflow-hidden bg-white">
-            <CardHeader className="p-3 border-b border-border/40 bg-muted/5 flex flex-row items-center justify-between">
-              <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
-                Collaborative Registry
+        <TabsContent value="groups" className="mt-4">
+          <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
+            <CardHeader className="p-4 border-b border-border/30 bg-muted/10 flex flex-row items-center justify-between">
+              <CardTitle className="text-sm font-semibold text-muted-foreground">
+                Collaborative Submissions Registry
               </CardTitle>
-              <Layers className="size-3 text-muted-foreground/20" />
+              <Layers className="size-4 text-muted-foreground/40" />
             </CardHeader>
-            <CardContent className="p-8 text-center">
-              <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground/60">
-                Group grading is coming soon. Collaborative review is not yet
-                available.
-              </div>
+            <CardContent className="p-16 text-center space-y-3">
+              <Users className="size-10 text-muted-foreground/35 mx-auto" />
+              <p className="text-sm font-medium text-muted-foreground max-w-md mx-auto">
+                Group grading and collaborative reviews are currently in development.
+              </p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -705,48 +637,49 @@ export default function LecturerGradingQueue() {
         open={!!selectedStudent}
         onOpenChange={(open) => !open && setSelectedStudent(null)}
       >
-        <SheetContent className="sm:max-w-2xl overflow-y-auto p-0 border-l border-border/40 shadow-2xl rounded-l-xl">
+        <SheetContent className="sm:max-w-2xl overflow-y-auto p-0 border-l border-border/40 shadow-2xl rounded-l-2xl">
           {selectedStudent && (
-            <div className="flex flex-col h-full bg-background">
-              <div className="p-5 border-b border-border/40 bg-muted/[0.02]">
-                <div className="flex items-center gap-2 mb-1">
+            <div className="flex flex-col h-full bg-background font-sans">
+              <div className="p-6 border-b border-border/45 bg-muted/15">
+                <div className="flex items-center gap-2 mb-1.5">
                   <Badge
                     variant="outline"
-                    className="text-[8px] h-3.5 uppercase font-bold border-primary/20 bg-primary/5 text-primary/70"
+                    className="text-xs px-2.5 py-0.5 rounded-full font-semibold border-primary/20 bg-primary/5 text-primary/70 shadow-none capitalize"
                   >
                     Response Audit
                   </Badge>
-                  <span className="text-[8px] font-bold text-muted-foreground/30 uppercase">
-                    {selectedStudent.question_type}
+                  <span className="text-xs font-semibold text-muted-foreground/60 capitalize">
+                    {selectedStudent.question_type?.replace("_", " ").toLowerCase()}
                   </span>
                 </div>
-                <SheetTitle className="text-base font-bold uppercase tracking-tight text-foreground/90">
+                <SheetTitle className="text-xl font-semibold tracking-tight text-foreground/90 leading-tight">
                   {selectedStudent.student_name}
                 </SheetTitle>
-                <SheetDescription className="text-[10px] font-bold text-muted-foreground/60 uppercase mt-0.5">
+                <SheetDescription className="text-xs text-muted-foreground mt-1 font-medium">
                   {selectedStudent.assessment_title}
                 </SheetDescription>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5 space-y-6">
-                <section className="space-y-1.5">
-                  <Label className="text-[8px] font-bold uppercase text-muted-foreground/40 tracking-widest px-0.5">
-                    Pedagogical Node
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground/80">
+                    Question Node Description
                   </Label>
-                  <div className="text-[13px] font-medium leading-relaxed bg-muted/[0.01] p-3 rounded border border-border/40 italic text-foreground/80">
+                  <div className="text-sm leading-relaxed bg-muted/15 p-4 rounded-xl border border-border/40 text-foreground/85">
                     {selectedStudent.question_text}
                   </div>
-                </section>
+                </div>
 
-                <section className="space-y-1.5">
-                  <Label className="text-[8px] font-bold uppercase text-muted-foreground/40 tracking-widest px-0.5">
-                    Input Trace
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground/80">
+                    Student Response Trace
                   </Label>
-                  <div className="text-[13px] leading-relaxed border border-border/60 rounded-md p-4 bg-white/50 shadow-sm whitespace-pre-wrap font-medium">
-                    {selectedStudent.student_answer ||
-                      "Null response recorded."}
+                  <div className="text-sm leading-relaxed border border-border/50 rounded-xl p-4 bg-background shadow-sm whitespace-pre-wrap text-foreground/90">
+                    {selectedStudent.student_answer || (
+                      <span className="italic text-muted-foreground">No response recorded.</span>
+                    )}
                   </div>
-                </section>
+                </div>
 
                 {selectedStudent.rubric && (
                   <RubricGradingPanel
@@ -771,7 +704,7 @@ export default function LecturerGradingQueue() {
                         variant="ghost"
                         size="sm"
                         onClick={() => setShowAiPanel(false)}
-                        className="text-[8px] font-bold uppercase text-muted-foreground/30 hover:text-destructive h-5 gap-1.5"
+                        className="text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg h-7 gap-1.5"
                       >
                         Discard Analysis
                       </Button>
@@ -782,9 +715,9 @@ export default function LecturerGradingQueue() {
                     variant="outline"
                     size="sm"
                     onClick={() => setShowAiPanel(true)}
-                    className="w-full text-[9px] font-bold uppercase h-8 border-dashed border-primary/20 bg-primary/[0.01] text-primary/60 hover:bg-primary/[0.03]"
+                    className="w-full text-xs font-medium h-9 border-dashed border-primary/20 bg-primary/[0.01] text-primary/70 hover:bg-primary/[0.03] rounded-lg"
                   >
-                    <BrainCircuit className="size-3 mr-2" /> Restore Analysis
+                    <BrainCircuit className="size-3.5 mr-2" /> Restore Analysis
                   </Button>
                 ) : null}
 
@@ -796,12 +729,12 @@ export default function LecturerGradingQueue() {
 
                 <div className="pt-6 border-t border-border/40 space-y-4">
                   <div className="space-y-2">
-                    <Label className="text-[10px] font-bold text-foreground/60 uppercase tracking-widest">
-                      Academic Feedback
+                    <Label className="text-xs font-semibold text-muted-foreground/80">
+                      Lecturer Evaluation Feedback
                     </Label>
                     <Textarea
-                      placeholder="Final trace feedback..."
-                      className="text-xs min-h-[80px] border-border/60 bg-muted/[0.01] focus:ring-0 uppercase placeholder:text-muted-foreground/20"
+                      placeholder="Provide detailed feedback on this response..."
+                      className="text-sm min-h-[90px] border-border/60 bg-muted/10 focus-visible:ring-1 transition-colors rounded-xl"
                       value={finalFeedback}
                       onChange={(e) => setFinalFeedback(e.target.value)}
                     />
@@ -814,26 +747,26 @@ export default function LecturerGradingQueue() {
                           type="number"
                           value={overrideScore}
                           onChange={(e) => setOverrideScore(e.target.value)}
-                          className="w-20 h-9 text-sm font-bold text-center pl-2 pr-5 border-border/60 focus:ring-0"
+                          className="w-24 h-10 text-sm font-semibold text-center pr-7 border-border/60 rounded-lg"
                         />
-                        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[8px] font-bold text-muted-foreground/40 uppercase">
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground/60 select-none">
                           pts
                         </span>
                       </div>
-                      <div className="text-[10px] font-bold text-muted-foreground/30 uppercase tracking-tighter">
-                        Vector Scale: {selectedStudent.max_score} MAX
+                      <div className="text-xs text-muted-foreground/65">
+                        out of {selectedStudent.max_score} Maximum
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 pb-6">
+                    <div className="grid grid-cols-2 gap-3 pb-8 pt-2">
                       <Button
-                        variant="secondary"
+                        variant="outline"
                         onClick={() => handleSaveDecision(false)}
                         disabled={isSaving}
-                        className="h-9 text-[10px] font-bold uppercase rounded-md border border-border/40 shadow-none"
+                        className="h-10 text-xs font-medium rounded-lg border-border/60 hover:bg-muted/40 shadow-sm"
                       >
                         {isSaving ? (
-                          <Loader2 className="size-3 animate-spin" />
+                          <Loader2 className="size-4 animate-spin" />
                         ) : (
                           "Save Draft"
                         )}
@@ -841,9 +774,9 @@ export default function LecturerGradingQueue() {
                       <Button
                         onClick={() => handleSaveDecision(true)}
                         disabled={isSaving}
-                        className="h-9 text-[10px] font-bold uppercase rounded-md bg-primary hover:bg-primary/90 text-primary-foreground shadow-none"
+                        className="h-10 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/95 text-primary-foreground shadow-md transition-all"
                       >
-                        Confirm Decision
+                        Confirm Evaluation
                       </Button>
                     </div>
                   </div>

@@ -237,13 +237,13 @@ export default function StudentResultsPage() {
           { label: "Top Score Accomplished", value: `${bestPerformance?.percentage || 0}%`, icon: Trophy },
           { label: "Registered Attempts", value: results.length.toString(), icon: FileText },
         ].map((stat, i) => (
-          <Card key={i} className="shadow-none border border-border/50 bg-muted/20 backdrop-blur-sm rounded-xl overflow-hidden">
+          <Card key={i} className="shadow-none border rounded-xl overflow-hidden bg-card">
             <CardContent className="p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stat.label}</span>
                 <stat.icon className="size-4 text-primary/50" />
               </div>
-              <div className="text-3xl font-semibold text-foreground tracking-tight">{stat.value}</div>
+              <div className="text-2xl font-bold text-foreground tracking-tight">{stat.value}</div>
               {stat.progress !== undefined && (
                 <div className="pt-1">
                    <Progress value={stat.progress} className="h-1.5 bg-primary/10 rounded-full" />
@@ -300,7 +300,7 @@ export default function StudentResultsPage() {
                        <div className="h-[1px] flex-1 bg-border/40" />
                        <span className="text-xs font-medium text-muted-foreground/45">{courseResults.length} Items</span>
                     </div>
-                    <Card className="shadow-none border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
+                    <Card className="shadow-none border rounded-xl overflow-hidden bg-card">
                        <div className="divide-y divide-border/20">
                           {courseResults.map(renderResultItem)}
                        </div>

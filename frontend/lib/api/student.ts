@@ -50,6 +50,7 @@ export interface StudentUpcomingAssessment {
   course_code?: string;
   course_name?: string;
   window_start?: string;
+  window_end?: string;
   duration_minutes?: number;
   total_marks?: number;
 }
