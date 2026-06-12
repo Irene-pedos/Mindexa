@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
-AIProviderName = Literal["groq", "openai", "anthropic"]
+AIProviderName = Literal["groq", "openai", "anthropic", "jina"]
 
 
 class AIMessage(BaseModel):

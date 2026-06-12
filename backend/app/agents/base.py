@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import TypeVar, Type
 
 from pydantic import BaseModel, ValidationError as PydanticValidationError
@@ -41,16 +42,38 @@ class BaseAgent:
         """
         try:
             # Clean JSON from markdown blocks if present
-            clean_content = content.strip()
-            if clean_content.startswith("```json"):
-                clean_content = clean_content[7:]
-            elif clean_content.startswith("```"):
-                clean_content = clean_content[3:]
-            if clean_content.endswith("```"):
-                clean_content = clean_content[:-3]
-            clean_content = clean_content.strip()
+            content_str = content.strip()
 
-            data = json.loads(clean_content)
+            # 1. Try extracting content inside markdown blocks
+            match = re.search(r"```json\s*(.*?)\s*```", content_str, re.DOTALL)
+            if not match:
+                match = re.search(r"```\s*(.*?)\s*```", content_str, re.DOTALL)
+
+            if match:
+                clean_content = match.group(1).strip()
+            else:
+                # 2. Try extracting content between the outermost JSON brackets
+                first_curly = content_str.find("{")
+                first_square = content_str.find("[")
+
+                start = -1
+                if first_curly != -1 and first_square != -1:
+                    start = min(first_curly, first_square)
+                elif first_curly != -1:
+                    start = first_curly
+                elif first_square != -1:
+                    start = first_square
+
+                last_curly = content_str.rfind("}")
+                last_square = content_str.rfind("]")
+                end = max(last_curly, last_square)
+
+                if start != -1 and end != -1 and start < end:
+                    clean_content = content_str[start:end+1].strip()
+                else:
+                    clean_content = content_str
+
+            data = json.loads(clean_content, strict=False)
 
             if extract_list:
                 if not isinstance(data, list):

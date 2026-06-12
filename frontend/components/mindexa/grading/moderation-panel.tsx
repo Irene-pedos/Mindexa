@@ -300,7 +300,7 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
                                        <div className="bg-amber-50 border border-amber-100 p-2 rounded flex items-start gap-2">
                                           <Info className="size-3.5 text-amber-600 mt-0.5" />
                                           <p className="text-[10px] text-amber-800 leading-tight">
-                                             By clicking "supersede", the current grade becomes obsolete. The institutional metadata will record this as a Moderator Revision.
+                                             By clicking &quot;supersede&quot;, the current grade becomes obsolete. The institutional metadata will record this as a Moderator Revision.
                                           </p>
                                        </div>
                                     </div>

@@ -205,6 +205,26 @@ class AssessmentService:
         assessment = await self._get_and_validate(assessment_id, current_user)
 
         update_fields = {}
+        if data.teaching_workspace_id is not None:
+            update_fields["teaching_workspace_id"] = data.teaching_workspace_id
+            from app.db.models.academic import TeachingWorkspace, CourseSubject
+            from sqlalchemy import select
+            res = await self.db.execute(
+                select(TeachingWorkspace).where(TeachingWorkspace.id == data.teaching_workspace_id)
+            )
+            workspace = res.scalars().first()
+            if workspace:
+                update_fields["course_id"] = workspace.course_id
+                sub_res = await self.db.execute(
+                    select(CourseSubject.subject_id).where(CourseSubject.course_id == workspace.course_id).limit(1)
+                )
+                subj_id = sub_res.scalar_one_or_none()
+                if subj_id:
+                    update_fields["subject_id"] = subj_id
+
+        if data.course_id is not None:
+            update_fields["course_id"] = data.course_id
+
         if data.title is not None:
             update_fields["title"] = data.title
         if data.description is not None:
@@ -265,6 +285,10 @@ class AssessmentService:
             update_fields["show_feedback_after_submit"] = data.show_feedback_after_submit
         if data.is_ai_generation_enabled is not None:
             update_fields["is_ai_generation_enabled"] = data.is_ai_generation_enabled
+        if data.audience_type is not None:
+            update_fields["audience_type"] = data.audience_type
+        if data.target_student_ids is not None:
+            update_fields["target_student_ids"] = data.target_student_ids
             
         # Security/Integrity additions
         if data.max_attempts is not None:
@@ -286,6 +310,78 @@ class AssessmentService:
         if data.randomize_options is not None:
             update_fields["randomize_options"] = data.randomize_options
 
+        # Update target sections (class groups)
+        if data.class_group_ids is not None:
+            # Clear existing targets
+            from app.db.models.assessment import AssessmentTargetSection
+            from app.db.models.academic import TeachingAssignment, ClassSection
+            from sqlalchemy import update, select
+            await self.db.execute(
+                update(AssessmentTargetSection)
+                .where(AssessmentTargetSection.assessment_id == assessment_id)
+                .values(is_deleted=True, deleted_at=datetime.now(UTC))
+            )
+            for cg_id in data.class_group_ids:
+                res = await self.db.execute(
+                    select(ClassSection.id)
+                    .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
+                    .where(
+                        TeachingAssignment.course_id == assessment.course_id,
+                        ClassSection.class_group_id == cg_id,
+                        ClassSection.is_deleted == False
+                    )
+                )
+                section_id = res.scalar_one_or_none()
+                if section_id:
+                    target = AssessmentTargetSection(
+                        assessment_id=assessment_id,
+                        class_section_id=section_id,
+                        added_by_id=current_user.id
+                    )
+                    self.db.add(target)
+
+        if "teaching_workspace_id" in update_fields and update_fields["teaching_workspace_id"]:
+            from app.db.models.assessment import AssessmentTargetSection
+            from app.db.models.academic import TeachingWorkspace
+            from sqlalchemy import select, update
+            await self.db.execute(
+                update(AssessmentTargetSection)
+                .where(AssessmentTargetSection.assessment_id == assessment_id)
+                .values(is_deleted=True, deleted_at=datetime.now(UTC))
+            )
+            res = await self.db.execute(
+                select(TeachingWorkspace.class_section_id).where(TeachingWorkspace.id == update_fields["teaching_workspace_id"])
+            )
+            ws_section_id = res.scalar_one_or_none()
+            if ws_section_id:
+                target = AssessmentTargetSection(
+                    assessment_id=assessment_id,
+                    class_section_id=ws_section_id,
+                    added_by_id=current_user.id
+                )
+                self.db.add(target)
+
+        # Update supervisors
+        if data.supervisor_ids is not None:
+            # Clear existing supervisors
+            from app.db.models.assessment import AssessmentSupervisor
+            from app.db.enums import SupervisorRole
+            from sqlalchemy import update
+            await self.db.execute(
+                update(AssessmentSupervisor)
+                .where(AssessmentSupervisor.assessment_id == assessment_id)
+                .values(is_deleted=True, deleted_at=datetime.now(UTC))
+            )
+            for sup_id in data.supervisor_ids:
+                role = SupervisorRole.PRIMARY if str(sup_id) == str(assessment.created_by_id) else SupervisorRole.ASSISTANT
+                sup = AssessmentSupervisor(
+                    assessment_id=assessment_id,
+                    supervisor_id=sup_id,
+                    supervisor_role=role,
+                    assigned_by_id=current_user.id
+                )
+                self.db.add(sup)
+
         # Advance wizard step if moving forward
         if step > (assessment.draft_step or 0):
             update_fields["draft_step"] = step
@@ -296,6 +392,8 @@ class AssessmentService:
                 updated_by_id=current_user.id,
                 **update_fields
             )
+
+        await self.db.flush()
 
         await self._repo.upsert_draft_progress(
             assessment_id=assessment_id,
@@ -606,6 +704,48 @@ class AssessmentService:
                 warnings=warnings,
             )
 
+        # Capture student enrollment snapshot
+        try:
+            from app.db.models.academic import StudentEnrollment, AssessmentTargetSection
+            from app.db.models.auth import User, UserProfile
+            from sqlalchemy import select
+
+            stmt = (
+                select(
+                    User.id,
+                    User.email,
+                    UserProfile.first_name,
+                    UserProfile.last_name,
+                    UserProfile.student_id
+                )
+                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+                .join(UserProfile, UserProfile.user_id == User.id)
+                .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
+                .where(
+                    AssessmentTargetSection.assessment_id == assessment_id,
+                    AssessmentTargetSection.is_deleted == False,
+                    StudentEnrollment.is_deleted == False
+                )
+                .distinct()
+            )
+            res = await self.db.execute(stmt)
+            snapshot_students = []
+            for uid, email, fname, lname, sid in res.all():
+                snapshot_students.append({
+                    "id": str(uid),
+                    "email": email,
+                    "name": f"{fname} {lname}",
+                    "student_id": sid or "N/A"
+                })
+            
+            await self._repo.update_fields(
+                assessment_id,
+                updated_by_id=current_user.id,
+                student_enrollment_snapshot=snapshot_students
+            )
+        except Exception as e:
+            print(f"Failed to save student enrollment snapshot: {e}")
+
         # All checks passed — finalize
         await self._repo.publish(assessment_id, updated_by_id=current_user.id)
 
@@ -689,6 +829,10 @@ class AssessmentService:
         if current_user.role == UserRole.STUDENT.value:
             if not assessment.draft_is_complete:
                 raise NotFoundError("Assessment not found.")
+            if assessment.audience_type == "selected":
+                target_ids = assessment.target_student_ids or []
+                if str(current_user.id) not in [str(tid) for tid in target_ids]:
+                    raise NotFoundError("Assessment not found.")
 
         return assessment
 
@@ -1055,6 +1199,8 @@ class AssessmentService:
                 "require_all_member_approval": data.rules.requireAllMemberApproval if is_group else False,
                 "require_all_member_participation": data.rules.requireAllMemberParticipation if is_group else False,
                 "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
+                "audience_type": data.metadata.audience_type,
+                "target_student_ids": data.metadata.target_student_ids,
             }
             if data.rules.autosaveToken:
                 update_data["autosave_token"] = data.rules.autosaveToken
@@ -1094,6 +1240,8 @@ class AssessmentService:
                 late_penalty_percent=data.rules.latePenaltyPercent,
                 grace_period_minutes=data.rules.gracePeriodMinutes,
                 autosave_token=data.rules.autosaveToken,
+                audience_type=data.metadata.audience_type or "all",
+                target_student_ids=data.metadata.target_student_ids,
             )
 
         # 3. Update Security Settings
@@ -1113,6 +1261,8 @@ class AssessmentService:
             "randomize_options": data.rules.shuffleOptions,
             "late_penalty_percent": data.rules.latePenaltyPercent,
             "grace_period_minutes": data.rules.gracePeriodMinutes,
+            "audience_type": data.metadata.audience_type or "all",
+            "target_student_ids": data.metadata.target_student_ids,
         }
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
@@ -1123,6 +1273,19 @@ class AssessmentService:
             .where(AssessmentTargetSection.assessment_id == assessment.id)
             .values(is_deleted=True, deleted_at=datetime.now(UTC))
         )
+
+        if teaching_workspace_id:
+            res = await self.db.execute(
+                select(TeachingWorkspace.class_section_id).where(TeachingWorkspace.id == teaching_workspace_id)
+            )
+            ws_section_id = res.scalar_one_or_none()
+            if ws_section_id:
+                target = AssessmentTargetSection(
+                    assessment_id=assessment.id,
+                    class_section_id=ws_section_id,
+                    added_by_id=current_user.id
+                )
+                self.db.add(target)
 
         if data.metadata.class_group_ids:
             for cg_id in data.metadata.class_group_ids:
@@ -1144,7 +1307,9 @@ class AssessmentService:
                         class_section_id=section_id,
                         added_by_id=current_user.id
                     )
-                    self.db.add(target)
+                    # Check to avoid duplicate if it's the same as ws_section_id
+                    if not teaching_workspace_id or str(section_id) != str(ws_section_id):
+                        self.db.add(target)
         
         await self.db.flush()
 
@@ -1264,6 +1429,7 @@ class AssessmentService:
                 assessment_section_id=section_id_map.get(q.sectionId),
                 group_id=target_group_id,
                 marks_override=q.marks,
+                is_required=q.is_required if q.is_required is not None else True,
             )
 
         # 5. Handle Supervisors

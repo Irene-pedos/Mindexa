@@ -280,6 +280,13 @@ class AssessmentGeneralUpdate(BaseModel):
 
     draft_step: int | None = Field(default=None, ge=1, le=6)
 
+    teaching_workspace_id: uuid.UUID | None = None
+    course_id: uuid.UUID | None = None
+    class_group_ids: list[uuid.UUID] | None = None
+    supervisor_ids: list[uuid.UUID] | None = None
+    audience_type: str | None = None
+    target_student_ids: list[uuid.UUID] | None = None
+
     model_config = {"str_strip_whitespace": True, "populate_by_name": True}
 
 
@@ -294,10 +301,13 @@ class AssessmentSummaryResponse(BaseModel):
     assessment_type: str
     status: str
     grading_mode: str
+    result_release_mode: str | None = None
     total_marks: int
+    passing_marks: int | None = None
     duration_minutes: int | None
     window_start: datetime | None
     window_end: datetime | None
+    max_attempts: int = 1
     is_group_assessment: bool
     is_finalized: bool
     draft_step: int | None
@@ -310,6 +320,26 @@ class AssessmentSummaryResponse(BaseModel):
     student_attempt_id: uuid.UUID | None = None
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class AssessmentSupervisorResponse(BaseModel):
+    id: uuid.UUID
+    assessment_id: uuid.UUID
+    supervisor_id: uuid.UUID
+    supervisor_role: str
+    assigned_at: datetime
+    assigned_by_id: uuid.UUID | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class AssessmentTargetSectionResponse(BaseModel):
+    id: uuid.UUID
+    assessment_id: uuid.UUID
+    class_section_id: uuid.UUID
+    added_by_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 
@@ -362,6 +392,11 @@ class AssessmentDetailResponse(BaseModel):
     sections: list[AssessmentSectionResponse] = []
     assessment_questions: list[AssessmentQuestionResponse] = []
     draft_progress: AssessmentDraftProgressResponse | None = None
+    supervisors: list[AssessmentSupervisorResponse] = []
+    target_sections: list[AssessmentTargetSectionResponse] = []
+    student_enrollment_snapshot: list[dict] | None = None
+    audience_type: str = "all"
+    target_student_ids: list[uuid.UUID] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -435,6 +470,7 @@ class BulkAssessmentQuestion(BaseModel):
     imageUrl: str | None = None
     computationalType: str | None = None
     caseStudyContext: str | None = None
+    is_required: bool | None = True
 
     @model_validator(mode="before")
     @classmethod
@@ -462,6 +498,8 @@ class BulkAssessmentMetadata(BaseModel):
     class_group_ids: list[str | uuid.UUID] | None = []
     teaching_workspace_id: str | uuid.UUID | None = None
     subject_id: str | uuid.UUID | None = None
+    audience_type: str | None = "all"
+    target_student_ids: list[str | uuid.UUID] | None = []
     date: datetime | None = None
     startTime: str | None = None
     endTime: str | None = None

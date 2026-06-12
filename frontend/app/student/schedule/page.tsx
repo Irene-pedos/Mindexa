@@ -55,7 +55,7 @@ export default function StudentSchedulePage() {
 
   if (loading) {
     return (
-      <div className="space-y-6 max-w-7xl mx-auto p-4">
+      <div className="space-y-6">
         <div className="space-y-1">
             <Skeleton variant="title" className="h-8 w-48" />
             <Skeleton variant="title" className="h-4 w-72" />
@@ -74,7 +74,7 @@ export default function StudentSchedulePage() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto p-4 pb-12">
+    <div className="space-y-6">
       <div className="space-y-0.5">
         <h1 className="text-2xl font-semibold tracking-tight">
           Academic Schedule

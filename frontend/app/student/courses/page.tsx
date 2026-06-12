@@ -11,16 +11,14 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   BookOpen,
-  Users,
   Calendar,
   Award,
   BarChart3,
   Clock,
-  LayoutDashboard,
   FileText,
-  ArrowRight,
   GraduationCap
 } from "lucide-react";
 import Link from "next/link";
@@ -29,7 +27,7 @@ import {
   StudentCourseListItem,
   StudentDashboardResponse,
 } from "@/lib/api/student";
-import { Skeleton } from "@/components/ui/interfaces-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export default function StudentWorkspacesPage() {
@@ -66,16 +64,22 @@ export default function StudentWorkspacesPage() {
 
   if (loading) {
     return (
-      <div className="space-y-3 max-w-7xl mx-auto p-4">
-        <Skeleton variant="title" className="h-6 w-48" />
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <div className="space-y-2">
+            <Skeleton className="h-8 w-64" />
+            <Skeleton className="h-4 w-96 opacity-60" />
+          </div>
+          <Skeleton className="h-10 w-32 rounded-lg" />
+        </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} variant="media" className="h-14 w-full rounded-md" />
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
           ))}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton key={i} variant="media" className="h-36 w-full rounded-lg" />
+            <Skeleton key={i} className="h-44 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -83,90 +87,93 @@ export default function StudentWorkspacesPage() {
   }
 
   const metrics = [
-    { label: "Enrolled", value: workspaces.length, icon: GraduationCap, color: "text-primary" },
-    { label: "Progression", value: `${avgProgress}%`, icon: BarChart3, color: "text-emerald-600" },
-    { label: "Pending", value: dashboardData?.summary.active_assessments_count.value ?? 0, icon: Clock, color: "text-amber-600" },
-    { label: "CGPA Index", value: (dashboardData?.summary.cgpa.value ?? 0).toFixed(2), icon: Award, color: "text-primary" },
+    { label: "Enrolled Courses", value: workspaces.length, icon: GraduationCap, color: "text-primary" },
+    { label: "Average Progress", value: `${avgProgress}%`, icon: BarChart3, color: "text-emerald-600" },
+    { label: "Pending Assessments", value: dashboardData?.summary.active_assessments_count.value ?? 0, icon: Clock, color: "text-amber-600" },
+    { label: "Current CGPA", value: (dashboardData?.summary.cgpa.value ?? 0).toFixed(2), icon: Award, color: "text-primary" },
   ];
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto p-4 pb-8">
-      {/* Precision Header */}
-      <div className="flex items-center justify-between gap-4 border-b border-border/40 pb-3">
-        <div className="space-y-0.5">
-          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">Modules</h1>
-          <p className="text-muted-foreground text-[10px] font-bold uppercase tracking-wider">Academic progression ledger.</p>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">My Courses</h1>
+          <p className="text-muted-foreground mt-1">Overview of your enrolled academic modules and study progress</p>
         </div>
-        <Button variant="outline" size="sm" className="h-7 px-3 text-[10px] font-bold uppercase border-border/60" asChild>
+        <Button variant="outline" size="sm" asChild>
           <Link href="/student/schedule">
-            <Calendar className="mr-1.5 size-3 text-primary/70" /> Schedule
+            <Calendar className="mr-2 size-4 text-muted-foreground" /> View Schedule
           </Link>
         </Button>
       </div>
 
-      {/* Metrics - Ultra Compact */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+      {/* Metrics */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((stat, i) => (
-          <div key={i} className="p-2.5 px-3 rounded-lg border border-border/50 bg-muted/5 flex items-center justify-between group hover:border-primary/20 transition-all">
-            <div className="space-y-0">
-              <p className="text-[9px] font-bold uppercase text-muted-foreground/60">{stat.label}</p>
-              <p className={cn("text-base font-bold tabular-nums tracking-tighter", stat.color)}>{stat.value}</p>
-            </div>
-            <stat.icon className="size-3.5 opacity-20" />
-          </div>
+          <Card key={i}>
+            <CardContent className="p-4 flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-muted-foreground">{stat.label}</p>
+                <p className={cn("text-2xl font-semibold tracking-tight tabular-nums", stat.color)}>{stat.value}</p>
+              </div>
+              <stat.icon className="size-5 text-muted-foreground opacity-70" />
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* Modules Grid - High Density Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      {/* Modules Grid */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {workspaces.length === 0 ? (
-          <div className="col-span-full py-16 text-center border border-dashed rounded-lg bg-muted/5 border-border/40">
-            <p className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">Registry Empty</p>
+          <div className="col-span-full py-20 text-center border-2 border-dashed rounded-xl">
+            <BookOpen className="size-12 text-muted-foreground mx-auto mb-4 opacity-20" />
+            <p className="text-muted-foreground">No enrolled courses found.</p>
           </div>
         ) : (
           workspaces.map((ws) => (
-            <Card key={ws.id} className="shadow-none border border-border/60 hover:border-primary/30 transition-all bg-card/50 rounded-lg overflow-hidden">
-              <CardHeader className="p-3 border-b border-border/40 bg-muted/5">
+            <Card key={ws.id} className="flex flex-col hover:bg-muted/50 transition-colors">
+              <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="text-sm font-bold truncate uppercase text-foreground/80">{ws.title}</CardTitle>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <Badge variant="outline" className="h-3.5 px-1 text-[8px] font-bold bg-primary/5 border-primary/20 text-primary/70 uppercase rounded-sm">{ws.code}</Badge>
-                      <span className="text-[9px] font-bold text-muted-foreground/50 uppercase">{ws.academic_year || "GLOBAL"}</span>
+                  <div className="space-y-1 min-w-0">
+                    <CardTitle className="text-base font-semibold truncate">{ws.title}</CardTitle>
+                    <div className="flex items-center gap-2 mt-1">
+                      <Badge variant="outline" className="text-[10px] font-medium px-1.5 h-5">{ws.code}</Badge>
+                      <span className="text-xs text-muted-foreground">{ws.academic_year || "Global"}</span>
                     </div>
                   </div>
-                  <BookOpen className="size-3.5 text-primary/40 shrink-0 mt-0.5" />
+                  <BookOpen className="size-5 text-muted-foreground opacity-60 shrink-0 mt-0.5" />
                 </div>
               </CardHeader>
 
-              <CardContent className="p-3 space-y-3">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-end text-[9px] font-bold uppercase tracking-tight">
-                    <span className="text-muted-foreground/60">Module Saturation</span>
-                    <span className="text-foreground/70">{ws.progress}%</span>
+              <CardContent className="space-y-4 flex-1 flex flex-col justify-between">
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs text-muted-foreground">
+                    <span>Course Progress</span>
+                    <span className="font-semibold text-foreground">{ws.progress}%</span>
                   </div>
-                  <div className="h-1 bg-muted/60 rounded-full overflow-hidden">
-                    <div className="h-full bg-primary/60 transition-all duration-700" style={{ width: `${ws.progress}%` }} />
-                  </div>
+                  <Progress value={ws.progress} className="h-1.5" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/10">
-                  <div className="min-w-0">
-                    <p className="text-[8px] text-muted-foreground font-bold uppercase tracking-tighter opacity-60">Instructor</p>
-                    <p className="text-[10px] font-semibold text-foreground/70 truncate">{ws.lecturer_name}</p>
+                <div className="grid grid-cols-2 gap-2 pt-2 border-t text-xs">
+                  <div>
+                    <p className="text-muted-foreground">Instructor</p>
+                    <p className="font-medium truncate">{ws.lecturer_name}</p>
                   </div>
                   <div className="text-right">
-                    <p className="text-[8px] text-muted-foreground font-bold uppercase tracking-tighter opacity-60">Status</p>
-                    <p className="text-[9px] font-bold text-emerald-600 uppercase">Operational</p>
+                    <p className="text-muted-foreground">Status</p>
+                    <p className="font-medium text-emerald-600">Active</p>
                   </div>
                 </div>
 
-                <div className="flex gap-1.5 pt-1">
-                  <Button asChild size="sm" className="flex-1 h-7 text-[10px] font-bold uppercase rounded-md bg-primary hover:bg-primary/90 shadow-none">
-                    <Link href={`/student/courses/${ws.id}`}>Enter Portal</Link>
+                <div className="flex gap-2 pt-2 mt-auto">
+                  <Button asChild size="sm" className="flex-1">
+                    <Link href={`/student/courses/${ws.id}`}>View Course</Link>
                   </Button>
-                  <Button asChild variant="outline" size="sm" className="h-7 w-7 p-0 rounded-md border-border/60 hover:bg-muted/50">
-                    <Link href="/student/assessments" title="Evaluations"><FileText className="size-3 text-muted-foreground" /></Link>
+                  <Button asChild variant="outline" size="sm" className="w-9 h-9 p-0">
+                    <Link href="/student/assessments" title="Assessments">
+                      <FileText className="size-4 text-muted-foreground" />
+                    </Link>
                   </Button>
                 </div>
               </CardContent>

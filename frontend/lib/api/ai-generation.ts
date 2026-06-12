@@ -48,6 +48,8 @@ export interface AIGenerationBatchDetailResponse {
   error_message: string | null;
   created_at: string;
   completed_at: string | null;
+  // Backend sends `generated_questions`; we normalise it to `questions` for the UI
+  generated_questions?: AIGeneratedQuestionResponse[];
   questions: AIGeneratedQuestionResponse[];
 }
 
@@ -93,8 +95,12 @@ export const aiGenerationApi = {
   },
 };
 
-function _parseBatchQuestions(batch: AIGenerationBatchDetailResponse): AIGenerationBatchDetailResponse {
-  batch.questions = batch.questions.map((q) => {
+function _parseBatchQuestions(batch: any): AIGenerationBatchDetailResponse {
+  // Backend sends the relationship as `generated_questions`; normalise to `questions`
+  const rawQuestions: AIGeneratedQuestionResponse[] =
+    batch.generated_questions ?? batch.questions ?? [];
+
+  const parsedQuestions = rawQuestions.map((q) => {
     let _options: GeneratedQuestionOptionResponse[] = [];
     if (q.parsed_options_json) {
       try {
@@ -105,5 +111,6 @@ function _parseBatchQuestions(batch: AIGenerationBatchDetailResponse): AIGenerat
     }
     return { ...q, _options };
   });
-  return batch;
+
+  return { ...batch, questions: parsedQuestions };
 }

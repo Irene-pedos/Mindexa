@@ -390,7 +390,7 @@ export default function LecturerDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Pending Audit Queue */}
-        <Card className="lg:col-span-7 shadow-none border rounded-xl overflow-hidden">
+        <Card className="lg:col-span-4 shadow-none border rounded-xl overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between py-3 px-5 border-b bg-muted/5">
             <div>
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
@@ -454,7 +454,7 @@ export default function LecturerDashboard() {
         </Card>
 
         {/* Integrity Monitor */}
-        <Card className="lg:col-span-5 shadow-none border rounded-xl overflow-hidden">
+        <Card className="lg:col-span-4 shadow-none border rounded-xl overflow-hidden">
           <CardHeader className="py-3 px-5 border-b bg-muted/5">
             <CardTitle className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-muted-foreground">
               <Eye className="size-3.5 text-primary" /> Integrity Watch
@@ -524,52 +524,52 @@ export default function LecturerDashboard() {
             </div>
           </CardContent>
         </Card>
-      </div>
 
-      {/* Registry Log */}
-      <Card className="shadow-none border rounded-xl overflow-hidden">
-        <CardHeader className="py-3 px-5 border-b bg-muted/5">
-          <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-            Historical Submissions
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-muted/30">
-            {data?.recent_submissions.length === 0 ? (
-              <p className="text-xs text-muted-foreground p-10 text-center font-medium italic">
-                Log currently empty.
-              </p>
-            ) : (
-              data?.recent_submissions.map((sub, i) => (
-                <div
-                  key={i}
-                  className="flex items-center justify-between p-3 hover:bg-muted/20 transition-colors"
-                >
-                  <div className="min-w-0">
-                    <div className="font-bold text-xs text-foreground/90 uppercase tracking-tight">
-                      {sub.student_name}
+        {/* Registry Log */}
+        <Card className="lg:col-span-4 shadow-none border rounded-xl overflow-hidden">
+          <CardHeader className="py-3 px-5 border-b bg-muted/5">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              Historical Submissions
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="divide-y divide-muted/30">
+              {data?.recent_submissions.length === 0 ? (
+                <p className="text-xs text-muted-foreground p-10 text-center font-medium italic">
+                  Log currently empty.
+                </p>
+              ) : (
+                data?.recent_submissions.map((sub, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center justify-between p-3 hover:bg-muted/20 transition-colors"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-xs text-foreground/90 uppercase tracking-tight">
+                        {sub.student_name}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground mt-0.5 font-medium line-clamp-1 italic">
+                        Finalized: {sub.assessment_title}
+                      </div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5 font-medium line-clamp-1 italic">
-                      Finalized: {sub.assessment_title}
+                    <div className="text-right shrink-0 flex items-center gap-4">
+                      <Badge
+                        variant="outline"
+                        className="text-[9px] font-bold uppercase tracking-wider h-4.5 px-2 rounded-full"
+                      >
+                        {sub.status}
+                      </Badge>
+                      <div className="text-[9px] text-muted-foreground font-bold tabular-nums">
+                        {new Date(sub.submitted_at).toLocaleDateString()}
+                      </div>
                     </div>
                   </div>
-                  <div className="text-right shrink-0 flex items-center gap-4">
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] font-bold uppercase tracking-wider h-4.5 px-2 rounded-full"
-                    >
-                      {sub.status}
-                    </Badge>
-                    <div className="text-[9px] text-muted-foreground font-bold tabular-nums">
-                      {new Date(sub.submitted_at).toLocaleDateString()}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                ))
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

@@ -21,4 +21,5 @@ export const attemptApi = {
         metadata_json: metadata
       })
     }),
+  getAttemptsForAssessment: (assessmentId: string) => apiClient(`/attempts/assessment/${assessmentId}`),
 };

@@ -2,31 +2,24 @@
 app/services/gemini_service.py
 
 Gemini Chat Service for Mindexa Platform.
-
-Responsibilities:
-    - chat()  — Send a message (with optional history/system prompt) to Gemini
-                and return a structured GeminiChatResponse.
-
-DESIGN NOTES:
-    - Uses the google-generativeai SDK (synchronous).
-    - Runs SDK calls in asyncio.to_thread() so the FastAPI event loop is never blocked.
-    - The client is configured once at __init__ time; the SDK caches the config
-      module-wide, so multiple service instances are safe.
-    - A missing or empty GEMINI_API_KEY raises a descriptive ServiceUnavailableError
-      at call time (not at startup) so the API still boots without the key.
-
-USAGE:
-    svc = GeminiService()
-    response = await svc.chat(message="Hello!", system_prompt="You are a study assistant.")
+Integrated with AIGateway to respect default LLM providers (e.g. Groq) and audit logs.
 """
+
+from __future__ import annotations
 
 import asyncio
 from typing import Any
 
 import structlog
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ai.gateway import AIGateway
+from app.core.ai.provider_factory import get_ai_provider
+from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.core.config import settings
 from app.core.exceptions import ServiceUnavailableError, ValidationError
+from app.db.enums import AIActionType
+from app.db.models.auth import User
 from app.schemas.gemini import ChatMessage, GeminiChatResponse
 
 logger = structlog.get_logger("mindexa.gemini_service")
@@ -34,13 +27,12 @@ logger = structlog.get_logger("mindexa.gemini_service")
 
 class GeminiService:
     """
-    Thin async wrapper around the google-generativeai SDK.
-
-    No DB dependency — this service does not touch the database.
-    Instantiate per-request (lightweight; config is module-level in the SDK).
+    Async wrapper for chat assistant calls.
+    Routes through AIGateway if db is available, falling back to GenAI SDK.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, db: AsyncSession | None = None) -> None:
+        self.db = db
         self._api_key: str = settings.GEMINI_API_KEY
         self._model_name: str = settings.GEMINI_DEFAULT_MODEL
 
@@ -51,23 +43,66 @@ class GeminiService:
         message: str,
         system_prompt: str | None = None,
         history: list[ChatMessage] | None = None,
+        current_user: User | None = None,
     ) -> GeminiChatResponse:
         """
-        Send a message to Gemini and return a structured response.
-
-        Args:
-            message:       The current user message.
-            system_prompt: Optional system instruction injected at the start.
-            history:       Prior turns for multi-turn conversation context.
-
-        Returns:
-            GeminiChatResponse with reply text, model name, and finish reason.
-
-        Raises:
-            ServiceUnavailableError: GEMINI_API_KEY is not configured.
-            ValidationError:         Gemini rejected the request (e.g. safety block).
-            ServiceUnavailableError: Any other SDK / network error.
+        Send a message to the active LLM provider and return a structured response.
         """
+        if self.db:
+            try:
+                chat_provider = get_ai_provider()
+                gateway = AIGateway(self.db, chat_provider)
+
+                # Map roles correctly: "model" -> "assistant" to prevent 400 errors with Groq/OpenAI
+                messages = []
+                if system_prompt:
+                    messages.append(AIMessage(role="system", content=system_prompt))
+                for turn in history or []:
+                    role = "assistant" if turn.role == "model" else turn.role
+                    messages.append(AIMessage(role=role, content=turn.content))
+                messages.append(AIMessage(role="user", content=message))
+
+                request = AICompletionRequest(
+                    messages=messages,
+                    temperature=0.7,
+                    max_tokens=2048,
+                )
+
+                actor_id = current_user.id if current_user else None
+                actor_role = None
+                if current_user:
+                    actor_role = (
+                        current_user.role.value
+                        if hasattr(current_user.role, "value")
+                        else str(current_user.role)
+                    )
+
+                action_type = (
+                    AIActionType.STUDY_SUPPORT
+                    if actor_role == "student"
+                    else AIActionType.ASSESSMENT_DRAFT
+                )
+
+                response = await gateway.complete(
+                    request,
+                    action_type=action_type,
+                    actor_id=actor_id,
+                    actor_role=actor_role,
+                    prompt_summary=f"Assistant chat: {message[:100]}",
+                    prompt_version="chat_assistant_v1",
+                )
+
+                return GeminiChatResponse(
+                    reply=response.content,
+                    model=response.model,
+                    finish_reason=response.finish_reason,
+                )
+            except Exception as exc:
+                logger.error("gateway_chat_failed_falling_back", error=str(exc))
+                if not self._api_key:
+                    raise
+
+        # ─── Fallback to direct Gemini SDK ────────────────────────────────────
         if not self._api_key:
             raise ServiceUnavailableError(
                 "Gemini API key is not configured. "
@@ -75,21 +110,20 @@ class GeminiService:
             )
 
         logger.info(
-            "gemini_chat_request",
+            "gemini_chat_request_fallback",
             model=self._model_name,
             history_turns=len(history or []),
             has_system_prompt=system_prompt is not None,
         )
 
         try:
-            response = await asyncio.to_thread(
+            sdk_response = await asyncio.to_thread(
                 self._call_gemini_sync,
                 message=message,
                 system_prompt=system_prompt,
                 history=history or [],
             )
         except ValueError as exc:
-            # SDK raises ValueError for blocked / safety-filtered content
             logger.warning("gemini_content_blocked", reason=str(exc))
             raise ValidationError(
                 f"Gemini refused to generate a response: {exc}",
@@ -101,7 +135,7 @@ class GeminiService:
                 f"Gemini service is currently unavailable: {exc}"
             ) from exc
 
-        return response
+        return sdk_response
 
     # ─── Internal sync helper (runs in thread pool) ───────────────────────────
 
@@ -113,22 +147,17 @@ class GeminiService:
     ) -> GeminiChatResponse:
         """
         Synchronous Gemini SDK call — executed inside asyncio.to_thread().
-
-        Builds the conversation in the format Gemini expects:
-            [{"role": "user"|"model", "parts": ["text"]}]
         """
         import google.generativeai as genai  # noqa: PLC0415
 
         genai.configure(api_key=self._api_key)
 
-        # Build generation config
         generation_config: dict[str, Any] = {
             "temperature": 0.7,
             "top_p": 0.95,
             "max_output_tokens": 2048,
         }
 
-        # Initialise model — system_instruction is supported from gemini-1.5+
         model_kwargs: dict[str, Any] = {
             "model_name": self._model_name,
             "generation_config": generation_config,
@@ -138,7 +167,6 @@ class GeminiService:
 
         model = genai.GenerativeModel(**model_kwargs)
 
-        # Build history in SDK format
         sdk_history = [
             {
                 "role": turn.role,        # "user" or "model"
@@ -147,11 +175,9 @@ class GeminiService:
             for turn in history
         ]
 
-        # Start a chat session with prior history, then send the new message
         chat_session = model.start_chat(history=sdk_history)
         result = chat_session.send_message(message)
 
-        # Extract finish reason safely
         finish_reason: str | None = None
         try:
             candidate = result.candidates[0]

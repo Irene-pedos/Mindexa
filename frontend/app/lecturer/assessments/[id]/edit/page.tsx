@@ -37,6 +37,14 @@ import {
   Calendar as CalendarIcon,
   Upload,
   X,
+  Check,
+  AlertTriangle,
+  ChevronDown,
+  FileText,
+  Layout,
+  BrainCircuit,
+  Eye,
+  CheckCircle2,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -312,12 +320,23 @@ function ReviewQuestionCard({ question, index }: { question: Question; index: nu
 
 // --- MAIN EDIT PAGE ---
 
+const STEPS_DATA = [
+  { title: "Identity", icon: FileText },
+  { title: "Blueprint", icon: Layout },
+  { title: "Structure", icon: BrainCircuit },
+  { title: "Final Review", icon: Eye },
+  { title: "Go Live", icon: CheckCircle2 },
+];
+
 export default function EditAssessmentPage() {
   const params = useParams();
   const router = useRouter();
   const id = params.id as string;
 
   const [activeStep, setActiveStep] = useState(1);
+  const [autosaveStatus, setAutosaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [editingCandidateId, setEditingCandidateId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [courses, setCourses] = useState<AdminCourseListItem[]>([]);
@@ -368,6 +387,31 @@ export default function EditAssessmentPage() {
 
   const totalMarks = useMemo(() => blueprint.reduce((sum, s) => sum + s.marks, 0), [blueprint]);
   const currentMarks = useMemo(() => questions.reduce((sum, q) => sum + q.marks, 0), [questions]);
+
+  const windowDuration = useMemo(() => {
+    if (!metadata.startTime || !metadata.endTime) return 0;
+    try {
+      const [sh, sm] = metadata.startTime.split(":").map(Number);
+      const [eh, em] = metadata.endTime.split(":").map(Number);
+      let diff = (eh * 60 + em) - (sh * 60 + sm);
+      if (diff < 0) diff += 24 * 60; // Handle over midnight
+      return diff;
+    } catch (e) {
+      return 0;
+    }
+  }, [metadata.startTime, metadata.endTime]);
+
+  const formatDisplayTime = (timeStr: string) => {
+    if (!timeStr) return "";
+    try {
+      const [h, m] = timeStr.split(":");
+      const d = new Date();
+      d.setHours(parseInt(h), parseInt(m));
+      return format(d, "h:mm a");
+    } catch (e) {
+      return timeStr;
+    }
+  };
 
   const handleInstitutionChange = async (val: string) => {
     setMetadata((prev: any) => ({ ...prev, institution_id: val, department_ids: [], option_ids: [], class_group_ids: [] }));
@@ -506,29 +550,235 @@ export default function EditAssessmentPage() {
     init();
   }, [id]);
 
-  const handleSave = async () => {
-    setIsSaving(true);
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (activeStep > 1) {
+            handleNextStep(activeStep - 1);
+          }
+        } else {
+          const totalSteps = STEPS_DATA.length;
+          if (activeStep < totalSteps) {
+            handleNextStep(activeStep + 1);
+          }
+        }
+      }
+      if (e.key === "Escape") {
+        setEditingCandidateId(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeStep, editingCandidateId]);
+
+  const mapApiErrors = (err: any) => {
+    const errors: Record<string, string> = {};
     try {
-      const payload = {
-        id,
-        metadata: {
-            ...metadata,
-            durationMinutes: parseInt(metadata.durationMinutes),
-            passing_marks: parseInt(metadata.passing_marks),
-        },
-        blueprint,
-        questions: questions.map(q => ({
-            ...q,
-            marks: parseInt(q.marks as any),
-            imageUrl: q.imageUrl,
-            caseStudyContext: q.caseStudyContext,
-            options: q.options.map(o => ({...o, order_index: parseInt(o.order_index as any)}))
-        })),
-        rules: {
-            ...rules,
-            attempts: parseInt(rules.attempts)
-        },
+      let errMsg = err.message || "";
+      if (errMsg.startsWith("Validation failed: ")) {
+        errMsg = errMsg.replace("Validation failed: ", "");
+      }
+      const parsed = JSON.parse(errMsg);
+      if (Array.isArray(parsed)) {
+        parsed.forEach((detail: any) => {
+          const field = detail.loc?.[detail.loc.length - 1];
+          if (field) {
+            errors[field] = detail.msg;
+          }
+        });
+      } else if (parsed && typeof parsed === "object") {
+        Object.entries(parsed).forEach(([field, msg]) => {
+          errors[field] = String(msg);
+        });
+      }
+    } catch {
+      const errMsg = err.message || "";
+      if (errMsg.includes(" | ") || errMsg.includes(": ")) {
+        const parts = errMsg.split(" | ");
+        parts.forEach((part: string) => {
+          const colonIdx = part.indexOf(":");
+          if (colonIdx > -1) {
+            const field = part.substring(0, colonIdx).trim();
+            const msg = part.substring(colonIdx + 1).trim();
+            errors[field] = msg;
+          }
+        });
+      }
+    }
+    setFieldErrors(errors);
+    return errors;
+  };
+
+  const runStepGuards = (targetStep: number): boolean => {
+    if (targetStep < activeStep) return true;
+
+    if (targetStep >= 2 && activeStep < 2) {
+      if (!metadata.title) {
+        toast.error("Display Title is required");
+        return false;
+      }
+      if (!metadata.mode) {
+        toast.error("Assessment Protocol is required");
+        return false;
+      }
+      if (!metadata.teaching_workspace_id && !metadata.course_id) {
+        toast.error("A valid Teaching Workspace and Course are required for assessment creation.");
+        return false;
+      }
+      if (!metadata.date) {
+        toast.error("Scheduled Date is required");
+        return false;
+      }
+      if (!metadata.startTime) {
+        toast.error("Access Start is required");
+        return false;
+      }
+      if (!metadata.endTime) {
+        toast.error("Access End is required");
+        return false;
+      }
+      if (!metadata.durationMinutes || parseInt(metadata.durationMinutes as any) <= 0) {
+        toast.error("Valid duration is required");
+        return false;
+      }
+      if (parseInt(metadata.durationMinutes as any) > windowDuration) {
+        toast.error(`Duration (${metadata.durationMinutes}m) cannot exceed the time window (${windowDuration}m) between start and end time.`);
+        return false;
+      }
+      if (!metadata.passing_marks || parseInt(metadata.passing_marks as any) <= 0) {
+        toast.error("Valid passing marks is required");
+        return false;
+      }
+    }
+
+    if (targetStep >= 3 && activeStep < 3) {
+      if (blueprint.length === 0) {
+        toast.error("Cannot advance to questions without at least 1 blueprint section.");
+        return false;
+      }
+      if (metadata.mode !== "Groupwork") {
+        for (const b of blueprint) {
+          if (!b.section) {
+            toast.error("All sections must have a title");
+            return false;
+          }
+          if (!b.marks || parseInt(b.marks as any) <= 0) {
+            toast.error("All sections must have allocated marks");
+            return false;
+          }
+          if (!b.questions || parseInt(b.questions as any) <= 0) {
+            toast.error("All sections must have target question count");
+            return false;
+          }
+        }
+      }
+    }
+
+    if (targetStep >= 5 && activeStep < 5) {
+      if (currentMarks !== totalMarks) {
+        toast.error(`Cannot advance to publishing: Total marks assigned to questions (${currentMarks}) must match target assessment marks (${totalMarks}).`);
+        return false;
+      }
+    }
+
+    return true;
+  };
+
+  const preparePayload = () => {
+    const payload = {
+      id,
+      metadata: {
+          ...metadata,
+          durationMinutes: parseInt(metadata.durationMinutes),
+          passing_marks: parseInt(metadata.passing_marks),
+      },
+      blueprint,
+      questions: questions.map(q => ({
+          ...q,
+          marks: parseInt(q.marks as any),
+          imageUrl: q.imageUrl,
+          caseStudyContext: q.caseStudyContext,
+          options: q.options.map(o => ({...o, order_index: parseInt(o.order_index as any)}))
+      })),
+      rules: {
+          ...rules,
+          attempts: parseInt(rules.attempts)
+      },
+    };
+    return payload;
+  };
+
+  const runAutosave = useCallback(async (step: number) => {
+    if (!id) return;
+    setAutosaveStatus("saving");
+    try {
+      const updatePayload = {
+        title: metadata.title || undefined,
+        description: metadata.description || undefined,
+        instructions: metadata.selectedInstructions.join("\n") + (metadata.customInstructions ? "\n" + metadata.customInstructions : ""),
+        assessment_type: metadata.mode === "Groupwork" ? "GROUP_WORK" : metadata.mode.toUpperCase(),
+        grading_mode: "AUTOMATIC",
+        result_release_mode: rules.resultRelease === "manual" ? "MANUAL" : "IMMEDIATE",
+        total_marks: totalMarks || undefined,
+        passing_marks: metadata.passing_marks ? parseInt(metadata.passing_marks as any) : undefined,
+        duration_minutes: metadata.durationMinutes ? parseInt(metadata.durationMinutes as any) : undefined,
+        is_group_assessment: metadata.mode === "Groupwork",
+        max_group_size: metadata.max_group_size || undefined,
+        group_formation_mode: metadata.group_formation_mode || undefined,
+        group_assignment_mode: metadata.group_assignment_mode || undefined,
+        question_distribution_mode: metadata.question_distribution_mode || undefined,
+        require_all_member_approval: metadata.require_all_member_approval,
+        require_all_member_participation: metadata.require_all_member_participation,
+        appeal_window_days: metadata.appeal_window_days ? parseInt(metadata.appeal_window_days as any) : undefined,
+        max_attempts: rules.attempts ? parseInt(rules.attempts as any) : undefined,
+        is_password_protected: rules.passwordProtected,
+        fullscreen_required: rules.browserRestricted,
+        is_supervised: rules.supervised,
+        ai_assistance_allowed: rules.aiAllowed,
+        is_open_book: rules.openBook,
+        randomize_questions: rules.shuffleQuestions,
+        randomize_options: rules.shuffleOptions,
+        draft_step: step,
       };
+      await apiClient(`/assessments/${id}/wizard/${step}`, {
+        method: "POST",
+        body: JSON.stringify(updatePayload),
+      });
+      setAutosaveStatus("saved");
+    } catch (err: any) {
+      setAutosaveStatus("error");
+      console.error("Autosave failed:", err);
+    }
+  }, [id, metadata, rules, totalMarks]);
+
+  const handleNextStep = (step: number) => {
+    if (step > activeStep) {
+      if (!runStepGuards(step)) return;
+      runAutosave(activeStep);
+    } else {
+      toast.warning(`Navigating backward to step ${step}. Your draft is autosaved.`);
+      runAutosave(activeStep);
+    }
+    setActiveStep(step);
+  };
+
+  const handleSaveDraft = async () => {
+    setAutosaveStatus("saving");
+    try {
+      await runAutosave(activeStep);
+      toast.success("Draft saved successfully");
+    } catch (err) {
+      toast.error("Failed to save draft");
+    }
+  };
+
+  const handlePublish = async () => {
+    setIsSaving(true);
+    setFieldErrors({});
+    try {
+      const payload = preparePayload();
       const res = await apiClient("/assessments/publish", { method: "POST", body: JSON.stringify(payload) }) as any;
       if (res.validation_passed) {
         toast.success("Assessment registry synced successfully");
@@ -537,6 +787,7 @@ export default function EditAssessmentPage() {
         toast.error(res.errors?.join(", ") || "Sync failed validation");
       }
     } catch (err: any) {
+      mapApiErrors(err);
       toast.error(err.message || "Failed to update assessment");
     } finally {
       setIsSaving(false);
@@ -559,7 +810,6 @@ export default function EditAssessmentPage() {
         await questionApi.createQuestion({
             content: q.text,
             image_url: q.imageUrl,
-            case_study_context: q.caseStudyContext,
             question_type: typeMap[q.type] || "short_answer",
             difficulty: "medium",
             suggested_marks: Math.max(1, q.marks),
@@ -579,47 +829,31 @@ export default function EditAssessmentPage() {
 
   if (isLoading) return <div className="p-20 text-center"><LoaderCircleIcon className="animate-spin mx-auto mb-3 size-6 text-primary/40" /><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Loading Registry Matrix</p></div>;
 
-  return (
-    <div className="max-w-5xl mx-auto space-y-4 pb-16 p-4">
-      <div className="flex items-center justify-between border-b border-border/40 pb-3 px-1">
-        <div className="space-y-0.5">
-          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">Modify Assessment</h1>
-          <p className="text-muted-foreground text-[9px] uppercase tracking-widest font-bold">Registry ID: {id.split('-')[0]} • Status: Verified</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => router.back()} className="h-8 px-4 rounded-md border border-border/60 text-[10px] font-bold uppercase tracking-widest hover:bg-muted/50">Abort</Button>
-          <Button onClick={handleSave} disabled={isSaving} className="h-8 px-5 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">
-            {isSaving ? <LoaderCircleIcon className="animate-spin mr-1.5 size-3" /> : <Save className="mr-1.5 size-3" />}
-            Finalize
-          </Button>
-        </div>
-      </div>
 
-      <Stepper value={activeStep} onValueChange={setActiveStep} className="space-y-6">
-        <StepperNav className="flex w-full gap-1 border-b border-border/40 bg-muted/5 p-1 rounded-t-md">
-          {["Identity", "Blueprint", "Structure", "Review"].map((title, idx) => (
-            <StepperItem key={idx} step={idx + 1} className="flex-1">
-              <StepperTrigger className="flex w-full items-center justify-center gap-2 p-2 rounded data-[state=active]:bg-background data-[state=active]:shadow-sm data-[state=active]:border border border-transparent border-b-0 transition-all">
-                <StepperIndicator className="size-4 text-[9px] font-bold">{idx + 1}</StepperIndicator>
-                <StepperTitle className="text-[9px] font-bold uppercase tracking-widest">{title}</StepperTitle>
-              </StepperTrigger>
-            </StepperItem>
-          ))}
-        </StepperNav>
-
-        <StepperPanel>
-          <StepperContent value={1} className="space-y-4 focus-visible:outline-none">
-            <Card className="shadow-none border border-border/60 rounded-md overflow-hidden bg-card/30">
+  const renderStepContent = (stepNum: number) => {
+    switch (stepNum) {
+      case 1:
+        return (
+          <>
+          <Card className="shadow-none border border-border/60 rounded-md overflow-hidden bg-card/30">
                 <CardHeader className="bg-muted/5 border-b border-border/40 py-3 px-5"><CardTitle className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Assessment Identity</CardTitle></CardHeader>
                 <CardContent className="p-5 space-y-5">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                         <div className="space-y-1.5">
-                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Display Title</Label>
-                            <Input value={metadata.title} onChange={(e) => setMetadata({...metadata, title: e.target.value})} className="h-9 font-semibold text-sm rounded bg-white shadow-none focus-visible:ring-1" />
+                            <Label htmlFor="title" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Display Title</Label>
+                            <Input id="title" value={metadata.title} onChange={(e) => setMetadata({...metadata, title: e.target.value})} onBlur={() => runAutosave(1)} aria-invalid={!!fieldErrors.title} aria-describedby={fieldErrors.title ? "title-error" : undefined} className="h-9 font-semibold text-sm rounded bg-white shadow-none focus-visible:ring-1" />
+                        {fieldErrors.title && (
+                          <p className="text-xs text-destructive mt-1 font-semibold" id="title-error">
+                            {fieldErrors.title}
+                          </p>
+                        )}
                         </div>
                         <div className="space-y-1.5">
                             <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Assessment Protocol</Label>
-                            <Select value={metadata.mode} onValueChange={(v) => setMetadata({...metadata, mode: v})}>
+                            <Select value={metadata.mode} onValueChange={(v) => {
+                            setMetadata({...metadata, mode: v});
+                            setTimeout(() => runAutosave(1), 0);
+                          }}>
                                 <SelectTrigger className="h-9 rounded font-bold text-xs bg-white shadow-none"><SelectValue /></SelectTrigger>
                                 <SelectContent className="rounded">
                                     {["CAT", "Summative", "Homework", "Formative", "Practice", "Groupwork"].map(m => <SelectItem key={m} value={m} className="text-xs font-bold">{m}</SelectItem>)}
@@ -629,19 +863,19 @@ export default function EditAssessmentPage() {
                     </div>
                     <div className="space-y-1.5">
                         <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Description & Context</Label>
-                        <Textarea value={metadata.description} onChange={(e) => setMetadata({...metadata, description: e.target.value})} className="min-h-[80px] rounded bg-white p-3 text-xs font-medium focus-visible:ring-1" />
+                        <Textarea id="description" value={metadata.description} onChange={(e) => setMetadata({...metadata, description: e.target.value})} onBlur={() => runAutosave(1)} className="min-h-[80px] rounded bg-white p-3 text-xs font-medium focus-visible:ring-1" />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-5 pt-5 border-t border-border/40">
                         <div className="space-y-1.5">
-                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Scheduled Date</Label>
+                            <Label htmlFor="date" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Scheduled Date</Label>
                             <Input type="date" value={metadata.date ? format(metadata.date, "yyyy-MM-dd") : ""} onChange={(e) => setMetadata({...metadata, date: new Date(e.target.value)})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
                         <div className="space-y-1.5">
-                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access Start</Label>
+                            <Label htmlFor="startTime" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access Start</Label>
                             <Input type="time" value={metadata.startTime} onChange={(e) => setMetadata({...metadata, startTime: e.target.value})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
                         <div className="space-y-1.5">
-                            <Label className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access End</Label>
+                            <Label htmlFor="endTime" className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/60">Access End</Label>
                             <Input type="time" value={metadata.endTime} onChange={(e) => setMetadata({...metadata, endTime: e.target.value})} className="h-9 rounded font-bold text-xs bg-white shadow-none" />
                         </div>
                     </div>
@@ -694,10 +928,12 @@ export default function EditAssessmentPage() {
                   Blueprint <ChevronRight className="ml-1 size-3" />
                 </Button>
             </div>
-          </StepperContent>
-
-          <StepperContent value={2} className="space-y-4 focus-visible:outline-none">
-            <div className="flex items-center justify-between px-1">
+          </>
+        );
+      case 2:
+        return (
+          <>
+          <div className="flex items-center justify-between px-1">
                 <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Blueprint</h2>
                 <Button variant="outline" size="sm" onClick={() => setBlueprint([...blueprint, { id: `sec-${Date.now()}`, section: "New Section", topics: "", marks: 0, questions: 0, difficulty: "Medium", allowedTypes: ["mcq"] }])} className="rounded-md h-8 text-[10px] font-bold uppercase border-primary/20 text-primary px-3 hover:bg-primary/5">
                     <Plus className="size-3 mr-1.5" /> Add Section
@@ -738,10 +974,12 @@ export default function EditAssessmentPage() {
                 <Button variant="ghost" onClick={() => setActiveStep(1)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50"><ChevronLeft className="mr-1.5 size-3" /> Identity</Button>
                 <Button onClick={() => setActiveStep(3)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">Structure <ChevronRight className="ml-1.5 size-3" /></Button>
             </div>
-          </StepperContent>
-
-          <StepperContent value={3} className="space-y-4 focus-visible:outline-none">
-            <div className="flex items-center justify-between px-1">
+          </>
+        );
+      case 3:
+        return (
+          <>
+          <div className="flex items-center justify-between px-1">
                 <div className="space-y-0.5">
                     <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">Architecture</h2>
                     <p className="text-[9px] font-bold text-muted-foreground/50 uppercase">{questions.length} logical nodes</p>
@@ -792,10 +1030,12 @@ export default function EditAssessmentPage() {
                 <Button variant="ghost" onClick={() => setActiveStep(2)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50"><ChevronLeft className="mr-1.5 size-3" /> Blueprint</Button>
                 <Button onClick={() => setActiveStep(4)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none">Review <ChevronRight className="ml-1.5 size-3" /></Button>
             </div>
-          </StepperContent>
-
-          <StepperContent value={4} className="space-y-4 focus-visible:outline-none">
-            <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-card/30">
+          </>
+        );
+      case 4:
+        return (
+          <>
+          <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-card/30">
                 <CardHeader className="bg-muted/5 border-b border-border/40 py-5 px-6 relative">
                     <div className="absolute top-4 right-6 flex gap-2">
                         <Badge variant="outline" className="h-6 px-2 rounded border-primary/20 bg-white text-primary font-bold uppercase tracking-widest text-[9px]">{metadata.mode}</Badge>
@@ -854,15 +1094,173 @@ export default function EditAssessmentPage() {
             </Card>
 
             <div className="flex justify-between pt-4 border-t border-border/40 mt-4">
-                <Button variant="ghost" onClick={() => setActiveStep(3)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50">Architecture</Button>
-                <Button onClick={handleSave} disabled={isSaving} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none bg-primary hover:bg-primary/90">
-                    {isSaving ? <LoaderCircleIcon className="animate-spin mr-1.5 size-3" /> : <Save className="mr-1.5 size-3" />}
-                    Sync State
+                <Button variant="ghost" onClick={() => handleNextStep(3)} className="h-9 px-4 rounded-md font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted/50">Back</Button>
+                <Button onClick={() => handleNextStep(5)} className="h-9 px-6 rounded-md font-bold uppercase tracking-widest text-[10px] shadow-none bg-primary hover:bg-primary/90">
+                    Next: Go Live
                 </Button>
             </div>
-          </StepperContent>
-        </StepperPanel>
-      </Stepper>
+          </>
+        );
+      case 5:
+        return (
+          <>
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-8">
+              <div className="max-w-md space-y-4">
+                <h2 className="text-2xl font-bold tracking-tight uppercase">
+                  Update Assessment?
+                </h2>
+                <p className="text-muted-foreground text-sm">
+                  All changes will be updated in the registry.
+                  Scheduled for{" "}
+                  <strong>
+                    {metadata.date ? format(metadata.date, "PPP") : "TBD"}
+                  </strong>
+                  .
+                </p>
+                <div className="p-4 bg-muted/50 rounded-lg text-sm space-y-1 text-left">
+                  <p>
+                    <strong>Window:</strong>{" "}
+                    {formatDisplayTime(metadata.startTime)} -{" "}
+                    {formatDisplayTime(metadata.endTime)}
+                  </p>
+                  <p>
+                    <strong>Mode:</strong> {metadata.mode}
+                  </p>
+                  <p>
+                    <strong>Review:</strong> {rules.resultRelease}
+                  </p>
+                  <p>
+                    <strong>Closed / Open:</strong> {questions.filter(q => ['mcq','truefalse','matching','fillblank','ordering'].includes(q.type)).length} / {questions.filter(q => ['shortanswer','essay','computational','casestudy'].includes(q.type)).length}
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 w-full max-w-xs">
+                <Button
+                  size="lg"
+                  className="h-12 text-base font-semibold"
+                  onClick={handlePublish}
+                  disabled={isSaving}
+                >
+                  {isSaving ? "Updating..." : "Update Assessment"}
+                </Button>
+                <Button variant="ghost" onClick={() => handleNextStep(4)}>
+                  Review Again
+                </Button>
+              </div>
+            </div>
+          </>
+        );
+      default:
+        return null;
+    }
+  };
+
+  return (
+    <div className="max-w-5xl mx-auto space-y-4 pb-16 p-4">
+      <div className="flex items-center justify-between border-b border-border/40 pb-3 px-1">
+        <div className="space-y-0.5">
+          <h1 className="text-lg font-bold tracking-tight text-foreground/90 uppercase">Modify Assessment</h1>
+          <p className="text-muted-foreground text-[9px] uppercase tracking-widest font-bold">Registry ID: {id.split('-')[0]} • Status: Verified</p>
+        </div>
+        <div className="flex items-center gap-2">
+          {autosaveStatus === "saving" && (
+            <span className="text-xs text-muted-foreground flex items-center gap-1.5 animate-pulse">
+              <LoaderCircleIcon className="size-3.5 animate-spin" /> Saving...
+            </span>
+          )}
+          {autosaveStatus === "saved" && (
+            <span className="text-xs text-emerald-600 flex items-center gap-1.5 font-medium">
+              <Check className="size-3.5 text-emerald-600" /> Saved
+            </span>
+          )}
+          {autosaveStatus === "error" && (
+            <span className="text-xs text-destructive flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="size-3.5 text-destructive" /> Error saving
+            </span>
+          )}
+          <Button variant="ghost" onClick={() => router.back()} className="h-8 px-4 rounded-md border border-border/60 text-[10px] font-bold uppercase tracking-widest hover:bg-muted/50">Abort</Button>
+          <Button variant="outline" onClick={handleSaveDraft} disabled={isSaving} className="h-8 px-4 rounded-md border border-border/60 text-[10px] font-bold uppercase tracking-widest hover:bg-muted/50">Save Draft</Button>
+          <Badge variant="outline" className="h-8 px-3 font-semibold text-[10px] uppercase tracking-widest">
+            Step {activeStep} / 5
+          </Badge>
+        </div>
+      </div>
+
+      {/* Mobile Accordion Stepper (visible on mobile, hidden on desktop) */}
+      <div className="md:hidden block space-y-4">
+        {STEPS_DATA.map((s, index) => {
+          const stepNum = index + 1;
+          const isActive = activeStep === stepNum;
+          return (
+            <div key={index} className="border rounded-lg overflow-hidden bg-card shadow-sm">
+              <button
+                type="button"
+                onClick={() => handleNextStep(stepNum)}
+                className="flex items-center justify-between w-full p-4 font-semibold text-sm hover:bg-muted/50 transition-colors"
+              >
+                <div className="flex items-center gap-2.5">
+                  <span className={cn(
+                    "size-6 text-xs rounded-full flex items-center justify-center font-bold transition-colors",
+                    isActive ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"
+                  )}>
+                    {stepNum}
+                  </span>
+                  <span className="font-semibold text-foreground">{s.title}</span>
+                </div>
+                <ChevronDown className={cn("size-4 text-muted-foreground transition-transform duration-200", isActive && "rotate-180")} />
+              </button>
+              {isActive && (
+                <div className="p-4 border-t bg-background space-y-6">
+                  {renderStepContent(stepNum)}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Desktop Stepper (visible on desktop, hidden on mobile) */}
+      <div className="hidden md:block">
+        <Stepper
+          value={activeStep}
+          onValueChange={handleNextStep}
+          className="space-y-6"
+          indicators={{
+            completed: <Check className="size-3.5" />,
+            loading: <div className="size-3.5 rounded-full bg-primary/40 animate-pulse" />,
+          }}
+        >
+          <StepperNav className="flex w-full gap-2 border-b">
+            {STEPS_DATA.map((s, index) => {
+              const stepNum = index + 1;
+              return (
+                <StepperItem
+                  key={index}
+                  step={stepNum}
+                  className="relative flex-1"
+                >
+                  <StepperTrigger className="flex w-full flex-row items-center justify-center gap-2 p-3 rounded-none border-b-2 border-transparent transition-all hover:bg-muted/50 data-[state=active]:bg-transparent data-[state=active]:border-primary data-[state=active]:shadow-none">
+                    <StepperIndicator className="size-5 text-[10px] rounded-full bg-muted text-muted-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                      <s.icon className="size-3" />
+                    </StepperIndicator>
+                    <StepperTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground data-[state=active]:text-foreground">
+                      {s.title}
+                    </StepperTitle>
+                  </StepperTrigger>
+                </StepperItem>
+              );
+            })}
+          </StepperNav>
+
+          <StepperPanel>
+            <StepperContent value={1}>{renderStepContent(1)}</StepperContent>
+            <StepperContent value={2}>{renderStepContent(2)}</StepperContent>
+            <StepperContent value={3}>{renderStepContent(3)}</StepperContent>
+            <StepperContent value={4}>{renderStepContent(4)}</StepperContent>
+            <StepperContent value={5}>{renderStepContent(5)}</StepperContent>
+          </StepperPanel>
+        </Stepper>
+      </div>
     </div>
   );
 }

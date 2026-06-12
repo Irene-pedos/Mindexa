@@ -225,6 +225,7 @@ class QuestionDetailResponse(BaseModel):
     estimated_time_minutes: int | None = None
     fill_blank_template: str | None = None
     correct_order_json: str | None = None
+    case_study_context: str | None = None
     is_active: bool
     version_number: int = Field(1, validation_alias="version")
     parent_question_id: uuid.UUID | None = None

@@ -137,7 +137,7 @@ export default function NewWorkspacePage() {
 
   if (fetchingAssignments) {
     return (
-      <div className="max-w-5xl mx-auto space-y-6 p-6 animate-pulse">
+      <div className="space-y-6 animate-pulse">
         <div className="flex items-center gap-4">
           <Skeleton className="size-10 rounded-xl" />
           <Skeleton className="h-8 w-64 rounded-md" />
@@ -151,7 +151,7 @@ export default function NewWorkspacePage() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 p-6">
+    <div className="space-y-6">
       <div className="flex items-center justify-between border-b border-muted/20 pb-5">
         <div className="flex items-center gap-4">
           <Button

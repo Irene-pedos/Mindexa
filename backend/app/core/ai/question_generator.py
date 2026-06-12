@@ -5,7 +5,6 @@ AI Question Generator module for Mindexa Platform.
 Integrated with AssessmentGeneratorAgent for audited, validated generation.
 """
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
@@ -141,10 +140,12 @@ async def generate_questions(
         )
 
     except Exception as e:
+        err_msg = str(e)
         logger.error(
             "Generation failed for request %s: %s",
             context.request_id,
-            str(e),
+            err_msg,
+            exc_info=True,
         )
         return GenerationResult(
             request_id=context.request_id,
@@ -154,5 +155,5 @@ async def generate_questions(
             total_failed=context.count,
             provider="unknown",
             model_used="unknown",
-            error=str(e),
+            error=err_msg,
         )

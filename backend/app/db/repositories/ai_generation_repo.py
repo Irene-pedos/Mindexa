@@ -59,9 +59,11 @@ class AIGenerationRepository:
     async def get_batch_by_id(
         self, batch_id: uuid.UUID
     ) -> AIGenerationBatch | None:
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(AIGenerationBatch)
             .where(col(AIGenerationBatch.id) == batch_id)
+            .options(selectinload(AIGenerationBatch.generated_questions))  # type: ignore[arg-type]
         )
         return result.scalar_one_or_none()
 

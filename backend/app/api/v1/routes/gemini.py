@@ -20,20 +20,22 @@ SWAGGER / OPENAPI:
 """
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserRole
 from app.core.exceptions import PermissionDeniedError
 from app.db.models.auth import User
-from app.dependencies.auth import LecturerOrAdminUser, VerifiedUser
+from app.db.session import get_db
+from app.dependencies.auth import VerifiedUser
 from app.schemas.gemini import GeminiChatRequest, GeminiChatResponse
 from app.services.gemini_service import GeminiService
 
 router = APIRouter(prefix="/gemini", tags=["Gemini AI"])
 
 
-def _service() -> GeminiService:
-    """Dependency factory — GeminiService has no DB dependency."""
-    return GeminiService()
+def _service(db: AsyncSession = Depends(get_db)) -> GeminiService:
+    """Dependency factory — passes db session to GeminiService."""
+    return GeminiService(db)
 
 
 # ---------------------------------------------------------------------------
@@ -113,4 +115,5 @@ async def gemini_chat(
         message=body.message,
         system_prompt=body.system_prompt,
         history=body.history,
+        current_user=current_user,
     )

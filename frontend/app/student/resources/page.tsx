@@ -125,7 +125,7 @@ export default function StudentResourcesPage() {
 
   if (loading) {
     return (
-      <div className="space-y-8 max-w-7xl mx-auto p-4">
+      <div className="space-y-6">
         <div className="flex justify-between items-center">
             <div className="space-y-2">
                 <Skeleton className="h-8 w-64" />
@@ -143,10 +143,10 @@ export default function StudentResourcesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight">My Study Resources</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">My Study Resources</h1>
           <p className="text-muted-foreground mt-1">Personal uploaded materials for revision and study support</p>
         </div>
 

@@ -6,7 +6,7 @@ from sqlalchemy import func, select, or_, and_, exists, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.db.models.academic import TeachingWorkspace, ClassSection, StudentEnrollment, TeachingAssignment, Course
+from app.db.models.academic import TeachingWorkspace, ClassSection, StudentEnrollment, TeachingAssignment, Course, ClassGroup
 from app.db.models.auth import User
 from app.db.enums import EnrollmentStatus
 
@@ -132,7 +132,8 @@ class WorkspaceRepository:
             .where(TeachingWorkspace.id == workspace_id, TeachingWorkspace.is_deleted == False)
             .options(
                 selectinload(TeachingWorkspace.course).selectinload(Course.institution),
-                selectinload(TeachingWorkspace.class_section),
+                selectinload(TeachingWorkspace.class_section).selectinload(ClassSection.department),
+                selectinload(TeachingWorkspace.class_section).selectinload(ClassSection.class_group).selectinload(ClassGroup.option),
                 selectinload(TeachingWorkspace.academic_period),
                 selectinload(TeachingWorkspace.teaching_assignment)
                 .selectinload(TeachingAssignment.lecturer)

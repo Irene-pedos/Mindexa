@@ -190,6 +190,24 @@ class AIGateway:
         started = time.perf_counter()
         try:
             response = await self._embed_with_retries(request)
+            
+            # Normalize embedding dimensions to settings.PGVECTOR_DIMENSION
+            target_dim = settings.PGVECTOR_DIMENSION
+            adjusted_embeddings = []
+            for emb in response.embeddings:
+                if len(emb) < target_dim:
+                    emb = emb + [0.0] * (target_dim - len(emb))
+                elif len(emb) > target_dim:
+                    emb = emb[:target_dim]
+                adjusted_embeddings.append(emb)
+                
+            response = AIEmbeddingResponse(
+                embeddings=adjusted_embeddings,
+                provider=response.provider,
+                model=response.model,
+                total_tokens=response.total_tokens,
+                raw=response.raw,
+            )
         except Exception as exc:
             latency_ms = int((time.perf_counter() - started) * 1000)
             self.db.add(

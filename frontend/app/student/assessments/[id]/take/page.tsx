@@ -110,8 +110,8 @@ function DraggableMatchResponse({
       {...listeners}
       {...attributes}
       className={cn(
-        "px-3 py-1.5 rounded bg-background border border-primary/20 text-primary font-bold text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
-        isDragging && "shadow-lg border-primary scale-105",
+        "px-3.5 py-2 rounded-lg bg-background border border-primary/20 text-primary font-medium text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
+        isDragging && "shadow-md border-primary scale-102",
         isUsed && "opacity-20 grayscale pointer-events-none border-dashed",
       )}
     >
@@ -139,31 +139,31 @@ function DroppableMatchTarget({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex items-center gap-3 p-3 rounded-lg border transition-all",
+        "flex items-center gap-4 p-4 rounded-xl border transition-all duration-200",
         isOver
           ? "bg-primary/5 border-primary"
           : matchedValue
-            ? "bg-primary/[0.02] border-primary/20"
-            : "bg-background border-muted/60 border-dashed",
+            ? "bg-primary/[0.01] border-primary/25"
+            : "bg-background border-muted/70 border-dashed",
       )}
     >
-      <div className="flex-1 text-[13px] font-medium text-foreground/70">
+      <div className="flex-1 text-sm font-medium text-foreground/80">
         {premiseText}
       </div>
-      <div className="shrink-0 text-muted-foreground/20">
-        <ArrowRight className="size-3" />
+      <div className="shrink-0 text-muted-foreground/30">
+        <ArrowRight className="size-4" />
       </div>
       <div
         className={cn(
-          "w-[200px] h-9 rounded border flex items-center justify-center px-3 transition-all relative group",
+          "w-[200px] h-10 rounded-lg border flex items-center justify-center px-3 transition-all relative group",
           matchedValue
-            ? "bg-primary text-white border-primary"
-            : "bg-muted/20 border-dashed border-muted-foreground/10",
+            ? "bg-primary text-primary-foreground border-primary"
+            : "bg-muted/10 border-dashed border-muted-foreground/20",
         )}
       >
         {matchedValue ? (
           <>
-            <span className="font-bold text-[10px] uppercase truncate">
+            <span className="font-semibold text-xs truncate">
               {matchedValue}
             </span>
             <button
@@ -171,14 +171,14 @@ function DroppableMatchTarget({
                 e.stopPropagation();
                 onRemove();
               }}
-              className="absolute -top-1.5 -right-1.5 size-4 rounded-full bg-destructive text-white flex items-center justify-center shadow-md opacity-0 group-hover:opacity-100 transition-opacity"
+              className="absolute -top-1.5 -right-1.5 size-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
             >
-              <X className="size-2.5" />
+              <X className="size-3" />
             </button>
           </>
         ) : (
-          <span className="text-[9px] font-bold text-muted-foreground/30 uppercase tracking-widest animate-pulse">
-            Drop
+          <span className="text-xs font-medium text-muted-foreground/45 animate-pulse">
+            Drop here
           </span>
         )}
       </div>
@@ -302,8 +302,8 @@ function DraggableFillBlankAnswer({
       {...listeners}
       {...attributes}
       className={cn(
-        "px-3 py-1.5 rounded bg-background border border-primary/20 text-primary font-bold text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
-        isDragging && "shadow-lg border-primary scale-105",
+        "px-3.5 py-2 rounded-lg bg-background border border-primary/20 text-primary font-medium text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
+        isDragging && "shadow-md border-primary scale-102",
         isUsed && "opacity-20 grayscale pointer-events-none border-dashed",
       )}
     >
@@ -329,27 +329,27 @@ function DroppableBlank({
     <span
       ref={setNodeRef}
       className={cn(
-        "inline-flex items-center justify-center min-w-[100px] h-7 mx-1 border-b-2 transition-all px-2 relative top-0.5",
+        "inline-flex items-center justify-center min-w-[110px] h-8 mx-1.5 border-b-2 transition-all px-2.5 relative top-0.5 rounded bg-muted/10",
         isOver
           ? "bg-primary/10 border-primary"
           : value
-            ? "bg-primary/[0.03] border-primary/40"
-            : "bg-muted/30 border-muted-foreground/10",
+            ? "bg-primary/[0.03] border-primary/30"
+            : "border-muted-foreground/20",
       )}
     >
       {value ? (
         <span
-          className="text-primary font-bold text-[13px] flex items-center gap-1.5 cursor-pointer group"
+          className="text-primary font-semibold text-sm flex items-center gap-1.5 cursor-pointer group"
           onClick={(e) => {
             e.stopPropagation();
             onRemove();
           }}
         >
           {value}
-          <X className="size-3 opacity-0 group-hover:opacity-100 transition-opacity text-primary/60 hover:text-primary" />
+          <X className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary/60 hover:text-primary" />
         </span>
       ) : (
-        <span className="text-muted-foreground/30 text-[9px] font-bold uppercase tracking-wider animate-pulse">
+        <span className="text-muted-foreground/40 text-xs font-medium animate-pulse">
           Drop
         </span>
       )}
@@ -476,18 +476,18 @@ function SortableOrderItem({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-3 p-3 rounded-md border bg-background group transition-all",
-        isDragging ? "shadow-md border-primary/50" : "hover:border-primary/10",
+        "flex items-center gap-4 p-4 rounded-xl border bg-background group transition-all duration-200",
+        isDragging ? "shadow-md border-primary/40" : "hover:border-primary/10 hover:shadow-sm",
       )}
     >
       <div
         {...attributes}
         {...listeners}
-        className="size-6 rounded bg-muted/50 flex items-center justify-center text-[10px] font-bold text-muted-foreground cursor-grab active:cursor-grabbing"
+        className="size-7 rounded-lg bg-muted/60 flex items-center justify-center text-xs font-semibold text-muted-foreground cursor-grab active:cursor-grabbing"
       >
         {index + 1}
       </div>
-      <div className="flex-1 text-[13px] font-medium">{text}</div>
+      <div className="flex-1 text-sm font-medium text-foreground/80">{text}</div>
       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           variant="ghost"
@@ -695,20 +695,36 @@ export default function TakeAssessmentPage() {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [stage, isHighSecurity, handleIntegrityEvent]);
 
+  const submitAssessment = useCallback(async () => {
+    if (!attemptId || !attemptToken) return;
+    setSubmitting(true);
+    try {
+      await attemptApi.submitAttempt(attemptId, attemptToken, true);
+      if (typeof document !== "undefined" && document.fullscreenElement) document.exitFullscreen();
+      setStage("submitted");
+      toast.success("Submitted.");
+    } catch (err: any) {
+      toast.error("Submission failed.");
+    } finally {
+      setSubmitting(false);
+      setShowSubmitConfirm(false);
+    }
+  }, [attemptId, attemptToken]);
+
   useEffect(() => {
     if (stage !== "taking" || timeLeft <= 0) return;
     const timer = setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           clearInterval(timer);
-          autoSubmit();
+          submitAssessment();
           return 0;
         }
         return prev - 1;
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [stage, timeLeft, autoSubmit]);
+  }, [stage, timeLeft, submitAssessment]);
 
   const saveAnswer = useCallback(
     async (questionId: string, qType: string, answerVal: any) => {
@@ -833,26 +849,24 @@ export default function TakeAssessmentPage() {
     }
   };
 
-  const submitAssessment = async () => {
-    if (!attemptId || !attemptToken) return;
-    setSubmitting(true);
-    try {
-      await attemptApi.submitAttempt(attemptId, attemptToken, true);
-      if (document.fullscreenElement) document.exitFullscreen();
-      setStage("submitted");
-      toast.success("Submitted.");
-    } catch (err: any) {
-      toast.error("Submission failed.");
-    } finally {
-      setSubmitting(false);
-      setShowSubmitConfirm(false);
-    }
-  };
-
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m}:${s.toString().padStart(2, "0")}`;
+  };
+
+  const getAssessmentTypeLabel = (type: string) => {
+    if (!type) return "";
+    switch (type.toLowerCase()) {
+      case "cat":
+        return "Continuous Assessment Test";
+      case "assignment":
+        return "Assignment";
+      case "summative":
+        return "Summative Exam";
+      default:
+        return type;
+    }
   };
   const progress =
     questions.length > 0
@@ -902,7 +916,7 @@ export default function TakeAssessmentPage() {
       return (
         <MatchingDnd q={q} currentVal={currentVal} setAnswers={setAnswers} />
       );
-    if (type === "fillblank")
+    if (type === "fillblank" || type === "fillblanks")
       return (
         <FillInTheBlanksDnd
           q={q}
@@ -952,26 +966,26 @@ export default function TakeAssessmentPage() {
   if (stage === "terminated")
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-sm w-full border-red-100 bg-red-50/10 shadow-none rounded-lg overflow-hidden text-center">
-          <CardHeader className="py-6 border-b border-red-100 bg-red-50/30">
-            <AlertTriangle className="size-8 text-red-600 mx-auto mb-2" />
-            <CardTitle className="text-lg font-bold text-red-700 uppercase">
-              Terminated
+        <Card className="max-w-md w-full border-destructive/20 bg-destructive/5 shadow-none rounded-xl overflow-hidden text-center">
+          <CardHeader className="py-6 border-b border-destructive/10 bg-destructive/10">
+            <AlertTriangle className="size-8 text-destructive mx-auto mb-2" />
+            <CardTitle className="text-xl font-semibold text-destructive tracking-tight">
+              Session Terminated
             </CardTitle>
-            <CardDescription className="text-[10px] font-bold uppercase text-red-600/60">
+            <CardDescription className="text-sm font-medium text-destructive/85">
               {terminationReason}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
-            <p className="text-xs text-muted-foreground font-medium leading-relaxed uppercase tracking-tighter">
-              Responses secured. Session closed by integrity guard.
+            <p className="text-sm text-muted-foreground leading-relaxed">
+              Your responses have been securely recorded. The session has been closed due to security protocol enforcement.
             </p>
             <Button
               onClick={() => router.push("/student/dashboard")}
-              className="w-full h-8 text-[10px] font-bold uppercase rounded shadow-none"
+              className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
               variant="outline"
             >
-              Dashboard
+              Back to Dashboard
             </Button>
           </CardContent>
         </Card>
@@ -981,22 +995,22 @@ export default function TakeAssessmentPage() {
   if (stage === "submitted")
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-xs w-full shadow-none border rounded-lg overflow-hidden text-center">
-          <CardContent className="p-8 space-y-4">
-            <CheckCircle className="size-10 text-emerald-500 mx-auto" />
-            <div className="space-y-1">
-              <CardTitle className="text-lg font-bold uppercase">
-                Finalized
+        <Card className="max-w-md w-full shadow-none border rounded-xl overflow-hidden text-center">
+          <CardContent className="p-8 space-y-5">
+            <CheckCircle className="size-12 text-emerald-500 mx-auto" />
+            <div className="space-y-1.5">
+              <CardTitle className="text-xl font-semibold tracking-tight">
+                Assessment Finalized
               </CardTitle>
-              <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">
-                Attempt securely recorded.
+              <p className="text-sm text-muted-foreground">
+                Your assessment attempt has been successfully and securely recorded.
               </p>
             </div>
             <Button
               onClick={() => router.push("/student/dashboard")}
-              className="w-full h-8 text-[10px] font-bold uppercase rounded shadow-none bg-primary hover:bg-primary/90"
+              className="w-full h-10 text-xs font-medium rounded-lg shadow-sm bg-primary hover:bg-primary/90"
             >
-              Dashboard
+              Back to Dashboard
             </Button>
           </CardContent>
         </Card>
@@ -1004,20 +1018,20 @@ export default function TakeAssessmentPage() {
     );
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
-      <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-md px-4 py-2.5 flex items-center justify-between">
+    <div className="min-h-screen bg-background flex flex-col font-sans">
+      <div className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur-md px-6 py-3.5 flex items-center justify-between">
         <div className="flex items-center gap-3 min-w-0">
           <Button
             variant="ghost"
             size="sm"
             onClick={handleExitEnvironment}
-            className="h-7 px-2 text-[10px] font-bold uppercase border border-border/60 rounded-md"
+            className="h-8 px-3 text-xs font-medium border border-border/60 rounded-lg hover:bg-muted/50 transition-colors"
           >
-            <ArrowLeft className="size-3" /> {isHighSecurity ? "Term" : "Exit"}
+            <ArrowLeft className="size-3.5 mr-1" /> {isHighSecurity ? "Terminate" : "Exit"}
           </Button>
-          <Separator orientation="vertical" className="h-4" />
+          <Separator orientation="vertical" className="h-5" />
           <div className="min-w-0">
-            <div className="font-bold text-xs truncate max-w-[200px] uppercase text-foreground/80">
+            <div className="font-semibold text-sm truncate max-w-[240px] text-foreground/95">
               {assessment.title}
             </div>
           </div>
@@ -1026,19 +1040,19 @@ export default function TakeAssessmentPage() {
         <div className="flex items-center gap-3">
           <div
             className={cn(
-              "flex items-center gap-1.5 px-2.5 py-0.5 rounded border text-[11px] font-bold tabular-nums",
+              "flex items-center gap-1.5 px-3 py-1 rounded-lg border text-sm font-semibold tabular-nums",
               timeLeft < 300
-                ? "border-red-100 text-red-600 bg-red-50"
-                : "bg-muted/10 border-border/60",
+                ? "border-destructive/20 text-destructive bg-destructive/10"
+                : "bg-muted/40 border-border/60 text-foreground/80",
             )}
           >
-            <Timer className="size-3" /> {formatTime(timeLeft)}
+            <Timer className="size-4" /> {formatTime(timeLeft)}
           </div>
           <Button
             onClick={() => setShowSubmitConfirm(true)}
             variant="destructive"
             size="sm"
-            className="h-7 text-[10px] font-bold uppercase px-3 rounded-md shadow-none"
+            className="h-8 text-xs font-medium px-4 rounded-lg shadow-sm transition-all"
             disabled={stage !== "taking"}
           >
             Finalize
@@ -1048,59 +1062,59 @@ export default function TakeAssessmentPage() {
 
       {stage === "intro" && (
         <div className="flex-1 flex items-center justify-center p-4">
-          <Card className="max-w-lg w-full border shadow-none rounded-lg overflow-hidden bg-background">
-            <CardHeader className="text-center py-6 bg-muted/5 border-b border-border/40">
-              <CardTitle className="text-xl font-bold uppercase tracking-tight">
+          <Card className="max-w-xl w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
+            <CardHeader className="text-center py-6 bg-muted/20 border-b border-border/40">
+              <CardTitle className="text-2xl font-semibold tracking-tight">
                 {assessment.title}
               </CardTitle>
-              <CardDescription className="text-[9px] font-bold mt-1 uppercase tracking-widest text-muted-foreground/40">
-                {assessment.assessment_type} • {assessment.academic_year}
+              <CardDescription className="text-xs font-medium mt-1.5 text-muted-foreground/70">
+                {getAssessmentTypeLabel(assessment.assessment_type)} • Academic Year {assessment.academic_year}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-2">
-                <div className="p-3 border border-border/60 rounded-md bg-muted/5">
-                  <p className="text-[8px] text-muted-foreground uppercase font-bold mb-1">
-                    Time
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-4 border border-border/60 rounded-xl bg-muted/5">
+                  <p className="text-xs text-muted-foreground/80 font-medium mb-1">
+                    Duration
                   </p>
-                  <p className="text-lg font-bold tabular-nums">
-                    {assessment.duration_minutes || 90}M
+                  <p className="text-xl font-semibold tabular-nums text-foreground">
+                    {assessment.duration_minutes || 90} Mins
                   </p>
                 </div>
-                <div className="p-3 border border-border/60 rounded-md bg-muted/5">
-                  <p className="text-[8px] text-muted-foreground uppercase font-bold mb-1">
-                    Weight
+                <div className="p-4 border border-border/60 rounded-xl bg-muted/5">
+                  <p className="text-xs text-muted-foreground/80 font-medium mb-1">
+                    Total Marks
                   </p>
-                  <p className="text-lg font-bold tabular-nums">
-                    {assessment.total_marks || 100}P
+                  <p className="text-xl font-semibold tabular-nums text-foreground">
+                    {assessment.total_marks || 100} Points
                   </p>
                 </div>
               </div>
-              <div className="space-y-3">
-                <p className="text-[10px] text-muted-foreground leading-relaxed font-bold uppercase tracking-tight">
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground leading-relaxed">
                   {assessment.description ||
-                    "Institutional integrity standards apply."}
+                    "Institutional integrity standards apply to this evaluation session."}
                 </p>
-                <div className="flex gap-1.5 pt-1">
+                <div className="flex gap-2 pt-1.5">
                   <Badge
                     variant="outline"
-                    className="h-4 px-1.5 text-[8px] font-bold uppercase rounded-sm border-muted-foreground/10 text-muted-foreground/60"
+                    className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground"
                   >
                     {assessment.is_supervised ? "Proctored" : "Self-paced"}
                   </Badge>
                   <Badge
                     variant="outline"
-                    className="h-4 px-1.5 text-[8px] font-bold uppercase rounded-sm border-muted-foreground/10 text-muted-foreground/60"
+                    className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground"
                   >
-                    {assessment.fullscreen_required ? "Lockdown" : "Open"}
+                    {assessment.fullscreen_required ? "Lockdown Mode" : "Open Environment"}
                   </Badge>
                 </div>
               </div>
               <Button
                 onClick={handleStartAssessment}
-                className="w-full h-9 text-[10px] font-bold uppercase tracking-widest rounded shadow-none bg-primary hover:bg-primary/90"
+                className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm bg-primary hover:bg-primary/90"
               >
-                Initialize Session
+                Initialize Assessment Session
               </Button>
             </CardContent>
           </Card>
@@ -1109,27 +1123,30 @@ export default function TakeAssessmentPage() {
 
       {stage === "password" && (
         <div className="flex-1 flex items-center justify-center p-4">
-          <Card className="max-w-sm w-full border shadow-none rounded-lg overflow-hidden bg-background">
-            <CardHeader className="text-center py-6 bg-muted/5 border-b border-border/40">
-              <CardTitle className="text-sm font-bold uppercase tracking-widest">
-                Access Control
+          <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
+            <CardHeader className="text-center py-6 bg-muted/20 border-b border-border/40">
+              <CardTitle className="text-base font-semibold tracking-tight text-foreground">
+                Access Control Required
               </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground/75 mt-1">
+                Enter the session password provided by the instructor to authorize access.
+              </CardDescription>
             </CardHeader>
             <CardContent className="p-6 text-center">
               <form onSubmit={handlePasswordSubmit} className="space-y-4">
                 <Input
                   type="password"
-                  placeholder="PASSWORD"
-                  className="h-10 rounded text-center text-lg font-bold tracking-[0.4em] border-border/60 bg-background"
+                  placeholder="SESSION PASSWORD"
+                  className="h-11 rounded-lg text-center text-lg font-semibold tracking-[0.4em] border-border/60 bg-background/50 hover:bg-background/80 focus:bg-background transition-all"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   autoFocus
                 />
                 <Button
                   type="submit"
-                  className="w-full h-9 text-[10px] font-bold uppercase tracking-widest rounded shadow-none"
+                  className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
                 >
-                  Authorize
+                  Authorize Access
                 </Button>
               </form>
             </CardContent>
@@ -1139,51 +1156,51 @@ export default function TakeAssessmentPage() {
 
       {stage === "readiness" && (
         <div className="flex-1 flex items-center justify-center p-4">
-          <Card className="max-w-sm w-full border shadow-none rounded-lg overflow-hidden">
-            <CardHeader className="py-4 border-b bg-muted/5 border-border/40 text-center">
-              <CardTitle className="text-[10px] font-bold uppercase tracking-[0.2em]">
+          <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
+            <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
+              <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
                 Protocol Declaration
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {[
-                  "Environment Locked.",
-                  "Activity Logged.",
-                  "Termination Enforced.",
+                  "Locked evaluation environment.",
+                  "Comprehensive activity logging active.",
+                  "Termination protocols strictly enforced.",
                 ].map((text, i) => (
                   <div
                     key={i}
-                    className="flex gap-3 p-2.5 rounded border border-border/40 bg-muted/[0.01] items-center"
+                    className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
                   >
-                    <Check className="size-3 text-emerald-600" />
-                    <span className="text-[9px] font-bold uppercase tracking-tight text-foreground/60">
+                    <Check className="size-4 text-emerald-600 shrink-0" />
+                    <span className="text-xs font-medium text-foreground/75">
                       {text}
                     </span>
                   </div>
                 ))}
               </div>
-              <div className="space-y-3">
-                <div className="flex items-start gap-2.5 p-3 rounded bg-primary/5 border border-primary/10">
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
                   <Checkbox
                     id="readiness"
                     checked={readinessChecked}
                     onCheckedChange={(c) => setReadinessChecked(!!c)}
-                    className="mt-0.5 size-3.5 rounded border-primary/30"
+                    className="mt-0.5 size-4 rounded border-primary/30"
                   />
                   <Label
                     htmlFor="readiness"
-                    className="text-[9px] font-bold leading-relaxed cursor-pointer uppercase tracking-tight text-primary/60"
+                    className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
                   >
-                    I declare adherence to integrity standards.
+                    I declare and commit adherence to the institutional academic integrity standards.
                   </Label>
                 </div>
                 <Button
                   onClick={handleReadinessConfirm}
                   disabled={!readinessChecked}
-                  className="w-full h-9 text-[10px] font-bold uppercase tracking-widest rounded shadow-none"
+                  className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
                 >
-                  Commit & Begin
+                  Commit & Begin Assessment
                 </Button>
               </div>
             </CardContent>
@@ -1192,71 +1209,71 @@ export default function TakeAssessmentPage() {
       )}
 
       {stage === "taking" && (
-        <div className="flex-1 flex overflow-hidden bg-muted/[0.02]">
-          <div className="flex-1 p-4 overflow-y-auto">
+        <div className="flex-1 flex overflow-hidden bg-muted/[0.01]">
+          <div className="flex-1 p-4 md:p-6 overflow-y-auto">
             {!isFullscreen && assessment?.fullscreen_required ? (
-              <div className="h-full flex flex-col items-center justify-center space-y-6 text-center max-w-xs mx-auto">
-                <Monitor className="size-10 text-red-600 animate-pulse" />
-                <p className="text-[11px] font-bold uppercase text-red-700 tracking-tight leading-relaxed">
-                  Environment Lost. Restore secure mode immediately.
+              <div className="h-full flex flex-col items-center justify-center space-y-6 text-center max-w-sm mx-auto">
+                <Monitor className="size-12 text-destructive animate-pulse" />
+                <p className="text-sm font-semibold text-destructive leading-relaxed">
+                  Secure environment lost. Please restore secure full-screen mode immediately to continue.
                 </p>
                 <Button
                   onClick={enterFullscreen}
                   variant="destructive"
-                  className="h-9 w-full text-[10px] font-bold uppercase tracking-widest rounded shadow-lg shadow-red-100"
+                  className="h-10 w-full text-xs font-medium rounded-lg shadow-md shadow-destructive/10"
                 >
-                  Restore
+                  Restore Secure Environment
                 </Button>
               </div>
             ) : (
-              <div className="max-w-3xl mx-auto space-y-4">
+              <div className="space-y-6">
                 <div className="flex items-center justify-between px-0.5">
-                  <div className="flex-1 max-w-[150px] space-y-1.5">
-                    <div className="flex justify-between text-[8px] font-bold text-muted-foreground/50 uppercase tracking-widest">
-                      <span>Sync Trace</span>
+                  <div className="flex-1 max-w-[200px] space-y-1.5">
+                    <div className="flex justify-between text-xs font-medium text-muted-foreground/80">
+                      <span>Sync Progress</span>
                       <span>{Math.round(progress)}%</span>
                     </div>
-                    <Progress value={progress} className="h-1 bg-muted/20" />
+                    <Progress value={progress} className="h-1.5 bg-muted/20 rounded-full" />
                   </div>
                   <Badge
                     variant="outline"
-                    className="h-5 px-2 text-emerald-700 border-emerald-100 bg-emerald-50 text-[9px] font-bold rounded-sm uppercase"
+                    className="h-6 px-2.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-600 border-emerald-500/20 shadow-none"
                   >
-                    {currentQ?.marks || 0} PTS
+                    {currentQ?.marks || 0} Points
                   </Badge>
                 </div>
 
-                <Card className="shadow-none border border-border/60 rounded-lg overflow-hidden bg-background">
-                  <CardHeader className="py-2.5 px-6 border-b bg-muted/[0.02]">
-                    <span className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/40">
+                <Card className="shadow-none border border-border/50 rounded-xl overflow-hidden bg-background">
+                  <CardHeader className="py-3 px-6 border-b bg-muted/[0.02]">
+                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
                       {currentQ?.section_title || "Primary Node"}
                     </span>
                   </CardHeader>
                   <CardContent className="p-6 md:p-10">
                     <div className="space-y-4 mb-8">
-                      <div className="flex items-start gap-3">
-                        <span className="size-6 bg-muted/40 rounded flex items-center justify-center text-[10px] font-bold text-muted-foreground/60 shrink-0">
+                      <div className="flex items-start gap-3.5">
+                        <span className="size-7 bg-muted/60 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0">
                           {currentQuestionIndex + 1}
                         </span>
-                        <h2 className="text-[15px] font-semibold leading-relaxed text-foreground/80">
+                        <h2 className="text-lg font-medium leading-relaxed text-foreground/90">
                           {currentQ?.text || currentQ?.content}
                         </h2>
                       </div>
                       {currentQ?.imageUrl && (
-                        <div className="ml-9 p-1 border border-border/40 rounded-lg bg-muted/5 inline-block">
+                        <div className="ml-10.5 p-1 border border-border/40 rounded-xl bg-muted/5 inline-block">
                           <img
                             src={currentQ.imageUrl}
                             alt="Context"
-                            className="max-h-[240px] rounded object-contain"
+                            className="max-h-[240px] rounded-lg object-contain"
                           />
                         </div>
                       )}
                     </div>
-                    <div className="ml-9 min-h-[120px]">
+                    <div className="ml-10.5 min-h-[120px]">
                       {renderQuestion(currentQ)}
                     </div>
                   </CardContent>
-                  <CardFooter className="bg-muted/5 p-3 flex justify-between border-t border-border/40">
+                  <CardFooter className="bg-muted/5 p-4 flex justify-between border-t border-border/40">
                     <Button
                       variant="ghost"
                       onClick={() =>
@@ -1265,7 +1282,7 @@ export default function TakeAssessmentPage() {
                         )
                       }
                       disabled={currentQuestionIndex === 0}
-                      className="h-8 px-3 font-bold text-[9px] uppercase tracking-widest text-muted-foreground/50 rounded"
+                      className="h-9 px-4 font-medium text-xs text-muted-foreground hover:bg-muted/50 rounded-lg transition-colors"
                     >
                       Prev
                     </Button>
@@ -1276,11 +1293,11 @@ export default function TakeAssessmentPage() {
                           setCurrentQuestionIndex(currentQuestionIndex + 1);
                         else setShowSubmitConfirm(true);
                       }}
-                      className="h-8 px-6 font-bold text-[9px] uppercase tracking-widest rounded shadow-none"
+                      className="h-9 px-6 font-semibold text-xs rounded-lg shadow-none"
                     >
                       {currentQuestionIndex === questions.length - 1
-                        ? "Finalize"
-                        : "Next"}
+                        ? "Finalize Attempt"
+                        : "Next Question"}
                     </Button>
                   </CardFooter>
                 </Card>
@@ -1288,9 +1305,9 @@ export default function TakeAssessmentPage() {
             )}
           </div>
 
-          <div className="w-56 border-l border-border/40 bg-background p-5 hidden lg:flex flex-col">
-            <h3 className="text-[9px] font-bold uppercase tracking-[0.2em] text-muted-foreground/30 mb-4 px-1">
-              Session Matrix
+          <div className="w-60 border-l border-border/40 bg-background p-5 hidden lg:flex flex-col">
+            <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-4 px-1">
+              Assessment Matrix
             </h3>
             <div className="space-y-5 overflow-y-auto pr-1 pb-6">
               {Array.from(
@@ -1301,7 +1318,7 @@ export default function TakeAssessmentPage() {
                 );
                 return (
                   <div key={sectionId || "gen"} className="space-y-1.5">
-                    <div className="grid grid-cols-4 gap-1.5">
+                    <div className="grid grid-cols-4 gap-2">
                       {sectionQuestions.map((q) => {
                         const idx = questions.findIndex((gq) => gq.id === q.id);
                         const isAnswered = !!answers[q.id],
@@ -1311,12 +1328,12 @@ export default function TakeAssessmentPage() {
                             key={q.id}
                             onClick={() => setCurrentQuestionIndex(idx)}
                             className={cn(
-                              "h-7 rounded border text-[9px] font-bold transition-all flex items-center justify-center",
+                              "h-8 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
                               isCurrent
-                                ? "border-primary bg-primary text-white"
+                                ? "border-primary bg-primary text-primary-foreground"
                                 : isAnswered
-                                  ? "border-emerald-100 bg-emerald-50 text-emerald-700"
-                                  : "bg-muted/10 border-border/40 text-muted-foreground/30 hover:bg-muted/20",
+                                  ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20"
+                                  : "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20",
                             )}
                           >
                             {(idx + 1).toString().padStart(2, "0")}
@@ -1329,9 +1346,9 @@ export default function TakeAssessmentPage() {
               })}
             </div>
             <div className="mt-auto pt-4 border-t border-dashed border-border/40">
-              <div className="flex items-center gap-2 font-bold text-[8px] text-muted-foreground/40 uppercase tracking-widest">
-                <div className="size-1 rounded-full bg-primary animate-pulse" />{" "}
-                Sync Live
+              <div className="flex items-center gap-2 font-medium text-xs text-muted-foreground/50">
+                <div className="size-2 rounded-full bg-primary animate-pulse" />{" "}
+                Secure Sync Live
               </div>
             </div>
           </div>
@@ -1339,46 +1356,45 @@ export default function TakeAssessmentPage() {
       )}
 
       <Dialog open={showWarningModal} onOpenChange={setShowWarningModal}>
-        <DialogContent className="sm:max-w-xs p-6 border-none shadow-2xl rounded-lg text-center">
-          <AlertTriangle className="size-8 text-red-600 mx-auto mb-3" />
-          <DialogTitle className="text-base font-bold uppercase text-red-700">
-            Integrity Alert
+        <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background">
+          <AlertTriangle className="size-10 text-destructive mx-auto mb-3" />
+          <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
+            Integrity Protocols Alert
           </DialogTitle>
-          <p className="text-[10px] font-bold text-muted-foreground uppercase py-4">
-            Warning {warnings}/3. Restoration mandatory.
+          <p className="text-sm text-muted-foreground py-4">
+            Security warning {warnings}/3. Switching away from this page is a violation of the test protocol. Please restore secure fullscreen focus immediately.
           </p>
           <Button
             onClick={() => setShowWarningModal(false)}
-            className="w-full h-9 text-[10px] font-bold uppercase rounded shadow-none bg-red-600 hover:bg-red-700"
+            className="w-full h-10 text-xs font-semibold rounded-lg shadow-none bg-destructive hover:bg-destructive/90 text-destructive-foreground"
           >
-            Acknowledge
+            Acknowledge warning
           </Button>
         </DialogContent>
       </Dialog>
 
       <Dialog open={showSubmitConfirm} onOpenChange={setShowSubmitConfirm}>
-        <DialogContent className="sm:max-w-xs p-6 border-none shadow-2xl rounded-lg text-center">
-          <DialogTitle className="text-base font-bold uppercase">
-            Finalize Trace?
+        <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background">
+          <DialogTitle className="text-lg font-semibold tracking-tight">
+            Submit Assessment?
           </DialogTitle>
-          <p className="text-[10px] font-semibold text-muted-foreground uppercase pt-3 pb-6">
-            Final submission secures all synchronized responses for evaluative
-            processing.
+          <p className="text-sm text-muted-foreground pt-3 pb-6">
+            Are you sure you want to finalize your assessment? All synchronized answers will be finalized for evaluation.
           </p>
-          <div className="flex gap-2">
+          <div className="flex gap-3">
             <Button
-              variant="ghost"
-              className="flex-1 h-9 text-[9px] font-bold uppercase rounded"
+              variant="outline"
+              className="flex-1 h-10 text-xs font-medium rounded-lg"
               onClick={() => setShowSubmitConfirm(false)}
             >
-              Review
+              Review answers
             </Button>
             <Button
-              className="flex-1 h-9 text-[9px] font-bold uppercase rounded shadow-none"
+              className="flex-1 h-10 text-xs font-semibold rounded-lg shadow-none"
               onClick={submitAssessment}
               disabled={submitting}
             >
-              Commit
+              Submit test
             </Button>
           </div>
         </DialogContent>

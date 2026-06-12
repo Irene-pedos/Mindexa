@@ -1,19 +1,12 @@
 from __future__ import annotations
 
-import json
 import uuid
-from typing import Any
 
-from pydantic import BaseModel, Field, ValidationError as PydanticValidationError
-
-from app.core.ai.gateway import AIGateway
-from app.core.ai.prompt_registry import get_prompt
-from app.core.ai.providers import AICompletionRequest, AIMessage
-from app.core.exceptions import ValidationError
-from app.db.enums import AIActionType
-
+from pydantic import BaseModel, Field
 
 from app.agents.base import BaseAgent
+from app.core.ai.providers import AICompletionRequest, AIMessage
+from app.db.enums import AIActionType
 
 
 class GeneratedQuestionOption(BaseModel):
@@ -70,6 +63,9 @@ class AssessmentGeneratorAgent(BaseAgent):
             .replace("{{type_instructions}}", type_instructions)
         )
 
+        # Cap max_tokens: Groq hard-limits completion tokens (free tier: 4096).
+        # Allow 800 tokens per question but never exceed 4096 total.
+        max_tokens = min(800 * count, 4096)
         request = AICompletionRequest(
             messages=[
                 AIMessage(role="system", content=system_content),
@@ -79,7 +75,7 @@ class AssessmentGeneratorAgent(BaseAgent):
                 ),
             ],
             temperature=0.7,
-            max_tokens=2000 * count, # Scale tokens with count
+            max_tokens=max_tokens,
         )
 
         response = await self.gateway.complete(

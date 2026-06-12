@@ -21,6 +21,7 @@ export interface QuestionBankItem {
   suggested_marks: number;
   marks: number; // Keep for backward compatibility in UI
   subject?: string;
+  course_id?: string;
   topic?: string;
   bloom_level?: string;
   estimated_time_minutes?: number;
@@ -45,6 +46,7 @@ export interface QuestionCreateRequest {
   question_type: string;
   difficulty: string;
   subject?: string;
+  course_id?: string;
   topic?: string;
   bloom_level?: string;
   suggested_marks: number;

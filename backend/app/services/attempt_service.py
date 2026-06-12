@@ -83,6 +83,15 @@ class AttemptService:
                 code="ASSESSMENT_NOT_ACTIVE",
             )
 
+        # Gate 1b — audience type targeting check
+        if assessment.audience_type == "selected":
+            target_ids = assessment.target_student_ids or []
+            if str(student_id) not in [str(tid) for tid in target_ids]:
+                raise AuthorizationError(
+                    "You are not eligible for this assessment.",
+                    code="STUDENT_NOT_TARGETED",
+                )
+
         # Gate 2 — within window
         if assessment.is_group_assessment:
             raise ValidationError(

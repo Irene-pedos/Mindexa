@@ -88,6 +88,7 @@ async def moderate_grade(
         feedback_update=body.feedback_update,
         internal_notes=body.internal_notes,
     )
+    await db.refresh(new_grade)
     return SubmissionGradeResponse.model_validate(new_grade)
 
 
@@ -169,6 +170,7 @@ async def manual_grade(
         review_started_at=body.review_started_at,
         review_duration_seconds=body.review_duration_seconds,
     )
+    await db.refresh(grade)
     return SubmissionGradeResponse.model_validate(grade)
 
 
@@ -205,6 +207,7 @@ async def confirm_ai_grade(
         review_started_at=body.review_started_at,
         review_duration_seconds=body.review_duration_seconds,
     )
+    await db.refresh(grade)
     return SubmissionGradeResponse.model_validate(grade)
 
 
@@ -232,6 +235,7 @@ async def draft_feedback(
         grade_id=grade.id,
         lecturer_id=current_user.id,
     )
+    await db.refresh(updated_grade)
     return SubmissionGradeResponse.model_validate(updated_grade)
 
 

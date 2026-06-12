@@ -88,8 +88,10 @@ export interface AdminAnalyticsMetric {
 export interface AdminAnalyticsResponse {
   summary: AdminAnalyticsMetric[];
   user_distribution: { name: string; value: number }[];
+  activity_data: any[];
   assessment_trends: { date: string; count: number }[];
   integrity_hotspots: { course: string; flags: number }[];
+  ai_grading_stats?: any[];
   key_insights: string[];
 }
 

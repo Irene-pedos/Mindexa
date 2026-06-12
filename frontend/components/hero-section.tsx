@@ -3,133 +3,236 @@
 
 import React from "react";
 import Link from "next/link";
-import { ArrowRight, PlayCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { TextEffect } from "@/components/ui/text-effect";
-import { AnimatedGroup } from "@/components/ui/animated-group";
-import { HeroHeader } from "./header";
-import ShinyText from "@/components/ShinyText";
-import { TypographyH2 } from "./ui/typography";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Card, CardContent } from "@/components/ui/card";
-import { InView } from "@/components/ui/in-view";
-import { Variants } from "motion/react";
 import Image from "next/image";
+import { motion } from "motion/react";
+import {
+  Sparkles,
+  ArrowUpRight,
+  ChevronRight,
+} from "lucide-react";
+import { HeroHeader } from "./header";
 
-const transitionVariants: Variants = {
-  hidden: { opacity: 0, filter: "blur(12px)", y: 12 },
-  visible: {
-    opacity: 1,
-    filter: "blur(0px)",
-    y: 0,
-    transition: { type: "spring", bounce: 0.3, duration: 1.5 } as const,
-  },
-};
+// ─── HeroBadge ────────────────────────────────────────────────────────────────
+
+function HeroBadge() {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, ease: "easeOut" }}
+      className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/60 backdrop-blur-md border border-white/20 mx-auto mb-3 w-fit"
+    >
+      <Sparkles className="w-4 h-4 text-[rgba(30,50,90,0.8)]" />
+      <span className="text-[14px] font-normal text-[rgba(30,50,90,0.9)]">
+        Explainable AI Grading
+      </span>
+    </motion.div>
+  );
+}
+
+// ─── BottomLeftCard ───────────────────────────────────────────────────────────
+
+function BottomLeftCard() {
+  return (
+    <motion.div
+      initial={{ x: -20, opacity: 0 }}
+      animate={{ x: 0, opacity: 1 }}
+      transition={{ duration: 0.8, delay: 0.2 }}
+      className="absolute bottom-28 right-4 left-auto md:left-6 md:right-auto md:bottom-6 lg:bottom-10 lg:left-10 p-3 md:p-4 lg:p-5 rounded-[1.2rem] md:rounded-[1.5rem] lg:rounded-[2.2rem] bg-white/30 backdrop-blur-xl flex flex-col gap-2 lg:gap-3 min-w-[140px] md:min-w-[150px] lg:min-w-[180px] w-fit"
+    >
+      {/* Stats */}
+      <div className="flex flex-col">
+        <span className="text-2xl md:text-3xl font-normal text-[rgba(30,50,90,0.9)] tracking-tight">
+          98%
+        </span>
+        <span className="text-[10px] md:text-[12px] font-normal text-[rgba(30,50,90,0.6)] uppercase tracking-wider">
+          Grading Accuracy
+        </span>
+      </div>
+
+      {/* CTA Button */}
+      <motion.button
+        whileHover={{ scale: 1.02 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() =>
+          document
+            .getElementById("solution")
+            ?.scrollIntoView({ behavior: "smooth" })
+        }
+        className="flex items-center bg-white rounded-full pl-1.5 pr-5 py-1.5 gap-2 hover:bg-white/90 transition-colors self-start group"
+      >
+        <div className="bg-[rgba(30,50,90,0.1)] p-1 rounded-full flex items-center justify-center">
+          <ArrowUpRight className="w-4 h-4 text-[rgba(30,50,90,0.9)]" />
+        </div>
+        <span className="text-[14px] font-normal text-[rgba(30,50,90,0.9)]">
+          See Demo
+        </span>
+      </motion.button>
+    </motion.div>
+  );
+}
+
+// ─── BottomRightCorner ────────────────────────────────────────────────────────
+
+function BottomRightCorner() {
+  return (
+    <motion.div
+      initial={{ y: 20, opacity: 0 }}
+      animate={{ y: 0, opacity: 1 }}
+      transition={{ duration: 0.8, delay: 0.4 }}
+      className="absolute bottom-0 right-0 p-3 pt-5 pl-8 sm:p-4 sm:pt-6 sm:pl-10 md:p-6 md:pt-8 md:pl-14 bg-[#f0f0f0] rounded-tl-[1.5rem] sm:rounded-tl-[2rem] md:rounded-tl-[3.5rem] flex items-center gap-3 sm:gap-4 md:gap-6"
+    >
+      {/* Top intersection corner mask */}
+      <div className="absolute -top-[1.5rem] sm:-top-[2rem] md:-top-[3.5rem] right-0 w-[1.5rem] sm:w-[2rem] md:w-[3.5rem] h-[1.5rem] sm:h-[2rem] md:h-[3.5rem] pointer-events-none">
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 56 56"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M56 56V0C56 30.9279 30.9279 56 0 56H56Z"
+            fill="#f0f0f0"
+          />
+        </svg>
+      </div>
+
+      {/* Left intersection corner mask */}
+      <div className="absolute bottom-0 -left-[1.5rem] sm:-left-[2rem] md:-left-[3.5rem] w-[1.5rem] sm:w-[2rem] md:w-[3.5rem] h-[1.5rem] sm:h-[2rem] md:h-[3.5rem] pointer-events-none">
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 56 56"
+          fill="none"
+          xmlns="http://www.w3.org/2000/svg"
+        >
+          <path
+            d="M56 56H0C30.9279 56 56 30.9279 56 0V56Z"
+            fill="#f0f0f0"
+          />
+        </svg>
+      </div>
+
+      {/* Icon circle */}
+      <div className="bg-[rgba(30,50,90,0.05)] w-10 h-10 md:w-14 md:h-14 rounded-full flex items-center justify-center border border-[rgba(30,50,90,0.1)]">
+        <ArrowUpRight className="w-5 h-5 md:w-6 md:h-6 text-[rgba(30,50,90,0.8)]" />
+      </div>
+
+      {/* Info column */}
+      <div className="flex flex-col">
+        <span className="text-[16px] md:text-[20px] font-normal text-[rgba(30,50,90,0.95)]">
+          Documentation
+        </span>
+        <Link
+          href="#"
+          className="flex items-center gap-1 text-[rgba(30,50,90,0.6)] hover:text-[rgba(30,50,90,0.8)] transition-colors"
+        >
+          <span className="text-[12px] md:text-[15px] font-normal">
+            Library
+          </span>
+          <ChevronRight className="w-3 h-3 md:w-4 md:h-4" />
+        </Link>
+      </div>
+    </motion.div>
+  );
+}
+
+// ─── HeroSection (main export) ────────────────────────────────────────────────
 
 export default function HeroSection() {
   return (
     <>
       <HeroHeader />
 
-      <main className="overflow-hidden min-h-screen relative">
-        {/* Background Image */}
-        <div className="absolute top-15 md:top-18 inset-x-4 md:inset-x-6 bottom-4 md:bottom-6 z-0 rounded-2xl md:rounded-[2.5rem] overflow-hidden">
-          <Image
-            src="/images/hero-section-background.png"
-            alt="Students focused during digital exam"
-            fill
-            priority
-            className="object-cover brightness-50"
-          />
-          {/* Overlay to ensure text readability */}
-          <div className="absolute inset-0 bg-gradient-to-t from-white via-white/0 via-white/0 to-white/0" />
-        </div>
+      <div className="w-full h-screen flex items-center justify-center p-3 md:p-5 bg-[#f0f0f0]">
+        <section className="relative w-full max-w-[1536px] h-full rounded-[1.5rem] md:rounded-[3rem] overflow-hidden shadow-none flex flex-col items-center bg-white/10 group">
 
-        <section
-          id="home"
-          className="relative z-10 min-h-screen flex items-center pt-20 pb-16"
-        >
-          <div className="mx-auto max-w-7xl px-6 w-full">
-            <div className="max-w-3xl">
-              <AnimatedGroup variants={transitionVariants}>
-                <Link
-                  href="#about"
-                  className=" flex w-fit items-center gap-3 rounded-full border bg-white/80 backdrop-blur-sm px-5 py-2 text-sm shadow-sm hover:shadow transition-all duration-300"
-                >
-                  <span className="text-slate-600">
-                    Introducing Explainable AI Grading
-                  </span>
-                  <div className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-xs font-medium text-indigo-700">
-                    New
-                  </div>
-                </Link>
-              </AnimatedGroup>
+          {/* ── Background image (replaces video) ── */}
+          <div className="absolute inset-0 z-0">
+            <Image
+              src="/images/hero-section-background.png"
+              alt="Students focused during digital exam"
+              fill
+              priority
+              className="object-cover object-[65%] lg:object-center brightness-75"
+            />
+            {/* subtle gradient so text is always legible */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
+          </div>
 
-              {/* Headline with ShinyText */}
-              <div className="mt-10">
-                <TypographyH2 className="text-balance text-4xl sm:text-5xl md:text-6xl leading-tight md:leading-none font-semibold tracking-tighter text-white">
-                  Powering the{" "}
-                  <ShinyText
-                    text="Secure Future"
-                    speed={8}
-                    shineColor="oklch(0.488 0.243 264.376)"
-                    color="#ffffff"
-                  />{" "}
-                  of Academic Integrity.
-                </TypographyH2>
-              </div>
+          {/* ── Content layer ── */}
+          <div className="relative z-10 w-full h-full flex flex-col items-center">
 
-              {/* Subtitle */}
-              <TextEffect
-                per="line"
-                preset="fade-in-blur"
-                speedSegment={0.3}
-                delay={0.5}
-                as="p"
-                className="mx-auto mt-6 md:mt-8 max-w-3xl text-base sm:text-lg md:text-xl text-white/90"
+            {/* Navbar placeholder — HeroHeader is fixed/absolute, sits above */}
+            <div className="w-full pt-20" />
+
+            {/* ── Text container ── */}
+            <div className="w-full flex flex-col items-center pt-8 px-6 text-center max-w-4xl">
+              <HeroBadge />
+
+              <motion.h1
+                initial={{ opacity: 0, scale: 0.98 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.8, delay: 0.2 }}
+                className="text-4xl sm:text-5xl md:text-6xl lg:text-[80px] font-normal text-white mb-2 tracking-tight leading-[1.05]"
               >
-                Conduct cheating-free assessments with real time AI monitoring
-                and autonomous grading.
-              </TextEffect>
+                Secure Academic
+                <br />
+                Excellence.
+              </motion.h1>
+
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.8, delay: 0.4 }}
+                className="text-sm sm:text-base md:text-lg text-white/80 leading-relaxed max-w-xl font-normal"
+              >
+                Conduct cheating-free assessments with real-time AI monitoring,
+                explainable grading, and full academic integrity control.
+              </motion.p>
 
               {/* CTAs */}
-              <AnimatedGroup
-                variants={{
-                  container: {
-                    visible: {
-                      transition: {
-                        staggerChildren: 0.05,
-                        delayChildren: 0.75,
-                      },
-                    },
-                  },
-                  ...transitionVariants,
-                }}
-                className="mt-10 flex flex-col sm:flex-row gap-4"
+              <motion.div
+                initial={{ opacity: 0, y: 12 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.8, delay: 0.6 }}
+                className="mt-8 flex flex-col sm:flex-row gap-3"
               >
-                <Button
-                  asChild
-                  size="lg"
-                  className="rounded-full px-8 text-base font-medium"
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center justify-center bg-[rgba(30,50,90,0.85)] text-white rounded-full pl-2 pr-6 py-2 gap-3 hover:bg-[rgba(30,50,90,1)] transition-colors"
+                  onClick={() => window.location.href = "/signup"}
                 >
-                  <Link href="/signup">Get Started</Link>
-                </Button>
+                  <div className="bg-white/20 p-1.5 rounded-full flex items-center justify-center">
+                    <ArrowUpRight className="w-4 h-4 text-white" />
+                  </div>
+                  <span className="text-sm font-normal">Get Started</span>
+                </motion.button>
 
-                <Button
-                  asChild
-                  size="lg"
-                  variant="outline"
-                  className="rounded-full px-8 text-base font-medium bg-white/80 backdrop-blur-sm border-slate-300"
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  className="flex items-center justify-center bg-white/20 backdrop-blur-md text-white rounded-full px-6 py-2 gap-2 border border-white/30 hover:bg-white/30 transition-colors"
+                  onClick={() =>
+                    document
+                      .getElementById("solution")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
                 >
-                  <Link href="#demo">
-                    See it in action <PlayCircle className="ml-2 h-5 w-5" />
-                  </Link>
-                </Button>
-              </AnimatedGroup>
+                  <span className="text-sm font-normal">See it in action</span>
+                  <ChevronRight className="w-4 h-4" />
+                </motion.button>
+              </motion.div>
             </div>
+
+            {/* ── Bottom cards ── */}
+            <BottomLeftCard />
+            <BottomRightCorner />
           </div>
         </section>
-      </main>
+      </div>
     </>
   );
 }

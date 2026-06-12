@@ -188,7 +188,7 @@ export default function StudentDashboard() {
 
   if (loading) {
     return (
-      <div className="space-y-6 max-w-7xl mx-auto p-4">
+      <div className="space-y-6">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <Skeleton className="h-8 w-48" />
@@ -206,7 +206,7 @@ export default function StudentDashboard() {
   }
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto p-4">
+    <div className="space-y-4">
       {/* Welcome Header with Planner Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-2">

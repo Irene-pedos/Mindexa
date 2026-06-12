@@ -352,6 +352,8 @@ class LecturerService:
             lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
             status=ws.status,
             class_name=ws.class_section.name if ws.class_section else "GLOBAL",
+            department_name=ws.class_section.department.name if ws.class_section and ws.class_section.department else "N/A",
+            option_name=ws.class_section.class_group.option.name if ws.class_section and ws.class_section.class_group and ws.class_section.class_group.option else "N/A",
             roster=roster,
             sections=[ws.class_section.name] if ws.class_section else ["GLOBAL"]
         )

@@ -4,53 +4,61 @@
 import React, { useState } from "react";
 import {
   Card,
-  CardContent,
   CardDescription,
-  CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import {
-  Bot,
-  Sparkles,
-  FileText,
   CheckCircle,
   Edit3,
   ShieldCheck,
-  AlertTriangle,
+  Sparkles,
 } from "lucide-react";
 import {
-  AdvancedChatInput,
-  type FileAttachment,
-} from "@/components/advanced-ai-chat-input";
-import { cn } from "@/lib/utils";
+  PureMultimodalInput,
+  type Attachment,
+} from "@/components/ui/multimodal-ai-chat-input";
 import { geminiApi, ChatMessage } from "@/lib/api/gemini";
 import { toast } from "sonner";
 
 export default function LecturerAIAssistant() {
-  const [prompt, setPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedContent, setGeneratedContent] = useState("");
-  const [selectedTask, setSelectedTask] = useState("");
   const [history, setHistory] = useState<ChatMessage[]>([]);
-  const [attachedFiles, setAttachedFiles] = useState<FileAttachment[]>([]);
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
 
-  const quickTasks = [
-    "Generate a complete assessment draft from topic",
-    "Create 10 high-quality MCQs on a specific topic",
-    "Suggest a detailed rubric for an essay question",
-    "Improve the quality and clarity of these questions",
-    "Generate a complete answer key and marking scheme",
-    "Draft personalized feedback templates",
-    "Analyze topic coverage and difficulty balance",
-    "Generate practice questions from uploaded lecture notes",
+  const suggestedActions = [
+    {
+      title: "Assessment Draft",
+      label: "from a topic",
+      action: "Generate a complete assessment draft from topic: ",
+    },
+    {
+      title: "Create MCQs",
+      label: "10 high-quality MCQs",
+      action: "Create 10 high-quality MCQs on a specific topic: ",
+    },
+    {
+      title: "Suggest Rubric",
+      label: "for an essay question",
+      action: "Suggest a detailed rubric for an essay question: ",
+    },
+    {
+      title: "Improve Questions",
+      label: "clarity and quality",
+      action: "Improve the quality and clarity of these questions: ",
+    },
   ];
 
-  const handleSend = async () => {
-    const userMessage = prompt.trim() || selectedTask;
+  const handleSendMessage = async (params: { input: string; attachments: Attachment[] }) => {
+    let userMessage = params.input.trim();
     if (!userMessage) return;
+
+    if (params.attachments.length > 0) {
+      const fileNames = params.attachments.map((a) => a.name).join(", ");
+      userMessage = `${userMessage}\n\n[Attached Files: ${fileNames}]`;
+    }
 
     setIsGenerating(true);
 
@@ -68,7 +76,6 @@ export default function LecturerAIAssistant() {
         { role: "user", content: userMessage },
         { role: "model", content: response.reply },
       ]);
-      setPrompt("");
     } catch (e) {
       toast.error("AI assistant failed to respond. Please try again.");
     } finally {
@@ -76,154 +83,117 @@ export default function LecturerAIAssistant() {
     }
   };
 
-  const handleFileRemove = (id: string | number) => {
-    setAttachedFiles((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const actionIcons = [
-    <Button
-      key="upload"
-      variant="ghost"
-      size="icon"
-      title="Attach lecture notes or past papers"
-    >
-      <FileText className="size-5" />
-    </Button>,
-    <Button key="spark" variant="ghost" size="icon" title="Enhance prompt">
-      <Sparkles className="size-5" />
-    </Button>,
-  ];
-
   return (
-    <div className="space-y-10">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight flex items-center gap-3">
-          Lecturer AI Assistant
-        </h1>
-        <p className="text-muted-foreground mt-1 max-w-2xl text-sm">
-          AI-powered support for assessment creation, question improvement,
-          rubric design, and feedback drafting.{" "}
-          <strong>You retain full control and final approval.</strong>
-        </p>
-      </div>
+    <div className="w-full h-[calc(100vh-100px)] min-h-[500px]">
+      <Card className="shadow-none border w-full flex flex-col h-full relative overflow-hidden bg-zinc-50/20 animate-in fade-in duration-300">
+        {/* Top Header */}
+        <div className="border-b bg-muted/5 px-4 py-3 flex items-center justify-between shrink-0 z-30">
+          <div>
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              Ask Your Assistant
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Create assessment blueprints, rubrics, question sets, or grading feedback
+            </CardDescription>
+          </div>
+          {generatedContent && (
+            <Badge variant="secondary" className="text-[10px] uppercase font-bold tracking-wider">
+              Draft Ready
+            </Badge>
+          )}
+        </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-8">
-        {/* Task Selection & Input */}
-        <div className="xl:col-span-7 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>What do you need help with today?</CardTitle>
-              <CardDescription>
-                Choose a quick task or describe your own requirement
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex flex-wrap gap-2">
-                {quickTasks.map((task, index) => (
-                  <Button
-                    key={index}
-                    variant={selectedTask === task ? "default" : "outline"}
-                    size="sm"
-                    className="text-left h-auto py-2 px-4"
-                    onClick={() => {
-                      setSelectedTask(task);
-                      setPrompt("");
-                    }}
-                  >
-                    {task}
-                  </Button>
-                ))}
+        {/* Scrollable Output Area */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6 bg-white/50">
+          
+          {/* Welcome Hero when no generated content */}
+          {!generatedContent && !isGenerating && (
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-xl mx-auto space-y-6">
+              <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
+                <Sparkles className="size-8 text-primary" />
+              </div>
+              <div className="space-y-2">
+                <h2 className="text-lg font-semibold tracking-tight font-medium animate-in slide-in-from-top-2 duration-300">Lecturer AI Assistant</h2>
+                <p className="text-xs text-muted-foreground leading-relaxed max-w-md font-medium">
+                  Draft high-quality exams and tests, generate rubrics, refine questions, or construct answer schemes. You retain full control and final approval.
+                </p>
               </div>
 
-              <Separator />
+              {/* Oversight Notice inside the flow */}
+              <div className="p-4 rounded-xl border bg-amber-50/50 border-amber-500/20 flex gap-3 text-left max-w-md animate-in slide-in-from-bottom-2 duration-350">
+                <ShieldCheck className="size-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-[11px] text-amber-900 leading-normal font-medium">
+                  <strong>Review Policy:</strong> This assistant is designed to support your work. All generated content must be reviewed and approved by you before publishing.
+                </div>
+              </div>
+            </div>
+          )}
 
-              <AdvancedChatInput
-                textareaProps={{
-                  placeholder:
-                    "Describe your task in detail...\nExample: Generate a 60-mark summative assessment blueprint on Data Structures with 40% easy, 40% medium, 20% hard questions...",
-                  value: prompt,
-                  onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-                    setPrompt(e.target.value);
-                    if (e.target.value) setSelectedTask("");
-                  },
-                }}
-                files={attachedFiles}
-                onFileRemove={handleFileRemove}
-                onSend={handleSend}
-                actionIcons={actionIcons}
-              />
+          {/* Loading/Generating State */}
+          {isGenerating && (
+            <div className="space-y-6 max-w-3xl mx-auto py-4">
+              <div className="flex items-center gap-2 text-xs font-bold text-muted-foreground uppercase tracking-widest animate-pulse">
+                <Sparkles className="size-4 animate-spin text-primary" />
+                AI Agent is drafting content...
+              </div>
+              <div className="space-y-3">
+                <div className="h-4 bg-zinc-200 animate-pulse rounded-md w-3/4" />
+                <div className="h-4 bg-zinc-200 animate-pulse rounded-md w-5/6" />
+                <div className="h-4 bg-zinc-200 animate-pulse rounded-md w-1/2" />
+              </div>
+            </div>
+          )}
 
-              <Button
-                onClick={handleSend}
-                disabled={isGenerating || (!prompt.trim() && !selectedTask)}
-                size="lg"
-                className="w-full h-12"
-              >
-                {isGenerating
-                  ? "AI is working..."
-                  : "Generate with AI Assistant"}
-                <Sparkles className="ml-3 size-5" />
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* AI Output & Approval Area */}
-        <div className="xl:col-span-5">
-          <Card className="h-full flex flex-col">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                AI Output
-                <Badge variant="secondary" className="ml-auto">
-                  Draft Only
-                </Badge>
-              </CardTitle>
-              <CardDescription>
-                Always review, edit, and approve before using in any assessment
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="flex-1 flex flex-col">
-              {generatedContent ? (
-                <div className="flex-1 bg-card border rounded-2xl p-6 overflow-auto whitespace-pre-line text-sm leading-relaxed">
+          {/* Generated Content Output */}
+          {generatedContent && (
+            <div className="space-y-6 max-w-3xl mx-auto animate-in fade-in duration-300">
+              <div className="space-y-2.5">
+                <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  Draft Content
+                </h3>
+                <div className="bg-white border rounded-2xl p-6 overflow-auto whitespace-pre-line text-sm leading-relaxed shadow-sm border-zinc-200/60">
                   {generatedContent}
                 </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center text-center text-muted-foreground border border-dashed rounded-2xl">
-                  Your AI-generated draft will appear here.
-                  <br />
-                  Review it carefully before approval.
-                </div>
-              )}
+              </div>
 
-              {generatedContent && (
-                <div className="mt-6 flex gap-3">
-                  <Button className="flex-1" size="lg">
-                    <CheckCircle className="mr-2 size-5" />
-                    Approve &amp; Use
-                  </Button>
-                  <Button variant="outline" className="flex-1" size="lg">
-                    <Edit3 className="mr-2 size-5" />
-                    Edit Manually
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+              {/* Approval Action Buttons */}
+              <div className="flex gap-3 pt-2 max-w-md">
+                <Button className="flex-1 rounded-xl h-11 text-xs font-bold shadow-sm" size="default">
+                  <CheckCircle className="mr-2 size-4" />
+                  Approve &amp; Use
+                </Button>
+                <Button variant="outline" className="flex-1 rounded-xl h-11 text-zinc-700 text-xs font-bold shadow-sm" size="default">
+                  <Edit3 className="mr-2 size-4" />
+                  Edit Manually
+                </Button>
+              </div>
+            </div>
+          )}
+
         </div>
-      </div>
 
-      {/* Human Oversight & Safety Banner */}
-      <Card className="border-amber-500/30">
-        <CardContent className=" flex gap-4">
-          <ShieldCheck className="size-6 text-amber-500 mt-0.5 flex-shrink-0" />
-          <div className="text-sm">
-            <strong>Important:</strong> This AI Assistant is designed to support
-            your work, not replace it. All generated content (assessments,
-            questions, rubrics, feedback) must be carefully reviewed and
-            approved by you before being published to students. AI suggestions
-            are never final.
+        {/* Input bar at the bottom */}
+        <div className="p-4 border-t bg-white shrink-0 z-20">
+          <div className="max-w-3xl mx-auto">
+            <PureMultimodalInput
+              chatId="lecturer-assistant"
+              messages={history.map((h, i) => ({
+                id: String(i),
+                role: h.role,
+                content: h.content,
+              }))}
+              attachments={attachments}
+              setAttachments={setAttachments}
+              onSendMessage={handleSendMessage}
+              onStopGenerating={() => setIsGenerating(false)}
+              isGenerating={isGenerating}
+              canSend={!isGenerating}
+              selectedVisibilityType="public"
+              suggestedActions={suggestedActions}
+              placeholder="Describe your task in detail... (e.g. Generate 10 MCQs on SQL Normalization)"
+            />
           </div>
-        </CardContent>
+        </div>
       </Card>
     </div>
   );

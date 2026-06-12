@@ -270,6 +270,17 @@ class Assessment(AuditedBaseModel, table=True):
     )
     draft_is_complete: bool = Field(default=False, nullable=False)
     autosave_token: Optional[uuid.UUID] = Field(default=None, nullable=True)
+    student_enrollment_snapshot: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+        description="Snapshot of enrolled students at publication time."
+    )
+    audience_type: str = Field(default="all", nullable=False, max_length=50)
+    target_student_ids: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+        description="List of specific targeted student user IDs if audience_type is 'selected'."
+    )
 
     # ── Publish timestamps ────────────────────────────────────────────────────
 

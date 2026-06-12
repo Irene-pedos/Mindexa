@@ -159,6 +159,9 @@ class AssessmentRepository:
         late_penalty_percent: float | None = None,
         grace_period_minutes: int | None = None,
         autosave_token: uuid.UUID | None = None,
+        audience_type: str = "all",
+        target_student_ids: list | None = None,
+        student_enrollment_snapshot: list | None = None,
     ) -> Assessment:
         """
         Create a new Assessment row.
@@ -201,12 +204,16 @@ class AssessmentRepository:
             late_penalty_percent=late_penalty_percent,
             grace_period_minutes=grace_period_minutes,
             autosave_token=autosave_token,
+            audience_type=audience_type,
+            target_student_ids=target_student_ids,
+            student_enrollment_snapshot=student_enrollment_snapshot,
             draft_step=1,
             draft_is_complete=False,
         )
         self.db.add(assessment)
         await self.db.flush()
         return assessment
+
 
     # -----------------------------------------------------------------------
     # Assessment — reads
@@ -1413,6 +1420,20 @@ class AssessmentRepository:
             Assessment.id.in_(course_stmt)
         )
         filters.append(availability_filter)
+
+        # Audience type targeting filter
+        from sqlalchemy import cast
+        from sqlalchemy.dialects.postgresql import JSONB
+        
+        audience_filter = or_(
+            col(Assessment.audience_type).is_(None),
+            col(Assessment.audience_type) == "all",
+            and_(
+                col(Assessment.audience_type) == "selected",
+                cast(Assessment.target_student_ids, JSONB).contains([str(student_id)])
+            )
+        )
+        filters.append(audience_filter)
 
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)
