@@ -594,66 +594,143 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             started_at=now,
         )
 
-        # Build context from batch record
-        context = GenerationContext(
-            question_type=batch.question_type,
-            difficulty=batch.difficulty,
-            count=batch.total_requested,
-            subject=batch.subject,
-            topic=batch.topic,
-            bloom_level=batch.bloom_level,
-            additional_context=batch.additional_context,
-            request_id=str(batch.id),
-            lecturer_id=batch.created_by_id,
-        )
+        # Build context or iterate over sections
+        if batch.sections_json:
+            total_generated = 0
+            total_failed = 0
+            final_status = AIBatchStatus.COMPLETED
+            
+            for sec in batch.sections_json:
+                sec_id_str = sec.get("section_id")
+                sec_uuid = uuid.UUID(sec_id_str) if sec_id_str else None
+                sec_topic = sec.get("topic") or batch.topic
+                sec_q_type = sec.get("question_type") or sec.get("type") or batch.question_type
+                sec_difficulty = sec.get("difficulty") or batch.difficulty
+                sec_count = sec.get("count") or 3
+                sec_bloom = sec.get("bloom_level") or batch.bloom_level
+                
+                context = GenerationContext(
+                    question_type=sec_q_type,
+                    difficulty=sec_difficulty,
+                    count=sec_count,
+                    subject=batch.subject,
+                    topic=sec_topic,
+                    bloom_level=sec_bloom,
+                    additional_context=batch.additional_context,
+                    request_id=str(batch.id),
+                    lecturer_id=batch.created_by_id,
+                )
+                
+                try:
+                    result = await generate_questions(context, db=session)
+                    total_generated += result.total_generated
+                    total_failed += result.total_failed
+                    
+                    # Store each generated question
+                    for generated in result.questions:
+                        options_json = (
+                            json.dumps(generated.options) if generated.options else None
+                        )
+                        await repo.create_generated_question(
+                            batch_id=batch.id,
+                            generated_content=generated.raw_content,
+                            question_type=generated.question_type,
+                            difficulty=generated.difficulty,
+                            raw_prompt=result.full_prompt,
+                            parsed_successfully=generated.parsed_successfully,
+                            parsed_question_text=generated.question_text,
+                            parsed_options_json=options_json,
+                            parsed_explanation=generated.explanation,
+                            parse_error=generated.parse_error,
+                            target_section_id=sec_uuid,
+                        )
+                except Exception as sec_exc:
+                    logger.error("Failed to generate for section %s: %s", sec_id_str, str(sec_exc))
+                    total_failed += sec_count
 
-        # Call AI generator - pass session for auditing
-        result = await generate_questions(context, db=session)
+            # Determine final batch status
+            if total_generated == 0:
+                final_status = AIBatchStatus.FAILED
+            elif total_failed > 0:
+                final_status = AIBatchStatus.PARTIAL_FAILURE
 
-        # Store each generated question
-        for generated in result.questions:
-            options_json = (
-                json.dumps(generated.options) if generated.options else None
-            )
-            await repo.create_generated_question(
+            completed_at = datetime.now(UTC)
+            await repo.update_batch_status(
                 batch_id=batch.id,
-                generated_content=generated.raw_content,
-                question_type=generated.question_type,
-                difficulty=generated.difficulty,
-                raw_prompt=result.full_prompt,
-                parsed_successfully=generated.parsed_successfully,
-                parsed_question_text=generated.question_text,
-                parsed_options_json=options_json,
-                parsed_explanation=generated.explanation,
-                parse_error=generated.parse_error,
+                status=final_status,
+                total_generated=total_generated,
+                total_failed=total_failed,
+                completed_at=completed_at,
+            )
+            
+            await session.commit()
+            return {
+                "batch_id": batch_id,
+                "status": final_status.value,
+                "generated": total_generated,
+            }
+        else:
+            # Build context from batch record (single section/default)
+            context = GenerationContext(
+                question_type=batch.question_type,
+                difficulty=batch.difficulty,
+                count=batch.total_requested,
+                subject=batch.subject,
+                topic=batch.topic,
+                bloom_level=batch.bloom_level,
+                additional_context=batch.additional_context,
+                request_id=str(batch.id),
+                lecturer_id=batch.created_by_id,
             )
 
-        # Determine final batch status
-        final_status = AIBatchStatus.COMPLETED
-        if result.total_generated == 0:
-            final_status = AIBatchStatus.FAILED
-        elif result.total_failed > 0:
-            final_status = AIBatchStatus.PARTIAL_FAILURE
+            # Call AI generator - pass session for auditing
+            result = await generate_questions(context, db=session)
 
-        completed_at = datetime.now(UTC)
-        await repo.update_batch_status(
-            batch_id=batch.id,
-            status=final_status,
-            total_generated=result.total_generated,
-            total_failed=result.total_failed,
-            completed_at=completed_at,
-            error_message=result.error,
-            ai_model_used=result.model_used,
-            ai_provider=result.provider,
-            total_tokens_used=result.tokens_used,
-        )
+            # Store each generated question
+            for generated in result.questions:
+                options_json = (
+                    json.dumps(generated.options) if generated.options else None
+                )
+                await repo.create_generated_question(
+                    batch_id=batch.id,
+                    generated_content=generated.raw_content,
+                    question_type=generated.question_type,
+                    difficulty=generated.difficulty,
+                    raw_prompt=result.full_prompt,
+                    parsed_successfully=generated.parsed_successfully,
+                    parsed_question_text=generated.question_text,
+                    parsed_options_json=options_json,
+                    parsed_explanation=generated.explanation,
+                    parse_error=generated.parse_error,
+                    target_section_id=batch.target_section_id,
+                )
 
-        await session.commit()
-        return {
-            "batch_id": batch_id,
-            "status": final_status.value,
-            "generated": result.total_generated,
-        }
+            # Determine final batch status
+            final_status = AIBatchStatus.COMPLETED
+            if result.total_generated == 0:
+                final_status = AIBatchStatus.FAILED
+            elif result.total_failed > 0:
+                final_status = AIBatchStatus.PARTIAL_FAILURE
+
+            completed_at = datetime.now(UTC)
+            await repo.update_batch_status(
+                batch_id=batch.id,
+                status=final_status,
+                total_generated=result.total_generated,
+                total_failed=result.total_failed,
+                completed_at=completed_at,
+                error_message=result.error,
+                ai_model_used=result.model_used,
+                ai_provider=result.provider,
+                total_tokens_used=result.tokens_used,
+            )
+
+            await session.commit()
+            return {
+                "batch_id": batch_id,
+                "status": final_status.value,
+                "generated": result.total_generated,
+            }
 
 
 # ---------------------------------------------------------------------------

@@ -1325,6 +1325,8 @@ class AssessmentService:
                 allocated_marks=b_sec.marks,
                 description=b_sec.topics,
                 allowed_question_types={"types": b_sec.allowedTypes},
+                difficulty_distribution=b_sec.difficultyDistribution,
+                ai_generation_prompt_hint=b_sec.aiPromptHint,
             )
             section_id_map[b_sec.id] = section.id
 

@@ -440,6 +440,8 @@ class BulkAssessmentSection(BaseModel):
     questions: int | str | None = 0
     difficulty: str | None = "Medium"
     allowedTypes: list[str] | None = []
+    aiPromptHint: str | None = None
+    difficultyDistribution: dict[str, int] | None = None
 
     @model_validator(mode="before")
     @classmethod

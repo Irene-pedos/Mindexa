@@ -31,6 +31,8 @@ class AIGenerationRepository:
         difficulty: str,
         total_requested: int,
         assessment_id: uuid.UUID | None = None,
+        target_section_id: uuid.UUID | None = None,
+        sections_json: list[dict] | None = None,
         subject: str | None = None,
         topic: str | None = None,
         bloom_level: str | None = None,
@@ -40,6 +42,8 @@ class AIGenerationRepository:
         batch = AIGenerationBatch(
             created_by_id=created_by_id,
             assessment_id=assessment_id,
+            target_section_id=target_section_id,
+            sections_json=sections_json,
             question_type=question_type,
             difficulty=difficulty,
             total_requested=total_requested,
@@ -138,9 +142,11 @@ class AIGenerationRepository:
         parsed_options_json: str | None = None,
         parsed_explanation: str | None = None,
         parse_error: str | None = None,
+        target_section_id: uuid.UUID | None = None,
     ) -> AIGeneratedQuestion:
         q = AIGeneratedQuestion(
             batch_id=batch_id,
+            target_section_id=target_section_id,
             generated_content=generated_content,
             question_type=question_type,
             difficulty=difficulty,

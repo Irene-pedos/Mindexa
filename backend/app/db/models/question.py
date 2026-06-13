@@ -354,6 +354,19 @@ class AIGenerationBatch(BaseModel, table=True):
             index=True,
         ),
     )
+    target_section_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    sections_json: list[dict] | None = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
     question_type: str = Field(nullable=False)
     difficulty: str = Field(nullable=False)
     total_requested: int = Field(nullable=False)
@@ -395,6 +408,15 @@ class AIGeneratedQuestion(BaseModel, table=True):
             nullable=False,
             index=True,
         )
+    )
+    target_section_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     generated_content: str = Field(nullable=False)
     question_type: str = Field(nullable=False)

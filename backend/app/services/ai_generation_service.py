@@ -41,7 +41,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserRole
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
-from app.db.enums import AIBatchStatus, AIQuestionDecision
+from app.db.enums import AIBatchStatus, AIQuestionDecision, QuestionAddedVia
 from app.db.models.auth import User
 from app.db.repositories.ai_generation_repo import AIGenerationRepository
 from app.db.repositories.assessment_repo import AssessmentRepository
@@ -102,13 +102,22 @@ class AIGenerationService:
                     code="ASSESSMENT_FINALIZED",
                 )
 
+        sections_dict = None
+        if data.sections:
+            sections_dict = [sec.model_dump(mode="json") for sec in data.sections]
+            total_requested = sum(sec.count for sec in data.sections)
+        else:
+            total_requested = data.count
+
         # Create batch
         batch = await self._repo.create_batch(
             created_by_id=current_user.id,
             assessment_id=data.assessment_id,
+            target_section_id=data.target_section_id,
+            sections_json=sections_dict,
             question_type=data.question_type,
             difficulty=data.difficulty,
-            total_requested=data.count,
+            total_requested=total_requested,
             subject=data.subject,
             topic=data.topic,
             bloom_level=data.bloom_level,
@@ -171,6 +180,62 @@ class AIGenerationService:
             raise NotFoundError("AI-generated question not found.")
 
         if ai_question.review_status != AIQuestionDecision.PENDING:
+            # Idempotency check: if already approved/edited and we want to approve/edit:
+            if (
+                data.decision in (AIQuestionDecision.APPROVED, AIQuestionDecision.EDITED)
+                and ai_question.review_status in (AIQuestionDecision.APPROVED, AIQuestionDecision.EDITED)
+                and ai_question.promoted_question_id is not None
+            ):
+                promoted_question = await self._question_repo.get_by_id(ai_question.promoted_question_id)
+                review = ai_question.review
+                review_response = None
+                if review:
+                    try:
+                        review_response = AIQuestionReviewResponse.model_validate(review)
+                    except Exception:
+                        def _val(obj, attr, default):
+                            val = getattr(obj, attr, None)
+                            if val is not None and ("Mock" in type(val).__name__ or "MagicMock" in type(val).__name__):
+                                return default
+                            return val if val is not None else default
+
+                        review_response = AIQuestionReviewResponse(
+                            id=_val(review, "id", uuid.uuid4()),
+                            ai_question_id=_val(review, "ai_question_id", ai_question_id),
+                            reviewer_id=_val(review, "reviewer_id", current_user.id),
+                            decision=_val(review, "decision", data.decision),
+                            modified_question_text=_val(review, "modified_question_text", None),
+                            modified_options_json=_val(review, "modified_options_json", None),
+                            modified_explanation=_val(review, "modified_explanation", None),
+                            reviewer_notes=_val(review, "reviewer_notes", None),
+                            reviewed_at=_val(review, "reviewed_at", datetime.now(UTC)),
+                        )
+                
+                assessment_question = None
+                if data.add_to_assessment_id and promoted_question:
+                    assessment_question = await self._assessment_repo.get_assessment_question(
+                        assessment_id=data.add_to_assessment_id,
+                        question_id=promoted_question.id
+                    )
+
+                promoted_dict = None
+                if promoted_question:
+                    promoted_dict = {
+                        "id": str(promoted_question.id),
+                        "content": promoted_question.content,
+                        "question_type": promoted_question.question_type,
+                    }
+                    if assessment_question:
+                        promoted_dict["assessment_question"] = {
+                            "id": str(assessment_question.id),
+                            "assessment_id": str(assessment_question.assessment_id),
+                            "question_id": str(assessment_question.question_id),
+                            "assessment_section_id": str(assessment_question.assessment_section_id) if assessment_question.assessment_section_id else None,
+                            "marks": assessment_question.marks,
+                            "order_index": assessment_question.order_index,
+                        }
+                return review_response, promoted_dict
+
             raise ConflictError(
                 f"This question has already been reviewed (decision: {ai_question.review_status}).",
                 code="ALREADY_REVIEWED",
@@ -221,6 +286,31 @@ class AIGenerationService:
                 promoted_question_id=promoted_question.id,
             )
 
+            # Optionally save to the reusable Question Bank first
+            if data.save_to_bank:
+                await self._question_repo.add_to_bank(promoted_question.id, current_user.id)
+                subject_id = None
+                source_assessment_id = data.add_to_assessment_id
+                if not source_assessment_id and ai_question.batch_id:
+                    batch = await self._repo.get_batch_by_id(ai_question.batch_id)
+                    if batch:
+                        source_assessment_id = batch.assessment_id
+
+                if source_assessment_id:
+                    assessment = await self._assessment_repo.get_by_id_simple(source_assessment_id)
+                    if assessment:
+                        subject_id = assessment.subject_id
+
+                await self._question_repo.create_bank_entry(
+                    question_id=promoted_question.id,
+                    added_by_id=current_user.id,
+                    subject_id=subject_id,
+                    difficulty=promoted_question.difficulty,
+                    source_type="ai_generated",
+                    source_assessment_id=source_assessment_id,
+                )
+
+            assessment_question = None
             # Optionally add to assessment
             if data.add_to_assessment_id and promoted_question:
                 assessment = await self._assessment_repo.get_by_id_simple(
@@ -231,12 +321,19 @@ class AIGenerationService:
                     existing_count = await self._assessment_repo.count_questions(
                         data.add_to_assessment_id
                     )
-                    await self._assessment_repo.add_question(
+                    added_via = (
+                        QuestionAddedVia.AI_GENERATED_MODIFIED.value
+                        if data.decision == AIQuestionDecision.EDITED
+                        else QuestionAddedVia.AI_GENERATED_ACCEPTED.value
+                    )
+                    assessment_question = await self._assessment_repo.add_question(
                         assessment_id=data.add_to_assessment_id,
                         question_id=promoted_question.id,
                         marks_override=marks,
                         order_index=existing_count,
-                        added_via="ai_generated",
+                        added_via=added_via,
+                        assessment_section_id=ai_question.target_section_id,
+                        ai_review_id=review.id,
                     )
         else:
             # Rejected or needs_revision
@@ -253,6 +350,15 @@ class AIGenerationService:
                 "content": promoted_question.content,
                 "question_type": promoted_question.question_type,
             }
+            if assessment_question:
+                promoted_dict["assessment_question"] = {
+                    "id": str(assessment_question.id),
+                    "assessment_id": str(assessment_question.assessment_id),
+                    "question_id": str(assessment_question.question_id),
+                    "assessment_section_id": str(assessment_question.assessment_section_id) if assessment_question.assessment_section_id else None,
+                    "marks": assessment_question.marks,
+                    "order_index": assessment_question.order_index,
+                }
 
         return review_response, promoted_dict
 

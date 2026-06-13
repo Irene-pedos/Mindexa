@@ -14,6 +14,7 @@ async def test_ai_generation_service_requires_review_before_promotion():
     service = AIGenerationService(db)
     service._repo = AsyncMock()
     service._question_repo = AsyncMock()
+    service._assessment_repo = AsyncMock()
     
     # Mock User
     current_user = MagicMock(spec=User)
@@ -68,12 +69,36 @@ async def test_ai_generation_service_requires_review_before_promotion():
     # Verify promotion happened
     assert promoted is not None
     service._repo.update_generated_question.assert_called_once()
+    service._question_repo.add_to_bank.assert_called_once()
+    service._question_repo.create_bank_entry.assert_called_once()
     
-    # Now try to review again - should fail
+    # Now try to review again with the same decision - should be idempotent
     mock_ai_question.review_status = AIQuestionDecision.APPROVED
+    mock_ai_question.promoted_question_id = promoted["id"]
+    
+    # We mock getting the promoted question
+    service._question_repo.get_by_id = AsyncMock(return_value=MagicMock(
+        id=promoted["id"],
+        content="What is 2+2?",
+        question_type="short_answer"
+    ))
+    
+    review_resp2, promoted2 = await service.review_ai_question(
+        ai_question_id=ai_question_id,
+        data=review_data,
+        current_user=current_user
+    )
+    assert promoted2 is not None
+    assert promoted2["id"] == promoted["id"]
+
+    # Try to review again with a conflicting decision (e.g. REJECTED) - should fail
+    review_data_rejected = ReviewAIQuestionRequest(
+        decision=AIQuestionDecision.REJECTED,
+        add_to_assessment_id=None
+    )
     with pytest.raises(ConflictError):
         await service.review_ai_question(
             ai_question_id=ai_question_id,
-            data=review_data,
+            data=review_data_rejected,
             current_user=current_user
         )

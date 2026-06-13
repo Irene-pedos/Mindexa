@@ -1444,6 +1444,7 @@ export default function NewAssessmentBuilder() {
   const [aiCandidates, setAiCandidates] = useState<any[]>([]);
   const [aiTargetSectionId, setAiTargetSectionId] = useState<string>("all");
   const [aiBatchId, setAiBatchId] = useState<string | null>(null);
+  const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
 
   // Step 6 validation & distribution report
   const [validationResult, setValidationResult] = useState<any>(null);
@@ -1760,6 +1761,8 @@ export default function NewAssessmentBuilder() {
                         questions: s.question_count_target || 0,
                         difficulty: "Medium",
                         allowedTypes: s.allowed_question_types?.types || ["mcq"],
+                        aiPromptHint: s.ai_generation_prompt_hint || "",
+                        difficultyDistribution: s.difficulty_distribution || undefined,
                     })));
                 }
 
@@ -2099,76 +2102,171 @@ export default function NewAssessmentBuilder() {
   const [editingText, setEditingText] = useState("");
   const [editingExplanation, setEditingExplanation] = useState("");
 
+  const pollBatchStatus = useCallback((batchId: string, currentTick = 0, targetSectionId: string) => {
+    const maxTicks = 60; // 120 seconds max (2s interval)
+    if (currentTick >= maxTicks) {
+      setAiGenerating(false);
+      toast.error("AI question generation timed out. Please try again.");
+      return;
+    }
+
+    setTimeout(async () => {
+      try {
+        const batch = await aiGenerationApi.getBatch(batchId);
+
+        if (batch.status === "completed" || batch.status === "partial_failure") {
+          const generatedQuestions = batch.questions || [];
+          if (generatedQuestions.length === 0) {
+            setAiGenerating(false);
+            toast.error("AI finished, but zero questions were successfully generated. Please check constraints.");
+            return;
+          }
+          const tagged = generatedQuestions.map((q) => ({
+            ...q,
+            _sectionId: q.target_section_id || (targetSectionId === "all" ? undefined : targetSectionId)
+          }));
+          setAiCandidates((prev) => {
+            const newSectionIds = new Set(tagged.map(q => q._sectionId).filter(Boolean));
+            const filteredPrev = prev.filter(q => !q._sectionId || !newSectionIds.has(q._sectionId));
+            return [...filteredPrev, ...tagged];
+          });
+          setAiGenerating(false);
+          setAiDrawerOpen(false);
+          setAiReviewDrawerOpen(true);
+
+          if (targetSectionId === "all") {
+            const generatedSectionIds = new Set(generatedQuestions.map(q => q.target_section_id).filter(Boolean));
+            const failedIds = blueprint.map(s => s.id).filter(id => !generatedSectionIds.has(id));
+            setAiFailedSectionIds(failedIds);
+            if (failedIds.length > 0) {
+              toast.warning(`Generation partially completed. ${failedIds.length} out of ${blueprint.length} sections failed.`);
+            } else {
+              toast.success(`AI generated ${generatedQuestions.length} question candidates!`);
+            }
+          } else {
+            setAiFailedSectionIds([]);
+            toast.success(`AI generated ${generatedQuestions.length} question candidates!`);
+          }
+        } else if (batch.status === "failed") {
+          setAiGenerating(false);
+          toast.error(batch.error_message || "AI question generation failed on server.");
+        } else {
+          // Continue polling
+          pollBatchStatus(batchId, currentTick + 1, targetSectionId);
+        }
+      } catch (err) {
+        console.error("Polling batch failed:", err);
+        // Continue polling despite small errors
+        pollBatchStatus(batchId, currentTick + 1, targetSectionId);
+      }
+    }, 2000);
+  }, [blueprint]);
+
   const handleAIGenerate = async () => {
     setAiGenerating(true);
     try {
       if (aiTargetSectionId === "all") {
-        const allCandidates: any[] = [];
-        let successCount = 0;
-        
-        for (const sec of blueprint) {
-          try {
-            toast.info(`Generating questions for ${sec.section}: ${sec.topics || "General"}...`);
-            
-            const qType = sec.allowedTypes[0] || "mcq";
-            const res = await aiGenerationApi.generateQuestions({
-              subject: metadata.title || "Subject",
-              topic: sec.topics || metadata.title || "General",
-              question_type: mapFrontendToBackendType(qType) as any,
-              difficulty: sec.difficulty.toLowerCase() as any,
-              count: sec.questions || 3,
-              bloom_level: (sec.bloomLevel || "understand") as any,
-              additional_context: aiGenerationConfig.additional_context,
-              target_assessment_id: draftId || undefined
-            });
-            
-            const tagged = (res.questions || []).map((q) => ({
-              ...q,
-              _sectionId: sec.id
-            }));
-            
-            allCandidates.push(...tagged);
-            successCount++;
-          } catch (sectionErr) {
-            console.error(`Failed to generate questions for section ${sec.section}`, sectionErr);
-            toast.error(`Failed to generate questions for ${sec.section}`);
-          }
-        }
-        
-        if (allCandidates.length === 0) {
-          throw new Error("No questions were generated for any section.");
-        }
-        
-        setAiCandidates(allCandidates);
-        setAiDrawerOpen(false);
-        setAiReviewDrawerOpen(true);
-        toast.success(`Generated candidate questions for ${successCount} of ${blueprint.length} sections!`);
-      } else {
+        const sectionsPayload = blueprint.map((sec) => {
+          const qType = sec.allowedTypes[0] || "mcq";
+          return {
+            section_id: sec.id,
+            topic: sec.topics || metadata.title || "General",
+            question_type: mapFrontendToBackendType(qType) as any,
+            difficulty: sec.difficulty.toLowerCase() as any,
+            count: sec.questions || 3,
+            bloom_level: (sec.bloomLevel || "understand") as any,
+          };
+        });
+
+        toast.info("Submitting AI request to generate questions for all sections...");
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
-          topic: aiGenerationConfig.topic,
+          topic: metadata.title || "General",
+          question_type: "mcq",
+          difficulty: "medium",
+          count: 5,
+          additional_context: aiGenerationConfig.additional_context,
+          target_assessment_id: draftId || undefined,
+          sections: sectionsPayload,
+        });
+
+        setAiBatchId(res.id);
+        pollBatchStatus(res.id, 0, "all");
+      } else {
+        // Synchronize AI drawer config back to the selected blueprint section so it's persisted in the draft
+        setBlueprint((prev) =>
+          prev.map((s) =>
+            s.id === aiTargetSectionId
+              ? {
+                  ...s,
+                  topics: aiGenerationConfig.topic,
+                  difficulty: (aiGenerationConfig.difficulty.charAt(0).toUpperCase() + aiGenerationConfig.difficulty.slice(1)) as any,
+                  questions: aiGenerationConfig.count,
+                  bloomLevel: aiGenerationConfig.bloom_level as any,
+                  aiPromptHint: aiGenerationConfig.additional_context,
+                  allowedTypes: [aiGenerationConfig.question_type as any],
+                }
+              : s
+          )
+        );
+        setTimeout(() => runAutosave(4), 0);
+
+        const targetSection = blueprint.find(s => s.id === aiTargetSectionId);
+        const secTopic = aiGenerationConfig.topic || targetSection?.topics || "";
+
+        const res = await aiGenerationApi.generateQuestions({
+          subject: metadata.title || "Subject",
+          topic: secTopic,
           question_type: mapFrontendToBackendType(aiGenerationConfig.question_type) as any,
           difficulty: aiGenerationConfig.difficulty as any,
           count: aiGenerationConfig.count,
           bloom_level: aiGenerationConfig.bloom_level as any,
           additional_context: aiGenerationConfig.additional_context,
-          target_assessment_id: draftId || undefined
+          target_assessment_id: draftId || undefined,
+          target_section_id: aiTargetSectionId,
         });
-        
-        const tagged = (res.questions || []).map((q) => ({
-          ...q,
-          _sectionId: aiTargetSectionId
-        }));
-        
-        setAiCandidates(tagged);
+
         setAiBatchId(res.id);
-        setAiDrawerOpen(false);
-        setAiReviewDrawerOpen(true);
-        toast.success("AI successfully generated question candidates!");
+        pollBatchStatus(res.id, 0, aiTargetSectionId);
       }
     } catch (err: any) {
       toast.error(err.message || "Failed to generate questions with AI.");
-    } finally {
+      setAiGenerating(false);
+    }
+  };
+
+  const handleRetryFailedSections = async () => {
+    setAiGenerating(true);
+    try {
+      const failedSections = blueprint.filter(sec => aiFailedSectionIds.includes(sec.id));
+      const sectionsPayload = failedSections.map((sec) => {
+        const qType = sec.allowedTypes[0] || "mcq";
+        return {
+          section_id: sec.id,
+          topic: sec.topics || metadata.title || "General",
+          question_type: mapFrontendToBackendType(qType) as any,
+          difficulty: sec.difficulty.toLowerCase() as any,
+          count: sec.questions || 3,
+          bloom_level: (sec.bloomLevel || "understand") as any,
+        };
+      });
+
+      toast.info(`Retrying question generation for ${failedSections.length} sections...`);
+      const res = await aiGenerationApi.generateQuestions({
+        subject: metadata.title || "Subject",
+        topic: metadata.title || "General",
+        question_type: "mcq",
+        difficulty: "medium",
+        count: 5,
+        additional_context: aiGenerationConfig.additional_context,
+        target_assessment_id: draftId || undefined,
+        sections: sectionsPayload,
+      });
+
+      setAiBatchId(res.id);
+      pollBatchStatus(res.id, 0, "all");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to retry generation.");
       setAiGenerating(false);
     }
   };
@@ -2188,7 +2286,7 @@ export default function NewAssessmentBuilder() {
         ordering: "ordering",
         case_study: "casestudy",
       };
-      await aiGenerationApi.reviewQuestion(candidateId, {
+      const res = await aiGenerationApi.reviewQuestion(candidateId, {
         decision: "approved",
         add_to_assessment_id: draftId || undefined
       });
@@ -2196,12 +2294,22 @@ export default function NewAssessmentBuilder() {
       const qType = typeMap[candidate.question_type] || "shortanswer";
       const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const sectionObj = blueprint.find(s => s.id === targetSecId);
-      const marksPerQuestion = sectionObj && sectionObj.questions
-        ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
-        : 2;
+      
+      let marksPerQuestion = 2;
+      if (sectionObj) {
+        const sectionQuestions = questions.filter(q => q.sectionId === targetSecId);
+        const allocatedMarks = sectionQuestions.reduce((sum, q) => sum + (q.marks || 0), 0);
+        const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
+        const targetQuestionCount = parseInt(sectionObj.questions as any) || 1;
+        const remainingSectionMarks = Math.max(0, totalSectionMarks - allocatedMarks);
+        const remainingQuestionSlots = Math.max(1, targetQuestionCount - sectionQuestions.length);
+        marksPerQuestion = Math.max(1, Math.round(remainingSectionMarks / remainingQuestionSlots));
+      }
+
+      const realId = res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
 
       const newQ: Question = {
-        id: candidate.id,
+        id: realId,
         sectionId: targetSecId,
         text: candidate.parsed_question_text || "",
         type: qType as any,
@@ -2249,7 +2357,7 @@ export default function NewAssessmentBuilder() {
       };
       const candidate = aiCandidates.find(c => c.id === candidateId);
       if (!candidate) return;
-      await aiGenerationApi.reviewQuestion(candidateId, {
+      const res = await aiGenerationApi.reviewQuestion(candidateId, {
         decision: "edited",
         modified_question_text: editingText,
         modified_explanation: editingExplanation,
@@ -2258,12 +2366,22 @@ export default function NewAssessmentBuilder() {
       const qType = typeMap[candidate.question_type] || "shortanswer";
       const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const sectionObj = blueprint.find(s => s.id === targetSecId);
-      const marksPerQuestion = sectionObj && sectionObj.questions
-        ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
-        : 2;
+      
+      let marksPerQuestion = 2;
+      if (sectionObj) {
+        const sectionQuestions = questions.filter(q => q.sectionId === targetSecId);
+        const allocatedMarks = sectionQuestions.reduce((sum, q) => sum + (q.marks || 0), 0);
+        const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
+        const targetQuestionCount = parseInt(sectionObj.questions as any) || 1;
+        const remainingSectionMarks = Math.max(0, totalSectionMarks - allocatedMarks);
+        const remainingQuestionSlots = Math.max(1, targetQuestionCount - sectionQuestions.length);
+        marksPerQuestion = Math.max(1, Math.round(remainingSectionMarks / remainingQuestionSlots));
+      }
+
+      const realId = res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
 
       const newQ: Question = {
-        id: candidate.id,
+        id: realId,
         sectionId: targetSecId,
         text: editingText,
         type: qType as any,
@@ -2287,7 +2405,7 @@ export default function NewAssessmentBuilder() {
 
   const handleAcceptAllCandidates = async () => {
     try {
-      await Promise.all(aiCandidates.map(c => 
+      const results = await Promise.all(aiCandidates.map(c => 
         aiGenerationApi.reviewQuestion(c.id, {
           decision: "approved",
           add_to_assessment_id: draftId || undefined
@@ -2304,15 +2422,26 @@ export default function NewAssessmentBuilder() {
         ordering: "ordering",
         case_study: "casestudy",
       };
-      const newQs = aiCandidates.map(c => {
+      const simulatedQuestions = [...questions];
+      const newQs = aiCandidates.map((c, index) => {
+        const res = results[index];
+        const realId = res?.assessment_question?.id || res?.promoted_question?.id || c.id;
         const targetSecId = (c as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
         const sectionObj = blueprint.find(s => s.id === targetSecId);
-        const marksPerQuestion = sectionObj && sectionObj.questions
-          ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
-          : 2;
+        
+        let marksPerQuestion = 2;
+        if (sectionObj) {
+          const sectionQuestions = simulatedQuestions.filter(q => q.sectionId === targetSecId);
+          const allocatedMarks = sectionQuestions.reduce((sum, q) => sum + (q.marks || 0), 0);
+          const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
+          const targetQuestionCount = parseInt(sectionObj.questions as any) || 1;
+          const remainingSectionMarks = Math.max(0, totalSectionMarks - allocatedMarks);
+          const remainingQuestionSlots = Math.max(1, targetQuestionCount - sectionQuestions.length);
+          marksPerQuestion = Math.max(1, Math.round(remainingSectionMarks / remainingQuestionSlots));
+        }
 
-        return {
-          id: c.id,
+        const newQ: Question = {
+          id: realId,
           sectionId: targetSecId,
           text: c.parsed_question_text || "",
           type: (typeMap[c.question_type] || "shortanswer") as any,
@@ -2325,6 +2454,8 @@ export default function NewAssessmentBuilder() {
           aiGenerated: true,
           is_required: true,
         };
+        simulatedQuestions.push(newQ);
+        return newQ;
       });
       setQuestions(prev => [...prev, ...newQs]);
       setAiCandidates([]);
@@ -2471,6 +2602,8 @@ export default function NewAssessmentBuilder() {
         questions: b.questions,
         difficulty: b.difficulty,
         allowedTypes: b.allowedTypes.map(t => mapFrontendToBackendType(t)),
+        aiPromptHint: b.aiPromptHint,
+        difficultyDistribution: b.difficultyDistribution,
       })),
       questions: questions.map((q) => {
         let finalOptions = q.options.map(opt => ({
@@ -2784,7 +2917,7 @@ export default function NewAssessmentBuilder() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeStep, editingCandidateId]);
 
-  const handleSaveDraft = async () => {
+  const handleSaveDraft = async (): Promise<string | null> => {
     setIsSavingDraft(true);
     setFieldErrors({});
     try {
@@ -2793,16 +2926,25 @@ export default function NewAssessmentBuilder() {
         body: JSON.stringify(preparePayload()),
       })) as any;
       toast.success("Draft saved successfully.");
-      if (!draftId && res.assessment_id) {
+      if (res.assessment_id) {
         draftIdRef.current = res.assessment_id;
         loadedDraftIdRef.current = res.assessment_id;
         router.replace(`/lecturer/assessments/new?draft=${res.assessment_id}`);
       }
+      return res.assessment_id || null;
     } catch (err: any) {
       mapApiErrors(err);
+      return null;
     } finally {
       setIsSavingDraft(false);
     }
+  };
+
+  const ensureDraftId = async (): Promise<string | null> => {
+    if (draftIdRef.current) return draftIdRef.current;
+    toast.info("Saving draft first to enable AI features...");
+    const savedId = await handleSaveDraft();
+    return savedId;
   };
 
   const handlePublish = async () => {
@@ -3566,7 +3708,12 @@ export default function NewAssessmentBuilder() {
               </div>
               <div className="flex gap-2">
                 <Button
-                  onClick={() => {
+                  onClick={async () => {
+                    const activeId = await ensureDraftId();
+                    if (!activeId) {
+                      toast.error("Please fill in required metadata fields and save the assessment draft before generating questions.");
+                      return;
+                    }
                     setAiTargetSectionId("all");
                     setAiGenerationConfig({
                       topic: metadata.title || "",
@@ -3610,7 +3757,12 @@ export default function NewAssessmentBuilder() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => {
+                        onClick={async () => {
+                          const activeId = await ensureDraftId();
+                          if (!activeId) {
+                            toast.error("Please fill in required metadata fields and save the assessment draft before generating questions.");
+                            return;
+                          }
                           setAiTargetSectionId(sec.id);
                           setAiGenerationConfig({
                             topic: sec.topics || metadata.title || "",
@@ -4601,6 +4753,44 @@ export default function NewAssessmentBuilder() {
               Accept, edit, or reject the AI generated candidate questions below.
             </SheetDescription>
           </SheetHeader>
+
+          {aiFailedSectionIds.length > 0 && (
+            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3">
+              <div className="flex gap-2.5 items-start text-xs text-amber-800">
+                <AlertTriangle className="size-4 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <strong className="font-semibold block mb-0.5">Partial Generation Failure</strong>
+                  Some sections failed to generate questions:{" "}
+                  {blueprint
+                    .filter((s) => aiFailedSectionIds.includes(s.id))
+                    .map((s, idx, arr) => (
+                      <span key={s.id} className="font-semibold">
+                        {s.section}
+                        {idx < arr.length - 1 ? ", " : ""}
+                      </span>
+                    ))}
+                  . You can retry generating just the failed sections.
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleRetryFailedSections}
+                disabled={aiGenerating}
+                className="w-full bg-white hover:bg-amber-100 border-amber-300 text-amber-900 font-semibold h-8 text-xs"
+              >
+                {aiGenerating ? (
+                  <>
+                    <LoaderCircleIcon className="mr-2 h-3.5 w-3.5 animate-spin" /> Retrying...
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit className="mr-2 h-3.5 w-3.5 text-primary" /> Retry Failed Sections
+                  </>
+                )}
+              </Button>
+            </div>
+          )}
 
           <ScrollArea className="h-[calc(100vh-200px)] pr-4 space-y-6">
             <div className="space-y-6">

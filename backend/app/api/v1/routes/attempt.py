@@ -21,24 +21,19 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.exceptions import AuthorizationError, NotFoundError
 from app.db.enums import AttemptStatus, UserRole
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.session import get_db
-from app.dependencies.auth import require_active_user, require_lecturer_or_admin, require_student
-from app.schemas.attempt import (
-    AttemptListResponse,
-    AttemptDetailResponse,
-    AttemptStartRequest,
-    AttemptStartResponse,
-    AttemptSubmitRequest,
-    AttemptSummary,
-    AttemptSupervisorView,
-)
+from app.dependencies.auth import (require_active_user,
+                                   require_lecturer_or_admin, require_student)
+from app.schemas.attempt import (AttemptDetailResponse, AttemptListResponse,
+                                 AttemptStartRequest, AttemptStartResponse,
+                                 AttemptSubmitRequest, AttemptSummary,
+                                 AttemptSupervisorView)
 from app.services.attempt_service import AttemptService
+from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/attempts", tags=["Attempts"])
 
@@ -195,20 +190,31 @@ async def list_my_attempts(
         page=page,
         page_size=page_size,
     )
-    
+
     summaries = []
     from app.db.models.attempt import GroupSubmission
-    from sqlalchemy import select
-    
+    from sqlalchemy import select, tuple_
+
+    group_keys = [
+        (a.assessment_id, a.group_id)
+        for a in items
+        if a.group_id is not None
+    ]
+
+    group_submissions: dict[tuple[uuid.UUID, uuid.UUID], GroupSubmission] = {}
+    if group_keys:
+        sub_stmt = select(GroupSubmission).where(
+            tuple_(GroupSubmission.assessment_id, GroupSubmission.group_id).in_(group_keys)
+        )
+        sub_res = await db.execute(sub_stmt)
+        for submission in sub_res.scalars().all():
+            if submission.group_id is not None:
+                group_submissions[(submission.assessment_id, submission.group_id)] = submission
+
     for a in items:
         summary = AttemptSummary.model_validate(a)
-        if a.group_id:
-            sub_stmt = select(GroupSubmission).where(
-                GroupSubmission.assessment_id == a.assessment_id,
-                GroupSubmission.group_id == a.group_id
-            )
-            sub_res = await db.execute(sub_stmt)
-            submission = sub_res.scalar_one_or_none()
+        if a.group_id is not None:
+            submission = group_submissions.get((a.assessment_id, a.group_id))
             if submission:
                 summary.group_submission_id = submission.id
                 summary.group_submission_status = submission.status
@@ -254,7 +260,7 @@ async def get_attempt(
     if attempt.assessment and attempt.assessment.assessment_questions:
         # Load sections for title lookup
         section_map = {s.id: s.title for s in attempt.assessment.sections}
-        
+
         for aq in attempt.assessment.assessment_questions:
             if aq.question:
                 q = aq.question
@@ -284,9 +290,10 @@ async def get_attempt(
     # Shuffling Logic: Shuffle within each section if enabled
     if attempt.assessment and attempt.assessment.randomize_questions:
         import random
+
         # Seed with attempt ID for stability per attempt
         rng = random.Random(str(attempt.id))
-        
+
         # Group by section
         by_section = {}
         for qd in questions_data:
@@ -294,17 +301,17 @@ async def get_attempt(
             if sid not in by_section:
                 by_section[sid] = []
             by_section[sid].append(qd)
-            
+
         # Shuffle each group and re-assemble
         shuffled_questions = []
         # Sort sections by original order of first question to maintain section flow
         sorted_sids = sorted(by_section.keys(), key=lambda sid: min(q["order_index"] for q in by_section[sid]))
-        
+
         for sid in sorted_sids:
             section_qs = by_section[sid]
             rng.shuffle(section_qs)
             shuffled_questions.extend(section_qs)
-        
+
         questions_data = shuffled_questions
     else:
         # Sort by order_index

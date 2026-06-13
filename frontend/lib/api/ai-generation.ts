@@ -1,4 +1,12 @@
-import { apiClient } from "./client";
+export interface GenerateQuestionsSectionRequest {
+  section_id: string;
+  topic?: string;
+  question_type?: "mcq" | "true_false" | "short_answer" | "essay" | "matching" | "fill_blank";
+  type?: string;
+  difficulty?: "easy" | "medium" | "hard";
+  bloom_level?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
+  count?: number;
+}
 
 export interface GenerateQuestionsRequest {
   subject: string;
@@ -9,6 +17,8 @@ export interface GenerateQuestionsRequest {
   bloom_level?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
   additional_context?: string;
   target_assessment_id?: string;
+  target_section_id?: string;
+  sections?: GenerateQuestionsSectionRequest[];
 }
 
 export interface GeneratedQuestionOptionResponse {
@@ -21,6 +31,7 @@ export interface GeneratedQuestionOptionResponse {
 export interface AIGeneratedQuestionResponse {
   id: string;
   batch_id: string;
+  target_section_id: string | null;
   question_type: string;
   difficulty: string;
   review_status: string;
@@ -30,6 +41,7 @@ export interface AIGeneratedQuestionResponse {
   parsed_explanation: string | null;
   parse_error: string | null;
   bloom_level: string | null;
+  options?: GeneratedQuestionOptionResponse[];
   // Computed options here for UI convenience
   _options: GeneratedQuestionOptionResponse[];
 }
@@ -64,16 +76,22 @@ export interface AIGenerationBatchListResponse {
 export interface ReviewAIQuestionRequest {
   decision: "approved" | "edited" | "rejected" | "needs_revision";
   modified_question_text?: string;
+  modified_options_json?: string;
   modified_explanation?: string;
+  reviewer_notes?: string;
   add_to_assessment_id?: string;
+  marks_if_added?: number;
+  save_to_bank?: boolean;
 }
+
 
 export const aiGenerationApi = {
   async generateQuestions(data: GenerateQuestionsRequest): Promise<AIGenerationBatchDetailResponse> {
-    const { target_assessment_id, ...rest } = data;
+    const { target_assessment_id, target_section_id, ...rest } = data;
     const payload = {
       ...rest,
       assessment_id: target_assessment_id,
+      target_section_id: target_section_id,
     };
     const res = await apiClient("/ai/generate", {
         method: "POST",
@@ -107,7 +125,9 @@ function _parseBatchQuestions(batch: any): AIGenerationBatchDetailResponse {
 
   const parsedQuestions = rawQuestions.map((q) => {
     let _options: GeneratedQuestionOptionResponse[] = [];
-    if (q.parsed_options_json) {
+    if (q.options && q.options.length > 0) {
+      _options = q.options;
+    } else if (q.parsed_options_json) {
       try {
         _options = JSON.parse(q.parsed_options_json);
       } catch (e) {

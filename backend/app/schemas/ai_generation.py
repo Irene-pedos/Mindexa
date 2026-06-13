@@ -8,11 +8,61 @@ import uuid
 from datetime import datetime
 from typing import ClassVar
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, computed_field
 
 from app.db.enums import AIQuestionDecision
 
 # ─── Generation Request ───────────────────────────────────────────────────────
+
+
+class GenerateQuestionsSectionRequest(BaseModel):
+    section_id: uuid.UUID
+    topic: str | None = Field(default=None, max_length=200)
+    question_type: str = Field(default="mcq")
+    type: str | None = Field(default=None, description="Alias for question_type")
+    difficulty: str = Field(default="medium")
+    bloom_level: str | None = None
+    count: int = Field(default=5, ge=1, le=20)
+
+    @field_validator("question_type")
+    @classmethod
+    def validate_question_type(cls, v: str) -> str:
+        if v not in GenerateQuestionsRequest.VALID_TYPES:
+            raise ValueError(
+                f"question_type must be one of: {', '.join(sorted(GenerateQuestionsRequest.VALID_TYPES))}"
+            )
+        return v
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, v: str | None) -> str | None:
+        if v and v not in GenerateQuestionsRequest.VALID_TYPES:
+            raise ValueError(
+                f"type must be one of: {', '.join(sorted(GenerateQuestionsRequest.VALID_TYPES))}"
+            )
+        return v
+
+    @field_validator("difficulty")
+    @classmethod
+    def validate_difficulty(cls, v: str) -> str:
+        v_lower = v.strip().lower()
+        if v_lower not in GenerateQuestionsRequest.VALID_DIFFICULTIES:
+            raise ValueError(
+                f"difficulty must be one of: {', '.join(sorted(GenerateQuestionsRequest.VALID_DIFFICULTIES))}"
+            )
+        return v_lower
+
+    @field_validator("bloom_level")
+    @classmethod
+    def validate_bloom(cls, v: str | None) -> str | None:
+        if v:
+            v_lower = v.strip().lower()
+            if v_lower not in GenerateQuestionsRequest.VALID_BLOOM:
+                raise ValueError(
+                    f"bloom_level must be one of: {', '.join(sorted(GenerateQuestionsRequest.VALID_BLOOM))}"
+                )
+            return v_lower
+        return v
 
 
 class GenerateQuestionsRequest(BaseModel):
@@ -34,9 +84,17 @@ class GenerateQuestionsRequest(BaseModel):
         default=None,
         description="Extra context for the AI: curriculum notes, learning outcomes, etc."
     )
-    assessment_id: uuid.UUID | None = Field(
+    assessment_id: uuid.UUID = Field(
+        ...,
+        description="Link this batch to a specific assessment"
+    )
+    target_section_id: uuid.UUID | None = Field(
         default=None,
-        description="Optional: link this batch to a specific assessment"
+        description="Optional: link this batch to a specific section of the assessment"
+    )
+    sections: list[GenerateQuestionsSectionRequest] | None = Field(
+        default=None,
+        description="Optional list of section requirements to generate for in a single batch"
     )
 
     VALID_TYPES: ClassVar[set[str]] = {
@@ -60,19 +118,23 @@ class GenerateQuestionsRequest(BaseModel):
     @field_validator("difficulty")
     @classmethod
     def validate_difficulty(cls, v: str) -> str:
-        if v not in cls.VALID_DIFFICULTIES:
+        v_lower = v.strip().lower()
+        if v_lower not in cls.VALID_DIFFICULTIES:
             raise ValueError(
                 f"difficulty must be one of: {', '.join(sorted(cls.VALID_DIFFICULTIES))}"
             )
-        return v
+        return v_lower
 
     @field_validator("bloom_level")
     @classmethod
     def validate_bloom(cls, v: str | None) -> str | None:
-        if v and v not in cls.VALID_BLOOM:
-            raise ValueError(
-                f"bloom_level must be one of: {', '.join(sorted(cls.VALID_BLOOM))}"
-            )
+        if v:
+            v_lower = v.strip().lower()
+            if v_lower not in cls.VALID_BLOOM:
+                raise ValueError(
+                    f"bloom_level must be one of: {', '.join(sorted(cls.VALID_BLOOM))}"
+                )
+            return v_lower
         return v
 
     model_config = {"str_strip_whitespace": True}
@@ -113,6 +175,10 @@ class ReviewAIQuestionRequest(BaseModel):
     # If approving/editing, optionally add to an assessment immediately
     add_to_assessment_id: uuid.UUID | None = None
     marks_if_added: int | None = Field(default=None, ge=1)
+    save_to_bank: bool = Field(
+        default=True,
+        description="Optionally save the approved/edited question to the lecturer's reusable question bank"
+    )
 
     @field_validator("decision")
     @classmethod
@@ -141,6 +207,7 @@ class ReviewAIQuestionRequest(BaseModel):
 class AIGeneratedQuestionResponse(BaseModel):
     id: uuid.UUID
     batch_id: uuid.UUID
+    target_section_id: uuid.UUID | None = None
     question_type: str
     difficulty: str
     parsed_successfully: bool
@@ -153,6 +220,17 @@ class AIGeneratedQuestionResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+    @computed_field
+    @property
+    def options(self) -> list[dict]:
+        import json
+        if not self.parsed_options_json:
+            return []
+        try:
+            return json.loads(self.parsed_options_json)
+        except Exception:
+            return []
 
 
 class AIQuestionReviewResponse(BaseModel):

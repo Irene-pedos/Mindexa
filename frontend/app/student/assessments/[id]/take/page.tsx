@@ -482,7 +482,9 @@ function SortableOrderItem({
       style={style}
       className={cn(
         "flex items-center gap-4 p-4 rounded-xl border bg-background group transition-all duration-200",
-        isDragging ? "shadow-md border-primary/40" : "hover:border-primary/10 hover:shadow-sm",
+        isDragging
+          ? "shadow-md border-primary/40"
+          : "hover:border-primary/10 hover:shadow-sm",
       )}
     >
       <div
@@ -492,7 +494,9 @@ function SortableOrderItem({
       >
         {index + 1}
       </div>
-      <div className="flex-1 text-sm font-medium text-foreground/80">{text}</div>
+      <div className="flex-1 text-sm font-medium text-foreground/80">
+        {text}
+      </div>
       <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         <Button
           variant="ghost"
@@ -608,10 +612,16 @@ export default function TakeAssessmentPage() {
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
 
-  const [flaggedQuestions, setFlaggedQuestions] = useState<Record<string, boolean>>({});
-  const [skippedQuestions, setSkippedQuestions] = useState<Record<string, boolean>>({});
+  const [flaggedQuestions, setFlaggedQuestions] = useState<
+    Record<string, boolean>
+  >({});
+  const [skippedQuestions, setSkippedQuestions] = useState<
+    Record<string, boolean>
+  >({});
   const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [saveStatus, setSaveStatus] = useState<Record<string, "saving" | "saved" | "failed">>({});
+  const [saveStatus, setSaveStatus] = useState<
+    Record<string, "saving" | "saved" | "failed">
+  >({});
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [currentWarning, setCurrentWarning] = useState<any>(null);
   const [warningModalOpen, setWarningModalOpen] = useState(false);
@@ -620,6 +630,8 @@ export default function TakeAssessmentPage() {
   const lastSavedValuesRef = React.useRef<Record<string, any>>({});
   const warned10mRef = React.useRef(false);
   const warned5mRef = React.useRef(false);
+  const isNavigatingRef = React.useRef(false);
+  const stageRef = React.useRef<Stage>(stage);
 
   const currentQ = questions[currentQuestionIndex];
   const isHighSecurity = useMemo(
@@ -683,7 +695,7 @@ export default function TakeAssessmentPage() {
           attemptId,
           attemptToken,
           type,
-          metadata
+          metadata,
         );
         if (res.warning_issued && res.warning) {
           setWarnings((prev) => {
@@ -701,35 +713,43 @@ export default function TakeAssessmentPage() {
         console.error("Failed to record integrity event", err);
       }
     },
-    [attemptId, attemptToken, terminateSession]
+    [attemptId, attemptToken, terminateSession],
   );
 
   // Network Status Tracking & Offline Queue flushing
-  const queueLocalSave = useCallback((questionId: string, qType: string, answerVal: any) => {
-    if (!attemptId) return;
-    const queueKey = `offline_saves_${attemptId}`;
-    const newItem = {
-      question_id: questionId,
-      q_type: qType,
-      answer_val: answerVal,
-      timestamp: Date.now()
-    };
-    try {
-      const existingStr = localStorage.getItem(queueKey);
-      let queue = [];
-      if (existingStr) {
-        queue = JSON.parse(existingStr);
+  const queueLocalSave = useCallback(
+    (questionId: string, qType: string, answerVal: any) => {
+      if (!attemptId) return;
+      const queueKey = `offline_saves_${attemptId}`;
+      const newItem = {
+        question_id: questionId,
+        q_type: qType,
+        answer_val: answerVal,
+        timestamp: Date.now(),
+      };
+      try {
+        const existingStr = localStorage.getItem(queueKey);
+        let queue = [];
+        if (existingStr) {
+          queue = JSON.parse(existingStr);
+        }
+        queue = queue.filter((item: any) => item.question_id !== questionId);
+        queue.push(newItem);
+        localStorage.setItem(queueKey, JSON.stringify(queue));
+      } catch (e) {
+        console.error("Failed to save answer locally", e);
       }
-      queue = queue.filter((item: any) => item.question_id !== questionId);
-      queue.push(newItem);
-      localStorage.setItem(queueKey, JSON.stringify(queue));
-    } catch (e) {
-      console.error("Failed to save answer locally", e);
-    }
-  }, [attemptId]);
+    },
+    [attemptId],
+  );
 
   const saveAnswer = useCallback(
-    async (questionId: string, qType: string, answerVal: any, changeType: "autosave" | "manual_save" = "autosave") => {
+    async (
+      questionId: string,
+      qType: string,
+      answerVal: any,
+      changeType: "autosave" | "manual_save" = "autosave",
+    ) => {
       if (!attemptId || !attemptToken) return;
 
       const answerType = getAnswerType(qType);
@@ -745,11 +765,18 @@ export default function TakeAssessmentPage() {
       };
 
       if (answerType === "TEXT") {
-        payload.answer_text = typeof answerVal === "string" ? answerVal : (answerVal === null || answerVal === undefined ? "" : JSON.stringify(answerVal));
+        payload.answer_text =
+          typeof answerVal === "string"
+            ? answerVal
+            : answerVal === null || answerVal === undefined
+              ? ""
+              : JSON.stringify(answerVal);
       } else if (answerType === "SINGLE_OPTION") {
         payload.selected_option_ids = Array.isArray(answerVal)
           ? answerVal
-          : (answerVal ? [answerVal] : []);
+          : answerVal
+            ? [answerVal]
+            : [];
       } else if (answerType === "ORDERED_LIST") {
         payload.ordered_option_ids = Array.isArray(answerVal) ? answerVal : [];
       } else if (answerType === "MATCH_PAIRS") {
@@ -758,11 +785,11 @@ export default function TakeAssessmentPage() {
         payload.fill_blank_answers = answerVal || {};
       }
 
-      setSaveStatus(prev => ({ ...prev, [questionId]: "saving" }));
+      setSaveStatus((prev) => ({ ...prev, [questionId]: "saving" }));
 
       try {
         await submissionApi.saveAnswer(payload);
-        setSaveStatus(prev => ({ ...prev, [questionId]: "saved" }));
+        setSaveStatus((prev) => ({ ...prev, [questionId]: "saved" }));
         setLastSaved(new Date());
 
         // Remove from local storage offline queue if it exists
@@ -771,7 +798,9 @@ export default function TakeAssessmentPage() {
         if (queueStr) {
           try {
             const queue = JSON.parse(queueStr);
-            const filtered = queue.filter((item: any) => item.question_id !== questionId);
+            const filtered = queue.filter(
+              (item: any) => item.question_id !== questionId,
+            );
             localStorage.setItem(queueKey, JSON.stringify(filtered));
           } catch (e) {
             console.error(e);
@@ -779,11 +808,11 @@ export default function TakeAssessmentPage() {
         }
       } catch (err) {
         console.error("Save failed, queueing locally", err);
-        setSaveStatus(prev => ({ ...prev, [questionId]: "failed" }));
+        setSaveStatus((prev) => ({ ...prev, [questionId]: "failed" }));
         queueLocalSave(questionId, qType, answerVal);
       }
     },
-    [attemptId, attemptToken, queueLocalSave]
+    [attemptId, attemptToken, queueLocalSave],
   );
 
   const flushOfflineQueue = useCallback(async () => {
@@ -798,12 +827,22 @@ export default function TakeAssessmentPage() {
       toast.info("Connection restored — syncing local answers...");
 
       // Log a RECONNECT integrity event
-      await attemptApi.recordIntegrityEvent(attemptId, attemptToken, "RECONNECT", {
-        offline_saves_count: queue.length
-      });
+      await attemptApi.recordIntegrityEvent(
+        attemptId,
+        attemptToken,
+        "RECONNECT",
+        {
+          offline_saves_count: queue.length,
+        },
+      );
 
       for (const item of queue) {
-        await saveAnswer(item.question_id, item.q_type, item.answer_val, "autosave");
+        await saveAnswer(
+          item.question_id,
+          item.q_type,
+          item.answer_val,
+          "autosave",
+        );
       }
 
       toast.success("Connection restored — all answers synced");
@@ -853,6 +892,7 @@ export default function TakeAssessmentPage() {
       lastSavedValuesRef.current = savedAnswers;
     } catch (e) {
       console.error("Failed to sync submissions", e);
+      toast.warning("Could not load previously saved answers. Starting fresh.");
     }
   };
 
@@ -869,24 +909,35 @@ export default function TakeAssessmentPage() {
         const activeAttempt = attemptsRes.items?.find(
           (a: any) =>
             a.assessment_id === assessmentId &&
-            (a.status === "IN_PROGRESS" || a.status === "PAUSED")
+            (a.status === "IN_PROGRESS" || a.status === "PAUSED"),
         );
 
         if (activeAttempt) {
           setAttemptId(activeAttempt.id);
-          const savedToken = localStorage.getItem(`attempt_token_${activeAttempt.id}`);
+          const savedToken = sessionStorage.getItem(
+            `attempt_token_${activeAttempt.id}`,
+          );
 
           if (savedToken) {
             if (activeAttempt.status === "PAUSED") {
               try {
-                const resumeData = await attemptApi.resumeAttempt(activeAttempt.id, savedToken);
+                const resumeData = await attemptApi.resumeAttempt(
+                  activeAttempt.id,
+                  savedToken,
+                );
                 const newToken = resumeData.access_token;
                 setAttemptToken(newToken);
-                localStorage.setItem(`attempt_token_${activeAttempt.id}`, newToken);
+                sessionStorage.setItem(
+                  `attempt_token_${activeAttempt.id}`,
+                  newToken,
+                );
                 setExpiresAt(resumeData.expires_at);
                 setTimeLeft(resumeData.seconds_remaining || 3600);
 
-                const attemptDetail = await attemptApi.getAttemptDetail(activeAttempt.id, newToken);
+                const attemptDetail = await attemptApi.getAttemptDetail(
+                  activeAttempt.id,
+                  newToken,
+                );
                 setQuestions(attemptDetail.questions || []);
                 await syncSavedSubmissions(activeAttempt.id);
                 setStage("taking");
@@ -901,7 +952,10 @@ export default function TakeAssessmentPage() {
               setAttemptToken(savedToken);
               setExpiresAt(activeAttempt.expires_at);
               try {
-                const attemptDetail = await attemptApi.getAttemptDetail(activeAttempt.id, savedToken);
+                const attemptDetail = await attemptApi.getAttemptDetail(
+                  activeAttempt.id,
+                  savedToken,
+                );
                 setQuestions(attemptDetail.questions || []);
                 await syncSavedSubmissions(activeAttempt.id);
                 setStage("taking");
@@ -912,7 +966,9 @@ export default function TakeAssessmentPage() {
               }
             }
           } else {
-            toast.info("Active attempt found, but session token is not present on this device.");
+            toast.info(
+              "Active attempt found, but session token is not present on this device.",
+            );
             setStage("intro");
           }
         } else {
@@ -933,10 +989,16 @@ export default function TakeAssessmentPage() {
 
   // WebSocket for real-time integrity reporting
   useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
+
+  useEffect(() => {
     if (stage !== "taking" || !attemptId) return;
 
+    stageRef.current = stage;
+
     let socket: WebSocket | null = null;
-    let reconnectTimeout: any = null;
+    let reconnectTimeout: number | null = null;
 
     const connectWs = () => {
       try {
@@ -962,8 +1024,8 @@ export default function TakeAssessmentPage() {
         };
 
         socket.onclose = () => {
-          if (stage === "taking") {
-            reconnectTimeout = setTimeout(connectWs, 5000);
+          if (stageRef.current === "taking") {
+            reconnectTimeout = window.setTimeout(connectWs, 5000);
           }
         };
       } catch (err) {
@@ -975,14 +1037,14 @@ export default function TakeAssessmentPage() {
 
     return () => {
       if (socket) socket.close();
-      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (reconnectTimeout !== null) window.clearTimeout(reconnectTimeout);
     };
   }, [stage, attemptId]);
 
   // Fullscreen enforcement
   useEffect(() => {
     if (stage !== "taking" || !assessment?.fullscreen_required) return;
-    
+
     const checkFullscreen = () => {
       const isFull = !!document.fullscreenElement;
       setIsFullscreen(isFull);
@@ -1047,7 +1109,7 @@ export default function TakeAssessmentPage() {
 
       if (
         (window.outerWidth - window.innerWidth > threshold ||
-         window.outerHeight - window.innerHeight > threshold) &&
+          window.outerHeight - window.innerHeight > threshold) &&
         (widthDiff > 50 || heightDiff > 50)
       ) {
         handleIntegrityEvent("DEVTOOLS_DETECTED");
@@ -1078,22 +1140,40 @@ export default function TakeAssessmentPage() {
 
     if (assessment.ai_assistance_allowed === false) {
       const ua = navigator.userAgent.toLowerCase();
-      const aiKeywords = ["copilot", "chatgpt", "gemini", "sider", "monica", "harpa", "merlin", "chathub"];
-      const detectedKeyword = aiKeywords.find(kw => ua.includes(kw));
+      const aiKeywords = [
+        "copilot",
+        "chatgpt",
+        "gemini",
+        "sider",
+        "monica",
+        "harpa",
+        "merlin",
+        "chathub",
+      ];
+      const detectedKeyword = aiKeywords.find((kw) => ua.includes(kw));
 
       const windowKeys = Object.keys(window);
-      const extensionKeywords = ["gpt", "openai", "copilot", "gemini", "monica", "sider"];
-      const detectedProperty = windowKeys.find(key => 
-        extensionKeywords.some(kw => key.toLowerCase().includes(kw))
+      const extensionKeywords = [
+        "gpt",
+        "openai",
+        "copilot",
+        "gemini",
+        "monica",
+        "sider",
+      ];
+      const detectedProperty = windowKeys.find((key) =>
+        extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
       );
 
       if (detectedKeyword || detectedProperty) {
         handleIntegrityEvent("AI_EXTENSION_DETECTED", {
           userAgent: navigator.userAgent,
           detected_keyword: detectedKeyword || null,
-          detected_property: detectedProperty || null
+          detected_property: detectedProperty || null,
         });
-        toast.error("Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.");
+        toast.error(
+          "Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.",
+        );
       }
     }
   }, [stage, assessment, handleIntegrityEvent]);
@@ -1105,7 +1185,8 @@ export default function TakeAssessmentPage() {
       const currentAnswer = answers[q.id];
       if (
         currentAnswer !== undefined &&
-        JSON.stringify(currentAnswer) !== JSON.stringify(lastSavedValuesRef.current[q.id])
+        JSON.stringify(currentAnswer) !==
+          JSON.stringify(lastSavedValuesRef.current[q.id])
       ) {
         try {
           await saveAnswer(q.id, q.type, currentAnswer, "manual_save");
@@ -1135,7 +1216,17 @@ export default function TakeAssessmentPage() {
     if (stage !== "taking" || !expiresAt) return;
 
     const calculateTimeRemaining = () => {
-      const remaining = Math.max(0, Math.floor((new Date(expiresAt).getTime() - Date.now()) / 1000));
+      const expiry = new Date(expiresAt);
+      if (Number.isNaN(expiry.getTime())) {
+        console.error("Invalid expiry timestamp for attempt", expiresAt);
+        setTimeLeft(0);
+        return;
+      }
+
+      const remaining = Math.max(
+        0,
+        Math.floor((expiry.getTime() - Date.now()) / 1000),
+      );
       setTimeLeft(remaining);
 
       if (remaining <= 600 && remaining > 300 && !warned10mRef.current) {
@@ -1144,9 +1235,11 @@ export default function TakeAssessmentPage() {
       }
       if (remaining <= 300 && remaining > 0 && !warned5mRef.current) {
         warned5mRef.current = true;
-        toast.error("Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.");
+        toast.error(
+          "Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.",
+        );
       }
-      
+
       if (remaining <= 0) {
         handleAutoSubmit();
       }
@@ -1173,7 +1266,10 @@ export default function TakeAssessmentPage() {
     if (stage !== "taking" || !currentQ) return;
     const currentAnswer = answers[currentQ.id];
     if (currentAnswer === undefined) return;
-    if (JSON.stringify(currentAnswer) === JSON.stringify(lastSavedValuesRef.current[currentQ.id])) {
+    if (
+      JSON.stringify(currentAnswer) ===
+      JSON.stringify(lastSavedValuesRef.current[currentQ.id])
+    ) {
       return;
     }
 
@@ -1193,7 +1289,12 @@ export default function TakeAssessmentPage() {
       if (currentQ) {
         const currentAnswer = answers[currentQ.id];
         if (currentAnswer !== undefined) {
-          await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
+          await saveAnswer(
+            currentQ.id,
+            currentQ.type,
+            currentAnswer,
+            "autosave",
+          );
           lastSavedValuesRef.current[currentQ.id] = currentAnswer;
         }
       }
@@ -1205,22 +1306,31 @@ export default function TakeAssessmentPage() {
   // Navigation save
   const navigateToQuestion = useCallback(
     async (newIndex: number) => {
-      if (newIndex === currentQuestionIndex) return;
+      if (newIndex === currentQuestionIndex || isNavigatingRef.current) return;
+      isNavigatingRef.current = true;
+      try {
+        const q = currentQ;
+        if (q) {
+          const qId = q.id;
+          const qType = q.type;
+          const currentAnswer = answers[qId];
 
-      if (currentQ) {
-        const currentAnswer = answers[currentQ.id];
-        if (
-          currentAnswer !== undefined &&
-          JSON.stringify(currentAnswer) !== JSON.stringify(lastSavedValuesRef.current[currentQ.id])
-        ) {
-          await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "manual_save");
-          lastSavedValuesRef.current[currentQ.id] = currentAnswer;
+          if (
+            currentAnswer !== undefined &&
+            JSON.stringify(currentAnswer) !==
+              JSON.stringify(lastSavedValuesRef.current[qId])
+          ) {
+            await saveAnswer(qId, qType, currentAnswer, "manual_save");
+            lastSavedValuesRef.current[qId] = currentAnswer;
+          }
         }
-      }
 
-      setCurrentQuestionIndex(newIndex);
+        setCurrentQuestionIndex(newIndex);
+      } finally {
+        isNavigatingRef.current = false;
+      }
     },
-    [currentQuestionIndex, currentQ, answers, saveAnswer]
+    [currentQuestionIndex, currentQ, answers, saveAnswer],
   );
 
   const submitAssessment = useCallback(async () => {
@@ -1229,7 +1339,8 @@ export default function TakeAssessmentPage() {
     try {
       await saveAllPendingAnswers();
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
-      if (typeof document !== "undefined" && document.fullscreenElement) document.exitFullscreen();
+      if (typeof document !== "undefined" && document.fullscreenElement)
+        document.exitFullscreen();
       setStage("submitted");
       toast.success("Submitted successfully.");
     } catch (err: any) {
@@ -1437,7 +1548,8 @@ export default function TakeAssessmentPage() {
           </CardHeader>
           <CardContent className="p-6 space-y-4">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Your responses have been securely recorded. The session has been closed due to security protocol enforcement.
+              Your responses have been securely recorded. The session has been
+              closed due to security protocol enforcement.
             </p>
             <Button
               onClick={() => router.push("/student/dashboard")}
@@ -1462,7 +1574,8 @@ export default function TakeAssessmentPage() {
                 Assessment Finalized
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Your assessment attempt has been successfully and securely recorded.
+                Your assessment attempt has been successfully and securely
+                recorded.
               </p>
             </div>
             <Button
@@ -1487,7 +1600,8 @@ export default function TakeAssessmentPage() {
       {assessment?.ai_assistance_allowed === false && stage === "taking" && (
         <div className="bg-destructive/10 border-b border-destructive/25 text-destructive py-2 px-6 text-center text-xs font-semibold tracking-wider flex items-center justify-center gap-2 z-50">
           <Shield className="size-3.5" />
-          AI assistance is not permitted in this assessment. All assistant tools and extensions are strictly blocked.
+          AI assistance is not permitted in this assessment. All assistant tools
+          and extensions are strictly blocked.
         </div>
       )}
       <div className="sticky top-0 z-50 border-b bg-background/90 backdrop-blur-md px-6 py-3.5 flex items-center justify-between">
@@ -1498,7 +1612,8 @@ export default function TakeAssessmentPage() {
             onClick={handleExitEnvironment}
             className="h-8 px-3 text-xs font-medium border border-border/60 rounded-lg hover:bg-muted/50 transition-colors"
           >
-            <ArrowLeft className="size-3.5 mr-1" /> {isHighSecurity ? "Terminate" : "Exit"}
+            <ArrowLeft className="size-3.5 mr-1" />{" "}
+            {isHighSecurity ? "Terminate" : "Exit"}
           </Button>
           <Separator orientation="vertical" className="h-5" />
           <div className="min-w-0">
@@ -1541,7 +1656,8 @@ export default function TakeAssessmentPage() {
                 {assessment.title}
               </CardTitle>
               <CardDescription className="text-xs font-medium mt-1.5 text-muted-foreground/70">
-                {getAssessmentTypeLabel(assessment.assessment_type)} • Academic Year {assessment.academic_year}
+                {getAssessmentTypeLabel(assessment.assessment_type)} • Academic
+                Year {assessment.academic_year}
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
@@ -1579,7 +1695,9 @@ export default function TakeAssessmentPage() {
                     variant="outline"
                     className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground"
                   >
-                    {assessment.fullscreen_required ? "Lockdown Mode" : "Open Environment"}
+                    {assessment.fullscreen_required
+                      ? "Lockdown Mode"
+                      : "Open Environment"}
                   </Badge>
                 </div>
               </div>
@@ -1602,7 +1720,8 @@ export default function TakeAssessmentPage() {
                 Access Control Required
               </CardTitle>
               <CardDescription className="text-xs text-muted-foreground/75 mt-1">
-                Enter the session password provided by the instructor to authorize access.
+                Enter the session password provided by the instructor to
+                authorize access.
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 text-center">
@@ -1665,7 +1784,8 @@ export default function TakeAssessmentPage() {
                     htmlFor="readiness"
                     className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
                   >
-                    I declare and commit adherence to the institutional academic integrity standards.
+                    I declare and commit adherence to the institutional academic
+                    integrity standards.
                   </Label>
                 </div>
                 <Button
@@ -1688,7 +1808,8 @@ export default function TakeAssessmentPage() {
               <div className="h-full flex flex-col items-center justify-center space-y-6 text-center max-w-sm mx-auto">
                 <Monitor className="size-12 text-destructive animate-pulse" />
                 <p className="text-sm font-semibold text-destructive leading-relaxed">
-                  Secure environment lost. Please restore secure full-screen mode immediately to continue.
+                  Secure environment lost. Please restore secure full-screen
+                  mode immediately to continue.
                 </p>
                 <Button
                   onClick={enterFullscreen}
@@ -1706,17 +1827,26 @@ export default function TakeAssessmentPage() {
                       <span>Sync Progress</span>
                       <span>{Math.round(progress)}%</span>
                     </div>
-                    <Progress value={progress} className="h-1.5 bg-muted/20 rounded-full" />
+                    <Progress
+                      value={progress}
+                      className="h-1.5 bg-muted/20 rounded-full"
+                    />
                   </div>
                   <div className="flex items-center gap-3">
                     {saveStatus[currentQ?.id] === "saving" && (
-                      <span className="text-xs text-muted-foreground animate-pulse">Saving...</span>
+                      <span className="text-xs text-muted-foreground animate-pulse">
+                        Saving...
+                      </span>
                     )}
                     {saveStatus[currentQ?.id] === "saved" && (
-                      <span className="text-xs text-emerald-600 font-medium">Saved</span>
+                      <span className="text-xs text-emerald-600 font-medium">
+                        Saved
+                      </span>
                     )}
                     {saveStatus[currentQ?.id] === "failed" && (
-                      <span className="text-xs text-amber-600 font-medium">Save failed — retrying</span>
+                      <span className="text-xs text-amber-600 font-medium">
+                        Save failed — retrying
+                      </span>
                     )}
                     <Badge
                       variant="outline"
@@ -1738,38 +1868,46 @@ export default function TakeAssessmentPage() {
                         size="sm"
                         onClick={() => {
                           if (currentQ) {
-                            setFlaggedQuestions(prev => ({
+                            setFlaggedQuestions((prev) => ({
                               ...prev,
-                              [currentQ.id]: !prev[currentQ.id]
+                              [currentQ.id]: !prev[currentQ.id],
                             }));
                           }
                         }}
                         className={cn(
                           "h-7 px-2 text-xs gap-1 hover:bg-muted/50 rounded-lg transition-colors",
-                          flaggedQuestions[currentQ?.id] ? "text-amber-600 bg-amber-500/10" : "text-muted-foreground/60"
+                          flaggedQuestions[currentQ?.id]
+                            ? "text-amber-600 bg-amber-500/10"
+                            : "text-muted-foreground/60",
                         )}
                       >
                         <Bookmark className="size-3.5" />
-                        {flaggedQuestions[currentQ?.id] ? "Flagged" : "Flag for review"}
+                        {flaggedQuestions[currentQ?.id]
+                          ? "Flagged"
+                          : "Flag for review"}
                       </Button>
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => {
                           if (currentQ) {
-                            setSkippedQuestions(prev => ({
+                            setSkippedQuestions((prev) => ({
                               ...prev,
-                              [currentQ.id]: !prev[currentQ.id]
+                              [currentQ.id]: !prev[currentQ.id],
                             }));
                           }
                         }}
                         className={cn(
                           "h-7 px-2 text-xs gap-1 hover:bg-muted/50 rounded-lg transition-colors",
-                          skippedQuestions[currentQ?.id] ? "text-destructive bg-destructive/10" : "text-muted-foreground/60"
+                          skippedQuestions[currentQ?.id]
+                            ? "text-destructive bg-destructive/10"
+                            : "text-muted-foreground/60",
                         )}
                       >
                         <AlertTriangle className="size-3.5" />
-                        {skippedQuestions[currentQ?.id] ? "Skipped" : "Mark as Skipped"}
+                        {skippedQuestions[currentQ?.id]
+                          ? "Skipped"
+                          : "Mark as Skipped"}
                       </Button>
                     </div>
                   </CardHeader>
@@ -1820,8 +1958,14 @@ export default function TakeAssessmentPage() {
                           if (currentQ) {
                             const currentAnswer = answers[currentQ.id];
                             if (currentAnswer !== undefined) {
-                              await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "manual_save");
-                              lastSavedValuesRef.current[currentQ.id] = currentAnswer;
+                              await saveAnswer(
+                                currentQ.id,
+                                currentQ.type,
+                                currentAnswer,
+                                "manual_save",
+                              );
+                              lastSavedValuesRef.current[currentQ.id] =
+                                currentAnswer;
                             }
                           }
                           setShowSubmitConfirm(true);
@@ -1851,7 +1995,8 @@ export default function TakeAssessmentPage() {
                   (q) => q.assessment_section_id === sectionId,
                 );
                 const firstQuestion = sectionQuestions[0];
-                const sectionTitle = firstQuestion?.section_title || "General Section";
+                const sectionTitle =
+                  firstQuestion?.section_title || "General Section";
                 return (
                   <div key={sectionId || "gen"} className="space-y-2">
                     <div className="text-xs font-semibold text-muted-foreground/75 px-1 truncate">
@@ -1865,20 +2010,26 @@ export default function TakeAssessmentPage() {
                         const isFlagged = flaggedQuestions[q.id];
                         const isSkipped = skippedQuestions[q.id];
 
-                        let statusColor = "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
+                        let statusColor =
+                          "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
                         if (isAnswered) {
                           if (isFlagged) {
-                            statusColor = "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                            statusColor =
+                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
                           } else if (isSkipped) {
-                            statusColor = "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                            statusColor =
+                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
                           } else {
-                            statusColor = "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                            statusColor =
+                              "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
                           }
                         } else {
                           if (isFlagged) {
-                            statusColor = "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                            statusColor =
+                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
                           } else if (isSkipped) {
-                            statusColor = "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                            statusColor =
+                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
                           }
                         }
 
@@ -1890,7 +2041,7 @@ export default function TakeAssessmentPage() {
                               "h-8 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
                               isCurrent
                                 ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
-                                : statusColor
+                                : statusColor,
                             )}
                           >
                             {(idx + 1).toString().padStart(2, "0")}
@@ -1912,10 +2063,7 @@ export default function TakeAssessmentPage() {
         </div>
       )}
 
-      <Dialog 
-        open={warningModalOpen} 
-        onOpenChange={currentWarning?.warning_level === "WARNING_3" ? undefined : setWarningModalOpen}
-      >
+      <Dialog open={warningModalOpen} onOpenChange={undefined}>
         <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background">
           <AlertTriangle className="size-10 text-destructive mx-auto mb-3" />
           <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
@@ -1930,7 +2078,8 @@ export default function TakeAssessmentPage() {
             )}
             {currentWarning?.warning_level === "WARNING_3" && (
               <span className="block mt-2 font-semibold text-xs text-red-600 uppercase tracking-wider">
-                Critical: Your attempt has been flagged. Continued violations will terminate the session.
+                Critical: Your attempt has been flagged. Continued violations
+                will terminate the session.
               </span>
             )}
           </p>
@@ -1962,7 +2111,8 @@ export default function TakeAssessmentPage() {
               Review & Submit Assessment
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground mt-1">
-              Please review your completion status before finalizing your attempt.
+              Please review your completion status before finalizing your
+              attempt.
             </DialogDescription>
           </DialogHeader>
 
@@ -1977,34 +2127,46 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-emerald-50/20 border border-emerald-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-emerald-600">Answered</span>
                 <span className="text-base font-bold text-emerald-600 mt-1">
-                  {questions.filter(q => !!answers[q.id]).length}
+                  {questions.filter((q) => !!answers[q.id]).length}
                 </span>
               </div>
               <div className="p-3 bg-amber-50/20 border border-amber-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-amber-600">Flagged for Review</span>
                 <span className="text-base font-bold text-amber-600 mt-1">
-                  {questions.filter(q => flaggedQuestions[q.id]).length}
+                  {questions.filter((q) => flaggedQuestions[q.id]).length}
                 </span>
               </div>
               <div className="p-3 bg-red-50/20 border border-red-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-red-600">Skipped Explicitly</span>
                 <span className="text-base font-bold text-red-600 mt-1">
-                  {questions.filter(q => skippedQuestions[q.id]).length}
+                  {questions.filter((q) => skippedQuestions[q.id]).length}
                 </span>
               </div>
             </div>
 
-            {questions.length - questions.filter(q => !!answers[q.id]).length > 0 && (
+            {questions.length -
+              questions.filter((q) => !!answers[q.id]).length >
+              0 && (
               <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/15 flex items-start gap-2.5 text-left">
                 <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
                 <span className="text-xs text-destructive font-medium leading-relaxed">
-                  Warning: You have {questions.length - questions.filter(q => !!answers[q.id]).length} unanswered {questions.length - questions.filter(q => !!answers[q.id]).length === 1 ? "question" : "questions"}.
+                  Warning: You have{" "}
+                  {questions.length -
+                    questions.filter((q) => !!answers[q.id]).length}{" "}
+                  unanswered{" "}
+                  {questions.length -
+                    questions.filter((q) => !!answers[q.id]).length ===
+                  1
+                    ? "question"
+                    : "questions"}
+                  .
                 </span>
               </div>
             )}
-            
+
             <p className="text-xs text-muted-foreground/90 font-medium text-center pt-1 leading-relaxed">
-              Are you sure you want to submit? This action is final and cannot be undone.
+              Are you sure you want to submit? This action is final and cannot
+              be undone.
             </p>
           </div>
 

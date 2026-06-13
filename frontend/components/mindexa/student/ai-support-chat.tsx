@@ -35,7 +35,12 @@ import {
   Minimize2,
 } from "lucide-react";
 import { studentAiApi, StudentSupportResponse } from "@/lib/api/student-ai";
-import { studentApi, StudentResourceResponse, StudentRecentResult, StudentCourseListItem } from "@/lib/api/student";
+import {
+  studentApi,
+  StudentResourceResponse,
+  StudentRecentResult,
+  StudentCourseListItem,
+} from "@/lib/api/student";
 import { assessmentApi } from "@/lib/api/assessment";
 import { apiClient } from "@/lib/api/client";
 import {
@@ -57,7 +62,9 @@ interface Message {
 }
 
 export function AISupportChat() {
-  const [activeTab, setActiveTab] = useState<"support" | "revision" | "practice" | "planner" | "insights">("support");
+  const [activeTab, setActiveTab] = useState<
+    "support" | "revision" | "practice" | "planner" | "insights"
+  >("support");
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isThinking, setIsThinking] = useState(false);
@@ -91,9 +98,13 @@ export function AISupportChat() {
   const [isAnalyzingInsights, setIsAnalyzingInsights] = useState(false);
 
   // Feedback Explainer State
-  const [selectedResultForFeedback, setSelectedResultForFeedback] = useState<string | null>(null);
+  const [selectedResultForFeedback, setSelectedResultForFeedback] = useState<
+    string | null
+  >(null);
   const [isExplainingFeedback, setIsExplainingFeedback] = useState(false);
-  const [feedbackExplanation, setFeedbackExplanation] = useState<string | null>(null);
+  const [feedbackExplanation, setFeedbackExplanation] = useState<string | null>(
+    null,
+  );
 
   // Revision State
   const [revisionTopic, setRevisionTopic] = useState("");
@@ -110,7 +121,9 @@ export function AISupportChat() {
   const [practiceStyle, setPracticeStyle] = useState("MCQ");
   const [practiceQuestions, setPracticeQuestions] = useState<any[]>([]);
   const [isGeneratingPractice, setIsGeneratingPractice] = useState(false);
-  const [studentAnswers, setStudentAnswers] = useState<Record<number, string>>({});
+  const [studentAnswers, setStudentAnswers] = useState<Record<number, string>>(
+    {},
+  );
   const [revealFeedback, setRevealFeedback] = useState(false);
 
   // Study Planner State
@@ -135,12 +148,13 @@ export function AISupportChat() {
     async function loadData() {
       try {
         setLoadingResources(true);
-        const [resData, attemptsData, resultsItems, workspacesData] = await Promise.all([
-          studentApi.getPersonalResources(),
-          apiClient("/attempts/me"),
-          studentApi.getResults().catch(() => []),
-          studentApi.getWorkspaces().catch(() => [])
-        ]);
+        const [resData, attemptsData, resultsItems, workspacesData] =
+          await Promise.all([
+            studentApi.getPersonalResources(),
+            apiClient("/attempts/me"),
+            studentApi.getResults().catch(() => []),
+            studentApi.getWorkspaces().catch(() => []),
+          ]);
 
         setResources(resData);
         setResults(resultsItems || []);
@@ -159,16 +173,20 @@ export function AISupportChat() {
             return [];
           }
         });
-        const allWorkspaceMaterials = (await Promise.all(workspaceMaterialsPromises)).flat();
+        const allWorkspaceMaterials = (
+          await Promise.all(workspaceMaterialsPromises)
+        ).flat();
         setLecturerMaterials(allWorkspaceMaterials);
 
         // Active assessment blocking check
         const activeAttempts = (attemptsData.items || []).filter(
-          (a: any) => a.status === "IN_PROGRESS" || a.status === "PAUSED"
+          (a: any) => a.status === "IN_PROGRESS" || a.status === "PAUSED",
         );
         if (activeAttempts.length > 0) {
           for (const attempt of activeAttempts) {
-            const assessment = await assessmentApi.getAssessmentById(attempt.assessment_id);
+            const assessment = await assessmentApi.getAssessmentById(
+              attempt.assessment_id,
+            );
             const isExamStyle =
               assessment.assessment_type === "CAT" ||
               assessment.assessment_type === "SUMMATIVE" ||
@@ -183,7 +201,10 @@ export function AISupportChat() {
           }
         }
       } catch (err) {
-        console.error("Failed to load study data or check active attempts", err);
+        console.error(
+          "Failed to load study data or check active attempts",
+          err,
+        );
       } finally {
         setLoadingResources(false);
       }
@@ -193,13 +214,19 @@ export function AISupportChat() {
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
-      if (resourcesRef.current && !resourcesRef.current.contains(event.target as Node)) {
+      if (
+        resourcesRef.current &&
+        !resourcesRef.current.contains(event.target as Node)
+      ) {
         setResourcesDropdownOpen(false);
       }
       if (tipsRef.current && !tipsRef.current.contains(event.target as Node)) {
         setTipsDropdownOpen(false);
       }
-      if (integrityRef.current && !integrityRef.current.contains(event.target as Node)) {
+      if (
+        integrityRef.current &&
+        !integrityRef.current.contains(event.target as Node)
+      ) {
         setIntegrityDropdownOpen(false);
       }
     }
@@ -211,16 +238,19 @@ export function AISupportChat() {
     if (!selectedResource) return null;
     const personal = resources.find((r) => r.id === selectedResource);
     if (personal) return personal.display_name || personal.original_filename;
-    
-    const lecturerMat = lecturerMaterials.find((m) => m.id === selectedResource);
-    if (lecturerMat) return lecturerMat.display_name || lecturerMat.original_filename;
-    
+
+    const lecturerMat = lecturerMaterials.find(
+      (m) => m.id === selectedResource,
+    );
+    if (lecturerMat)
+      return lecturerMat.display_name || lecturerMat.original_filename;
+
     return "Context Selected";
   }, [selectedResource, resources, lecturerMaterials]);
 
   const selectedContexts = useMemo(() => {
     if (!selectedResource) return [];
-    
+
     const personal = resources.find((r) => r.id === selectedResource);
     if (personal) {
       return [
@@ -231,7 +261,9 @@ export function AISupportChat() {
       ];
     }
 
-    const lecturerMat = lecturerMaterials.find((m) => m.id === selectedResource);
+    const lecturerMat = lecturerMaterials.find(
+      (m) => m.id === selectedResource,
+    );
     if (lecturerMat) {
       return [
         {
@@ -253,22 +285,28 @@ export function AISupportChat() {
     {
       title: "Active Recall",
       label: "SQL Joins practice scenario",
-      action: "Provide scenarios to test my understanding of SQL Outer and Inner Joins",
+      action:
+        "Provide scenarios to test my understanding of SQL Outer and Inner Joins",
     },
     {
       title: "Academic Material Study",
       label: "Summarize selected context",
-      action: "Summarize the key takeaways and learning outcomes from the selected resource",
+      action:
+        "Summarize the key takeaways and learning outcomes from the selected resource",
     },
     {
       title: "Lecturer Feedback",
       label: "Explain my grade on assessments",
-      action: "Explain standard database assessment rubrics and how to improve design marks",
+      action:
+        "Explain standard database assessment rubrics and how to improve design marks",
     },
   ];
 
   // 1. Core Chat Support Handlers
-  const handleSendMessage = async (params: { input: string; attachments: Attachment[] }) => {
+  const handleSendMessage = async (params: {
+    input: string;
+    attachments: Attachment[];
+  }) => {
     const query = params.input.trim();
     if (!query) return;
 
@@ -282,7 +320,7 @@ export function AISupportChat() {
       id: Date.now().toString(),
       sender: "student",
       text: userQuestion,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
     setMessages((prev) => [...prev, newStudentMessage]);
@@ -341,7 +379,7 @@ Ensure all text values are properly JSON-escaped, especially double quotes (whic
       setRevisionResult({
         summary: res.explanation,
         checklist: res.revision_plan || [],
-        readings: res.follow_up_questions || []
+        readings: res.follow_up_questions || [],
       });
       toast.success("Revision guide generated!");
     } catch (err: any) {
@@ -381,19 +419,22 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
       parts.forEach((part) => {
         if (!part.trim()) return;
-        const match = part.match(/\[\[ANSWER:\s*([\s\S]*?)\s*\|\s*EXPLANATION:\s*([\s\S]*?)\s*\]\]/);
+        const match = part.match(
+          /\[\[ANSWER:\s*([\s\S]*?)\s*\|\s*EXPLANATION:\s*([\s\S]*?)\s*\]\]/,
+        );
         if (match) {
           const qText = part.replace(/\[\[ANSWER:[\s\S]*?\]\]/, "").trim();
           parsedQuestions.push({
             question: qText,
             answer: match[1],
-            explanation: match[2]
+            explanation: match[2],
           });
         } else {
           parsedQuestions.push({
             question: part.trim(),
             answer: "Review explanation",
-            explanation: "Evaluate your response using standard study materials."
+            explanation:
+              "Evaluate your response using standard study materials.",
           });
         }
       });
@@ -402,7 +443,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
         parsedQuestions.push({
           question: res.explanation,
           answer: "Refer to prompt response",
-          explanation: "Self-evaluate using the generated text."
+          explanation: "Self-evaluate using the generated text.",
         });
       }
 
@@ -455,11 +496,11 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     setInsightsResult(null);
     setError(null);
 
-    const resultsSummary = results.map(r => ({
+    const resultsSummary = results.map((r) => ({
       title: r.assessment_title,
       percentage: r.percentage,
       grade: r.letter_grade,
-      passed: r.percentage >= 40
+      passed: r.percentage >= 40,
     }));
 
     const questionText = `Analyze my completed assessment results: ${JSON.stringify(resultsSummary)}.
@@ -493,14 +534,19 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     setError(null);
 
     try {
-      const resultDetail = await apiClient(`/results/attempt/${selectedResultForFeedback}`);
-      
+      const resultDetail = await apiClient(
+        `/results/attempt/${selectedResultForFeedback}`,
+      );
+
       const scoreText = `${resultDetail.total_score} / ${resultDetail.max_score} (${resultDetail.percentage}%)`;
       const gradeText = resultDetail.letter_grade || "N/A";
-      
+
       const feedbacks = (resultDetail.breakdowns || [])
         .filter((b: any) => b.feedback && b.feedback.trim())
-        .map((b: any, idx: number) => `Question ${idx + 1} ("${b.question_text || ""}"): Score ${b.score}/${b.max_score}. Feedback: ${b.feedback}`)
+        .map(
+          (b: any, idx: number) =>
+            `Question ${idx + 1} ("${b.question_text || ""}"): Score ${b.score}/${b.max_score}. Feedback: ${b.feedback}`,
+        )
         .join("\n\n");
 
       const promptText = `Explain the lecturer's feedback for my assessment "${resultDetail.assessment_title}".
@@ -532,12 +578,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     if (results.length === 0) return null;
     const total = results.length;
     const totalPercentage = results.reduce((acc, r) => acc + r.percentage, 0);
-    const passedCount = results.filter(r => r.percentage >= 40).length;
+    const passedCount = results.filter((r) => r.percentage >= 40).length;
 
     return {
       total,
       average: Math.round(totalPercentage / total),
-      passRate: Math.round((passedCount / total) * 100)
+      passRate: Math.round((passedCount / total) * 100),
     };
   }, [results]);
 
@@ -549,9 +595,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
             <ShieldAlert className="size-6 text-red-600" />
           </div>
           <div className="space-y-2">
-            <h3 className="text-base font-medium text-red-600">AI Support Unavailable</h3>
+            <h3 className="text-base font-medium text-red-600">
+              AI Support Unavailable
+            </h3>
             <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-              AI assistance is disabled for this assessment to maintain academic integrity.
+              AI assistance is disabled for this assessment to maintain academic
+              integrity.
             </p>
             {blockingExamTitle && (
               <p className="text-xs font-medium text-foreground bg-zinc-100 py-1.5 px-3 rounded-lg border border-zinc-200">
@@ -559,7 +608,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               </p>
             )}
             <p className="text-[11px] text-muted-foreground font-medium">
-              Please finalize your attempt and submit your assessment to restore access.
+              Please finalize your attempt and submit your assessment to restore
+              access.
             </p>
           </div>
         </div>
@@ -568,13 +618,14 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
   }
 
   return (
-    <Card className={cn(
-      "shadow-none border w-full flex flex-col relative overflow-hidden bg-zinc-50/20",
-      isFullScreen 
-        ? "fixed inset-0 z-50 h-screen w-screen rounded-none border-none p-4 md:p-6 bg-white" 
-        : "h-full"
-    )}>
-      
+    <Card
+      className={cn(
+        "shadow-none border w-full flex flex-col relative overflow-hidden bg-zinc-50/20",
+        isFullScreen
+          ? "fixed inset-0 z-50 h-screen w-screen rounded-none border-none p-4 md:p-6 bg-white"
+          : "h-full",
+      )}
+    >
       {/* Top Navigation Bar */}
       <div className="border-b bg-muted/5 px-4 py-3 flex flex-wrap gap-3 items-center justify-between shrink-0 z-30">
         <div className="flex items-center gap-3">
@@ -585,7 +636,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               size="sm"
               className={cn(
                 "h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-white",
-                selectedResource && "border-primary text-primary bg-primary/5"
+                selectedResource && "border-primary text-primary bg-primary/5",
               )}
               onClick={() => {
                 setResourcesDropdownOpen(!resourcesDropdownOpen);
@@ -602,16 +653,19 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
             {resourcesDropdownOpen && (
               <div className="absolute left-0 mt-2 w-80 bg-white text-zinc-950 border rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="space-y-4 max-h-80 overflow-y-auto pr-1 text-left">
-                  
                   {/* Lecturer Materials section */}
                   <div>
                     <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
                       Lecturer Course Materials
                     </div>
                     {loadingResources ? (
-                      <div className="text-xs text-muted-foreground py-1 pl-2">Loading materials...</div>
+                      <div className="text-xs text-muted-foreground py-1 pl-2">
+                        Loading materials...
+                      </div>
                     ) : lecturerMaterials.length === 0 ? (
-                      <div className="text-xs text-muted-foreground py-1 pl-2">No course materials available.</div>
+                      <div className="text-xs text-muted-foreground py-1 pl-2">
+                        No course materials available.
+                      </div>
                     ) : (
                       <div className="space-y-1">
                         {lecturerMaterials.map((file) => (
@@ -619,19 +673,28 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             key={file.id}
                             className={cn(
                               "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-colors",
-                              selectedResource === file.id && "border-primary bg-primary/5 text-primary"
+                              selectedResource === file.id &&
+                                "border-primary bg-primary/5 text-primary",
                             )}
                             onClick={() => {
-                              setSelectedResource(selectedResource === file.id ? null : file.id);
+                              setSelectedResource(
+                                selectedResource === file.id ? null : file.id,
+                              );
                               setResourcesDropdownOpen(false);
                             }}
                           >
                             <FileText className="size-3.5 shrink-0 text-blue-500" />
                             <div className="truncate flex-1 font-medium text-left">
-                              <div className="truncate">{file.display_name || file.original_filename}</div>
-                              <div className="text-[10px] text-muted-foreground">{file.course_code} • Lecturer Material</div>
+                              <div className="truncate">
+                                {file.display_name || file.original_filename}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground">
+                                {file.course_code} • Lecturer Material
+                              </div>
                             </div>
-                            {selectedResource === file.id && <CheckCircle2 className="size-3.5 text-primary shrink-0" />}
+                            {selectedResource === file.id && (
+                              <CheckCircle2 className="size-3.5 text-primary shrink-0" />
+                            )}
                           </div>
                         ))}
                       </div>
@@ -644,9 +707,13 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       Personal Study Files
                     </div>
                     {loadingResources ? (
-                      <div className="text-xs text-muted-foreground py-1 pl-2">Loading files...</div>
+                      <div className="text-xs text-muted-foreground py-1 pl-2">
+                        Loading files...
+                      </div>
                     ) : resources.length === 0 ? (
-                      <div className="text-xs text-muted-foreground py-1 pl-2">No personal files uploaded.</div>
+                      <div className="text-xs text-muted-foreground py-1 pl-2">
+                        No personal files uploaded.
+                      </div>
                     ) : (
                       <div className="space-y-1">
                         {resources.map((file) => (
@@ -654,25 +721,33 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             key={file.id}
                             className={cn(
                               "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-colors",
-                              selectedResource === file.id && "border-primary bg-primary/5 text-primary"
+                              selectedResource === file.id &&
+                                "border-primary bg-primary/5 text-primary",
                             )}
                             onClick={() => {
-                              setSelectedResource(selectedResource === file.id ? null : file.id);
+                              setSelectedResource(
+                                selectedResource === file.id ? null : file.id,
+                              );
                               setResourcesDropdownOpen(false);
                             }}
                           >
                             <FileText className="size-3.5 shrink-0 text-emerald-500" />
                             <div className="truncate flex-1 font-medium text-left">
-                              <div className="truncate">{file.display_name || file.original_filename}</div>
-                              <div className="text-[10px] text-muted-foreground">Personal Study File</div>
+                              <div className="truncate">
+                                {file.display_name || file.original_filename}
+                              </div>
+                              <div className="text-[10px] text-muted-foreground">
+                                Personal Study File
+                              </div>
                             </div>
-                            {selectedResource === file.id && <CheckCircle2 className="size-3.5 text-primary shrink-0" />}
+                            {selectedResource === file.id && (
+                              <CheckCircle2 className="size-3.5 text-primary shrink-0" />
+                            )}
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
-
                 </div>
               </div>
             )}
@@ -695,9 +770,10 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               <ChevronDown className="size-3 ml-0.5 opacity-60" />
             </Button>
             {tipsDropdownOpen && (
-              <div className="absolute left-0 mt-2 w-80 bg-white text-zinc-950 border rounded-xl shadow-lg p-5 z-45 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute left-0 mt-2 w-80 bg-white text-zinc-950 border rounded-xl shadow-lg p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                  <Lightbulb className="size-4 text-amber-500" /> Active Recall Tips
+                  <Lightbulb className="size-4 text-amber-500" /> Active Recall
+                  Tips
                 </div>
                 <div className="space-y-4">
                   <div className="flex gap-3">
@@ -705,7 +781,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       <Target className="size-3.5 text-emerald-700" />
                     </div>
                     <div className="text-xs font-medium text-zinc-600 leading-relaxed">
-                      Always try to formulate explanations in your own words before consulting solutions.
+                      Always try to formulate explanations in your own words
+                      before consulting solutions.
                     </div>
                   </div>
                   <div className="border-t my-2" />
@@ -714,7 +791,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       <BookOpen className="size-3.5 text-primary" />
                     </div>
                     <div className="text-xs font-medium text-zinc-600 leading-relaxed">
-                      Use the Practice Center to generate self-assessment quizzes regularly to test topic mastery.
+                      Use the Practice Center to generate self-assessment
+                      quizzes regularly to test topic mastery.
                     </div>
                   </div>
                 </div>
@@ -739,12 +817,14 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               Integrity Rules
             </Badge>
             {integrityDropdownOpen && (
-              <div className="absolute right-0 mt-2 w-72 bg-white text-zinc-950 border border-red-100 rounded-xl shadow-lg p-4 z-45 animate-in fade-in slide-in-from-top-2 duration-150">
+              <div className="absolute right-0 mt-2 w-72 bg-white text-zinc-950 border border-red-100 rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
                 <div className="text-xs font-bold text-red-700 uppercase tracking-widest mb-2 flex items-center gap-1.5">
                   <ShieldAlert className="size-4" /> Academic Policy
                 </div>
                 <p className="text-[11px] text-zinc-600 leading-relaxed font-medium">
-                  Student AI only supports study and learning. Generating cheat notes, accessing hidden assessments, or bypassing integrity checks is strictly prohibited.
+                  Student AI only supports study and learning. Generating cheat
+                  notes, accessing hidden assessments, or bypassing integrity
+                  checks is strictly prohibited.
                 </p>
               </div>
             )}
@@ -757,7 +837,11 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
             onClick={() => setIsFullScreen(!isFullScreen)}
             title={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"}
           >
-            {isFullScreen ? <Minimize2 className="size-4 text-zinc-600" /> : <Maximize2 className="size-4 text-zinc-600" />}
+            {isFullScreen ? (
+              <Minimize2 className="size-4 text-zinc-600" />
+            ) : (
+              <Maximize2 className="size-4 text-zinc-600" />
+            )}
           </Button>
         </div>
       </div>
@@ -783,7 +867,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                 "flex items-center gap-2 px-5 py-3 text-xs font-semibold border-b-2 transition-all whitespace-nowrap",
                 activeTab === tab.id
                   ? "border-primary text-primary bg-primary/[0.02]"
-                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                  : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50",
               )}
             >
               <Icon className="size-4" />
@@ -795,12 +879,15 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
       {/* Main Container Area */}
       <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-white/50 flex flex-col min-h-0">
-        
         {error && (
           <Alert variant="destructive" className="mb-4 rounded-xl">
             <ShieldAlert className="size-4" />
-            <AlertTitle className="text-sm font-semibold">Study Assistant Error</AlertTitle>
-            <AlertDescription className="text-xs mt-1 font-medium">{error}</AlertDescription>
+            <AlertTitle className="text-sm font-semibold">
+              Study Assistant Error
+            </AlertTitle>
+            <AlertDescription className="text-xs mt-1 font-medium">
+              {error}
+            </AlertDescription>
           </Alert>
         )}
 
@@ -814,12 +901,16 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                     <Brain className="size-8 text-primary" />
                   </div>
                   <div className="space-y-2">
-                    <h2 className="text-lg font-semibold tracking-tight">Revision & Study Support AI</h2>
+                    <h2 className="text-lg font-semibold tracking-tight">
+                      Revision & Study Support AI
+                    </h2>
                     <p className="text-xs text-muted-foreground leading-relaxed max-w-md font-medium">
-                      Ask questions to clarify academic concepts, get revision advice, and prepare for exams. Select a study record above to add specific context.
+                      Ask questions to clarify academic concepts, get revision
+                      advice, and prepare for exams. Select a study record above
+                      to add specific context.
                     </p>
                   </div>
-                  
+
                   {/* Suggested Start Buttons */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-4">
                     {studySuggestedActions.map((act, idx) => (
@@ -828,8 +919,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                         onClick={() => setPrompt(act.action)}
                         className="p-3 text-left border rounded-xl text-xs hover:bg-zinc-50 transition-colors font-medium space-y-1 bg-white shadow-sm border-zinc-200/60"
                       >
-                        <div className="text-primary font-bold text-[10px] uppercase tracking-wide">{act.title}</div>
-                        <div className="text-muted-foreground truncate">{act.label}</div>
+                        <div className="text-primary font-bold text-[10px] uppercase tracking-wide">
+                          {act.title}
+                        </div>
+                        <div className="text-muted-foreground truncate">
+                          {act.label}
+                        </div>
                       </button>
                     ))}
                   </div>
@@ -843,14 +938,14 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                         "flex flex-col max-w-[85%] space-y-1.5 p-4 rounded-2xl text-xs font-medium shadow-sm leading-relaxed whitespace-pre-wrap",
                         msg.sender === "student"
                           ? "bg-primary text-primary-foreground ml-auto rounded-tr-none"
-                          : "bg-white border text-foreground mr-auto rounded-tl-none border-zinc-200/60"
+                          : "bg-white border text-foreground mr-auto rounded-tl-none border-zinc-200/60",
                       )}
                     >
                       <div className="font-bold text-[9px] uppercase tracking-wider opacity-60">
                         {msg.sender === "student" ? "You" : "Study AI"}
                       </div>
                       <div>{msg.text}</div>
-                      
+
                       {msg.revision_plan && msg.revision_plan.length > 0 && (
                         <div className="mt-3 pt-2.5 border-t border-dashed border-zinc-200/60">
                           <div className="font-bold text-[9px] uppercase tracking-wider text-primary mb-1">
@@ -864,25 +959,26 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                         </div>
                       )}
 
-                      {msg.follow_up_questions && msg.follow_up_questions.length > 0 && (
-                        <div className="mt-3 pt-2.5 border-t border-dashed border-zinc-200/60">
-                          <div className="font-bold text-[9px] uppercase tracking-wider text-primary mb-1">
-                            Suggested Follow-ups:
+                      {msg.follow_up_questions &&
+                        msg.follow_up_questions.length > 0 && (
+                          <div className="mt-3 pt-2.5 border-t border-dashed border-zinc-200/60">
+                            <div className="font-bold text-[9px] uppercase tracking-wider text-primary mb-1">
+                              Suggested Follow-ups:
+                            </div>
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {msg.follow_up_questions.map((q, idx) => (
+                                <Badge
+                                  key={idx}
+                                  variant="outline"
+                                  className="cursor-pointer hover:bg-zinc-100 text-[10px] py-0.5 px-2 bg-zinc-50 border-zinc-200"
+                                  onClick={() => setPrompt(q)}
+                                >
+                                  {q}
+                                </Badge>
+                              ))}
+                            </div>
                           </div>
-                          <div className="flex flex-wrap gap-1.5 mt-1">
-                            {msg.follow_up_questions.map((q, idx) => (
-                              <Badge
-                                key={idx}
-                                variant="outline"
-                                className="cursor-pointer hover:bg-zinc-100 text-[10px] py-0.5 px-2 bg-zinc-50 border-zinc-200"
-                                onClick={() => setPrompt(q)}
-                              >
-                                {q}
-                              </Badge>
-                            ))}
-                          </div>
-                        </div>
-                      )}
+                        )}
 
                       {msg.safety_notice && (
                         <div className="mt-2.5 text-[10px] text-destructive bg-destructive/5 p-2 rounded-lg border border-destructive/10">
@@ -907,7 +1003,11 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
             <div className="p-4 border-t bg-white rounded-xl shadow-sm border-zinc-200/60">
               <PureMultimodalInput
                 chatId="student-study-ai"
-                messages={messages.map(m => ({ id: m.id, role: m.sender === "student" ? "user" : "model", content: m.text }))}
+                messages={messages.map((m) => ({
+                  id: m.id,
+                  role: m.sender === "student" ? "user" : "model",
+                  content: m.text,
+                }))}
                 attachments={attachments}
                 setAttachments={setAttachments}
                 onSendMessage={handleSendMessage}
@@ -929,12 +1029,21 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             <Card className="shadow-none border border-zinc-200/60 lg:col-span-4 bg-white rounded-xl">
               <CardHeader className="py-4">
-                <CardTitle className="text-sm font-semibold">Generate Revision Guide</CardTitle>
-                <CardDescription className="text-xs">Summarize materials and create checklists.</CardDescription>
+                <CardTitle className="text-sm font-semibold">
+                  Generate Revision Guide
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Summarize materials and create checklists.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="rev-topic" className="text-xs font-semibold text-zinc-700">Topic or Concept Name</Label>
+                  <Label
+                    htmlFor="rev-topic"
+                    className="text-xs font-semibold text-zinc-700"
+                  >
+                    Topic or Concept Name
+                  </Label>
                   <Input
                     id="rev-topic"
                     placeholder="e.g. Database Normalization"
@@ -948,7 +1057,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   disabled={isGeneratingRevision || !revisionTopic}
                   className="w-full h-9 text-xs font-semibold"
                 >
-                  {isGeneratingRevision && <RefreshCw className="size-3.5 animate-spin mr-1.5" />}
+                  {isGeneratingRevision && (
+                    <RefreshCw className="size-3.5 animate-spin mr-1.5" />
+                  )}
                   Generate Study Note
                 </Button>
               </CardContent>
@@ -968,14 +1079,16 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                     <CardHeader className="py-4 border-b bg-zinc-50/50">
                       <div className="flex justify-between items-center">
-                        <CardTitle className="text-sm font-semibold text-primary">{revisionTopic}</CardTitle>
+                        <CardTitle className="text-sm font-semibold text-primary">
+                          {revisionTopic}
+                        </CardTitle>
                         <Button
                           variant="ghost"
                           size="sm"
                           className="h-7 text-[10px] font-bold uppercase tracking-wider"
                           onClick={() => {
                             navigator.clipboard.writeText(
-                              `${revisionTopic} Revision Summary\n\n${revisionResult.summary}`
+                              `${revisionTopic} Revision Summary\n\n${revisionResult.summary}`,
                             );
                             toast.success("Revision summary copied!");
                           }}
@@ -987,28 +1100,34 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                     <CardContent className="p-6 space-y-6">
                       <div className="space-y-2">
                         <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                          <BookOpen className="size-3.5 text-primary" /> Concept Summary
+                          <BookOpen className="size-3.5 text-primary" /> Concept
+                          Summary
                         </h4>
                         <p className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
                           {revisionResult.summary}
                         </p>
                       </div>
 
-                      {revisionResult.checklist && revisionResult.checklist.length > 0 && (
-                        <div className="space-y-2">
-                          <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <ListChecks className="size-3.5 text-primary" /> Key Learning Checklist
-                          </h4>
-                          <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium text-foreground/75 pl-1">
-                            {revisionResult.checklist.map((item, idx) => (
-                              <li key={idx} className="flex items-start gap-2 bg-emerald-50/20 p-2.5 border border-emerald-500/10 rounded-lg">
-                                <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
-                                <span>{item}</span>
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
+                      {revisionResult.checklist &&
+                        revisionResult.checklist.length > 0 && (
+                          <div className="space-y-2">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                              <ListChecks className="size-3.5 text-primary" />{" "}
+                              Key Learning Checklist
+                            </h4>
+                            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium text-foreground/75 pl-1">
+                              {revisionResult.checklist.map((item, idx) => (
+                                <li
+                                  key={idx}
+                                  className="flex items-start gap-2 bg-emerald-50/20 p-2.5 border border-emerald-500/10 rounded-lg"
+                                >
+                                  <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                                  <span>{item}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
                     </CardContent>
                   </Card>
                 </div>
@@ -1029,12 +1148,21 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
             <Card className="shadow-none border border-zinc-200/60 lg:col-span-4 bg-white rounded-xl">
               <CardHeader className="py-4">
-                <CardTitle className="text-sm font-semibold">Generate Practice Quiz</CardTitle>
-                <CardDescription className="text-xs">Self-assessment quizzes for active retrieval.</CardDescription>
+                <CardTitle className="text-sm font-semibold">
+                  Generate Practice Quiz
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Self-assessment quizzes for active retrieval.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="prac-topic" className="text-xs font-semibold text-zinc-700">Practice Topic</Label>
+                  <Label
+                    htmlFor="prac-topic"
+                    className="text-xs font-semibold text-zinc-700"
+                  >
+                    Practice Topic
+                  </Label>
                   <Input
                     id="prac-topic"
                     placeholder="e.g. SQL Joins"
@@ -1045,7 +1173,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label htmlFor="prac-count" className="text-xs font-semibold text-zinc-700">Questions</Label>
+                    <Label
+                      htmlFor="prac-count"
+                      className="text-xs font-semibold text-zinc-700"
+                    >
+                      Questions
+                    </Label>
                     <select
                       id="prac-count"
                       value={practiceCount}
@@ -1058,7 +1191,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                     </select>
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="prac-style" className="text-xs font-semibold text-zinc-700">Style</Label>
+                    <Label
+                      htmlFor="prac-style"
+                      className="text-xs font-semibold text-zinc-700"
+                    >
+                      Style
+                    </Label>
                     <select
                       id="prac-style"
                       value={practiceStyle}
@@ -1076,7 +1214,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   disabled={isGeneratingPractice || !practiceTopic}
                   className="w-full h-9 text-xs font-semibold mt-2"
                 >
-                  {isGeneratingPractice && <RefreshCw className="size-3.5 animate-spin mr-1.5" />}
+                  {isGeneratingPractice && (
+                    <RefreshCw className="size-3.5 animate-spin mr-1.5" />
+                  )}
                   Generate Practice Quiz
                 </Button>
               </CardContent>
@@ -1095,11 +1235,16 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                 <div className="space-y-4 animate-in fade-in duration-300">
                   <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                     <CardHeader className="py-4 border-b bg-zinc-50/50">
-                      <CardTitle className="text-sm font-semibold text-primary">Practice Self-Quiz: {practiceTopic}</CardTitle>
+                      <CardTitle className="text-sm font-semibold text-primary">
+                        Practice Self-Quiz: {practiceTopic}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent className="p-6 space-y-6">
                       {practiceQuestions.map((q, idx) => (
-                        <div key={idx} className="space-y-3 pb-6 border-b border-dashed last:border-b-0 last:pb-0">
+                        <div
+                          key={idx}
+                          className="space-y-3 pb-6 border-b border-dashed last:border-b-0 last:pb-0"
+                        >
                           <div className="flex gap-2.5 items-start">
                             <span className="size-6 bg-zinc-100 text-zinc-600 rounded-lg flex items-center justify-center text-xs font-bold shrink-0">
                               {idx + 1}
@@ -1117,12 +1262,17 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                                   {["A", "B", "C", "D"].map((opt) => (
                                     <button
                                       key={opt}
-                                      onClick={() => setStudentAnswers(prev => ({ ...prev, [idx]: opt }))}
+                                      onClick={() =>
+                                        setStudentAnswers((prev) => ({
+                                          ...prev,
+                                          [idx]: opt,
+                                        }))
+                                      }
                                       className={cn(
                                         "h-8 rounded-lg border text-xs font-semibold transition-colors flex items-center px-3 gap-2 bg-white",
                                         studentAnswers[idx] === opt
                                           ? "border-primary text-primary bg-primary/5"
-                                          : "hover:bg-zinc-50 border-zinc-200/70"
+                                          : "hover:bg-zinc-50 border-zinc-200/70",
                                       )}
                                     >
                                       <span className="size-4 rounded-full border flex items-center justify-center text-[10px] font-bold bg-muted/20">
@@ -1136,7 +1286,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                                 <textarea
                                   placeholder="Type your practice response here..."
                                   value={studentAnswers[idx] || ""}
-                                  onChange={(e) => setStudentAnswers(prev => ({ ...prev, [idx]: e.target.value }))}
+                                  onChange={(e) =>
+                                    setStudentAnswers((prev) => ({
+                                      ...prev,
+                                      [idx]: e.target.value,
+                                    }))
+                                  }
                                   className="w-full min-h-[60px] p-3 rounded-lg border text-xs bg-white focus:border-zinc-400 outline-none"
                                 />
                               )}
@@ -1144,11 +1299,17 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                           ) : (
                             <div className="pl-8 space-y-2">
                               <div className="flex items-center gap-2">
-                                <Badge variant="outline" className="h-5 px-2 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[9px] font-bold">
+                                <Badge
+                                  variant="outline"
+                                  className="h-5 px-2 bg-emerald-500/10 text-emerald-600 border-emerald-500/20 text-[9px] font-bold"
+                                >
                                   Correct Answer: {q.answer}
                                 </Badge>
                                 {studentAnswers[idx] && (
-                                  <Badge variant="outline" className="h-5 px-2 bg-primary/10 text-primary border-primary/20 text-[9px] font-bold">
+                                  <Badge
+                                    variant="outline"
+                                    className="h-5 px-2 bg-primary/10 text-primary border-primary/20 text-[9px] font-bold"
+                                  >
                                     Your Answer: {studentAnswers[idx]}
                                   </Badge>
                                 )}
@@ -1177,7 +1338,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               {practiceQuestions.length === 0 && !isGeneratingPractice && (
                 <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
                   <ListChecks className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
-                  Your practice questions will appear here. No grading is recorded.
+                  Your practice questions will appear here. No grading is
+                  recorded.
                 </div>
               )}
             </div>
@@ -1189,12 +1351,21 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
             <Card className="shadow-none border border-zinc-200/60 lg:col-span-4 bg-white rounded-xl">
               <CardHeader className="py-4">
-                <CardTitle className="text-sm font-semibold">Generate Study Plan</CardTitle>
-                <CardDescription className="text-xs">Schedule your weekly revision target.</CardDescription>
+                <CardTitle className="text-sm font-semibold">
+                  Generate Study Plan
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  Schedule your weekly revision target.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="plan-exam" className="text-xs font-semibold text-zinc-700">Assessment Name</Label>
+                  <Label
+                    htmlFor="plan-exam"
+                    className="text-xs font-semibold text-zinc-700"
+                  >
+                    Assessment Name
+                  </Label>
                   <Input
                     id="plan-exam"
                     placeholder="e.g. Database systems CAT"
@@ -1205,7 +1376,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-2">
-                    <Label htmlFor="plan-date" className="text-xs font-semibold text-zinc-700">Target Date</Label>
+                    <Label
+                      htmlFor="plan-date"
+                      className="text-xs font-semibold text-zinc-700"
+                    >
+                      Target Date
+                    </Label>
                     <Input
                       id="plan-date"
                       type="date"
@@ -1215,7 +1391,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="plan-hours" className="text-xs font-semibold text-zinc-700">Hours/Day</Label>
+                    <Label
+                      htmlFor="plan-hours"
+                      className="text-xs font-semibold text-zinc-700"
+                    >
+                      Hours/Day
+                    </Label>
                     <select
                       id="plan-hours"
                       value={plannerHours}
@@ -1230,7 +1411,12 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   </div>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="plan-topics" className="text-xs font-semibold text-zinc-700">Topics to Cover</Label>
+                  <Label
+                    htmlFor="plan-topics"
+                    className="text-xs font-semibold text-zinc-700"
+                  >
+                    Topics to Cover
+                  </Label>
                   <Input
                     id="plan-topics"
                     placeholder="e.g. SQL Joins, Normal Forms"
@@ -1244,7 +1430,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   disabled={isGeneratingPlanner || !plannerExam}
                   className="w-full h-9 text-xs font-semibold mt-2"
                 >
-                  {isGeneratingPlanner && <RefreshCw className="size-3.5 animate-spin mr-1.5" />}
+                  {isGeneratingPlanner && (
+                    <RefreshCw className="size-3.5 animate-spin mr-1.5" />
+                  )}
                   Generate Study Plan
                 </Button>
               </CardContent>
@@ -1254,7 +1442,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               {isGeneratingPlanner && (
                 <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
                   <div className="h-4 bg-zinc-200 rounded w-1/3" />
-                  <div className="h-30 bg-zinc-100 rounded w-full" />
+                  <div className="h-32 bg-zinc-100 rounded w-full" />
                 </div>
               )}
 
@@ -1263,7 +1451,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                     <CardHeader className="py-4 border-b bg-zinc-50/50">
                       <div className="flex justify-between items-center">
-                        <CardTitle className="text-sm font-semibold text-primary">Revision Plan: {plannerExam}</CardTitle>
+                        <CardTitle className="text-sm font-semibold text-primary">
+                          Revision Plan: {plannerExam}
+                        </CardTitle>
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1289,7 +1479,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               {!plannerResult && !isGeneratingPlanner && (
                 <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
                   <Calendar className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
-                  Your weekly revision calendar and daily schedule will appear here.
+                  Your weekly revision calendar and daily schedule will appear
+                  here.
                 </div>
               )}
             </div>
@@ -1305,22 +1496,38 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   {/* Results Statistics Card */}
                   <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                     <CardHeader className="py-4">
-                      <CardTitle className="text-sm font-semibold">Academic Profile Summary</CardTitle>
-                      <CardDescription className="text-xs">Based on completed released grades.</CardDescription>
+                      <CardTitle className="text-sm font-semibold">
+                        Academic Profile Summary
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Based on completed released grades.
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="p-3 bg-zinc-50 rounded-lg border">
-                          <div className="text-lg font-bold text-zinc-900">{resultsStats.total}</div>
-                          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wide">Exams</div>
+                          <div className="text-lg font-bold text-zinc-900">
+                            {resultsStats.total}
+                          </div>
+                          <div className="text-[9px] font-bold text-zinc-500 uppercase tracking-wide">
+                            Exams
+                          </div>
                         </div>
                         <div className="p-3 bg-emerald-50/20 rounded-lg border border-emerald-500/10">
-                          <div className="text-lg font-bold text-emerald-600">{resultsStats.average}%</div>
-                          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wide">Avg Score</div>
+                          <div className="text-lg font-bold text-emerald-600">
+                            {resultsStats.average}%
+                          </div>
+                          <div className="text-[9px] font-bold text-emerald-500 uppercase tracking-wide">
+                            Avg Score
+                          </div>
                         </div>
                         <div className="p-3 bg-primary/5 rounded-lg border border-primary/10">
-                          <div className="text-lg font-bold text-primary">{resultsStats.passRate}%</div>
-                          <div className="text-[9px] font-bold text-primary/75 uppercase tracking-wide">Pass Rate</div>
+                          <div className="text-lg font-bold text-primary">
+                            {resultsStats.passRate}%
+                          </div>
+                          <div className="text-[9px] font-bold text-primary/75 uppercase tracking-wide">
+                            Pass Rate
+                          </div>
                         </div>
                       </div>
 
@@ -1329,7 +1536,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                         disabled={isAnalyzingInsights}
                         className="w-full h-9 text-xs font-semibold mt-2"
                       >
-                        {isAnalyzingInsights && <RefreshCw className="size-3.5 animate-spin mr-1.5" />}
+                        {isAnalyzingInsights && (
+                          <RefreshCw className="size-3.5 animate-spin mr-1.5" />
+                        )}
                         Analyze Topic Mastery
                       </Button>
                     </CardContent>
@@ -1338,16 +1547,27 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                   {/* Feedback Explainer Card */}
                   <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                     <CardHeader className="py-4">
-                      <CardTitle className="text-sm font-semibold">Feedback Explainer</CardTitle>
-                      <CardDescription className="text-xs">Understand lecturer feedback and comments.</CardDescription>
+                      <CardTitle className="text-sm font-semibold">
+                        Feedback Explainer
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        Understand lecturer feedback and comments.
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4 text-left">
                       <div className="space-y-2">
-                        <Label htmlFor="feedback-select" className="text-xs font-semibold text-zinc-700">Select Assessment</Label>
+                        <Label
+                          htmlFor="feedback-select"
+                          className="text-xs font-semibold text-zinc-700"
+                        >
+                          Select Assessment
+                        </Label>
                         <select
                           id="feedback-select"
                           value={selectedResultForFeedback || ""}
-                          onChange={(e) => setSelectedResultForFeedback(e.target.value)}
+                          onChange={(e) =>
+                            setSelectedResultForFeedback(e.target.value)
+                          }
                           className="w-full h-9 rounded-lg border text-xs px-2 bg-white outline-none"
                         >
                           <option value="">-- Choose an Assessment --</option>
@@ -1360,10 +1580,14 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       </div>
                       <Button
                         onClick={handleExplainFeedback}
-                        disabled={isExplainingFeedback || !selectedResultForFeedback}
+                        disabled={
+                          isExplainingFeedback || !selectedResultForFeedback
+                        }
                         className="w-full h-9 text-xs font-semibold"
                       >
-                        {isExplainingFeedback && <RefreshCw className="size-3.5 animate-spin mr-1.5" />}
+                        {isExplainingFeedback && (
+                          <RefreshCw className="size-3.5 animate-spin mr-1.5" />
+                        )}
                         Explain Feedback
                       </Button>
                     </CardContent>
@@ -1389,14 +1613,17 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                     <div className="space-y-4 animate-in fade-in duration-300">
                       <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                         <CardHeader className="py-4 border-b bg-zinc-50/50">
-                          <CardTitle className="text-sm font-semibold text-primary">Strengths & Weaknesses Analysis</CardTitle>
+                          <CardTitle className="text-sm font-semibold text-primary">
+                            Strengths & Weaknesses Analysis
+                          </CardTitle>
                         </CardHeader>
                         <CardContent className="p-6 text-left">
                           <div className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
                             {insightsResult}
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-4 italic">
-                            * Note: Insights are generated purely from completed historical data and contain no predictive grades.
+                            * Note: Insights are generated purely from completed
+                            historical data and contain no predictive grades.
                           </p>
                         </CardContent>
                       </Card>
@@ -1408,14 +1635,18 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
                         <CardHeader className="py-4 border-b bg-zinc-50/50">
                           <div className="flex justify-between items-center">
-                            <CardTitle className="text-sm font-semibold text-primary">Lecturer Feedback Explanation</CardTitle>
+                            <CardTitle className="text-sm font-semibold text-primary">
+                              Lecturer Feedback Explanation
+                            </CardTitle>
                             <Button
                               variant="ghost"
                               size="sm"
                               className="h-7 text-[10px] font-bold uppercase tracking-wider"
                               onClick={() => {
                                 if (feedbackExplanation) {
-                                  navigator.clipboard.writeText(feedbackExplanation);
+                                  navigator.clipboard.writeText(
+                                    feedbackExplanation,
+                                  );
                                   toast.success("Feedback explanation copied!");
                                 }
                               }}
@@ -1429,25 +1660,33 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             {feedbackExplanation}
                           </div>
                           <p className="text-[10px] text-muted-foreground mt-4 italic">
-                            * Note: This assistant only explains comments and grading metrics from the lecturer. It cannot change grades or override lecturer decisions.
+                            * Note: This assistant only explains comments and
+                            grading metrics from the lecturer. It cannot change
+                            grades or override lecturer decisions.
                           </p>
                         </CardContent>
                       </Card>
                     </div>
                   )}
 
-                  {!insightsResult && !feedbackExplanation && !isAnalyzingInsights && !isExplainingFeedback && (
-                    <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
-                      <BarChart2 className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
-                      {'Click "Analyze Topic Mastery" or select an assessment to explain lecturer feedback.'}
-                    </div>
-                  )}
+                  {!insightsResult &&
+                    !feedbackExplanation &&
+                    !isAnalyzingInsights &&
+                    !isExplainingFeedback && (
+                      <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
+                        <BarChart2 className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
+                        {
+                          'Click "Analyze Topic Mastery" or select an assessment to explain lecturer feedback.'
+                        }
+                      </div>
+                    )}
                 </div>
               </div>
             ) : (
               <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
                 <BarChart2 className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
-                No completed assessment results found to compile insights. Results will appear once lecturer reviews and releases them.
+                No completed assessment results found to compile insights.
+                Results will appear once lecturer reviews and releases them.
               </div>
             )}
           </div>

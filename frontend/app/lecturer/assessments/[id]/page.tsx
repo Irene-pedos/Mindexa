@@ -383,7 +383,7 @@ export default function AssessmentDetailsPage() {
     if (!candidate) return;
 
     try {
-      await aiGenerationApi.reviewQuestion(candId, {
+      const res = await aiGenerationApi.reviewQuestion(candId, {
         decision: "approved",
         add_to_assessment_id: assessmentId,
       });
@@ -405,12 +405,15 @@ export default function AssessmentDetailsPage() {
       };
 
       const qType = typeMap[candidate.question_type] || "shortanswer";
+      const promotedQId = res?.promoted_question?.id || candidate.id;
+      const aq = res?.promoted_question?.assessment_question;
+
       const newQ: Question = {
-        id: candidate.id,
+        id: promotedQId,
         sectionId: backendSectionId,
         text: candidate.parsed_question_text || "",
         type: qType,
-        marks: 2,
+        marks: aq?.marks || 2,
         options: [],
         aiGenerated: true,
         is_required: true,
@@ -421,13 +424,21 @@ export default function AssessmentDetailsPage() {
         const currentQuestions = prev.assessment_questions || [];
         return {
           ...prev,
-          assessment_questions: [...currentQuestions, { question: newQ, marks_override: 2, assessment_section_id: backendSectionId }],
+          assessment_questions: [...currentQuestions, { 
+            id: aq?.id || undefined,
+            assessment_id: assessmentId,
+            question_id: promotedQId,
+            marks_override: aq?.marks || 2,
+            assessment_section_id: backendSectionId,
+            question: newQ 
+          }],
         };
       });
 
       setAiCandidates((prev) => prev.filter((c) => c.id !== candId));
       setAiAcceptedCount((prev) => prev + 1);
       toast.success("Question accepted and added to section.");
+      fetchDetails();
     } catch (err) {
       toast.error("Failed to accept question.");
     }
@@ -453,7 +464,7 @@ export default function AssessmentDetailsPage() {
     if (!candidate) return;
 
     try {
-      await aiGenerationApi.reviewQuestion(candId, {
+      const res = await aiGenerationApi.reviewQuestion(candId, {
         decision: "edited",
         modified_question_text: editingText,
         modified_explanation: editingExplanation,
@@ -473,8 +484,11 @@ export default function AssessmentDetailsPage() {
       };
 
       const qType = typeMap[candidate.question_type] || "shortanswer";
+      const promotedQId = res?.promoted_question?.id || candidate.id;
+      const aq = res?.promoted_question?.assessment_question;
+
       const newQ: Question = {
-        id: candidate.id,
+        id: promotedQId,
         sectionId: aiTargetSectionId,
         text: editingText,
         type: qType,
@@ -489,7 +503,14 @@ export default function AssessmentDetailsPage() {
         const currentQuestions = prev.assessment_questions || [];
         return {
           ...prev,
-          assessment_questions: [...currentQuestions, { question: newQ, marks_override: editingMarks, assessment_section_id: aiTargetSectionId }],
+          assessment_questions: [...currentQuestions, { 
+            id: aq?.id || undefined,
+            assessment_id: assessmentId,
+            question_id: promotedQId,
+            marks_override: editingMarks,
+            assessment_section_id: aiTargetSectionId,
+            question: newQ
+          }],
         };
       });
 
@@ -497,6 +518,7 @@ export default function AssessmentDetailsPage() {
       setAiAcceptedCount((prev) => prev + 1);
       setEditingCandidateId(null);
       toast.success("Edited question accepted and added.");
+      fetchDetails();
     } catch (err) {
       toast.error("Failed to save edited question.");
     }
@@ -518,7 +540,7 @@ export default function AssessmentDetailsPage() {
         case_study: "casestudy",
       };
 
-      await Promise.all(
+      const results = await Promise.all(
         aiCandidates.map((c) =>
           aiGenerationApi.reviewQuestion(c.id, {
             decision: "approved",
@@ -527,21 +549,29 @@ export default function AssessmentDetailsPage() {
         )
       );
 
-      const addedQuestions = aiCandidates.map((c) => ({
-        question: {
-          id: c.id,
-          sectionId: aiTargetSectionId,
-          text: c.parsed_question_text || "",
-          type: typeMap[c.question_type] || "shortanswer",
-          marks: 2,
-          options: [],
-          aiGenerated: true,
-          is_required: true,
-          bloom_level: c.bloom_level || undefined,
-        },
-        marks_override: 2,
-        assessment_section_id: aiTargetSectionId,
-      }));
+      const addedQuestions = aiCandidates.map((c, index) => {
+        const res = results[index];
+        const promotedQId = res?.promoted_question?.id || c.id;
+        const aq = res?.promoted_question?.assessment_question;
+        return {
+          id: aq?.id || undefined,
+          assessment_id: assessmentId,
+          question_id: promotedQId,
+          marks_override: aq?.marks || 2,
+          assessment_section_id: aiTargetSectionId,
+          question: {
+            id: promotedQId,
+            sectionId: aiTargetSectionId,
+            text: c.parsed_question_text || "",
+            type: typeMap[c.question_type] || "shortanswer",
+            marks: 2,
+            options: [],
+            aiGenerated: true,
+            is_required: true,
+            bloom_level: c.bloom_level || undefined,
+          },
+        };
+      });
 
       setAssessment((prev: any) => ({
         ...prev,
@@ -552,6 +582,7 @@ export default function AssessmentDetailsPage() {
       setAiCandidates([]);
       setAiReviewDrawerOpen(false);
       toast.success("All question candidates accepted successfully.");
+      fetchDetails();
     } catch (err) {
       toast.error("Failed to accept all questions.");
     }
