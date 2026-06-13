@@ -123,11 +123,11 @@ export default function StudentResultsPage() {
       >
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-center gap-2 flex-wrap">
-            <div className="text-base font-semibold text-foreground/90 group-hover:text-primary transition-colors tracking-tight">
+            <div className="text-base font-medium text-foreground/90 group-hover:text-primary transition-colors tracking-tight">
               {result.assessment_title}
             </div>
             {category === "VIOLATION" && (
-              <Badge variant="destructive" className="h-5 text-xs font-semibold px-2 py-0 rounded-full">
+              <Badge variant="destructive" className="h-5 text-xs font-medium px-2 py-0 rounded-full">
                 Violation
               </Badge>
             )}
@@ -160,7 +160,7 @@ export default function StudentResultsPage() {
         <div className="flex items-center gap-5 mt-4 md:mt-0">
           <div className="text-right shrink-0">
             <div className="flex items-baseline justify-end gap-1.5 tabular-nums">
-              <span className="text-lg font-bold text-foreground">
+              <span className="text-lg font-semibold text-foreground">
                 {result.score}
               </span>
               <span className="text-xs font-medium text-muted-foreground/50">
@@ -168,7 +168,7 @@ export default function StudentResultsPage() {
               </span>
             </div>
             <div className={cn(
-              "text-xs font-semibold mt-0.5",
+              "text-xs font-medium mt-0.5",
               category === "VIOLATION" ? "text-destructive" : 
               result.percentage >= 70 ? "text-emerald-600" :
               result.percentage >= 40 ? "text-primary" : "text-amber-600"
@@ -240,10 +240,10 @@ export default function StudentResultsPage() {
           <Card key={i} className="shadow-none border rounded-xl overflow-hidden bg-card">
             <CardContent className="p-4 space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stat.label}</span>
+                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{stat.label}</span>
                 <stat.icon className="size-4 text-primary/50" />
               </div>
-              <div className="text-2xl font-bold text-foreground tracking-tight">{stat.value}</div>
+              <div className="text-2xl font-semibold text-foreground tracking-tight">{stat.value}</div>
               {stat.progress !== undefined && (
                 <div className="pt-1">
                    <Progress value={stat.progress} className="h-1.5 bg-primary/10 rounded-full" />
@@ -268,7 +268,7 @@ export default function StudentResultsPage() {
             <div className="flex items-center gap-2.5">
                <ArrowUpDown className="size-4 text-muted-foreground/60" />
                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="h-9 text-xs font-semibold w-36 border border-border/60 bg-background/50 hover:bg-background/80 transition-colors rounded-lg shadow-none">
+                  <SelectTrigger className="h-9 text-xs font-medium w-36 border border-border/60 bg-background/50 hover:bg-background/80 transition-colors rounded-lg shadow-none">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -296,7 +296,7 @@ export default function StudentResultsPage() {
                 {Object.entries(groupedResults).map(([course, courseResults]: any) => (
                   <div key={course} className="space-y-2">
                     <div className="flex items-center gap-3 px-1">
-                       <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">{course}</h2>
+                       <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">{course}</h2>
                        <div className="h-[1px] flex-1 bg-border/40" />
                        <span className="text-xs font-medium text-muted-foreground/45">{courseResults.length} Items</span>
                     </div>

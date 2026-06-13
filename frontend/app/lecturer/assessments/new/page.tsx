@@ -174,6 +174,7 @@ interface BlueprintSection {
     hard: number;
   };
   aiPromptHint?: string;
+  bloomLevel?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
 }
 
 interface Question {
@@ -1552,6 +1553,7 @@ export default function NewAssessmentBuilder() {
       questions: "" as any,
       difficulty: "Medium",
       allowedTypes: ["mcq", "truefalse", "matching"],
+      bloomLevel: "understand",
     },
   ]);
 
@@ -1946,6 +1948,7 @@ export default function NewAssessmentBuilder() {
         questions: "" as any,
         difficulty: "Medium",
         allowedTypes: ["mcq"],
+        bloomLevel: "understand",
       },
     ]);
   };
@@ -2099,23 +2102,72 @@ export default function NewAssessmentBuilder() {
   const handleAIGenerate = async () => {
     setAiGenerating(true);
     try {
-      const res = await aiGenerationApi.generateQuestions({
-        subject: metadata.title || "Subject",
-        topic: aiGenerationConfig.topic,
-        question_type: mapFrontendToBackendType(aiGenerationConfig.question_type) as any,
-        difficulty: aiGenerationConfig.difficulty as any,
-        count: aiGenerationConfig.count,
-        bloom_level: aiGenerationConfig.bloom_level as any,
-        additional_context: aiGenerationConfig.additional_context,
-        target_assessment_id: draftId || undefined
-      });
-      setAiCandidates(res.questions || []);
-      setAiBatchId(res.id);
-      setAiDrawerOpen(false);
-      setAiReviewDrawerOpen(true);
-      toast.success("AI successfully generated question candidates!");
-    } catch (err) {
-      toast.error("Failed to generate questions with AI.");
+      if (aiTargetSectionId === "all") {
+        const allCandidates: any[] = [];
+        let successCount = 0;
+        
+        for (const sec of blueprint) {
+          try {
+            toast.info(`Generating questions for ${sec.section}: ${sec.topics || "General"}...`);
+            
+            const qType = sec.allowedTypes[0] || "mcq";
+            const res = await aiGenerationApi.generateQuestions({
+              subject: metadata.title || "Subject",
+              topic: sec.topics || metadata.title || "General",
+              question_type: mapFrontendToBackendType(qType) as any,
+              difficulty: sec.difficulty.toLowerCase() as any,
+              count: sec.questions || 3,
+              bloom_level: (sec.bloomLevel || "understand") as any,
+              additional_context: aiGenerationConfig.additional_context,
+              target_assessment_id: draftId || undefined
+            });
+            
+            const tagged = (res.questions || []).map((q) => ({
+              ...q,
+              _sectionId: sec.id
+            }));
+            
+            allCandidates.push(...tagged);
+            successCount++;
+          } catch (sectionErr) {
+            console.error(`Failed to generate questions for section ${sec.section}`, sectionErr);
+            toast.error(`Failed to generate questions for ${sec.section}`);
+          }
+        }
+        
+        if (allCandidates.length === 0) {
+          throw new Error("No questions were generated for any section.");
+        }
+        
+        setAiCandidates(allCandidates);
+        setAiDrawerOpen(false);
+        setAiReviewDrawerOpen(true);
+        toast.success(`Generated candidate questions for ${successCount} of ${blueprint.length} sections!`);
+      } else {
+        const res = await aiGenerationApi.generateQuestions({
+          subject: metadata.title || "Subject",
+          topic: aiGenerationConfig.topic,
+          question_type: mapFrontendToBackendType(aiGenerationConfig.question_type) as any,
+          difficulty: aiGenerationConfig.difficulty as any,
+          count: aiGenerationConfig.count,
+          bloom_level: aiGenerationConfig.bloom_level as any,
+          additional_context: aiGenerationConfig.additional_context,
+          target_assessment_id: draftId || undefined
+        });
+        
+        const tagged = (res.questions || []).map((q) => ({
+          ...q,
+          _sectionId: aiTargetSectionId
+        }));
+        
+        setAiCandidates(tagged);
+        setAiBatchId(res.id);
+        setAiDrawerOpen(false);
+        setAiReviewDrawerOpen(true);
+        toast.success("AI successfully generated question candidates!");
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate questions with AI.");
     } finally {
       setAiGenerating(false);
     }
@@ -2142,12 +2194,18 @@ export default function NewAssessmentBuilder() {
       });
       
       const qType = typeMap[candidate.question_type] || "shortanswer";
+      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+      const sectionObj = blueprint.find(s => s.id === targetSecId);
+      const marksPerQuestion = sectionObj && sectionObj.questions
+        ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
+        : 2;
+
       const newQ: Question = {
         id: candidate.id,
-        sectionId: aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId,
+        sectionId: targetSecId,
         text: candidate.parsed_question_text || "",
         type: qType as any,
-        marks: 2,
+        marks: marksPerQuestion,
         options: candidate._options?.map((o: any, idx: number) => ({
           option_text: o.text,
           is_correct: o.is_correct,
@@ -2198,12 +2256,18 @@ export default function NewAssessmentBuilder() {
         add_to_assessment_id: draftId || undefined
       });
       const qType = typeMap[candidate.question_type] || "shortanswer";
+      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+      const sectionObj = blueprint.find(s => s.id === targetSecId);
+      const marksPerQuestion = sectionObj && sectionObj.questions
+        ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
+        : 2;
+
       const newQ: Question = {
         id: candidate.id,
-        sectionId: aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId,
+        sectionId: targetSecId,
         text: editingText,
         type: qType as any,
-        marks: 2,
+        marks: marksPerQuestion,
         options: candidate._options?.map((o: any, idx: number) => ({
           option_text: o.text,
           is_correct: o.is_correct,
@@ -2240,21 +2304,28 @@ export default function NewAssessmentBuilder() {
         ordering: "ordering",
         case_study: "casestudy",
       };
-      const targetSecId = aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId;
-      const newQs = aiCandidates.map(c => ({
-        id: c.id,
-        sectionId: targetSecId,
-        text: c.parsed_question_text || "",
-        type: (typeMap[c.question_type] || "shortanswer") as any,
-        marks: 2,
-        options: c._options?.map((o: any, idx: number) => ({
-          option_text: o.text,
-          is_correct: o.is_correct,
-          order_index: idx
-        })) || [],
-        aiGenerated: true,
-        is_required: true,
-      }));
+      const newQs = aiCandidates.map(c => {
+        const targetSecId = (c as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+        const sectionObj = blueprint.find(s => s.id === targetSecId);
+        const marksPerQuestion = sectionObj && sectionObj.questions
+          ? Math.max(1, Math.round((parseInt(sectionObj.marks as any) || 2) / (parseInt(sectionObj.questions as any) || 1)))
+          : 2;
+
+        return {
+          id: c.id,
+          sectionId: targetSecId,
+          text: c.parsed_question_text || "",
+          type: (typeMap[c.question_type] || "shortanswer") as any,
+          marks: marksPerQuestion,
+          options: c._options?.map((o: any, idx: number) => ({
+            option_text: o.text,
+            is_correct: o.is_correct,
+            order_index: idx
+          })) || [],
+          aiGenerated: true,
+          is_required: true,
+        };
+      });
       setQuestions(prev => [...prev, ...newQs]);
       setAiCandidates([]);
       setAiReviewDrawerOpen(false);
@@ -3496,6 +3567,7 @@ export default function NewAssessmentBuilder() {
               <div className="flex gap-2">
                 <Button
                   onClick={() => {
+                    setAiTargetSectionId("all");
                     setAiGenerationConfig({
                       topic: metadata.title || "",
                       question_type: "mcq",
@@ -3520,7 +3592,7 @@ export default function NewAssessmentBuilder() {
                 </Button>
               </div>
             </div>
-
+ 
             <div className="space-y-4">
               {blueprint.map((sec, idx) => (
                 <Card key={sec.id} className="shadow-none border hover:border-primary/10 transition-colors">
@@ -3539,12 +3611,13 @@ export default function NewAssessmentBuilder() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
+                          setAiTargetSectionId(sec.id);
                           setAiGenerationConfig({
                             topic: sec.topics || metadata.title || "",
                             question_type: sec.allowedTypes[0] || "mcq",
                             difficulty: sec.difficulty.toLowerCase(),
                             count: sec.questions || 3,
-                            bloom_level: "apply",
+                            bloom_level: sec.bloomLevel || "understand",
                             additional_context: sec.aiPromptHint || "",
                             easyPercent: 30,
                             mediumPercent: 40,
@@ -3628,6 +3701,40 @@ export default function NewAssessmentBuilder() {
                             </ToggleGroupItem>
                           ))}
                         </ToggleGroup>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 pt-2">
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`difficulty-${sec.id}`} className="text-xs font-semibold">Section Difficulty</Label>
+                          <select
+                            id={`difficulty-${sec.id}`}
+                            value={sec.difficulty}
+                            onChange={(e) => updateSection(sec.id, "difficulty", e.target.value as any)}
+                            onBlur={() => runAutosave(4)}
+                            className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
+                          >
+                            <option value="Easy">Easy</option>
+                            <option value="Medium">Medium</option>
+                            <option value="Hard">Hard</option>
+                          </select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`bloom-${sec.id}`} className="text-xs font-semibold">Target Bloom&apos;s Level</Label>
+                          <select
+                            id={`bloom-${sec.id}`}
+                            value={sec.bloomLevel || "understand"}
+                            onChange={(e) => updateSection(sec.id, "bloomLevel", e.target.value as any)}
+                            onBlur={() => runAutosave(4)}
+                            className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
+                          >
+                            <option value="remember">Remembering</option>
+                            <option value="understand">Understanding</option>
+                            <option value="apply">Applying</option>
+                            <option value="analyze">Analyzing</option>
+                            <option value="evaluate">Evaluating</option>
+                            <option value="create">Creating</option>
+                          </select>
+                        </div>
                       </div>
                     </div>
                   </CardContent>
@@ -4337,84 +4444,118 @@ export default function NewAssessmentBuilder() {
             </SheetDescription>
           </SheetHeader>
           <div className="space-y-4 pt-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-semibold">Subject / Topic Focus</Label>
-              <Input
-                value={aiGenerationConfig.topic}
-                onChange={(e) => setAiGenerationConfig({ ...aiGenerationConfig, topic: e.target.value })}
-                placeholder="e.g. Database indexes, B-Trees, Query Optimization"
-              />
-            </div>
+            {aiTargetSectionId === "all" ? (
+              <div className="space-y-4">
+                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg space-y-2 text-xs text-zinc-600">
+                  <div><strong>Course Workspace:</strong> {selectedWorkspaceDetail?.title || "No course workspace selected"}</div>
+                  <div><strong>Assessment Title:</strong> {metadata.title || "Untitled Assessment"}</div>
+                  <div><strong>Assessment Type:</strong> {metadata.mode || "CAT"}</div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Question Type</Label>
-                <Select
-                  value={aiGenerationConfig.question_type}
-                  onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, question_type: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="mcq">Multiple Choice (MCQ)</SelectItem>
-                    <SelectItem value="truefalse">True / False</SelectItem>
-                    <SelectItem value="shortanswer">Short Answer</SelectItem>
-                    <SelectItem value="essay">Essay</SelectItem>
-                    <SelectItem value="matching">Matching Pairs</SelectItem>
-                    <SelectItem value="fillblank">Fill-in-the-Blank</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Target Questions Count</Label>
-                <Input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={aiGenerationConfig.count}
-                  onChange={(e) => setAiGenerationConfig({ ...aiGenerationConfig, count: parseInt(e.target.value) || 3 })}
-                />
-              </div>
-            </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-zinc-700">Blueprint Distribution Summary</Label>
+                  <div className="space-y-2 border p-3 rounded-lg bg-zinc-50/50">
+                    {blueprint.map((sec, idx) => (
+                      <div key={sec.id} className="flex justify-between items-center text-xs pb-1.5 border-b last:border-0 last:pb-0 border-zinc-100">
+                        <div>
+                          <span className="font-semibold text-zinc-800">Section {idx + 1}: {sec.section}</span>
+                          <div className="text-[10px] text-zinc-400 truncate max-w-[200px]">{sec.topics || "General topics"}</div>
+                        </div>
+                        <div className="text-right text-[10px] font-medium text-zinc-500">
+                          <div>{sec.questions || 0} Questions · {sec.marks || 0} Marks</div>
+                          <div className="uppercase text-[9px] text-zinc-400">{sec.difficulty} · {sec.bloomLevel || "understand"}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">Difficulty Level</Label>
-                <Select
-                  value={aiGenerationConfig.difficulty}
-                  onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, difficulty: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="easy">Easy</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="hard">Hard</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-[10px] text-amber-800 leading-normal">
+                  <strong>Assessment balancing:</strong> The AI Question Generation Agent will generate a balanced set of questions mapping to each blueprint section&apos;s topics, difficulty level, and Bloom&apos;s Taxonomy setting automatically.
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs font-semibold">{"Bloom's Taxonomy Level"}</Label>
-                <Select
-                  value={aiGenerationConfig.bloom_level}
-                  onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, bloom_level: v })}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="remember">Remember</SelectItem>
-                    <SelectItem value="understand">Understand</SelectItem>
-                    <SelectItem value="apply">Apply</SelectItem>
-                    <SelectItem value="analyze">Analyze</SelectItem>
-                    <SelectItem value="evaluate">Evaluate</SelectItem>
-                    <SelectItem value="create">Create</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            ) : (
+              <>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Subject / Topic Focus</Label>
+                  <Input
+                    value={aiGenerationConfig.topic}
+                    onChange={(e) => setAiGenerationConfig({ ...aiGenerationConfig, topic: e.target.value })}
+                    placeholder="e.g. Database indexes, B-Trees, Query Optimization"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold">Question Type</Label>
+                    <Select
+                      value={aiGenerationConfig.question_type}
+                      onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, question_type: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="mcq">Multiple Choice (MCQ)</SelectItem>
+                        <SelectItem value="truefalse">True / False</SelectItem>
+                        <SelectItem value="shortanswer">Short Answer</SelectItem>
+                        <SelectItem value="essay">Essay</SelectItem>
+                        <SelectItem value="matching">Matching Pairs</SelectItem>
+                        <SelectItem value="fillblank">Fill-in-the-Blank</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold">Target Questions Count</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={aiGenerationConfig.count}
+                      onChange={(e) => setAiGenerationConfig({ ...aiGenerationConfig, count: parseInt(e.target.value) || 3 })}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold">Difficulty Level</Label>
+                    <Select
+                      value={aiGenerationConfig.difficulty}
+                      onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, difficulty: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="easy">Easy</SelectItem>
+                        <SelectItem value="medium">Medium</SelectItem>
+                        <SelectItem value="hard">Hard</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs font-semibold">{"Bloom's Taxonomy Level"}</Label>
+                    <Select
+                      value={aiGenerationConfig.bloom_level}
+                      onValueChange={(v: any) => setAiGenerationConfig({ ...aiGenerationConfig, bloom_level: v })}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="remember">Remember</SelectItem>
+                        <SelectItem value="understand">Understand</SelectItem>
+                        <SelectItem value="apply">Apply</SelectItem>
+                        <SelectItem value="analyze">Analyze</SelectItem>
+                        <SelectItem value="evaluate">Evaluate</SelectItem>
+                        <SelectItem value="create">Create</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </>
+            )}
 
             <div className="space-y-1.5 pt-2">
               <Label className="text-xs font-semibold">Additional Context / Custom Prompt</Label>

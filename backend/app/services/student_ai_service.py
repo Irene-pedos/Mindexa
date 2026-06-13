@@ -105,8 +105,11 @@ class StudentAIService:
                 AssessmentAttempt.status.in_(
                     [AttemptStatus.IN_PROGRESS, AttemptStatus.PAUSED]
                 ),
-                Assessment.assessment_type.in_(
-                    [AssessmentType.CAT, AssessmentType.SUMMATIVE]
+                or_(
+                    Assessment.assessment_type.in_(
+                        [AssessmentType.CAT, AssessmentType.SUMMATIVE]
+                    ),
+                    Assessment.is_supervised == True,
                 ),
                 Assessment.status.in_(
                     [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE]
@@ -118,7 +121,7 @@ class StudentAIService:
         active_attempt_id = (await self.db.execute(stmt)).scalar_one_or_none()
         if active_attempt_id:
             raise PermissionDeniedError(
-                "Student AI support is unavailable during an active CAT or summative assessment attempt.",
+                "Student AI support is unavailable during an active CAT, summative, or supervised assessment attempt.",
                 code="AI_BLOCKED_DURING_ACTIVE_ASSESSMENT",
             )
 
@@ -145,10 +148,13 @@ class StudentAIService:
             )
 
         now = datetime.now(UTC)
-        is_exam_style = assessment.assessment_type in {
-            AssessmentType.CAT,
-            AssessmentType.SUMMATIVE,
-        }
+        is_exam_style = (
+            assessment.assessment_type in {
+                AssessmentType.CAT,
+                AssessmentType.SUMMATIVE,
+            }
+            or assessment.is_supervised
+        )
         window_is_open = (
             assessment.window_start is not None
             and assessment.window_start <= now
@@ -161,6 +167,6 @@ class StudentAIService:
             or is_locked
         ):
             raise PermissionDeniedError(
-                "Student AI support cannot use active CAT, summative, or locked assessment context.",
+                "Student AI support cannot use active CAT, summative, supervised, or locked assessment context.",
                 code="AI_CONTEXT_NOT_ALLOWED",
             )

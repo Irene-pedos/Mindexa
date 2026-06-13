@@ -173,6 +173,55 @@ async def submit_attempt(
     return AttemptDetailResponse.model_validate(attempt)
 
 
+# ── LIST MY ATTEMPTS ──────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/me",
+    response_model=AttemptListResponse,
+    summary="List the current student's attempts",
+)
+async def list_my_attempts(
+    status: AttemptStatus | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptListResponse:
+    repo = AttemptRepository(db)
+    items, total = await repo.list_by_student(
+        student_id=current_user.id,
+        status=status,
+        page=page,
+        page_size=page_size,
+    )
+    
+    summaries = []
+    from app.db.models.attempt import GroupSubmission
+    from sqlalchemy import select
+    
+    for a in items:
+        summary = AttemptSummary.model_validate(a)
+        if a.group_id:
+            sub_stmt = select(GroupSubmission).where(
+                GroupSubmission.assessment_id == a.assessment_id,
+                GroupSubmission.group_id == a.group_id
+            )
+            sub_res = await db.execute(sub_stmt)
+            submission = sub_res.scalar_one_or_none()
+            if submission:
+                summary.group_submission_id = submission.id
+                summary.group_submission_status = submission.status
+        summaries.append(summary)
+
+    return AttemptListResponse(
+        items=summaries,
+        total=total,
+        page=page,
+        page_size=page_size,
+    )
+
+
 # ── GET ATTEMPT ───────────────────────────────────────────────────────────────
 
 
@@ -303,55 +352,6 @@ async def get_attempt(
         ]
 
     return response
-
-
-# ── LIST MY ATTEMPTS ──────────────────────────────────────────────────────────
-
-
-@router.get(
-    "/me",
-    response_model=AttemptListResponse,
-    summary="List the current student's attempts",
-)
-async def list_my_attempts(
-    status: AttemptStatus | None = Query(default=None),
-    page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=20, ge=1, le=100),
-    current_user=Depends(require_student),
-    db: AsyncSession = Depends(get_db),
-) -> AttemptListResponse:
-    repo = AttemptRepository(db)
-    items, total = await repo.list_by_student(
-        student_id=current_user.id,
-        status=status,
-        page=page,
-        page_size=page_size,
-    )
-    
-    summaries = []
-    from app.db.models.attempt import GroupSubmission
-    from sqlalchemy import select
-    
-    for a in items:
-        summary = AttemptSummary.model_validate(a)
-        if a.group_id:
-            sub_stmt = select(GroupSubmission).where(
-                GroupSubmission.assessment_id == a.assessment_id,
-                GroupSubmission.group_id == a.group_id
-            )
-            sub_res = await db.execute(sub_stmt)
-            submission = sub_res.scalar_one_or_none()
-            if submission:
-                summary.group_submission_id = submission.id
-                summary.group_submission_status = submission.status
-        summaries.append(summary)
-
-    return AttemptListResponse(
-        items=summaries,
-        total=total,
-        page=page,
-        page_size=page_size,
-    )
 
 
 # ── LIST ATTEMPTS FOR ASSESSMENT (Supervisor) ─────────────────────────────────

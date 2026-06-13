@@ -1409,10 +1409,22 @@ class AssessmentRepository:
             )
         )
 
+        workspace_stmt = (
+            select(Assessment.id)
+            .join(TeachingWorkspace, TeachingWorkspace.id == Assessment.teaching_workspace_id)
+            .join(StudentEnrollment, StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id)
+            .where(
+                StudentEnrollment.student_id == student_id,
+                StudentEnrollment.is_deleted == False,
+                not_(Assessment.id.in_(has_targets_stmt))
+            )
+        )
+
         # Combined availability
         availability_filter = or_(
             Assessment.id.in_(targeted_stmt),
-            Assessment.id.in_(course_stmt)
+            Assessment.id.in_(course_stmt),
+            Assessment.id.in_(workspace_stmt),
         )
         filters.append(availability_filter)
 

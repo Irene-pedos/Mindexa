@@ -917,6 +917,7 @@ class AssessmentService:
                     student_id=current_user.id,
                     assessment_id=a.id
                 )
+                summary.attempts_used = len(attempts)
                 if not attempts:
                     summary.student_status = "NOT_STARTED"
                 else:
@@ -932,6 +933,7 @@ class AssessmentService:
                         summary.student_status = "IN_PROGRESS"
                         # For IN_PROGRESS, use the most recent active attempt
                         summary.student_attempt_id = attempts[0].id
+                        summary.student_attempt_expires_at = attempts[0].expires_at
 
                     # For group work, reflect group submission status
                     if a.is_group_assessment and attempts[0].group_id:

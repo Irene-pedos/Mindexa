@@ -70,9 +70,14 @@ export interface ReviewAIQuestionRequest {
 
 export const aiGenerationApi = {
   async generateQuestions(data: GenerateQuestionsRequest): Promise<AIGenerationBatchDetailResponse> {
+    const { target_assessment_id, ...rest } = data;
+    const payload = {
+      ...rest,
+      assessment_id: target_assessment_id,
+    };
     const res = await apiClient("/ai/generate", {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
     });
     return _parseBatchQuestions(res);
   },

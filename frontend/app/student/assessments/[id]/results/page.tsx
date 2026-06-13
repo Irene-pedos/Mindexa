@@ -316,7 +316,7 @@ function QuestionCard({
               {item.grading_mode?.toLowerCase().includes("ai") && (
                 <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
                   <Cpu className="size-3" />
-                  AI-assisted grading · reviewed by lecturer
+                  AI-assisted · reviewed by lecturer
                 </div>
               )}
             </>

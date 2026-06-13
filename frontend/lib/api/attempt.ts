@@ -5,7 +5,11 @@ export const attemptApi = {
   startAttempt: (data: Record<string, unknown>) => apiClient(`/attempts/start`, { method: "POST", body: JSON.stringify(data) }),
   getAttempt: (attemptId: string) => apiClient(`/attempts/${attemptId}`),
   getAttemptDetail: (attemptId: string, accessToken: string) => apiClient(`/attempts/${attemptId}?access_token=${accessToken}`),
-  resumeAttempt: (attemptId: string) => apiClient(`/attempts/${attemptId}/resume`, { method: "POST" }),
+  resumeAttempt: (attemptId: string, accessToken: string) => 
+    apiClient(`/attempts/${attemptId}/resume`, { 
+      method: "POST", 
+      body: JSON.stringify({ access_token: accessToken }) 
+    }),
   submitAttempt: (attemptId: string, accessToken: string, confirm: boolean = true) => 
     apiClient(`/attempts/${attemptId}/submit`, { 
       method: "POST", 

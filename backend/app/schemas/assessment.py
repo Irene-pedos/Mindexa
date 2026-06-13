@@ -318,6 +318,13 @@ class AssessmentSummaryResponse(BaseModel):
     target_class: str | None = None
     student_status: str | None = None  # NOT_STARTED, IN_PROGRESS, SUBMITTED
     student_attempt_id: uuid.UUID | None = None
+    student_attempt_expires_at: datetime | None = None
+    is_password_protected: bool = False
+    ai_assistance_allowed: bool = False
+    is_open_book: bool = False
+    late_submission_allowed: bool = False
+    is_supervised: bool = False
+    attempts_used: int = 0
     created_at: datetime
     updated_at: datetime
 

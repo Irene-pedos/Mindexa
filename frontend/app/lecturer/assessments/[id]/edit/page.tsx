@@ -687,13 +687,42 @@ export default function EditAssessmentPage() {
   };
 
   const preparePayload = () => {
+    const parseTimeString = (timeStr: string, baseDate: Date) => {
+      const d = new Date(baseDate);
+      const [time, modifier] = timeStr.trim().split(/\s+/);
+      const [h, m] = time.split(":");
+      let hours = parseInt(h);
+      const minutes = parseInt(m);
+      if (modifier?.toLowerCase() === "pm" && hours < 12) hours += 12;
+      if (modifier?.toLowerCase() === "am" && hours === 12) hours = 0;
+      d.setHours(hours, minutes, 0, 0);
+      return d;
+    };
+
+    let startD: Date | undefined;
+    let endD: Date | undefined;
+    const metaWithWindow: any = {
+      ...metadata,
+      durationMinutes: parseInt(metadata.durationMinutes),
+      passing_marks: parseInt(metadata.passing_marks),
+    };
+
+    if (metadata.date && metadata.startTime) {
+      startD = parseTimeString(metadata.startTime, metadata.date);
+      metaWithWindow.windowStart = startD.toISOString();
+    }
+    if (metadata.date && metadata.endTime) {
+      endD = parseTimeString(metadata.endTime, metadata.date);
+      if (startD && endD <= startD) {
+        // Handle over midnight end time by adding 1 day
+        endD.setDate(endD.getDate() + 1);
+      }
+      metaWithWindow.windowEnd = endD.toISOString();
+    }
+
     const payload = {
       id,
-      metadata: {
-          ...metadata,
-          durationMinutes: parseInt(metadata.durationMinutes),
-          passing_marks: parseInt(metadata.passing_marks),
-      },
+      metadata: metaWithWindow,
       blueprint,
       questions: questions.map(q => ({
           ...q,
