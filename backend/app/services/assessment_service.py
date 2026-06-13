@@ -30,47 +30,38 @@ FINALIZATION RULES (all must pass):
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.constants import AssessmentStatus, UserRole
-from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (AuthorizationError, ConflictError,
+                                 NotFoundError, ValidationError)
 from app.core.security import hash_password
 from app.db.enums import AssessmentStatus as DbAssessmentStatus
 from app.db.enums import AssessmentType as DbAssessmentType
-from app.db.enums import (
-    DifficultyLevel,
-    GroupAssignmentMode,
-    GradingMode,
-    GroupSubmissionStatus,
-    QuestionAddedVia,
-    QuestionSourceType,
-    QuestionDistributionMode,
-    QuestionType as DbQuestionType,
-    ResultReleaseMode,
-    AttemptStatus,
-    SupervisorRole,
-)
-from app.db.models.auth import User
+from app.db.enums import (AttemptStatus, DifficultyLevel, GradingMode,
+                          GroupAssignmentMode, GroupSubmissionStatus,
+                          QuestionAddedVia, QuestionDistributionMode,
+                          QuestionSourceType)
+from app.db.enums import QuestionType as DbQuestionType
+from app.db.enums import ResultReleaseMode, SupervisorRole
 from app.db.models.assessment import AssessmentSupervisor
+from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.repositories.question_repo import QuestionRepository
-from app.schemas.assessment import (
-    AddQuestionToAssessmentRequest,
-    AssessmentCreateRequest,
-    AssessmentGeneralUpdate,
-    AssessmentListResponse,
-    AssessmentSectionCreate,
-    AssessmentSectionUpdate,
-    AssessmentSecuritySettingsUpdate,
-    AssessmentSummaryResponse,
-    BulkAssessmentPublishRequest,
-    FinalizeAssessmentResponse,
-    ReorderQuestionsRequest,
-)
+from app.schemas.assessment import (AddQuestionToAssessmentRequest,
+                                    AssessmentCreateRequest,
+                                    AssessmentGeneralUpdate,
+                                    AssessmentListResponse,
+                                    AssessmentSectionCreate,
+                                    AssessmentSectionUpdate,
+                                    AssessmentSecuritySettingsUpdate,
+                                    AssessmentSummaryResponse,
+                                    BulkAssessmentPublishRequest,
+                                    FinalizeAssessmentResponse,
+                                    ReorderQuestionsRequest)
 from app.services.blueprint_service import BlueprintService
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AssessmentService:
@@ -125,7 +116,7 @@ class AssessmentService:
         workspace = await ws_repo.get_by_id(data.teaching_workspace_id)
         if not workspace:
             raise NotFoundError("Teaching Workspace", str(data.teaching_workspace_id))
-            
+
         # Verify ownership
         if workspace.teaching_assignment.lecturer_id != created_by.id and created_by.role != "ADMIN":
             from app.core.exceptions import AuthorizationError
@@ -207,7 +198,7 @@ class AssessmentService:
         update_fields = {}
         if data.teaching_workspace_id is not None:
             update_fields["teaching_workspace_id"] = data.teaching_workspace_id
-            from app.db.models.academic import TeachingWorkspace, CourseSubject
+            from app.db.models.academic import CourseSubject, TeachingWorkspace
             from sqlalchemy import select
             res = await self.db.execute(
                 select(TeachingWorkspace).where(TeachingWorkspace.id == data.teaching_workspace_id)
@@ -289,7 +280,7 @@ class AssessmentService:
             update_fields["audience_type"] = data.audience_type
         if data.target_student_ids is not None:
             update_fields["target_student_ids"] = data.target_student_ids
-            
+
         # Security/Integrity additions
         if data.max_attempts is not None:
             update_fields["max_attempts"] = data.max_attempts
@@ -313,9 +304,9 @@ class AssessmentService:
         # Update target sections (class groups)
         if data.class_group_ids is not None:
             # Clear existing targets
+            from app.db.models.academic import ClassSection, TeachingAssignment
             from app.db.models.assessment import AssessmentTargetSection
-            from app.db.models.academic import TeachingAssignment, ClassSection
-            from sqlalchemy import update, select
+            from sqlalchemy import select, update
             await self.db.execute(
                 update(AssessmentTargetSection)
                 .where(AssessmentTargetSection.assessment_id == assessment_id)
@@ -341,8 +332,8 @@ class AssessmentService:
                     self.db.add(target)
 
         if "teaching_workspace_id" in update_fields and update_fields["teaching_workspace_id"]:
-            from app.db.models.assessment import AssessmentTargetSection
             from app.db.models.academic import TeachingWorkspace
+            from app.db.models.assessment import AssessmentTargetSection
             from sqlalchemy import select, update
             await self.db.execute(
                 update(AssessmentTargetSection)
@@ -364,8 +355,8 @@ class AssessmentService:
         # Update supervisors
         if data.supervisor_ids is not None:
             # Clear existing supervisors
-            from app.db.models.assessment import AssessmentSupervisor
             from app.db.enums import SupervisorRole
+            from app.db.models.assessment import AssessmentSupervisor
             from sqlalchemy import update
             await self.db.execute(
                 update(AssessmentSupervisor)
@@ -678,7 +669,7 @@ class AssessmentService:
             else:
                 if assessment.group_invalidated_at is not None:
                     errors.append("Group assignments were invalidated and must be rebuilt before finalizing.")
-                
+
                 # Check for enrollment changes (Phase 12 rule)
                 from app.services.group_work_service import GroupWorkService
                 group_svc = GroupWorkService(self.db)
@@ -706,7 +697,8 @@ class AssessmentService:
 
         # Capture student enrollment snapshot
         try:
-            from app.db.models.academic import StudentEnrollment, AssessmentTargetSection
+            from app.db.models.academic import (AssessmentTargetSection,
+                                                StudentEnrollment)
             from app.db.models.auth import User, UserProfile
             from sqlalchemy import select
 
@@ -737,7 +729,7 @@ class AssessmentService:
                     "name": f"{fname} {lname}",
                     "student_id": sid or "N/A"
                 })
-            
+
             await self._repo.update_fields(
                 assessment_id,
                 updated_by_id=current_user.id,
@@ -783,7 +775,7 @@ class AssessmentService:
                     reference_type="assessment",
                     action_url=f"/student/assessments",
                 )
-                
+
                 # If already active, send start work notification too
                 now = datetime.now(tz=UTC)
                 if assessment.window_start and assessment.window_start <= now:
@@ -910,7 +902,7 @@ class AssessmentService:
             if hasattr(a, "course") and a.course:
                 summary.course_name = a.course.name
                 summary.course_code = a.course.code
-            
+
             # Populate student status if current user is a student
             if current_user.role == UserRole.STUDENT.value:
                 attempts, _ = await self._attempt_repo.list_by_student(
@@ -966,16 +958,16 @@ class AssessmentService:
         assessment = await self._repo.get_by_id_simple(assessment_id)
         if not assessment:
             raise NotFoundError("Assessment not found.")
-        
+
         self._assert_can_edit(assessment, current_user)
-        
+
         # Only block if it's currently ACTIVE (being taken by students)
         if assessment.status == DbAssessmentStatus.ACTIVE and current_user.role != UserRole.ADMIN.value:
             raise ConflictError(
                 "Active assessments currently being taken cannot be deleted. Archive them instead or contact an admin.",
                 code="CANNOT_DELETE_ACTIVE",
             )
-            
+
         await self._repo.soft_delete(assessment_id, deleted_by_id=current_user.id)
 
     # ─── Internal Helpers ─────────────────────────────────────────────────────
@@ -1060,7 +1052,7 @@ class AssessmentService:
                                 base_date = datetime.fromisoformat(base_date.replace("Z", "+00:00"))
                             except ValueError:
                                 return None
-                        
+
                         if not hasattr(base_date, "date"):
                             return None
 
@@ -1079,17 +1071,18 @@ class AssessmentService:
                 window_end = parse_time(data.metadata.endTime)
 
         # 2. Get or Create Assessment
-        from sqlalchemy import or_, select, update
-        from app.db.models.academic import Course, TeachingWorkspace, ClassSection
-        from app.db.models.assessment import AssessmentTargetSection
         from app.db.enums import AssessmentStatus as DbAssessmentStatus
-        
+        from app.db.models.academic import (ClassSection, Course,
+                                            TeachingWorkspace)
+        from app.db.models.assessment import AssessmentTargetSection
+        from sqlalchemy import or_, select, update
+
         teaching_workspace_id = None
         course_id = None
         subject_id = None
 
         # Determine Teaching Workspace & Course
-        # Strategy: 
+        # Strategy:
         # 1. If teaching_workspace_id is provided, use it and get course_id from it.
         # 2. If course_id is provided, try to see if it's actually a workspace ID.
         # 3. If it's a real course ID, find/default a workspace for this lecturer.
@@ -1141,7 +1134,7 @@ class AssessmentService:
             if workspace:
                 teaching_workspace_id = workspace.id
             else:
-                # Fallback: Just take any active workspace for this course if admin, 
+                # Fallback: Just take any active workspace for this course if admin,
                 # or raise if lecturer can't be found
                 res = await self.db.execute(
                     select(TeachingWorkspace).where(
@@ -1174,10 +1167,10 @@ class AssessmentService:
             assessment = await self._repo.get_by_id_simple(data.id)
             if not assessment:
                 raise NotFoundError("Assessment to update not found.")
-            
+
             # Check permissions
             self._assert_can_edit(assessment, current_user)
-            
+
             # Update basic fields
             update_data = {
                 "title": data.metadata.title,
@@ -1203,13 +1196,14 @@ class AssessmentService:
                 "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
                 "audience_type": data.metadata.audience_type,
                 "target_student_ids": data.metadata.target_student_ids,
-                "draft_step": data.draft_step,
             }
+            if data.draft_step is not None:
+                update_data["draft_step"] = data.draft_step
             if data.rules.autosaveToken:
                 update_data["autosave_token"] = data.rules.autosaveToken
 
             await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **update_data)
-            
+
             # Clear existing sections and questions to rebuild them
             await self._repo.clear_sections_and_questions(assessment.id)
         else:
@@ -1314,7 +1308,7 @@ class AssessmentService:
                     # Check to avoid duplicate if it's the same as ws_section_id
                     if not teaching_workspace_id or str(section_id) != str(ws_section_id):
                         self.db.add(target)
-        
+
         await self.db.flush()
 
         # 4. Create Sections & Questions
@@ -1334,7 +1328,7 @@ class AssessmentService:
 
         # Add questions
         from app.db.models.question import Question as QuestionModel
-        
+
         for i, q in enumerate(data.questions):
             # Map frontend question type to DB enum
             q_type_map = {
@@ -1362,15 +1356,15 @@ class AssessmentService:
                 is_in_question_bank=False,
                 source_type=QuestionSourceType.MANUAL,
                 grading_mode=GradingMode.MANUAL if db_q_type in [
-                    DbQuestionType.SHORT_ANSWER, 
-                    DbQuestionType.ESSAY, 
-                    DbQuestionType.COMPUTATIONAL, 
+                    DbQuestionType.SHORT_ANSWER,
+                    DbQuestionType.ESSAY,
+                    DbQuestionType.COMPUTATIONAL,
                     DbQuestionType.CASE_STUDY
                 ] else GradingMode.AUTO
             )
             if q.caseStudyContext:
                 new_q.case_study_context = q.caseStudyContext
-                
+
             self.db.add(new_q)
             await self.db.flush()
 
@@ -1440,11 +1434,12 @@ class AssessmentService:
 
         # 5. Handle Supervisors
         from sqlalchemy import delete
+
         # Clear existing supervisors for updates
         await self.db.execute(
             delete(AssessmentSupervisor).where(AssessmentSupervisor.assessment_id == assessment.id)
         )
-        
+
         # Add creator as primary supervisor
         creator_supervisor = AssessmentSupervisor(
             assessment_id=assessment.id,
@@ -1453,7 +1448,7 @@ class AssessmentService:
             assigned_by_id=current_user.id
         )
         self.db.add(creator_supervisor)
-        
+
         # Add extra supervisors from payload
         if data.rules.supervisor_ids:
             for s_id in data.rules.supervisor_ids:

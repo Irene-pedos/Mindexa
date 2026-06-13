@@ -172,7 +172,12 @@ interface DeleteDialogProps {
   onConfirm: () => Promise<void>;
 }
 
-function DeleteDialog({ open, assessment, onClose, onConfirm }: DeleteDialogProps) {
+function DeleteDialog({
+  open,
+  assessment,
+  onClose,
+  onConfirm,
+}: DeleteDialogProps) {
   const [typed, setTyped] = useState("");
   const [busy, setBusy] = useState(false);
   const isRisky = assessment ? RISKY_STATUSES.has(assessment.status) : false;
@@ -202,8 +207,8 @@ function DeleteDialog({ open, assessment, onClose, onConfirm }: DeleteDialogProp
             {isRisky ? (
               <>
                 <span className="block mb-2 font-medium text-destructive/80">
-                  This assessment is <strong>{assessment?.status}</strong> and may have student data.
-                  This action cannot be undone.
+                  This assessment is <strong>{assessment?.status}</strong> and
+                  may have student data. This action cannot be undone.
                 </span>
                 Type the assessment title to confirm:
                 <span className="block mt-1 px-2 py-1 bg-muted rounded text-foreground font-mono text-[11px]">
@@ -217,12 +222,18 @@ function DeleteDialog({ open, assessment, onClose, onConfirm }: DeleteDialogProp
                 />
               </>
             ) : (
-              <>Are you sure you want to delete &ldquo;{assessment?.title}&rdquo;? This cannot be undone.</>
+              <>
+                Are you sure you want to delete &ldquo;{assessment?.title}
+                &rdquo;? This cannot be undone.
+              </>
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="h-8 rounded-lg text-xs" onClick={handleClose}>
+          <AlertDialogCancel
+            className="h-8 rounded-lg text-xs"
+            onClick={handleClose}
+          >
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
@@ -247,7 +258,12 @@ interface BulkDeleteDialogProps {
   onConfirm: () => Promise<void>;
 }
 
-function BulkDeleteDialog({ open, count, onClose, onConfirm }: BulkDeleteDialogProps) {
+function BulkDeleteDialog({
+  open,
+  count,
+  onClose,
+  onConfirm,
+}: BulkDeleteDialogProps) {
   const [busy, setBusy] = useState(false);
   const handleConfirm = async () => {
     setBusy(true);
@@ -264,13 +280,19 @@ function BulkDeleteDialog({ open, count, onClose, onConfirm }: BulkDeleteDialogP
             Delete {count} Draft{count !== 1 ? "s" : ""}
           </AlertDialogTitle>
           <AlertDialogDescription className="text-xs text-muted-foreground">
-            This will permanently delete the selected draft assessments. This action cannot be undone.
+            This will permanently delete the selected draft assessments. This
+            action cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="h-8 rounded-lg text-xs" onClick={onClose}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel
+            className="h-8 rounded-lg text-xs"
+            onClick={onClose}
+          >
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
-            className="h-8 rounded-lg text-xs bg-destructive hover:bg-destructive/90"
+            className="h-8 rounded-lg text-xs bg-destructive hover:bg-destructive/90 text-white"
             disabled={busy}
             onClick={handleConfirm}
           >
@@ -331,16 +353,26 @@ export default function ManageAssessmentsPage() {
     } finally {
       setLoading(false);
     }
-  }, [statusTab, page, pageSize, sortBy, typeFilter, gradingFilter, debouncedSearch]);
+  }, [
+    statusTab,
+    page,
+    pageSize,
+    sortBy,
+    typeFilter,
+    gradingFilter,
+    debouncedSearch,
+  ]);
 
   // Fetch counts for tab badges (all statuses, once on mount and after mutations)
   const fetchTabCounts = useCallback(async () => {
     try {
-      const statuses = STATUS_TABS.filter((t) => t.value !== "all").map((t) => t.value);
+      const statuses = STATUS_TABS.filter((t) => t.value !== "all").map(
+        (t) => t.value,
+      );
       const results = await Promise.allSettled(
         statuses.map((s) =>
-          assessmentApi.getAssessments({ status: s, page: 1, page_size: 1 })
-        )
+          assessmentApi.getAssessments({ status: s, page: 1, page_size: 1 }),
+        ),
       );
       const counts: Record<string, number> = {};
       results.forEach((r, i) => {
@@ -402,7 +434,8 @@ export default function ManageAssessmentsPage() {
     }
 
     if (ok > 0) toast.success(`Deleted ${ok} draft${ok !== 1 ? "s" : ""}`);
-    if (fail > 0) toast.error(`${fail} deletion${fail !== 1 ? "s" : ""} failed`);
+    if (fail > 0)
+      toast.error(`${fail} deletion${fail !== 1 ? "s" : ""} failed`);
     setSelectedIds([]);
     setBulkDeleteOpen(false);
     fetchAssessments();
@@ -451,7 +484,10 @@ export default function ManageAssessmentsPage() {
     : assessments.map((a) => a.id);
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === selectableIds.length && selectableIds.length > 0) {
+    if (
+      selectedIds.length === selectableIds.length &&
+      selectableIds.length > 0
+    ) {
       setSelectedIds([]);
     } else {
       setSelectedIds(selectableIds);
@@ -461,7 +497,7 @@ export default function ManageAssessmentsPage() {
   const toggleSelect = (id: string, isDraft: boolean) => {
     if (!isDraft) return; // Can only select drafts for bulk ops
     setSelectedIds((prev) =>
-      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id],
     );
   };
 
@@ -469,7 +505,9 @@ export default function ManageAssessmentsPage() {
 
   const totalPages = Math.ceil(totalCount / pageSize);
   const needsGradingCount = assessments.filter(
-    (a) => (a.status === "ACTIVE" || a.status === "CLOSED") && a.grading_mode !== "AUTO"
+    (a) =>
+      (a.status === "ACTIVE" || a.status === "CLOSED") &&
+      a.grading_mode !== "AUTO",
   ).length;
 
   return (
@@ -498,7 +536,8 @@ export default function ManageAssessmentsPage() {
         <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
           <Cpu className="size-3.5 text-amber-600 shrink-0" />
           <p className="text-xs text-amber-800 font-medium">
-            {needsGradingCount} assessment{needsGradingCount !== 1 ? "s" : ""} currently open or closed require manual grading attention.
+            {needsGradingCount} assessment{needsGradingCount !== 1 ? "s" : ""}{" "}
+            currently open or closed require manual grading attention.
           </p>
           <Button
             variant="ghost"
@@ -523,47 +562,79 @@ export default function ManageAssessmentsPage() {
                 <SelectValue placeholder="Sort" />
               </SelectTrigger>
               <SelectContent className="rounded-xl text-xs">
-                <SelectItem value="newest" className="text-xs">Newest first</SelectItem>
-                <SelectItem value="oldest" className="text-xs">Oldest first</SelectItem>
-                <SelectItem value="title" className="text-xs">Alphabetical</SelectItem>
+                <SelectItem value="newest" className="text-xs">
+                  Newest first
+                </SelectItem>
+                <SelectItem value="oldest" className="text-xs">
+                  Oldest first
+                </SelectItem>
+                <SelectItem value="title" className="text-xs">
+                  Alphabetical
+                </SelectItem>
               </SelectContent>
             </Select>
 
             {/* Type filter */}
-            <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setPage(1); }}>
+            <Select
+              value={typeFilter}
+              onValueChange={(v) => {
+                setTypeFilter(v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger className="w-36 h-7 text-[11px] rounded-lg bg-background border-muted/60 shadow-none font-medium">
                 <Filter className="mr-1.5 size-3 text-muted-foreground/60" />
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent className="rounded-xl text-xs">
-                <SelectItem value="all" className="text-xs">All types</SelectItem>
+                <SelectItem value="all" className="text-xs">
+                  All types
+                </SelectItem>
                 {ASSESSMENT_TYPES.map((t) => (
-                  <SelectItem key={t} value={t} className="text-xs">{t}</SelectItem>
+                  <SelectItem key={t} value={t} className="text-xs">
+                    {t}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
             {/* Grading mode filter */}
-            <Select value={gradingFilter} onValueChange={(v) => { setGradingFilter(v); setPage(1); }}>
+            <Select
+              value={gradingFilter}
+              onValueChange={(v) => {
+                setGradingFilter(v);
+                setPage(1);
+              }}
+            >
               <SelectTrigger className="w-36 h-7 text-[11px] rounded-lg bg-background border-muted/60 shadow-none font-medium">
                 <CheckSquare className="mr-1.5 size-3 text-muted-foreground/60" />
                 <SelectValue placeholder="Grading" />
               </SelectTrigger>
               <SelectContent className="rounded-xl text-xs">
-                <SelectItem value="all" className="text-xs">All grading</SelectItem>
+                <SelectItem value="all" className="text-xs">
+                  All grading
+                </SelectItem>
                 {GRADING_MODES.map((m) => (
-                  <SelectItem key={m} value={m} className="text-xs">{m}</SelectItem>
+                  <SelectItem key={m} value={m} className="text-xs">
+                    {m}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
 
             {/* Clear filters */}
-            {(typeFilter !== "all" || gradingFilter !== "all" || searchTerm) && (
+            {(typeFilter !== "all" ||
+              gradingFilter !== "all" ||
+              searchTerm) && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground rounded-lg"
-                onClick={() => { setTypeFilter("all"); setGradingFilter("all"); setSearchTerm(""); }}
+                onClick={() => {
+                  setTypeFilter("all");
+                  setGradingFilter("all");
+                  setSearchTerm("");
+                }}
               >
                 <RefreshCw className="size-3 mr-1" /> Clear
               </Button>
@@ -600,12 +671,17 @@ export default function ManageAssessmentsPage() {
           ) : (
             <Tabs
               value={statusTab}
-              onValueChange={(v) => { setStatusTab(v); setPage(1); setSelectedIds([]); }}
+              onValueChange={(v) => {
+                setStatusTab(v);
+                setPage(1);
+                setSelectedIds([]);
+              }}
             >
               {/* Tabs */}
               <TabsList className="bg-muted/30 p-0.5 rounded-xl w-full flex-wrap h-auto gap-0.5 mb-3">
                 {STATUS_TABS.map((tab) => {
-                  const count = tab.value === "all" ? totalCount : tabCounts[tab.value];
+                  const count =
+                    tab.value === "all" ? totalCount : tabCounts[tab.value];
                   return (
                     <TabsTrigger
                       key={tab.value}
@@ -628,7 +704,8 @@ export default function ManageAssessmentsPage() {
                 {selectedIds.length > 0 && (
                   <div className="flex items-center justify-between bg-primary/5 px-3 py-1.5 rounded-lg border border-primary/10 mb-2">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">
-                      {selectedIds.length} draft{selectedIds.length !== 1 ? "s" : ""} selected
+                      {selectedIds.length} draft
+                      {selectedIds.length !== 1 ? "s" : ""} selected
                     </span>
                     <Button
                       variant="destructive"
@@ -648,7 +725,10 @@ export default function ManageAssessmentsPage() {
                       <TableRow className="hover:bg-transparent border-none">
                         <TableHead className="w-[36px] px-3">
                           <Checkbox
-                            checked={selectableIds.length > 0 && selectedIds.length === selectableIds.length}
+                            checked={
+                              selectableIds.length > 0 &&
+                              selectedIds.length === selectableIds.length
+                            }
                             onCheckedChange={toggleSelectAll}
                           />
                         </TableHead>
@@ -681,15 +761,23 @@ export default function ManageAssessmentsPage() {
                     <TableBody>
                       {assessments.length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={9} className="text-center py-20 text-muted-foreground">
+                          <TableCell
+                            colSpan={9}
+                            className="text-center py-20 text-muted-foreground"
+                          >
                             <div className="flex flex-col items-center gap-3">
                               <BookOpen className="size-8 opacity-10" />
                               <p className="text-xs font-medium text-muted-foreground/60">
                                 No assessments found
                               </p>
-                              <Button size="sm" asChild className="h-7 rounded-full px-4 text-xs">
+                              <Button
+                                size="sm"
+                                asChild
+                                className="h-7 rounded-full px-4 text-xs"
+                              >
                                 <Link href="/lecturer/assessments/new">
-                                  <Plus className="size-3.5 mr-1" /> Create your first assessment
+                                  <Plus className="size-3.5 mr-1" /> Create your
+                                  first assessment
                                 </Link>
                               </Button>
                             </div>
@@ -700,7 +788,10 @@ export default function ManageAssessmentsPage() {
                           const isDraft = item.status === "DRAFT";
                           const isActive = item.status === "ACTIVE";
                           const isClosed = item.status === "CLOSED";
-                          const canEdit = isDraft || item.status === "PUBLISHED" || item.status === "SCHEDULED";
+                          const canEdit =
+                            isDraft ||
+                            item.status === "PUBLISHED" ||
+                            item.status === "SCHEDULED";
                           const totalQ = (item as any).question_count ?? null;
                           const draftStep = isDraft ? item.draft_step : null;
 
@@ -717,8 +808,12 @@ export default function ManageAssessmentsPage() {
                                 <Checkbox
                                   checked={selectedIds.includes(item.id)}
                                   disabled={!isDraft}
-                                  onCheckedChange={() => toggleSelect(item.id, isDraft)}
-                                  className={cn(!isDraft && "opacity-20 cursor-not-allowed")}
+                                  onCheckedChange={() =>
+                                    toggleSelect(item.id, isDraft)
+                                  }
+                                  className={cn(
+                                    !isDraft && "opacity-20 cursor-not-allowed",
+                                  )}
                                 />
                               </TableCell>
 
@@ -734,11 +829,12 @@ export default function ManageAssessmentsPage() {
                                       {fmtDate(item.window_start)}
                                     </span>
                                   )}
-                                  {draftStep !== null && draftStep !== undefined && (
-                                    <span className="text-[9px] px-1.5 py-0 rounded-full bg-violet-50 text-violet-600 border border-violet-100 font-medium">
-                                      Step {draftStep} of 6
-                                    </span>
-                                  )}
+                                  {draftStep !== null &&
+                                    draftStep !== undefined && (
+                                      <span className="text-[9px] px-1.5 py-0 rounded-full bg-violet-50 text-violet-600 border border-violet-100 font-medium">
+                                        Step {draftStep} of 6
+                                      </span>
+                                    )}
                                   {item.max_attempts > 1 && (
                                     <span className="text-[9px] text-muted-foreground">
                                       ×{item.max_attempts} attempts
@@ -775,10 +871,12 @@ export default function ManageAssessmentsPage() {
                                   variant="outline"
                                   className={cn(
                                     "text-[8px] font-bold uppercase tracking-tight h-4 px-1.5 rounded",
-                                    gradingModeStyle(item.grading_mode)
+                                    gradingModeStyle(item.grading_mode),
                                   )}
                                 >
-                                  {item.grading_mode === "AI_ASSISTED" ? "AI" : item.grading_mode}
+                                  {item.grading_mode === "AI_ASSISTED"
+                                    ? "AI"
+                                    : item.grading_mode}
                                 </Badge>
                               </TableCell>
 
@@ -787,7 +885,7 @@ export default function ManageAssessmentsPage() {
                                 <span
                                   className={cn(
                                     "text-[8px] font-bold uppercase tracking-tight px-1.5 py-0.5 rounded",
-                                    releaseStyle(item.result_release_mode)
+                                    releaseStyle(item.result_release_mode),
                                   )}
                                 >
                                   {item.result_release_mode ?? "—"}
@@ -798,11 +896,12 @@ export default function ManageAssessmentsPage() {
                               <TableCell>
                                 <div className="text-xs font-medium text-foreground/80">
                                   {item.total_marks} pts
-                                  {item.passing_marks !== null && item.passing_marks !== undefined && (
-                                    <span className="text-muted-foreground font-normal ml-1 text-[9px]">
-                                      / pass {item.passing_marks}
-                                    </span>
-                                  )}
+                                  {item.passing_marks !== null &&
+                                    item.passing_marks !== undefined && (
+                                      <span className="text-muted-foreground font-normal ml-1 text-[9px]">
+                                        / pass {item.passing_marks}
+                                      </span>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-1.5 mt-0.5">
                                   {item.duration_minutes && (
@@ -824,7 +923,7 @@ export default function ManageAssessmentsPage() {
                                   variant="outline"
                                   className={cn(
                                     "text-[8px] font-bold uppercase tracking-tight h-4 px-1.5 rounded-full",
-                                    statusStyle(item.status)
+                                    statusStyle(item.status),
                                   )}
                                 >
                                   {item.status}
@@ -833,7 +932,7 @@ export default function ManageAssessmentsPage() {
 
                               {/* Actions */}
                               <TableCell className="text-right pr-3">
-                                <div className="flex justify-end gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex justify-end gap-0.5 transition-opacity">
                                   {/* View — non-drafts */}
                                   {!isDraft && (
                                     <Button
@@ -843,7 +942,9 @@ export default function ManageAssessmentsPage() {
                                       className="h-6 w-6 rounded hover:bg-muted/80"
                                       title="View"
                                     >
-                                      <Link href={`/lecturer/assessments/${item.id}`}>
+                                      <Link
+                                        href={`/lecturer/assessments/${item.id}`}
+                                      >
                                         <Eye className="size-3 text-muted-foreground" />
                                       </Link>
                                     </Button>
@@ -871,18 +972,26 @@ export default function ManageAssessmentsPage() {
                                   )}
 
                                   {/* Finalize shortcut — drafts only */}
-                                  {isDraft && item.draft_step && item.draft_step >= 4 && (
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6 rounded hover:bg-emerald-50"
-                                      title="Finalize & Publish"
-                                      disabled={finalizingId === item.id}
-                                      onClick={() => handleFinalize(item.id)}
-                                    >
-                                      <CheckSquare className={cn("size-3 text-emerald-600", finalizingId === item.id && "animate-pulse")} />
-                                    </Button>
-                                  )}
+                                  {isDraft &&
+                                    item.draft_step &&
+                                    item.draft_step >= 4 && (
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="h-6 w-6 rounded hover:bg-emerald-50"
+                                        title="Finalize & Publish"
+                                        disabled={finalizingId === item.id}
+                                        onClick={() => handleFinalize(item.id)}
+                                      >
+                                        <CheckSquare
+                                          className={cn(
+                                            "size-3 text-emerald-600",
+                                            finalizingId === item.id &&
+                                              "animate-pulse",
+                                          )}
+                                        />
+                                      </Button>
+                                    )}
 
                                   {/* Duplicate */}
                                   <Button
@@ -890,7 +999,9 @@ export default function ManageAssessmentsPage() {
                                     size="icon"
                                     className="h-6 w-6 rounded hover:bg-muted/80"
                                     title="Duplicate"
-                                    onClick={() => handleDuplicate(item.id, item.title)}
+                                    onClick={() =>
+                                      handleDuplicate(item.id, item.title)
+                                    }
                                   >
                                     <Copy className="size-3 text-muted-foreground" />
                                   </Button>
@@ -904,7 +1015,9 @@ export default function ManageAssessmentsPage() {
                                       className="h-6 w-6 rounded hover:bg-muted/80"
                                       title="Results & Grading"
                                     >
-                                      <Link href={`/lecturer/assessments/${item.id}/results`}>
+                                      <Link
+                                        href={`/lecturer/assessments/${item.id}/results`}
+                                      >
                                         <BarChart2 className="size-3 text-muted-foreground" />
                                       </Link>
                                     </Button>
@@ -919,7 +1032,9 @@ export default function ManageAssessmentsPage() {
                                       className="h-6 w-6 rounded hover:bg-sky-50"
                                       title="Live Supervision"
                                     >
-                                      <Link href={`/lecturer/supervision?assessment=${item.id}`}>
+                                      <Link
+                                        href={`/lecturer/supervision?assessment=${item.id}`}
+                                      >
                                         <MonitorPlay className="size-3 text-sky-600" />
                                       </Link>
                                     </Button>
@@ -949,7 +1064,8 @@ export default function ManageAssessmentsPage() {
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between pt-3">
                     <p className="text-[10px] font-medium text-muted-foreground/70">
-                      {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, totalCount)} of {totalCount}
+                      {(page - 1) * pageSize + 1}–
+                      {Math.min(page * pageSize, totalCount)} of {totalCount}
                     </p>
                     <div className="flex gap-1">
                       <Button
@@ -964,7 +1080,9 @@ export default function ManageAssessmentsPage() {
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        onClick={() =>
+                          setPage((p) => Math.min(totalPages, p + 1))
+                        }
                         disabled={page === totalPages}
                         className="h-7 px-2.5 rounded-lg text-[10px] font-medium shadow-none border-muted/40"
                       >

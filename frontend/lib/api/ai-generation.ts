@@ -80,6 +80,7 @@ export interface ReviewAIQuestionRequest {
   modified_explanation?: string;
   reviewer_notes?: string;
   add_to_assessment_id?: string;
+  add_to_section_id?: string;
   marks_if_added?: number;
   save_to_bank?: boolean;
 }

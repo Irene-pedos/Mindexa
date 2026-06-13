@@ -332,7 +332,7 @@ class AIGenerationService:
                         marks_override=marks,
                         order_index=existing_count,
                         added_via=added_via,
-                        assessment_section_id=ai_question.target_section_id,
+                        assessment_section_id=data.add_to_section_id or ai_question.target_section_id,
                         ai_review_id=review.id,
                     )
         else:

@@ -383,13 +383,14 @@ export default function AssessmentDetailsPage() {
     if (!candidate) return;
 
     try {
+      // Target section mapping to backend
+      const backendSectionId = candidate.target_section_id || (candidate as any)._sectionId || aiTargetSectionId;
+
       const res = await aiGenerationApi.reviewQuestion(candId, {
         decision: "approved",
         add_to_assessment_id: assessmentId,
+        add_to_section_id: backendSectionId || undefined,
       });
-
-      // Target section mapping to backend
-      const backendSectionId = aiTargetSectionId;
       
       // Update assessment local questions list dynamically
       const typeMap: Record<string, string> = {
@@ -464,11 +465,13 @@ export default function AssessmentDetailsPage() {
     if (!candidate) return;
 
     try {
+      const backendSectionId = candidate.target_section_id || (candidate as any)._sectionId || aiTargetSectionId;
       const res = await aiGenerationApi.reviewQuestion(candId, {
         decision: "edited",
         modified_question_text: editingText,
         modified_explanation: editingExplanation,
         add_to_assessment_id: assessmentId,
+        add_to_section_id: backendSectionId || undefined,
       });
 
       const typeMap: Record<string, string> = {
@@ -541,27 +544,30 @@ export default function AssessmentDetailsPage() {
       };
 
       const results = await Promise.all(
-        aiCandidates.map((c) =>
-          aiGenerationApi.reviewQuestion(c.id, {
+        aiCandidates.map((c) => {
+          const backendSectionId = c.target_section_id || (c as any)._sectionId || aiTargetSectionId;
+          return aiGenerationApi.reviewQuestion(c.id, {
             decision: "approved",
             add_to_assessment_id: assessmentId,
-          })
-        )
+            add_to_section_id: backendSectionId || undefined,
+          });
+        })
       );
 
       const addedQuestions = aiCandidates.map((c, index) => {
         const res = results[index];
         const promotedQId = res?.promoted_question?.id || c.id;
         const aq = res?.promoted_question?.assessment_question;
+        const backendSectionId = c.target_section_id || (c as any)._sectionId || aiTargetSectionId;
         return {
           id: aq?.id || undefined,
           assessment_id: assessmentId,
           question_id: promotedQId,
           marks_override: aq?.marks || 2,
-          assessment_section_id: aiTargetSectionId,
+          assessment_section_id: backendSectionId,
           question: {
             id: promotedQId,
-            sectionId: aiTargetSectionId,
+            sectionId: backendSectionId,
             text: c.parsed_question_text || "",
             type: typeMap[c.question_type] || "shortanswer",
             marks: 2,

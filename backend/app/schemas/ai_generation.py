@@ -174,6 +174,7 @@ class ReviewAIQuestionRequest(BaseModel):
 
     # If approving/editing, optionally add to an assessment immediately
     add_to_assessment_id: uuid.UUID | None = None
+    add_to_section_id: uuid.UUID | None = None
     marks_if_added: int | None = Field(default=None, ge=1)
     save_to_bank: bool = Field(
         default=True,

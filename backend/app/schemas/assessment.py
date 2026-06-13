@@ -13,11 +13,10 @@ Covers:
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
-
 from app.core.constants import AssessmentType, GradingMode
 from app.db.enums import GroupAssignmentMode, QuestionDistributionMode
 from app.schemas.question import QuestionDetailResponse
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ─── Assessment Section Schemas ───────────────────────────────────────────────
 
@@ -266,7 +265,7 @@ class AssessmentGeneralUpdate(BaseModel):
     show_marks_per_question: bool | None = None
     show_feedback_after_submit: bool | None = None
     is_ai_generation_enabled: bool | None = None
-    
+
     # Security/Integrity additions
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     is_password_protected: bool | None = None
@@ -578,4 +577,4 @@ class BulkAssessmentPublishRequest(BaseModel):
     blueprint: list[BulkAssessmentSection] | None = []
     questions: list[BulkAssessmentQuestion] | None = []
     rules: BulkAssessmentRules
-    draft_step: int | None = None
+    draft_step: int | None = Field(default=None, ge=1, le=6)

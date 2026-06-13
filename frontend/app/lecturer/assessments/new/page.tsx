@@ -1581,14 +1581,31 @@ export default function NewAssessmentBuilder() {
 
   const [questions, setQuestions] = useState<Question[]>([]);
 
+  const metadataRef = useRef(metadata);
+  const rulesRef = useRef(rules);
+  const blueprintRef = useRef(blueprint);
+  const questionsRef = useRef(questions);
+  const activeStepRef = useRef(activeStep);
+  const supervisorListRef = useRef(supervisorList);
+  const loadWorkspaceDetailRef = useRef(loadWorkspaceDetail);
+
+  useEffect(() => { metadataRef.current = metadata; }, [metadata]);
+  useEffect(() => { rulesRef.current = rules; }, [rules]);
+  useEffect(() => { blueprintRef.current = blueprint; }, [blueprint]);
+  useEffect(() => { questionsRef.current = questions; }, [questions]);
+  useEffect(() => { activeStepRef.current = activeStep; }, [activeStep]);
+  useEffect(() => { supervisorListRef.current = supervisorList; }, [supervisorList]);
+  useEffect(() => { loadWorkspaceDetailRef.current = loadWorkspaceDetail; }, [loadWorkspaceDetail]);
+
   // Derived
 
   const triggerStep6Load = async () => {
-    if (!draftId) return;
+    const activeId = draftIdRef.current;
+    if (!activeId) return;
     try {
       const [valRes, distRes] = await Promise.all([
-        apiClient(`/blueprint/${draftId}/validate`),
-        apiClient(`/blueprint/${draftId}/distribution`),
+        apiClient(`/blueprint/${activeId}/validate`),
+        apiClient(`/blueprint/${activeId}/distribution`),
       ]);
       setValidationResult(valRes);
       setDistributionData(distRes);
@@ -1652,12 +1669,20 @@ export default function NewAssessmentBuilder() {
   const [availableLecturers, setAvailableLecturers] = useState<UserResponse[]>([]);
   const [passingMarksPercent, setPassingMarksPercent] = useState(70);
 
-  // Logic: Passing Marks calculation
+  // Logic: Passing Marks calculation & Auto-sync total_marks
   useEffect(() => {
-    setMetadata(prev => ({
-      ...prev,
-      passing_marks: Math.floor((totalMarks * passingMarksPercent) / 100)
-    }));
+    setMetadata(prev => {
+      const newTotal = totalMarks;
+      const newPassing = Math.floor((totalMarks * passingMarksPercent) / 100);
+      if (prev.total_marks !== newTotal || prev.passing_marks !== newPassing) {
+        return {
+          ...prev,
+          total_marks: newTotal,
+          passing_marks: newPassing
+        };
+      }
+      return prev;
+    });
   }, [totalMarks, passingMarksPercent]);
 
   // Init Data
@@ -1749,7 +1774,7 @@ export default function NewAssessmentBuilder() {
                 });
 
                 if (data.teaching_workspace_id) {
-                    loadWorkspaceDetail(data.teaching_workspace_id);
+                    loadWorkspaceDetailRef.current(data.teaching_workspace_id);
                 }
 
                 // Populate blueprint
@@ -1839,7 +1864,7 @@ export default function NewAssessmentBuilder() {
       }
     }
     init();
-  }, [draftId, loadWorkspaceDetail]);
+  }, [draftId]);
 
   const handleInstitutionChange = async (val: string) => {
     setMetadata((prev) => ({
@@ -2063,9 +2088,10 @@ export default function NewAssessmentBuilder() {
     );
 
   const handleReorder = async (newOrder: { question_id: string; order_index: number }[]) => {
-    if (!draftId) return;
+    const activeId = draftIdRef.current;
+    if (!activeId) return;
     try {
-      await apiClient(`/assessments/${draftId}/questions/reorder`, {
+      await apiClient(`/assessments/${activeId}/questions/reorder`, {
         method: "PUT",
         body: JSON.stringify({ order: newOrder }),
       });
@@ -2179,6 +2205,7 @@ export default function NewAssessmentBuilder() {
           };
         });
 
+        const activeId = draftIdRef.current;
         toast.info("Submitting AI request to generate questions for all sections...");
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
@@ -2187,7 +2214,7 @@ export default function NewAssessmentBuilder() {
           difficulty: "medium",
           count: 5,
           additional_context: aiGenerationConfig.additional_context,
-          target_assessment_id: draftId || undefined,
+          target_assessment_id: activeId || undefined,
           sections: sectionsPayload,
         });
 
@@ -2215,6 +2242,7 @@ export default function NewAssessmentBuilder() {
         const targetSection = blueprint.find(s => s.id === aiTargetSectionId);
         const secTopic = aiGenerationConfig.topic || targetSection?.topics || "";
 
+        const activeId = draftIdRef.current;
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
           topic: secTopic,
@@ -2223,7 +2251,7 @@ export default function NewAssessmentBuilder() {
           count: aiGenerationConfig.count,
           bloom_level: aiGenerationConfig.bloom_level as any,
           additional_context: aiGenerationConfig.additional_context,
-          target_assessment_id: draftId || undefined,
+          target_assessment_id: activeId || undefined,
           target_section_id: aiTargetSectionId,
         });
 
@@ -2252,6 +2280,7 @@ export default function NewAssessmentBuilder() {
         };
       });
 
+      const activeId = draftIdRef.current;
       toast.info(`Retrying question generation for ${failedSections.length} sections...`);
       const res = await aiGenerationApi.generateQuestions({
         subject: metadata.title || "Subject",
@@ -2260,7 +2289,7 @@ export default function NewAssessmentBuilder() {
         difficulty: "medium",
         count: 5,
         additional_context: aiGenerationConfig.additional_context,
-        target_assessment_id: draftId || undefined,
+        target_assessment_id: activeId || undefined,
         sections: sectionsPayload,
       });
 
@@ -2287,13 +2316,15 @@ export default function NewAssessmentBuilder() {
         ordering: "ordering",
         case_study: "casestudy",
       };
+      const activeId = draftIdRef.current;
+      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const res = await aiGenerationApi.reviewQuestion(candidateId, {
         decision: "approved",
-        add_to_assessment_id: draftId || undefined
+        add_to_assessment_id: activeId || undefined,
+        add_to_section_id: targetSecId || undefined
       });
       
       const qType = typeMap[candidate.question_type] || "shortanswer";
-      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const sectionObj = blueprint.find(s => s.id === targetSecId);
       
       let marksPerQuestion = 2;
@@ -2358,14 +2389,16 @@ export default function NewAssessmentBuilder() {
       };
       const candidate = aiCandidates.find(c => c.id === candidateId);
       if (!candidate) return;
+      const activeId = draftIdRef.current;
+      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const res = await aiGenerationApi.reviewQuestion(candidateId, {
         decision: "edited",
         modified_question_text: editingText,
         modified_explanation: editingExplanation,
-        add_to_assessment_id: draftId || undefined
+        add_to_assessment_id: activeId || undefined,
+        add_to_section_id: targetSecId || undefined
       });
       const qType = typeMap[candidate.question_type] || "shortanswer";
-      const targetSecId = (candidate as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
       const sectionObj = blueprint.find(s => s.id === targetSecId);
       
       let marksPerQuestion = 2;
@@ -2405,13 +2438,16 @@ export default function NewAssessmentBuilder() {
   };
 
   const handleAcceptAllCandidates = async () => {
+    const activeId = draftIdRef.current;
     try {
-      const results = await Promise.all(aiCandidates.map(c => 
-        aiGenerationApi.reviewQuestion(c.id, {
+      const results = await Promise.all(aiCandidates.map(c => {
+        const targetSecId = (c as any)._sectionId || (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+        return aiGenerationApi.reviewQuestion(c.id, {
           decision: "approved",
-          add_to_assessment_id: draftId || undefined
-        })
-      ));
+          add_to_assessment_id: activeId || undefined,
+          add_to_section_id: targetSecId || undefined
+        });
+      }));
       const typeMap: Record<string, string> = {
         mcq: "mcq",
         true_false: "truefalse",
@@ -2611,11 +2647,11 @@ export default function NewAssessmentBuilder() {
   };
 
   const preparePayload = (metadataOverride?: any, rulesOverride?: any, draftStep?: number) => {
-    const activeMetadata = metadataOverride ? { ...metadata, ...metadataOverride } : metadata;
-    const activeRules = rulesOverride ? { ...rules, ...rulesOverride } : rules;
+    const activeMetadata = metadataOverride ? { ...metadataRef.current, ...metadataOverride } : metadataRef.current;
+    const activeRules = rulesOverride ? { ...rulesRef.current, ...rulesOverride } : rulesRef.current;
     const payload = {
       id: draftIdRef.current || undefined,
-      draft_step: draftStep !== undefined ? draftStep : activeStep,
+      draft_step: draftStep !== undefined ? draftStep : activeStepRef.current,
       metadata: {
         ...activeMetadata,
         assessment_type: activeMetadata.mode === "Groupwork" ? "GROUP_WORK" : activeMetadata.mode.toUpperCase(),
@@ -2631,7 +2667,7 @@ export default function NewAssessmentBuilder() {
         audience_type: activeMetadata.audience_type || "all",
         target_student_ids: activeMetadata.target_student_ids || [],
       },
-      blueprint: blueprint.map((b) => ({
+      blueprint: blueprintRef.current.map((b) => ({
         id: b.id,
         section: b.section,
         topics: b.topics,
@@ -2642,7 +2678,7 @@ export default function NewAssessmentBuilder() {
         aiPromptHint: b.aiPromptHint,
         difficultyDistribution: b.difficultyDistribution,
       })),
-      questions: questions.map((q) => {
+      questions: questionsRef.current.map((q) => {
         let finalOptions = q.options.map(opt => ({
           option_text: opt.option_text,
           option_text_right: opt.option_text_right,
@@ -2692,10 +2728,10 @@ export default function NewAssessmentBuilder() {
         };
       }),
       rules: {
-        ...rules,
-        requireAllMemberApproval: metadata.require_all_member_approval,
-        requireAllMemberParticipation: metadata.require_all_member_participation,
-        supervisor_ids: supervisorList.map(s => s.id),
+        ...activeRules,
+        requireAllMemberApproval: activeMetadata.require_all_member_approval,
+        requireAllMemberParticipation: activeMetadata.require_all_member_participation,
+        supervisor_ids: supervisorListRef.current.map(s => s.id),
       },
     };
 
@@ -2714,12 +2750,12 @@ export default function NewAssessmentBuilder() {
     let startD: Date | undefined;
     let endD: Date | undefined;
 
-    if (metadata.date && metadata.startTime) {
-      startD = parseTimeString(metadata.startTime, metadata.date);
+    if (activeMetadata.date && activeMetadata.startTime) {
+      startD = parseTimeString(activeMetadata.startTime, activeMetadata.date);
       (payload.metadata as any).windowStart = startD.toISOString();
     }
-    if (metadata.date && metadata.endTime) {
-      endD = parseTimeString(metadata.endTime, metadata.date);
+    if (activeMetadata.date && activeMetadata.endTime) {
+      endD = parseTimeString(activeMetadata.endTime, activeMetadata.date);
       if (startD && endD <= startD) {
         // Handle over midnight end time by adding 1 day
         endD.setDate(endD.getDate() + 1);
@@ -2890,7 +2926,7 @@ export default function NewAssessmentBuilder() {
         console.error("Autosave queue error:", err);
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [metadata, rules, router, supervisorList]);
+  }, [router]);
 
   const runAutosaveRef = useRef(runAutosave);
   useEffect(() => {
@@ -3259,17 +3295,13 @@ export default function NewAssessmentBuilder() {
                     <Input
                       type="number"
                       id="totalMarksInput"
-                      value={metadata.total_marks}
-                      onChange={(e) => {
-                        setMetadata({ ...metadata, total_marks: parseInt(e.target.value) || 0 });
-                        triggerDebouncedAutosave(1);
-                      }}
-                      className="h-10"
-                      placeholder="e.g. 100"
+                      value={metadata.total_marks || 0}
+                      disabled
+                      className="h-10 bg-muted cursor-not-allowed"
                       aria-invalid={!!fieldErrors.total_marks}
                     />
                     <p className="text-[10px] text-muted-foreground">
-                      Overall marks for this assessment (used in step 4 blueprint)
+                      Automatically calculated from Blueprint section marks (configured in Step 4).
                     </p>
                   </div>
                 </div>
