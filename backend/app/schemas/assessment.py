@@ -578,3 +578,4 @@ class BulkAssessmentPublishRequest(BaseModel):
     blueprint: list[BulkAssessmentSection] | None = []
     questions: list[BulkAssessmentQuestion] | None = []
     rules: BulkAssessmentRules
+    draft_step: int | None = None

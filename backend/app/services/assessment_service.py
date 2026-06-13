@@ -1203,6 +1203,7 @@ class AssessmentService:
                 "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
                 "audience_type": data.metadata.audience_type,
                 "target_student_ids": data.metadata.target_student_ids,
+                "draft_step": data.draft_step,
             }
             if data.rules.autosaveToken:
                 update_data["autosave_token"] = data.rules.autosaveToken
@@ -1244,6 +1245,7 @@ class AssessmentService:
                 autosave_token=data.rules.autosaveToken,
                 audience_type=data.metadata.audience_type or "all",
                 target_student_ids=data.metadata.target_student_ids,
+                draft_step=data.draft_step or 1,
             )
 
         # 3. Update Security Settings

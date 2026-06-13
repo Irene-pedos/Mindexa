@@ -1667,6 +1667,7 @@ export default function NewAssessmentBuilder() {
     }
     hasInitializedRef.current = true;
     loadedDraftIdRef.current = draftId;
+    draftIdRef.current = draftId || null;
 
     async function init() {
       try {
@@ -2574,11 +2575,47 @@ export default function NewAssessmentBuilder() {
     return type;
   };
 
-  const preparePayload = (metadataOverride?: any, rulesOverride?: any) => {
+  const prepareWizardPayload = (step: number) => {
+    return {
+      title: metadata.title || undefined,
+      description: metadata.description || undefined,
+      instructions: metadata.selectedInstructions.join("\n") + (metadata.customInstructions ? "\n" + metadata.customInstructions : ""),
+      assessment_type: metadata.mode === "Groupwork" ? "GROUP_WORK" : metadata.mode.toUpperCase(),
+      grading_mode: metadata.grading_mode || "AUTOMATIC",
+      result_release_mode: metadata.result_release_mode || "MANUAL",
+      total_marks: metadata.total_marks ? parseInt(metadata.total_marks as any) : undefined,
+      passing_marks: metadata.passing_marks ? parseInt(metadata.passing_marks as any) : undefined,
+      duration_minutes: metadata.durationMinutes ? parseInt(metadata.durationMinutes as any) : undefined,
+      is_group_assessment: metadata.mode === "Groupwork",
+      max_group_size: metadata.max_group_size || undefined,
+      group_formation_mode: metadata.group_formation_mode || undefined,
+      group_assignment_mode: metadata.group_assignment_mode || undefined,
+      question_distribution_mode: metadata.question_distribution_mode || undefined,
+      require_all_member_approval: metadata.require_all_member_approval,
+      require_all_member_participation: metadata.require_all_member_participation,
+      appeal_window_days: metadata.appeal_window_days ? parseInt(metadata.appeal_window_days as any) : undefined,
+      max_attempts: rules.attempts ? parseInt(rules.attempts as any) : undefined,
+      is_password_protected: rules.passwordProtected,
+      fullscreen_required: rules.browserRestricted,
+      is_supervised: rules.supervised,
+      ai_assistance_allowed: rules.aiAllowed,
+      is_open_book: rules.openBook,
+      randomize_questions: rules.shuffleQuestions,
+      randomize_options: rules.shuffleOptions,
+      draft_step: step,
+      class_group_ids: metadata.class_group_ids || [],
+      supervisor_ids: supervisorList.map(s => s.id),
+      audience_type: metadata.audience_type || "all",
+      target_student_ids: metadata.target_student_ids || [],
+    };
+  };
+
+  const preparePayload = (metadataOverride?: any, rulesOverride?: any, draftStep?: number) => {
     const activeMetadata = metadataOverride ? { ...metadata, ...metadataOverride } : metadata;
     const activeRules = rulesOverride ? { ...rules, ...rulesOverride } : rules;
     const payload = {
       id: draftIdRef.current || undefined,
+      draft_step: draftStep !== undefined ? draftStep : activeStep,
       metadata: {
         ...activeMetadata,
         assessment_type: activeMetadata.mode === "Groupwork" ? "GROUP_WORK" : activeMetadata.mode.toUpperCase(),
@@ -2817,67 +2854,29 @@ export default function NewAssessmentBuilder() {
     return true;
   };
 
+  const debouncedAutosaveRef = useRef<NodeJS.Timeout | null>(null);
+
   const runAutosave = useCallback(async (step: number, metadataOverride?: Partial<typeof metadata>, rulesOverride?: Partial<typeof rules>) => {
+    if (debouncedAutosaveRef.current) {
+      clearTimeout(debouncedAutosaveRef.current);
+    }
     const executeAutosave = async () => {
       // Use the ref so we always get the latest draftId even before React re-renders
       const currentId = draftIdRef.current;
       setAutosaveStatus("saving");
-      // Merge overrides so the payload always reflects the latest values,
-      // even when called immediately after setMetadata (before state re-render).
-      const activeMetadata = metadataOverride ? { ...metadata, ...metadataOverride } : metadata;
-      const activeRules = rulesOverride ? { ...rules, ...rulesOverride } : rules;
       try {
-        const payload = preparePayload(metadataOverride, rulesOverride);
-        if (!currentId) {
-          const res = (await apiClient("/assessments/draft", {
-            method: "POST",
-            body: JSON.stringify(payload),
-          })) as any;
-          setAutosaveStatus("saved");
-          if (res.assessment_id) {
-            // Update ref immediately so subsequent autosaves update this draft
-            draftIdRef.current = res.assessment_id;
-            loadedDraftIdRef.current = res.assessment_id;
-            router.replace(`/lecturer/assessments/new?draft=${res.assessment_id}`);
-          }
-        } else {
-          const updatePayload = {
-            title: activeMetadata.title || undefined,
-            description: activeMetadata.description || undefined,
-            instructions: activeMetadata.selectedInstructions.join("\n") + (activeMetadata.customInstructions ? "\n" + activeMetadata.customInstructions : ""),
-            assessment_type: activeMetadata.mode === "Groupwork" ? "GROUP_WORK" : activeMetadata.mode.toUpperCase(),
-            grading_mode: activeMetadata.grading_mode || "AUTOMATIC",
-            result_release_mode: activeMetadata.result_release_mode || "MANUAL",
-            total_marks: activeMetadata.total_marks ? parseInt(activeMetadata.total_marks as any) : undefined,
-            passing_marks: activeMetadata.passing_marks ? parseInt(activeMetadata.passing_marks as any) : undefined,
-            duration_minutes: activeMetadata.durationMinutes ? parseInt(activeMetadata.durationMinutes as any) : undefined,
-            is_group_assessment: activeMetadata.mode === "Groupwork",
-            max_group_size: activeMetadata.max_group_size || undefined,
-            group_formation_mode: activeMetadata.group_formation_mode || undefined,
-            group_assignment_mode: activeMetadata.group_assignment_mode || undefined,
-            question_distribution_mode: activeMetadata.question_distribution_mode || undefined,
-            require_all_member_approval: activeMetadata.require_all_member_approval,
-            require_all_member_participation: activeMetadata.require_all_member_participation,
-            appeal_window_days: activeMetadata.appeal_window_days ? parseInt(activeMetadata.appeal_window_days as any) : undefined,
-            max_attempts: activeRules.attempts ? parseInt(activeRules.attempts as any) : undefined,
-            is_password_protected: activeRules.passwordProtected,
-            fullscreen_required: activeRules.browserRestricted,
-            is_supervised: activeRules.supervised,
-            ai_assistance_allowed: activeRules.aiAllowed,
-            is_open_book: activeRules.openBook,
-            randomize_questions: activeRules.shuffleQuestions,
-            randomize_options: activeRules.shuffleOptions,
-            draft_step: step,
-            class_group_ids: activeMetadata.class_group_ids || [],
-            supervisor_ids: supervisorList.map(s => s.id),
-            audience_type: activeMetadata.audience_type || "all",
-            target_student_ids: activeMetadata.target_student_ids || [],
-          };
-          await apiClient(`/assessments/${currentId}/wizard/${step}`, {
-            method: "POST",
-            body: JSON.stringify(updatePayload),
-          });
-          setAutosaveStatus("saved");
+        const payload = preparePayload(metadataOverride, rulesOverride, step);
+        const res = (await apiClient("/assessments/draft", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        })) as any;
+        setAutosaveStatus("saved");
+        const returnedId = res.id || res.assessment_id;
+        if (returnedId && returnedId !== currentId) {
+          // Update ref immediately so subsequent autosaves update this draft
+          draftIdRef.current = returnedId;
+          loadedDraftIdRef.current = returnedId;
+          router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
         }
       } catch (err: any) {
         setAutosaveStatus("error");
@@ -2892,6 +2891,20 @@ export default function NewAssessmentBuilder() {
       });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [metadata, rules, router, supervisorList]);
+
+  const runAutosaveRef = useRef(runAutosave);
+  useEffect(() => {
+    runAutosaveRef.current = runAutosave;
+  }, [runAutosave]);
+
+  const triggerDebouncedAutosave = useCallback((step: number, metadataOverride?: Partial<typeof metadata>, rulesOverride?: Partial<typeof rules>) => {
+    if (debouncedAutosaveRef.current) {
+      clearTimeout(debouncedAutosaveRef.current);
+    }
+    debouncedAutosaveRef.current = setTimeout(() => {
+      runAutosaveRef.current(step, metadataOverride, rulesOverride);
+    }, 2000);
+  }, []);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -2921,17 +2934,28 @@ export default function NewAssessmentBuilder() {
     setIsSavingDraft(true);
     setFieldErrors({});
     try {
+      if (draftIdRef.current) {
+        // Update existing draft
+        await apiClient(`/assessments/${draftIdRef.current}/wizard/${activeStep}`, {
+          method: "POST",
+          body: JSON.stringify(prepareWizardPayload(activeStep)),
+        });
+        toast.success("Draft saved.");
+        return draftIdRef.current;
+      }
+      // Only create new if no draft yet
       const res = (await apiClient("/assessments/draft", {
         method: "POST",
-        body: JSON.stringify(preparePayload()),
+        body: JSON.stringify(preparePayload(undefined, undefined, activeStep)),
       })) as any;
       toast.success("Draft saved successfully.");
-      if (res.assessment_id) {
-        draftIdRef.current = res.assessment_id;
-        loadedDraftIdRef.current = res.assessment_id;
-        router.replace(`/lecturer/assessments/new?draft=${res.assessment_id}`);
+      const returnedId = res.id || res.assessment_id;
+      if (returnedId) {
+        draftIdRef.current = returnedId;
+        loadedDraftIdRef.current = returnedId;
+        router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
       }
-      return res.assessment_id || null;
+      return returnedId || null;
     } catch (err: any) {
       mapApiErrors(err);
       return null;
@@ -3029,8 +3053,10 @@ export default function NewAssessmentBuilder() {
                     <Input
                       id="title"
                       value={metadata.title}
-                      onChange={(e) => setMetadata({ ...metadata, title: e.target.value })}
-                      onBlur={() => runAutosave(1)}
+                      onChange={(e) => {
+                        setMetadata({ ...metadata, title: e.target.value });
+                        triggerDebouncedAutosave(1);
+                      }}
                       placeholder="e.g. Mid-Semester CAT – Database Systems"
                       className="h-10 font-medium"
                       aria-invalid={!!fieldErrors.title}
@@ -3081,8 +3107,10 @@ export default function NewAssessmentBuilder() {
                   <Textarea
                     id="description"
                     value={metadata.description}
-                    onChange={(e) => setMetadata({ ...metadata, description: e.target.value })}
-                    onBlur={() => runAutosave(1)}
+                    onChange={(e) => {
+                      setMetadata({ ...metadata, description: e.target.value });
+                      triggerDebouncedAutosave(1);
+                    }}
                     placeholder="Brief overview of the assessment coverage..."
                     className="min-h-[100px] text-sm"
                   />
@@ -3169,8 +3197,8 @@ export default function NewAssessmentBuilder() {
                           }
                         }
                         setMetadata({ ...metadata, startTime: selectedTime });
+                        triggerDebouncedAutosave(1);
                       }}
-                      onBlur={() => runAutosave(1)}
                       className="h-10"
                       aria-invalid={!!fieldErrors.startTime}
                       aria-describedby={fieldErrors.startTime ? "startTime-error" : undefined}
@@ -3187,8 +3215,10 @@ export default function NewAssessmentBuilder() {
                       type="time"
                       id="endTime"
                       value={metadata.endTime}
-                      onChange={(e) => setMetadata({ ...metadata, endTime: e.target.value })}
-                      onBlur={() => runAutosave(1)}
+                      onChange={(e) => {
+                        setMetadata({ ...metadata, endTime: e.target.value });
+                        triggerDebouncedAutosave(1);
+                      }}
                       className="h-10"
                       aria-invalid={!!fieldErrors.endTime}
                       aria-describedby={fieldErrors.endTime ? "endTime-error" : undefined}
@@ -3210,8 +3240,10 @@ export default function NewAssessmentBuilder() {
                       type="number"
                       id="durationMinutes"
                       value={metadata.durationMinutes}
-                      onChange={(e) => setMetadata({ ...metadata, durationMinutes: parseInt(e.target.value) || 0 })}
-                      onBlur={() => runAutosave(1)}
+                      onChange={(e) => {
+                        setMetadata({ ...metadata, durationMinutes: parseInt(e.target.value) || 0 });
+                        triggerDebouncedAutosave(1);
+                      }}
                       className="h-10"
                       aria-invalid={!!fieldErrors.duration_minutes}
                       aria-describedby={fieldErrors.duration_minutes ? "durationMinutes-error" : undefined}
@@ -3228,8 +3260,10 @@ export default function NewAssessmentBuilder() {
                       type="number"
                       id="totalMarksInput"
                       value={metadata.total_marks}
-                      onChange={(e) => setMetadata({ ...metadata, total_marks: parseInt(e.target.value) || 0 })}
-                      onBlur={() => runAutosave(1)}
+                      onChange={(e) => {
+                        setMetadata({ ...metadata, total_marks: parseInt(e.target.value) || 0 });
+                        triggerDebouncedAutosave(1);
+                      }}
                       className="h-10"
                       placeholder="e.g. 100"
                       aria-invalid={!!fieldErrors.total_marks}
@@ -3366,8 +3400,10 @@ export default function NewAssessmentBuilder() {
                               id="accessPassword"
                               placeholder="Type access code..."
                               value={rules.accessPassword}
-                              onChange={(e) => setRules({ ...rules, accessPassword: e.target.value })}
-                              onBlur={() => runAutosave(2)}
+                              onChange={(e) => {
+                                setRules({ ...rules, accessPassword: e.target.value });
+                                triggerDebouncedAutosave(2);
+                              }}
                               className="h-9 text-sm"
                             />
                           </div>
@@ -3382,8 +3418,10 @@ export default function NewAssessmentBuilder() {
                               min={1}
                               max={10}
                               value={rules.attempts}
-                              onChange={(e) => setRules({ ...rules, attempts: parseInt(e.target.value) || 1 })}
-                              onBlur={() => runAutosave(2)}
+                              onChange={(e) => {
+                                setRules({ ...rules, attempts: parseInt(e.target.value) || 1 });
+                                triggerDebouncedAutosave(2);
+                              }}
                               className="h-9 text-sm"
                             />
                           </div>
@@ -3396,8 +3434,10 @@ export default function NewAssessmentBuilder() {
                                 min={0}
                                 max={100}
                                 value={rules.latePenaltyPercent}
-                                onChange={(e) => setRules({ ...rules, latePenaltyPercent: parseFloat(e.target.value) || 0 })}
-                                onBlur={() => runAutosave(2)}
+                                onChange={(e) => {
+                                  setRules({ ...rules, latePenaltyPercent: parseFloat(e.target.value) || 0 });
+                                  triggerDebouncedAutosave(2);
+                                }}
                                 className="h-9 text-sm"
                               />
                             </div>
@@ -3413,8 +3453,10 @@ export default function NewAssessmentBuilder() {
                                 id="gracePeriodMinutes"
                                 min={0}
                                 value={rules.gracePeriodMinutes}
-                                onChange={(e) => setRules({ ...rules, gracePeriodMinutes: parseInt(e.target.value) || 0 })}
-                                onBlur={() => runAutosave(2)}
+                                onChange={(e) => {
+                                  setRules({ ...rules, gracePeriodMinutes: parseInt(e.target.value) || 0 });
+                                  triggerDebouncedAutosave(2);
+                                }}
                                 className="h-9 text-sm"
                               />
                             </div>
@@ -3474,8 +3516,10 @@ export default function NewAssessmentBuilder() {
                         placeholder="Any additional custom rules..."
                         className="min-h-[120px] text-sm bg-white"
                         value={metadata.customInstructions}
-                        onChange={(e) => setMetadata({ ...metadata, customInstructions: e.target.value })}
-                        onBlur={() => runAutosave(2)}
+                        onChange={(e) => {
+                          setMetadata({ ...metadata, customInstructions: e.target.value });
+                          triggerDebouncedAutosave(2);
+                        }}
                       />
                     </div>
                   </CardContent>
@@ -3748,8 +3792,10 @@ export default function NewAssessmentBuilder() {
                       <Badge variant="outline" className="font-bold text-[10px] px-2 h-5 bg-background">Section {idx + 1}</Badge>
                       <Input
                         value={sec.section}
-                        onChange={(e) => updateSection(sec.id, "section", e.target.value)}
-                        onBlur={() => runAutosave(4)}
+                        onChange={(e) => {
+                          updateSection(sec.id, "section", e.target.value);
+                          triggerDebouncedAutosave(4);
+                        }}
                         className="font-bold text-sm p-0 h-auto bg-transparent border-none focus-visible:ring-0 w-48 uppercase shadow-none"
                       />
                     </div>
@@ -3800,8 +3846,10 @@ export default function NewAssessmentBuilder() {
                           id={`topics-${sec.id}`}
                           placeholder="e.g. SQL joins, transactions, query indexes"
                           value={sec.topics}
-                          onChange={(e) => updateSection(sec.id, "topics", e.target.value)}
-                          onBlur={() => runAutosave(4)}
+                          onChange={(e) => {
+                            updateSection(sec.id, "topics", e.target.value);
+                            triggerDebouncedAutosave(4);
+                          }}
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -3811,8 +3859,10 @@ export default function NewAssessmentBuilder() {
                             type="number"
                             id={`marks-${sec.id}`}
                             value={sec.marks}
-                            onChange={(e) => updateSection(sec.id, "marks", parseInt(e.target.value) || 0)}
-                            onBlur={() => runAutosave(4)}
+                            onChange={(e) => {
+                              updateSection(sec.id, "marks", parseInt(e.target.value) || 0);
+                              triggerDebouncedAutosave(4);
+                            }}
                             className="font-bold text-center"
                           />
                         </div>
@@ -3822,8 +3872,10 @@ export default function NewAssessmentBuilder() {
                             type="number"
                             id={`questions-${sec.id}`}
                             value={sec.questions}
-                            onChange={(e) => updateSection(sec.id, "questions", parseInt(e.target.value) || 0)}
-                            onBlur={() => runAutosave(4)}
+                            onChange={(e) => {
+                              updateSection(sec.id, "questions", parseInt(e.target.value) || 0);
+                              triggerDebouncedAutosave(4);
+                            }}
                             className="font-bold text-center"
                           />
                         </div>
@@ -3861,8 +3913,10 @@ export default function NewAssessmentBuilder() {
                           <select
                             id={`difficulty-${sec.id}`}
                             value={sec.difficulty}
-                            onChange={(e) => updateSection(sec.id, "difficulty", e.target.value as any)}
-                            onBlur={() => runAutosave(4)}
+                            onChange={(e) => {
+                              updateSection(sec.id, "difficulty", e.target.value as any);
+                              triggerDebouncedAutosave(4);
+                            }}
                             className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
                           >
                             <option value="Easy">Easy</option>
@@ -3875,8 +3929,10 @@ export default function NewAssessmentBuilder() {
                           <select
                             id={`bloom-${sec.id}`}
                             value={sec.bloomLevel || "understand"}
-                            onChange={(e) => updateSection(sec.id, "bloomLevel", e.target.value as any)}
-                            onBlur={() => runAutosave(4)}
+                            onChange={(e) => {
+                              updateSection(sec.id, "bloomLevel", e.target.value as any);
+                              triggerDebouncedAutosave(4);
+                            }}
                             className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
                           >
                             <option value="remember">Remembering</option>
@@ -3920,8 +3976,10 @@ export default function NewAssessmentBuilder() {
                         min={1}
                         max={100}
                         value={passingMarksPercent}
-                        onChange={(e) => setPassingMarksPercent(parseInt(e.target.value) || 0)}
-                        onBlur={() => runAutosave(4)}
+                        onChange={(e) => {
+                          setPassingMarksPercent(parseInt(e.target.value) || 0);
+                          triggerDebouncedAutosave(4);
+                        }}
                         className="h-9 w-24 text-center font-bold"
                       />
                       <span className="text-xs text-muted-foreground">% of total marks</span>
@@ -4357,8 +4415,8 @@ export default function NewAssessmentBuilder() {
                             value={rules.resultReleaseAt ? format(new Date(rules.resultReleaseAt), "yyyy-MM-dd'T'HH:mm") : ""}
                             onChange={(e) => {
                               setRules({ ...rules, resultReleaseAt: e.target.value ? new Date(e.target.value) : undefined });
+                              triggerDebouncedAutosave(6);
                             }}
-                            onBlur={() => runAutosave(6)}
                             className="h-9 text-xs"
                           />
                         </div>

@@ -162,13 +162,14 @@ class AssessmentRepository:
         audience_type: str = "all",
         target_student_ids: list | None = None,
         student_enrollment_snapshot: list | None = None,
+        draft_step: int | None = 1,
     ) -> Assessment:
         """
         Create a new Assessment row.
 
         Sets:
             status           -> DRAFT
-            draft_step       -> 1
+            draft_step       -> draft_step
             draft_is_complete -> False
         """
         assessment = Assessment(
@@ -207,7 +208,7 @@ class AssessmentRepository:
             audience_type=audience_type,
             target_student_ids=target_student_ids,
             student_enrollment_snapshot=student_enrollment_snapshot,
-            draft_step=1,
+            draft_step=draft_step,
             draft_is_complete=False,
         )
         self.db.add(assessment)
