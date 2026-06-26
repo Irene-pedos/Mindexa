@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import uuid
+import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -17,7 +18,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.pool import AsyncAdaptedQueuePool, NullPool
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -37,25 +38,50 @@ def _json_dumps(obj):
 
 
 def _build_engine() -> AsyncEngine:
-    return create_async_engine(
-        settings.DATABASE_ASYNC_URL,
-        echo=settings.DEBUG and settings.is_development,
-        future=True,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20,
-        pool_timeout=30,
-        pool_recycle=1800,
-        poolclass=AsyncAdaptedQueuePool,
-        json_serializer=_json_dumps,
-        connect_args={
-            "server_settings": {
-                "application_name": settings.APP_NAME,
-                "jit": "off",
+    # Check if we are running inside a Celery worker.
+    # If so, we MUST use NullPool. Celery spins up and tears down asyncio event loops
+    # for each task. Connection pools (like QueuePool) are bound to the loop that created them.
+    # If a pooled connection is used across loops, or if the pool tries to close a connection
+    # after the task's loop has died, it results in "Event loop is closed" errors.
+    is_celery = "celery" in sys.argv[0] or "celery" in sys.modules
+
+    if is_celery:
+        logger.info("Initializing AsyncEngine with NullPool for Celery worker")
+        return create_async_engine(
+            settings.DATABASE_ASYNC_URL,
+            echo=settings.DEBUG and settings.is_development,
+            future=True,
+            poolclass=NullPool,
+            json_serializer=_json_dumps,
+            connect_args={
+                "server_settings": {
+                    "application_name": f"{settings.APP_NAME}_celery",
+                    "jit": "off",
+                },
+                "command_timeout": 60,
             },
-            "command_timeout": 60,
-        },
-    )
+        )
+    else:
+        logger.info("Initializing AsyncEngine with AsyncAdaptedQueuePool for API server")
+        return create_async_engine(
+            settings.DATABASE_ASYNC_URL,
+            echo=settings.DEBUG and settings.is_development,
+            future=True,
+            pool_pre_ping=True,
+            pool_size=10,
+            max_overflow=20,
+            pool_timeout=30,
+            pool_recycle=1800,
+            poolclass=AsyncAdaptedQueuePool,
+            json_serializer=_json_dumps,
+            connect_args={
+                "server_settings": {
+                    "application_name": settings.APP_NAME,
+                    "jit": "off",
+                },
+                "command_timeout": 60,
+            },
+        )
 
 
 engine: AsyncEngine = _build_engine()

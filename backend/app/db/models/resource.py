@@ -112,21 +112,36 @@ class StudentResource(BaseModel, table=True):
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
-    expires_at: datetime | None = Field(default=None, nullable=True)
+    expires_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
+
+    # ── RAG Integration ───────────────────────────────────────────────────────
+
+    academic_resource_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_resources.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
 
-    chunks: List["ResourceChunk"] = Relationship(
+    chunks: List["StudentResourceChunk"] = Relationship(
         back_populates="student_resource",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RESOURCE CHUNK
+# STUDENT RESOURCE CHUNK
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ResourceChunk(BaseModel, table=True):
+class StudentResourceChunk(BaseModel, table=True):
     """
     A text chunk extracted from a student_resource, with its embedding vector.
     """
@@ -289,6 +304,17 @@ class LecturerMaterial(BaseModel, table=True):
     )
     processing_error: str | None = Field(default=None, nullable=True, max_length=1000)
     chunk_count: int | None = Field(default=None, nullable=True)
+
+    # ── RAG Integration ───────────────────────────────────────────────────────
+
+    academic_resource_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("academic_resources.id", ondelete="SET NULL"),
+            nullable=True,
+        )
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
 

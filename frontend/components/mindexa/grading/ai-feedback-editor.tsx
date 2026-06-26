@@ -83,18 +83,13 @@ export function AIFeedbackEditor({
       </CardHeader>
       
       <CardContent className="p-4 space-y-4">
-        {!draftText && !drafting ? (
+        {!draftText ? (
           <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
-            <p className="text-sm text-muted-foreground max-w-sm">
-              Use the AI agent to draft professional, constructive feedback based on the rubric alignment and final score.
+            <Loader2 className="size-6 text-primary/50 animate-spin mb-2" />
+            <p className="text-sm font-medium text-foreground">AI Feedback Generation in Progress</p>
+            <p className="text-xs text-muted-foreground max-w-sm">
+              The AI agent is automatically drafting professional, constructive feedback based on the rubric alignment and final score. Please check back shortly.
             </p>
-            <Button 
-              size="sm" 
-              onClick={handleGenerateDraft}
-              className="bg-primary/10 text-primary hover:bg-primary/20 hover:text-primary border-none shadow-none"
-            >
-              <BrainCircuit className="mr-2 size-4" /> Draft Feedback
-            </Button>
           </div>
         ) : (
           <div className="space-y-4">
@@ -103,24 +98,11 @@ export function AIFeedbackEditor({
                 <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                   Draft Text
                 </span>
-                {draftText && (
-                   <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    className="h-6 text-xs text-muted-foreground"
-                    onClick={handleGenerateDraft}
-                    disabled={drafting}
-                   >
-                     {drafting ? <Loader2 className="size-3 animate-spin mr-1"/> : <BrainCircuit className="size-3 mr-1"/>}
-                     Regenerate
-                   </Button>
-                )}
               </div>
               <Textarea
                 className="min-h-[120px] text-sm leading-relaxed"
                 value={draftText}
                 onChange={handleTextChange}
-                disabled={drafting}
                 placeholder="AI draft will appear here. Edit it before saving."
               />
             </div>

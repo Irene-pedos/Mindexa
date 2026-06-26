@@ -1,7 +1,7 @@
 // app/student/group-work/[id]/page.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { 
   Loader2, 
@@ -29,6 +29,7 @@ import { GroupActivityFeed } from "@/components/mindexa/group-work/group-activit
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 
 export default function StudentGroupWorkWorkspace() {
   const params = useParams();
@@ -40,27 +41,65 @@ export default function StudentGroupWorkWorkspace() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [workspace, setWorkspace] = useState<any>(null);
   const [activeQuestionId, setActiveQuestionId] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+
+  const hasInitializedQuestion = useRef(false);
+  const isFetchingRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  
+  const userRef = useRef(user);
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   const loadWorkspace = useCallback(async (silent = false) => {
+    if (isFetchingRef.current) return;
+    isFetchingRef.current = true;
+
+    // Cancel any in-flight previous request
+    abortControllerRef.current?.abort();
+    abortControllerRef.current = new AbortController();
+
     if (!silent) setLoading(true);
     else setIsSyncing(true);
-    
+
     try {
       const data = await groupWorkApi.getWorkspace(assessmentId);
+      if (abortControllerRef.current.signal.aborted) return;
+
       setWorkspace(data);
-      
-      // Default to first question if none active
-      if (!activeQuestionId && data.questions && data.questions.length > 0) {
-        setActiveQuestionId(data.questions[0].id);
+
+      const isMember = data.members?.some((m: { student_id: string }) => m.student_id === userRef.current?.id);
+      if (!isMember) {
+        toast.error("You are not a member of this group workspace.");
+        router.push("/student/dashboard");
+        return;
       }
-    } catch (err: any) {
-      toast.error(err.message || "Failed to load group workspace");
-      router.push("/student/dashboard");
+
+      if (!hasInitializedQuestion.current && data.questions?.length > 0) {
+        setActiveQuestionId(data.questions[0].id);
+        hasInitializedQuestion.current = true;
+      }
+      setLastSyncedAt(new Date());
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name === "AbortError" || abortControllerRef.current?.signal.aborted) return;
+      const message = err instanceof Error ? err.message : "Failed to load group workspace";
+      if (!silent) {
+        toast.error(message);
+        router.push("/student/dashboard");
+      } else {
+        setSyncError(message);
+      }
     } finally {
-      setLoading(false);
-      setIsSyncing(false);
+      isFetchingRef.current = false;
+      if (!abortControllerRef.current?.signal.aborted) {
+        setLoading(false);
+        setIsSyncing(false);
+      }
     }
-  }, [assessmentId, router, activeQuestionId]);
+  }, [assessmentId, router]);
 
   useEffect(() => {
     loadWorkspace();
@@ -70,10 +109,17 @@ export default function StudentGroupWorkWorkspace() {
       loadWorkspace(true);
     }, 10000); // Sync every 10 seconds
     
-    return () => clearInterval(interval);
+    return () => {
+      clearInterval(interval);
+      abortControllerRef.current?.abort();
+    };
   }, [loadWorkspace]);
 
   const handleSaveAnswer = async (qId: string, content: any, notes?: any) => {
+    if (!workspace?.submission_id) {
+      toast.error("Workspace is still initializing. Please wait a moment and try again.");
+      return;
+    }
     try {
       await groupWorkApi.saveAnswer(assessmentId, workspace.submission_id, qId, {
         answer_content: content,
@@ -81,60 +127,83 @@ export default function StudentGroupWorkWorkspace() {
         change_source: "manual_edit"
       });
       loadWorkspace(true);
-    } catch (err: any) {
-      toast.error("Failed to save shared answer");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to save shared answer";
+      toast.error(message);
       throw err;
     }
   };
 
   const handlePostComment = async (body: string, qId?: string) => {
+    if (!workspace?.submission_id) {
+      toast.error("Workspace is still initializing. Please wait a moment and try again.");
+      return;
+    }
     try {
       await groupWorkApi.addComment(assessmentId, workspace.submission_id, {
         body,
         question_id: qId
       });
       loadWorkspace(true);
-    } catch (err: any) {
-      toast.error("Failed to post comment");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to post comment";
+      toast.error(message);
       throw err;
     }
   };
 
   const handleApprove = async (note?: string) => {
+    if (!workspace?.submission_id) {
+      toast.error("Workspace is still initializing. Please wait a moment and try again.");
+      return;
+    }
     try {
       await groupWorkApi.approveSubmission(assessmentId, workspace.submission_id, {
         status: "APPROVED",
         note
       });
-      toast.success("Digital signature applied");
+      toast.success("Your approval has been recorded.");
       loadWorkspace(true);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to approve");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to approve";
+      toast.error(message);
     }
   };
 
   const handleReject = async (note: string) => {
+    if (!workspace?.submission_id) {
+      toast.error("Workspace is still initializing. Please wait a moment and try again.");
+      return;
+    }
     try {
       await groupWorkApi.approveSubmission(assessmentId, workspace.submission_id, {
-        status: "REJECTED",
+        status: "CHANGES_REQUESTED",
         note
       });
-      toast.warning("Changes requested successfully");
+      toast.warning("Change request recorded. Your team has been notified.");
       loadWorkspace(true);
-    } catch (err: any) {
-      toast.error(err.message || "Failed to request changes");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to request changes";
+      toast.error(message);
     }
   };
 
+  const requestSubmit = async () => {
+    setShowSubmitConfirm(true);
+  };
+
   const handleSubmit = async () => {
+    if (!workspace?.submission_id) return;
+    setShowSubmitConfirm(false);
     try {
       await groupWorkApi.submitGroupWork(assessmentId, workspace.submission_id, {
         confirm: true
       });
-      toast.success("Assessment submitted successfully!");
-      router.push("/student/dashboard");
-    } catch (err: any) {
-      toast.error(err.message || "Submission failed");
+      toast.success("Group assessment submitted successfully.");
+      router.push(`/student/results`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Submission failed";
+      toast.error(message);
     }
   };
 
@@ -162,7 +231,11 @@ export default function StudentGroupWorkWorkspace() {
   const activeQuestion = workspace.questions.find((q: any) => q.id === activeQuestionId);
   const currentAnswer = workspace.answers.find((a: any) => a.question_id === activeQuestionId);
   const amLeader = workspace.members.find((m: any) => m.student_id === user?.id)?.is_leader || false;
-  const participationSatisfied = (workspace.members.find((m: any) => m.student_id === user?.id)?.participation_count || 0) > 0;
+  const minParticipation = workspace.assessment?.min_participation_count ?? 1;
+  const myParticipation = workspace.members.find(
+    (m: { student_id: string }) => m.student_id === user?.id
+  )?.participation_count || 0;
+  const participationSatisfied = myParticipation >= minParticipation;
 
   return (
     <div className="min-h-screen bg-background pb-20">
@@ -174,21 +247,21 @@ export default function StudentGroupWorkWorkspace() {
            </Button>
            <Separator orientation="vertical" className="h-4" />
            <div className="flex items-center gap-2">
-             <div className="size-2 rounded-full bg-emerald-500" />
+             <div className="size-2 rounded-full bg-success" />
              <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Workspace Active</span>
            </div>
          </div>
 
          <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-               {isSyncing && <div className="size-3.5 rounded-full bg-primary/20 animate-pulse" />}
+               {isSyncing && <Loader2 className="size-3.5 animate-spin text-primary" />}
                <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
                  {isSyncing ? "Syncing..." : "Workspace Synced"}
                </span>
             </div>
             <Button variant="outline" size="icon" onClick={() => loadWorkspace()} disabled={isSyncing} className="h-8 w-8 rounded-md">
                {isSyncing ? (
-                 <div className="size-3.5 rounded-full bg-primary/10 animate-pulse" />
+                 <Loader2 className="size-3.5 animate-spin" />
                ) : (
                  <RefreshCcw className="size-3.5" />
                )}
@@ -236,13 +309,13 @@ export default function StudentGroupWorkWorkspace() {
                                  isActive 
                                    ? "bg-primary border-primary text-primary-foreground shadow-sm" 
                                    : hasAnswer 
-                                     ? "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100" 
+                                     ? "bg-success/[0.03] border-success/20 text-success hover:bg-success/10" 
                                      : "bg-background border-border hover:bg-muted text-muted-foreground"
                                )}
                              >
                                {idx + 1}
                                {hasAnswer && !isActive && (
-                                 <div className="absolute -top-1 -right-1 size-3 bg-emerald-500 rounded-full border-2 border-background" />
+                                 <div className="absolute -top-1 -right-1 size-3 bg-success rounded-full border-2 border-background" />
                                )}
                              </button>
                            );
@@ -281,7 +354,7 @@ export default function StudentGroupWorkWorkspace() {
                  totalMembers={workspace.members.length}
                  onApprove={handleApprove}
                  onReject={handleReject}
-                 onSubmit={handleSubmit}
+                 onSubmit={requestSubmit}
                  isLeader={amLeader}
                  canSubmit={!!workspace.can_submit}
                  participationSatisfied={participationSatisfied}
@@ -307,6 +380,33 @@ export default function StudentGroupWorkWorkspace() {
             </div>
          </div>
       </div>
+
+      <Dialog open={showSubmitConfirm} onOpenChange={setShowSubmitConfirm}>
+        <DialogContent className="sm:max-w-sm p-6 border-none shadow-xl rounded-xl bg-background">
+          <DialogTitle className="text-base font-semibold text-center">
+            Submit Group Assessment?
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground text-center mt-2 mb-5 leading-relaxed">
+            This will finalize your group&apos;s submission for{" "}
+            <strong>{workspace?.assessment?.title}</strong>. This action cannot be undone.
+          </p>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1 h-9 text-xs rounded-lg"
+              onClick={() => setShowSubmitConfirm(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="flex-1 h-9 text-xs rounded-lg"
+              onClick={handleSubmit}
+            >
+              Confirm & Submit
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,0 +1,280 @@
+from __future__ import annotations
+import uuid
+import os
+import fitz  # PyMuPDF
+import docx
+import tiktoken
+import httpx
+from datetime import datetime, UTC
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
+from sqlalchemy import update
+from typing import List, Dict, Any, Optional
+
+from app.db.models.academic_resource import AcademicResource
+from app.db.models.resource_chunk import ResourceChunk
+from app.db.enums import ResourceProcessingStatus
+from app.core.config import settings
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+class DocumentExtractionError(Exception):
+    pass
+
+class EmbeddingGenerationError(Exception):
+    pass
+
+class DocumentProcessingService:
+    def __init__(self):
+        self.jina_api_key = settings.JINA_API_KEY
+        self.jina_base_url = settings.JINA_BASE_URL
+        self.embedding_model = settings.JINA_DEFAULT_MODEL
+        try:
+            self.tokenizer = tiktoken.get_encoding("cl100k_base")
+        except Exception:
+            self.tokenizer = None
+
+    async def process_resource(self, resource_id: uuid.UUID, db: AsyncSession) -> None:
+        """Full pipeline entry point called by Celery task."""
+        resource = await db.get(AcademicResource, resource_id)
+        if not resource:
+            logger.error("Resource not found", resource_id=resource_id)
+            return
+
+        try:
+            resource.processing_status = ResourceProcessingStatus.PROCESSING
+            await db.commit()
+
+            file_path = os.path.join(settings.UPLOAD_DIR, resource.file_path)
+            if not os.path.exists(file_path):
+                raise DocumentExtractionError(f"File not found: {file_path}")
+
+            # 4. Extract text
+            ext = os.path.splitext(resource.file_name)[1].lower()
+            if ext == ".pdf":
+                pages = self._extract_text_pdf(file_path)
+            elif ext in [".docx", ".doc"]:
+                pages = self._extract_text_docx(file_path)
+            elif ext == ".txt":
+                pages = self._extract_text_txt(file_path)
+            else:
+                raise DocumentExtractionError(f"Unsupported file type: {ext}")
+
+            # 5. Chunk text
+            chunks_data = self._chunk_text(pages)
+            
+            # 6. Generate embeddings
+            texts = [c["content"] for c in chunks_data]
+            embeddings = await self._generate_embeddings(texts)
+            
+            # 7. Store ResourceChunk records
+            await self._store_chunks(resource.id, chunks_data, embeddings, db)
+
+            # 8. Set status to COMPLETED on AcademicResource
+            resource.processing_status = ResourceProcessingStatus.PROCESSED
+            resource.processed_at = datetime.now(UTC)
+            resource.chunk_count = len(chunks_data)
+            await db.commit()
+            
+            # 9. Also update the owning StudentResource or LecturerMaterial so the
+            #    frontend can see the correct processing status.
+            await self._sync_parent_resource_status(
+                academic_resource_id=resource.id,
+                status=ResourceProcessingStatus.PROCESSED,
+                chunk_count=len(chunks_data),
+                db=db,
+            )
+            
+            logger.info("Resource processed successfully", resource_id=resource.id)
+
+        except Exception as e:
+            logger.exception("Error processing resource", resource_id=resource_id, error=str(e))
+            resource.processing_status = ResourceProcessingStatus.FAILED
+            resource.processing_error = str(e)
+            await db.commit()
+            # Also propagate failure to parent resource
+            await self._sync_parent_resource_status(
+                academic_resource_id=resource.id,
+                status=ResourceProcessingStatus.FAILED,
+                chunk_count=0,
+                db=db,
+                error=str(e),
+            )
+
+    def _extract_text_pdf(self, file_path: str) -> List[Dict[str, Any]]:
+        """Use PyMuPDF (fitz) to extract text page by page."""
+        pages = []
+        try:
+            doc = fitz.open(file_path)
+            for i, page in enumerate(doc):
+                text = page.get_text()
+                if text.strip():
+                    pages.append({"page": i + 1, "text": text})
+            doc.close()
+            return pages
+        except Exception as e:
+            raise DocumentExtractionError(f"PDF extraction failed: {str(e)}")
+
+    def _extract_text_docx(self, file_path: str) -> List[Dict[str, Any]]:
+        """Use python-docx to extract paragraphs."""
+        try:
+            doc = docx.Document(file_path)
+            text_blocks = []
+            current_block = []
+            
+            for para in doc.paragraphs:
+                if para.text.strip():
+                    current_block.append(para.text)
+                    if len(current_block) >= 5: # Group 5 paragraphs as a block
+                        text_blocks.append({"section": None, "text": "\n".join(current_block)})
+                        current_block = []
+            
+            if current_block:
+                text_blocks.append({"section": None, "text": "\n".join(current_block)})
+            
+            return text_blocks
+        except Exception as e:
+            raise DocumentExtractionError(f"DOCX extraction failed: {str(e)}")
+
+    def _extract_text_txt(self, file_path: str) -> List[Dict[str, Any]]:
+        """Plain text extraction."""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            
+            # Split by double newlines as logical blocks
+            blocks = content.split("\n\n")
+            return [{"page": 1, "text": b} for b in blocks if b.strip()]
+        except Exception as e:
+            raise DocumentExtractionError(f"TXT extraction failed: {str(e)}")
+
+    def _chunk_text(self, pages: List[Dict[str, Any]], chunk_size: int = None, overlap: int = None) -> List[Dict[str, Any]]:
+        """Split extracted text into overlapping chunks."""
+        chunk_size = chunk_size or settings.RAG_CHUNK_SIZE
+        overlap = overlap or settings.RAG_CHUNK_OVERLAP
+        chunks = []
+        chunk_index = 0
+        
+        for p in pages:
+            text = p["text"]
+            # Simplified character-based approximation if tiktoken is not available
+            # 1 token approx 4 characters
+            chars_per_chunk = chunk_size * 4
+            chars_overlap = overlap * 4
+            
+            start = 0
+            while start < len(text):
+                end = start + chars_per_chunk
+                chunk_text = text[start:end]
+                
+                if len(chunk_text.strip()) > 30: # Minimum 30 tokens approx 120 chars
+                    token_count = self._count_tokens(chunk_text)
+                    chunks.append({
+                        "chunk_index": chunk_index,
+                        "content": chunk_text,
+                        "token_count": token_count,
+                        "metadata": {"page": p.get("page"), "section": p.get("section")}
+                    })
+                    chunk_index += 1
+                
+                start += chars_per_chunk - chars_overlap
+                if start >= len(text):
+                    break
+                    
+        return chunks
+
+    def _count_tokens(self, text: str) -> int:
+        if self.tokenizer:
+            return len(self.tokenizer.encode(text))
+        return len(text) // 4
+
+    async def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Call Jina Embeddings API."""
+        if not self.jina_api_key:
+            raise EmbeddingGenerationError("JINA_API_KEY not configured")
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.jina_api_key}"
+        }
+        
+        # Jina supports batching.
+        url = f"{self.jina_base_url}/embeddings"
+        payload = {
+            "model": self.embedding_model,
+            "task": "retrieval.passage",
+            "dimensions": 768, # Specified in handoff
+            "input": texts
+        }
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code != 200:
+                raise EmbeddingGenerationError(f"Jina API failed: {response.text}")
+            
+            data = response.json()
+            return [item["embedding"] for item in data["data"]]
+
+    async def _store_chunks(self, resource_id: uuid.UUID, chunks_data: List[Dict[str, Any]], embeddings: List[List[float]], db: AsyncSession) -> None:
+        """Bulk insert ResourceChunk records."""
+        for i, chunk_info in enumerate(chunks_data):
+            chunk = ResourceChunk(
+                resource_id=resource_id,
+                chunk_index=chunk_info["chunk_index"],
+                content=chunk_info["content"],
+                token_count=chunk_info["token_count"],
+                embedding=embeddings[i],
+                metadata_json=chunk_info["metadata"]
+            )
+            db.add(chunk)
+        await db.flush()
+
+    async def _sync_parent_resource_status(
+        self,
+        academic_resource_id: uuid.UUID,
+        status: ResourceProcessingStatus,
+        chunk_count: int,
+        db: AsyncSession,
+        error: Optional[str] = None,
+    ) -> None:
+        """
+        After AcademicResource processing finishes, propagate the status back
+        to the StudentResource or LecturerMaterial that owns it.
+        This keeps the frontend status field in sync.
+        """
+        from app.db.models.resource import StudentResource, LecturerMaterial
+
+        # Try to update StudentResource
+        student_update = (
+            update(StudentResource)
+            .where(StudentResource.academic_resource_id == academic_resource_id)
+            .values(
+                processing_status=status,
+                chunk_count=chunk_count if chunk_count else None,
+                processing_error=error,
+            )
+        )
+        student_result = await db.execute(student_update)
+
+        # Try to update LecturerMaterial if it wasn't a student resource
+        if student_result.rowcount == 0:
+            lecturer_update = (
+                update(LecturerMaterial)
+                .where(LecturerMaterial.academic_resource_id == academic_resource_id)
+                .values(
+                    processing_status=status,
+                    chunk_count=chunk_count if chunk_count else None,
+                    processing_error=error,
+                )
+            )
+            await db.execute(lecturer_update)
+
+        try:
+            await db.commit()
+        except Exception as e:
+            logger.warning(
+                "Could not sync parent resource status",
+                academic_resource_id=academic_resource_id,
+                error=str(e),
+            )

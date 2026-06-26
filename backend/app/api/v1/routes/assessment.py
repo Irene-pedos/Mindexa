@@ -224,17 +224,18 @@ async def publish_bulk(
 
 @router.post(
     "/draft",
+    response_model=AssessmentDetailResponse,
     summary="Bulk Save Draft (Frontend Alignment)",
 )
 async def save_draft_bulk(
     body: BulkAssessmentPublishRequest,
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
-) -> FinalizeAssessmentResponse:
+) -> AssessmentDetailResponse:
     svc = _service(db)
     result = await svc.bulk_save_draft_assessment(body, current_user)
     await db.commit()
-    return result
+    return AssessmentDetailResponse.model_validate(result)
 
 
 # ---------------------------------------------------------------------------

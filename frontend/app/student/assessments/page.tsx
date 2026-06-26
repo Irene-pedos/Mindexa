@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
-import { apiClient } from "@/lib/api/client";
+import { notificationApi } from "@/lib/api/notification"; // BUG-18 fix: typed notification API
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import {
   getAssessmentProgressStatus,
@@ -104,11 +104,11 @@ export default function StudentAssessmentsPage() {
       try {
         const [assessData, notifData] = await Promise.all([
           assessmentApi.getAssessments({ page, page_size: pageSize }),
-          apiClient("/notifications/me?unread_only=true")
+          notificationApi.getNotifications(true).catch(() => ({ items: [] })),  // BUG-18 fix: use typed notificationApi
         ]);
         setAssessments(assessData.items || []);
         setTotal(assessData.total || 0);
-        setNotifications(notifData.items || []);
+        setNotifications((notifData as any)?.items || []);
       } catch (err) {
         console.error(err);
       } finally {

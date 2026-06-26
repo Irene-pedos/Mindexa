@@ -51,26 +51,27 @@ T = TypeVar("T")
 def _run(coro: Awaitable[T]) -> T:
     """
     Run an async coroutine from a synchronous Celery task.
-
-    Reuses a per-thread event loop to keep async DB connections valid
-    across multiple task executions in the same worker.
+    Safely creates a new event loop and disposes the global engine pool
+    to prevent loop collision errors in background workers.
     """
-    loop = getattr(_event_loop_local, "loop", None)
-    if loop is None or loop.is_closed():
-        loop = asyncio.new_event_loop()
-        _event_loop_local.loop = loop
+    from app.db.session import engine
 
-    previous_loop = None
-    try:
+    async def wrapper():
+        # First, ensure we start with a clean slate in this loop
+        await engine.dispose()
         try:
-            previous_loop = asyncio.get_event_loop()
-        except RuntimeError:
-            previous_loop = None
-        asyncio.set_event_loop(loop)
-        return loop.run_until_complete(coro)
+            return await coro
+        finally:
+            # Cleanly shut down connections *before* the loop closes
+            await engine.dispose()
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        return loop.run_until_complete(wrapper())
     finally:
-        if previous_loop is not None and previous_loop is not loop:
-            asyncio.set_event_loop(previous_loop)
+        loop.close()
+        asyncio.set_event_loop(None)
 
 
 def _utcnow() -> datetime:
@@ -565,19 +566,17 @@ def process_ai_generation_batch(
             raise self.retry(exc=exc, countdown=countdown)
         except MaxRetriesExceededError:
             _run(_mark_batch_failed(batch_id, str(exc)))
-            logger.critical("process_ai_generation_batch: max retries for batch %s", batch_id)
-            raise
-
-
-async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
+            logger.critical("process_ai_generation_batch: max retries for batch %s", batch_id)async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
     from app.core.ai.question_generator import (GenerationContext,
                                                 generate_questions)
     from app.db.enums import AIBatchStatus
     from app.db.repositories.ai_generation_repo import AIGenerationRepository
     from app.db.session import AsyncSessionLocal
+    from app.services.rag_service import RAGService
 
     async with AsyncSessionLocal() as session:
         repo = AIGenerationRepository(session)
+        rag = RAGService(session)
         try:
             batch_uuid = uuid.UUID(batch_id)
         except ValueError as exc:
@@ -594,12 +593,76 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
             started_at=now,
         )
 
+        # ── RAG: retrieve course material context ──────────────────────────────
+        # Try to get grounded context from the lecturer's uploaded materials.
+        # If the workspace_id is not set or materials aren't processed yet,
+        # retrieve_context_for_lecturer() returns "" and generation continues
+        # without RAG context (graceful fallback).
+        workspace_id = getattr(batch, "teaching_workspace_id", None)
+        rag_topic = batch.topic or batch.subject or "General"
+        course_material_context: str = ""
+        if workspace_id:
+            try:
+                course_material_context = await rag.retrieve_context_for_lecturer(
+                    topic=rag_topic,
+                    teaching_workspace_id=workspace_id,
+                    top_k=8,
+                )
+                logger.info(
+                    "Lecturer RAG context retrieved for batch",
+                    extra={
+                        "batch_id": batch_id,
+                        "workspace_id": str(workspace_id),
+                        "context_chars": len(course_material_context),
+                    },
+                )
+            except Exception as rag_exc:
+                logger.warning(
+                    "Lecturer RAG retrieval failed — generating without course context",
+                    extra={
+                        "batch_id": batch_id,
+                        "error": str(rag_exc),
+                    },
+                )
+        else:
+            logger.info(
+                "Batch has no teaching_workspace_id — skipping RAG",
+                extra={"batch_id": batch_id},
+            )
+
+        if workspace_id and not course_material_context.strip():
+            message = (
+                "AI generation requires processed lecture materials for the selected "
+                "teaching workspace. Upload notes from the course page and wait until "
+                "processing completes before generating assessment questions."
+            )
+            await repo.update_batch_status(
+                batch_id=batch.id,
+                status=AIBatchStatus.FAILED.value,
+                total_generated=0,
+                total_failed=batch.total_requested,
+                error_message=message,
+                completed_at=datetime.now(UTC),
+            )
+            await session.commit()
+            return {
+                "batch_id": batch_id,
+                "status": AIBatchStatus.FAILED.value,
+                "generated": 0,
+                "error": message,
+            }
+
+        # Blueprint & learning outcome context stored on the batch
+        blueprint_constraints = getattr(batch, "blueprint_constraints", None)
+        learning_outcomes = getattr(batch, "learning_outcomes", None)
+        marks_per_question = getattr(batch, "marks_per_question", None)
+
         # Build context or iterate over sections
         if batch.sections_json:
             total_generated = 0
             total_failed = 0
             final_status = AIBatchStatus.COMPLETED
-            
+
             for sec in batch.sections_json:
                 sec_id_str = sec.get("section_id")
                 sec_uuid = uuid.UUID(sec_id_str) if sec_id_str else None
@@ -608,7 +671,20 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 sec_difficulty = sec.get("difficulty") or batch.difficulty
                 sec_count = sec.get("count") or 3
                 sec_bloom = sec.get("bloom_level") or batch.bloom_level
-                
+                sec_marks = sec.get("marks_per_question") or batch.marks_per_question
+
+                # Re-retrieve RAG context per section topic if topic differs from batch topic
+                sec_context = course_material_context
+                if workspace_id and sec_topic and sec_topic != rag_topic:
+                    try:
+                        sec_context = await rag.retrieve_context_for_lecturer(
+                            topic=sec_topic,
+                            teaching_workspace_id=workspace_id,
+                            top_k=6,
+                        )
+                    except Exception:
+                        sec_context = course_material_context  # fallback to batch-level context
+
                 context = GenerationContext(
                     question_type=sec_q_type,
                     difficulty=sec_difficulty,
@@ -617,15 +693,20 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                     topic=sec_topic,
                     bloom_level=sec_bloom,
                     additional_context=batch.additional_context,
+                    workspace_id=workspace_id,
+                    course_material_context=sec_context or None,
+                    blueprint_constraints=blueprint_constraints,
+                    learning_outcomes=learning_outcomes,
+                    marks_per_question=sec_marks,
                     request_id=str(batch.id),
                     lecturer_id=batch.created_by_id,
                 )
-                
+
                 try:
                     result = await generate_questions(context, db=session)
                     total_generated += result.total_generated
                     total_failed += result.total_failed
-                    
+
                     # Store each generated question
                     for generated in result.questions:
                         options_json = (
@@ -662,7 +743,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 total_failed=total_failed,
                 completed_at=completed_at,
             )
-            
+
             await session.commit()
             return {
                 "batch_id": batch_id,
@@ -679,6 +760,11 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 topic=batch.topic,
                 bloom_level=batch.bloom_level,
                 additional_context=batch.additional_context,
+                workspace_id=workspace_id,
+                course_material_context=course_material_context or None,
+                blueprint_constraints=blueprint_constraints,
+                learning_outcomes=learning_outcomes,
+                marks_per_question=marks_per_question,
                 request_id=str(batch.id),
                 lecturer_id=batch.created_by_id,
             )

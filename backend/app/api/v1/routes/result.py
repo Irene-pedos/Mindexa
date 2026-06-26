@@ -19,10 +19,13 @@ import uuid
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.exceptions import NotFoundError
+from app.db.models.auth import User
 from app.db.repositories.result_repo import ResultRepository
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin, require_student
 from app.schemas.result import (
+    AssessmentReleasePolicyRequest,
     AssessmentResultResponse,
     ClearIntegrityHoldRequest,
     ReleaseResultsRequest,
@@ -45,7 +48,7 @@ router = APIRouter(prefix="/results", tags=["Results"])
 )
 async def get_my_result(
     attempt_id: uuid.UUID,
-    current_user=Depends(require_student),
+    current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentResultResponse:
     """
@@ -69,28 +72,29 @@ async def get_my_result(
 async def list_my_results(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    current_user=Depends(require_student),
+    current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> ResultListResponse:
     """
     Returns a paginated list of released results for the current student.
     """
+    from sqlalchemy import func, not_, select
+
     from app.db.models.assessment import Assessment
     from app.db.models.result import AssessmentResult
-    from sqlalchemy import select, func
 
     # Get results for current student
     stmt = select(AssessmentResult).where(
         AssessmentResult.student_id == current_user.id,
-        AssessmentResult.is_released == True,
-        AssessmentResult.is_deleted == False
+        AssessmentResult.is_released,
+        not_(AssessmentResult.is_deleted)
     ).order_by(AssessmentResult.released_at.desc())
 
     # Count total
     count_stmt = select(func.count(AssessmentResult.id)).where(
         AssessmentResult.student_id == current_user.id,
-        AssessmentResult.is_released == True,
-        AssessmentResult.is_deleted == False
+        AssessmentResult.is_released,
+        not_(AssessmentResult.is_deleted)
     )
     total = (await db.execute(count_stmt)).scalar_one()
 
@@ -127,7 +131,7 @@ async def list_my_results(
 )
 async def get_result_for_lecturer(
     attempt_id: uuid.UUID,
-    current_user=Depends(require_lecturer_or_admin),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentResultResponse:
     """
@@ -152,7 +156,7 @@ async def list_results_for_assessment(
     is_released: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
-    current_user=Depends(require_lecturer_or_admin),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ResultListResponse:
     repo = ResultRepository(db)
@@ -180,7 +184,7 @@ async def list_results_for_assessment(
 )
 async def calculate_result(
     attempt_id: uuid.UUID,
-    current_user=Depends(require_lecturer_or_admin),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentResultResponse:
     """
@@ -205,7 +209,7 @@ async def calculate_result(
 )
 async def release_results(
     body: ReleaseResultsRequest,
-    current_user=Depends(require_lecturer_or_admin),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ResultReleaseResponse:
     """
@@ -225,6 +229,82 @@ async def release_results(
     return ResultReleaseResponse(**release_data)
 
 
+@router.post(
+    "/assessment/{assessment_id}/trigger-release",
+    response_model=ResultReleaseResponse,
+    summary="Trigger immediate result release for an assessment",
+)
+async def trigger_immediate_release(
+    assessment_id: uuid.UUID,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ResultReleaseResponse:
+    """
+    Triggers an immediate release of all eligible results for the given assessment.
+    Used by the immediate release workflow in the lecturer UI.
+    """
+    service = ResultService(db)
+    release_data = await service.release_results(
+        assessment_id=assessment_id,
+        released_by_id=current_user.id,
+        attempt_ids=None, # None means all eligible
+    )
+    return ResultReleaseResponse(**release_data)
+
+
+@router.patch(
+    "/assessment/{assessment_id}/release-policy",
+    response_model=dict,
+    summary="Update the assessment's result release policy",
+)
+async def update_release_policy(
+    assessment_id: uuid.UUID,
+    body: AssessmentReleasePolicyRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Update the release policy (manual, immediate, scheduled) for an assessment.
+    """
+    from app.core.exceptions import ValidationError
+    from app.db.enums import ResultReleaseMode
+    from app.db.models.assessment import Assessment
+
+    # 1. Fetch assessment
+    assessment = await db.get(Assessment, assessment_id)
+    if not assessment:
+        raise NotFoundError("Assessment", str(assessment_id))
+
+    # 2. Map frontend string policy to Enum
+    policy_map = {
+        "immediate": ResultReleaseMode.IMMEDIATE,
+        "scheduled": ResultReleaseMode.SCHEDULED,
+        "hold": ResultReleaseMode.MANUAL
+    }
+    
+    enum_policy = policy_map.get(body.policy.lower())
+    if not enum_policy:
+         try:
+             enum_policy = ResultReleaseMode(body.policy.upper())
+         except ValueError as err:
+             raise ValidationError(f"Invalid policy: {body.policy}", code="INVALID_POLICY") from err
+
+    # 3. Update fields
+    assessment.result_release_mode = enum_policy
+    assessment.result_release_at = body.release_date
+    assessment.updated_by_id = current_user.id
+    
+    db.add(assessment)
+    await db.commit()
+    
+    return {
+        "message": "Release policy updated successfully",
+        "assessment_id": str(assessment_id),
+        "policy": enum_policy.value,
+        "release_date": body.release_date.isoformat() if body.release_date else None
+    }
+
+
 # ── CLEAR INTEGRITY HOLD ──────────────────────────────────────────────────────
 
 
@@ -236,7 +316,7 @@ async def release_results(
 async def clear_integrity_hold(
     result_id: uuid.UUID,
     body: ClearIntegrityHoldRequest,
-    current_user=Depends(require_lecturer_or_admin),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """

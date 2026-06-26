@@ -375,7 +375,7 @@ class ResultService:
                 
             q = response.question
             bd.question_text = q.content
-            bd.imageUrl = q.image_url
+            bd.image_url = q.image_url
             
             # Populate section title
             aq = aq_map.get(bd.question_id)

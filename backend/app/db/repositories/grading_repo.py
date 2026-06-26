@@ -279,6 +279,7 @@ class GradingRepository:
                     GradingQueueStatus.PENDING,
                     GradingQueueStatus.ASSIGNED,
                     GradingQueueStatus.IN_PROGRESS,
+                    GradingQueueStatus.AI_SUGGESTED,
                 ]),
             ).order_by(GradingQueueItem.created_at.desc()).limit(1)
         )
@@ -618,7 +619,6 @@ class GradingRepository:
             ai_suggested_score=old_grade.ai_suggested_score,
             ai_rationale=old_grade.ai_rationale,
             ai_confidence=old_grade.ai_confidence,
-            ai_action_log_id=old_grade.ai_action_log_id,
             feedback=feedback_update or old_grade.feedback,
             internal_notes=internal_notes or old_grade.internal_notes,
             rubric_scores=old_grade.rubric_scores, # Might need adjustment if rubric-based

@@ -286,8 +286,9 @@ export default function AssessmentDetailsPage() {
       try {
         const batch = await aiGenerationApi.getBatch(batchId);
         setAiGenerationProgress(Math.min(95, Math.round(((currentTick + 1) / maxTicks) * 100)));
+        const status = batch.status?.toLowerCase();
 
-        if (batch.status === "completed" || batch.status === "partial_failure") {
+        if (status === "completed" || status === "partial_failure") {
           const generatedQuestions = batch.questions || [];
           if (generatedQuestions.length === 0) {
             setAiGenerating(false);
@@ -301,7 +302,7 @@ export default function AssessmentDetailsPage() {
           setAiGenerating(false);
           setAiReviewDrawerOpen(true);
           toast.success(`AI generated ${generatedQuestions.length} question candidates!`);
-        } else if (batch.status === "failed") {
+        } else if (status === "failed") {
           setAiGenerating(false);
           toast.error(batch.error_message || "AI question generation failed on server.");
         } else {

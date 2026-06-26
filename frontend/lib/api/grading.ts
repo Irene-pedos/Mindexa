@@ -22,4 +22,10 @@ export const gradingApi = {
     method: "POST",
     body: JSON.stringify(data)
   }),
+  getAssessmentClassStats: (assessmentId: string) => 
+    apiClient(`/grading/assessment/${assessmentId}/stats/classes`),
+  getClassAiSummary: (assessmentId: string, classId: string) => 
+    apiClient(`/grading/assessment/${assessmentId}/class/${classId}/ai-summary`),
+  getAssessmentAnalytics: (assessmentId: string) => 
+    apiClient(`/grading/assessment/${assessmentId}/analytics`),
 };

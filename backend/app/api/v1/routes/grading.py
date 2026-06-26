@@ -16,6 +16,7 @@ Endpoints:
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,19 +29,64 @@ from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin
 from app.schemas.grading import (
     AIGradeConfirmRequest,
+    AIReviewSuggestionResponse,
+    AssessmentClassStatsResponse,
     AttemptGradingSummary,
+    ClassAiSummaryResponse,
     GradingQueueItemResponse,
     GradingQueueListResponse,
+    GroupGradingQueueListResponse,
     ManualGradeRequest,
+    ModerateGradeRequest,
+    ModerationStatsResponse,
     QueueItemAssignRequest,
     SubmissionGradeResponse,
-    GroupGradingQueueListResponse,
-    ModerationStatsResponse,
-    ModerateGradeRequest,
 )
 from app.services.grading_service import GradingService
 
 router = APIRouter(prefix="/grading", tags=["Grading"])
+
+
+# ── CLASS-CENTRIC GRADING WORKFLOW (Refactored) ──────────────────────────────
+
+
+@router.get(
+    "/assessment/{assessment_id}/stats/classes",
+    response_model=AssessmentClassStatsResponse,
+    summary="Get grading statistics for all classes assigned to an assessment",
+)
+async def get_assessment_classes_stats(
+    assessment_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentClassStatsResponse:
+    """
+    Returns class-level metrics for the Class Overview Dashboard.
+    Used to track grading progress (Pending, Reviewed, Released) per class section.
+    """
+    service = GradingService(db)
+    data = await service.get_assessment_class_stats(assessment_id)
+    return AssessmentClassStatsResponse.model_validate(data)
+
+
+@router.get(
+    "/assessment/{assessment_id}/class/{class_id}/ai-summary",
+    response_model=ClassAiSummaryResponse,
+    summary="Get AI-powered pedagogical summary for a class's performance",
+)
+async def get_class_ai_summary_endpoint(
+    assessment_id: uuid.UUID,
+    class_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ClassAiSummaryResponse:
+    """
+    Returns class-level AI summary (Average score, Topics, Common mistakes).
+    Used by lecturers to review overall performance before individual grading.
+    """
+    service = GradingService(db)
+    data = await service.get_class_ai_summary(assessment_id, class_id)
+    return ClassAiSummaryResponse.model_validate(data)
 
 
 # ── INSTITUTIONAL MODERATION (Phase 4) ─────────────────────────────────────────
@@ -243,6 +289,11 @@ async def draft_feedback(
 
 
 @router.get(
+    "/response/{response_id}/grade",
+    response_model=SubmissionGradeResponse,
+    summary="Get the grade details for a specific response",
+)
+@router.get(
     "/response/{response_id}",
     response_model=SubmissionGradeResponse,
     summary="Get the grade for a specific response",
@@ -377,6 +428,35 @@ async def assign_queue_item(
         priority=body.priority,
     )
     return {"message": "Queue item assigned successfully", "item_id": str(item_id)}
+
+
+@router.post(
+    "/queue/{item_id}/process-ai",
+    response_model=AIReviewSuggestionResponse,
+    summary="Manually trigger AI grading for a queue item",
+)
+async def process_ai_queue_item_endpoint(
+    item_id: uuid.UUID,
+    current_user: Any = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AIReviewSuggestionResponse:
+    repo = GradingRepository(db)
+    item = await repo.get_queue_item_by_id(item_id)
+    if not item:
+        raise NotFoundError("Queue item not found", code="QUEUE_ITEM_NOT_FOUND")
+
+    service = GradingService(db)
+    await service.process_ai_queue_item(item_id)
+    
+    grade = await repo.get_full_grade_detail(item.response_id)
+    suggested_score = grade.ai_suggested_score if grade else None
+    
+    return AIReviewSuggestionResponse(
+        status="success",
+        item_id=item_id,
+        response_id=item.response_id,
+        suggested_score=suggested_score,
+    )
 
 
 @router.get(

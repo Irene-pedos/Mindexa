@@ -34,13 +34,44 @@ class AIGateway:
     ) -> None:
         self.db = db
         # Support both single provider and list of fallbacks
-        self.chat_providers = chat_providers if isinstance(chat_providers, list) else [chat_providers]
+        if isinstance(chat_providers, list):
+            self.chat_providers = list(chat_providers)
+        else:
+            self.chat_providers = [chat_providers]
+            
+        # Dynamically append other configured providers as fallbacks
+        try:
+            from app.core.ai.provider_factory import get_ai_providers
+            configured = get_ai_providers()
+            existing_names = {p.name for p in self.chat_providers}
+            for provider in configured:
+                if provider.name not in existing_names:
+                    self.chat_providers.append(provider)
+        except Exception:
+            pass
+            
         self.active_chat_provider = self.chat_providers[0]
         
         if embedding_providers:
-            self.embedding_providers = embedding_providers if isinstance(embedding_providers, list) else [embedding_providers]
+            if isinstance(embedding_providers, list):
+                self.embedding_providers = list(embedding_providers)
+            else:
+                self.embedding_providers = [embedding_providers]
         else:
-            self.embedding_providers = self.chat_providers
+            self.embedding_providers = list(self.chat_providers)
+            
+        # Dynamically append other configured embedding providers as fallbacks if explicitly set
+        if embedding_providers and not isinstance(embedding_providers, list):
+            try:
+                from app.core.ai.provider_factory import get_embedding_providers
+                configured_embeds = get_embedding_providers()
+                existing_embed_names = {p.name for p in self.embedding_providers}
+                for provider in configured_embeds:
+                    if provider.name not in existing_embed_names:
+                        self.embedding_providers.append(provider)
+            except Exception:
+                pass
+                
         self.active_embedding_provider = self.embedding_providers[0]
 
     async def complete(
@@ -142,7 +173,9 @@ class AIGateway:
         self,
         request: AICompletionRequest,
     ) -> AICompletionResponse:
-        max_retries = max(0, settings.AI_MAX_RETRIES)
+        # Allow at least 4 retries for rate limit errors to give transient limits time to clear
+        max_retries = max(4, settings.AI_MAX_RETRIES)
+        errors = []
         
         for provider in self.chat_providers:
             self.active_chat_provider = provider
@@ -150,15 +183,26 @@ class AIGateway:
             while True:
                 try:
                     return await provider.complete(request)
-                except RateLimitError:
+                except RateLimitError as exc:
                     if attempt >= max_retries:
+                        errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")
                         break  # Fallback to next provider
                     attempt += 1
-                    await sleep(settings.AI_RETRY_BACKOFF_SECONDS * attempt)
-                except ServiceUnavailableError:
+                    # Exponential backoff (e.g., 0.5 * 2, 0.5 * 4, 0.5 * 8, 0.5 * 16)
+                    sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                    # Add a small random jitter (0 to 0.5 seconds) to avoid synchronized requests
+                    import random
+                    sleep_time += random.uniform(0.0, 0.5)
+                    await sleep(sleep_time)
+                except ServiceUnavailableError as exc:
+                    errors.append(f"{provider.name}: {exc}")
+                    break  # Fallback to next provider immediately
+                except Exception as exc:
+                    errors.append(f"{provider.name}: {type(exc).__name__} ({exc})")
                     break  # Fallback to next provider immediately
 
-        raise ServiceUnavailableError("All configured AI providers failed.")
+        errors_summary = " | ".join(errors)
+        raise ServiceUnavailableError(f"All configured AI providers failed. Details: {errors_summary}")
 
     async def embed(
         self,
@@ -261,7 +305,8 @@ class AIGateway:
         self,
         request: AIEmbeddingRequest,
     ) -> AIEmbeddingResponse:
-        max_retries = max(0, settings.AI_MAX_RETRIES)
+        # Allow at least 4 retries for rate limit errors
+        max_retries = max(4, settings.AI_MAX_RETRIES)
         
         for provider in self.embedding_providers:
             self.active_embedding_provider = provider
@@ -273,7 +318,11 @@ class AIGateway:
                     if attempt >= max_retries:
                         break
                     attempt += 1
-                    await sleep(settings.AI_RETRY_BACKOFF_SECONDS * attempt)
+                    # Exponential backoff
+                    sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                    import random
+                    sleep_time += random.uniform(0.0, 0.5)
+                    await sleep(sleep_time)
                 except ServiceUnavailableError:
                     break
 

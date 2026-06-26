@@ -150,7 +150,7 @@ async def test_ai_generation_service_with_section_id():
     mock_assessment = MagicMock()
     mock_assessment.draft_is_complete = False
     service._assessment_repo.get_by_id_simple = AsyncMock(return_value=mock_assessment)
-    service._assessment_repo.count_questions = AsyncMock(return_value=5)
+    service._assessment_repo.get_next_order_index = AsyncMock(return_value=5)
     
     from app.schemas.ai_generation import ReviewAIQuestionRequest
     assessment_id = uuid.uuid4()

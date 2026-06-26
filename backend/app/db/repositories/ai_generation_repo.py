@@ -38,6 +38,10 @@ class AIGenerationRepository:
         bloom_level: str | None = None,
         full_prompt: str | None = None,
         additional_context: str | None = None,
+        teaching_workspace_id: uuid.UUID | None = None,
+        blueprint_constraints: str | None = None,
+        learning_outcomes: str | None = None,
+        marks_per_question: int | None = None,
     ) -> AIGenerationBatch:
         batch = AIGenerationBatch(
             created_by_id=created_by_id,
@@ -52,6 +56,10 @@ class AIGenerationRepository:
             bloom_level=bloom_level,
             full_prompt=full_prompt,
             additional_context=additional_context,
+            teaching_workspace_id=teaching_workspace_id,
+            blueprint_constraints=blueprint_constraints,
+            learning_outcomes=learning_outcomes,
+            marks_per_question=marks_per_question,
             status=AIBatchStatus.PENDING,
             total_generated=0,
             total_failed=0,
@@ -165,9 +173,11 @@ class AIGenerationRepository:
     async def get_generated_question(
         self, ai_question_id: uuid.UUID
     ) -> AIGeneratedQuestion | None:
+        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(AIGeneratedQuestion)
             .where(col(AIGeneratedQuestion.id) == ai_question_id)
+            .options(selectinload(AIGeneratedQuestion.review))
         )
         return result.scalar_one_or_none()
 

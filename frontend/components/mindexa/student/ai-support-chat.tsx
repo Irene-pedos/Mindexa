@@ -56,6 +56,14 @@ interface Message {
   sender: "student" | "ai";
   text: string;
   timestamp: Date;
+  citations?: Array<{
+    resource_name: string;
+    resource_id: string;
+    page_number: number | null;
+    chunk_index: number;
+    excerpt: string;
+  }>;
+  fallback_used?: boolean;
   revision_plan?: string[];
   follow_up_questions?: string[];
   safety_notice?: string | null;
@@ -148,7 +156,7 @@ export function AISupportChat() {
     async function loadData() {
       try {
         setLoadingResources(true);
-        const [resData, attemptsData, resultsItems, workspacesData] =
+        const [personalResData, attemptsData, resultsItems, workspacesData] =
           await Promise.all([
             studentApi.getPersonalResources(),
             apiClient("/attempts/me"),
@@ -156,7 +164,7 @@ export function AISupportChat() {
             studentApi.getWorkspaces().catch(() => []),
           ]);
 
-        setResources(resData);
+        setResources(personalResData);
         setResults(resultsItems || []);
         setWorkspaces(workspacesData);
 
@@ -248,33 +256,41 @@ export function AISupportChat() {
     return "Context Selected";
   }, [selectedResource, resources, lecturerMaterials]);
 
-  const selectedContexts = useMemo(() => {
-    if (!selectedResource) return [];
+  // Student Resource Management
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-    const personal = resources.find((r) => r.id === selectedResource);
-    if (personal) {
-      return [
-        {
-          title: personal.display_name || personal.original_filename,
-          content: `Content from personal study resource: ${personal.display_name || personal.original_filename}`,
-        },
-      ];
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    try {
+      setIsUploading(true);
+      await studentApi.uploadPersonalResource(formData);
+      toast.success("File uploaded successfully! Processing started.");
+      // Refresh resources
+      const personalResData = await studentApi.getPersonalResources();
+      setResources(personalResData);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to upload file.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
 
-    const lecturerMat = lecturerMaterials.find(
-      (m) => m.id === selectedResource,
-    );
-    if (lecturerMat) {
-      return [
-        {
-          title: lecturerMat.display_name || lecturerMat.original_filename,
-          content: `Content from lecturer course material: ${lecturerMat.display_name || lecturerMat.original_filename}`,
-        },
-      ];
+  const handleDeleteResource = async (id: string) => {
+    try {
+      await studentApi.deletePersonalResource(id);
+      toast.success("Resource deleted.");
+      setResources((prev) => prev.filter((r) => r.id !== id));
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete resource.");
     }
-
-    return [];
-  }, [selectedResource, resources, lecturerMaterials]);
+  };
 
   const studySuggestedActions = [
     {
@@ -329,9 +345,14 @@ export function AISupportChat() {
     setPrompt("");
 
     try {
+      const history = messages.map((m) => ({
+        role: m.sender === "student" ? "user" : "assistant",
+        content: m.text,
+      }));
+
       const res = await studentAiApi.getSupport({
         question: userQuestion,
-        contexts: selectedContexts,
+        conversation_history: history,
       });
 
       const newAiMessage: Message = {
@@ -339,9 +360,8 @@ export function AISupportChat() {
         sender: "ai",
         text: res.explanation,
         timestamp: new Date(),
-        revision_plan: res.revision_plan,
-        follow_up_questions: res.follow_up_questions,
-        safety_notice: res.safety_notice,
+        citations: res.citations,
+        fallback_used: res.fallback_used,
       };
 
       setMessages((prev) => [...prev, newAiMessage]);
@@ -373,13 +393,12 @@ Ensure all text values are properly JSON-escaped, especially double quotes (whic
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
-        contexts: selectedContexts,
       });
 
       setRevisionResult({
         summary: res.explanation,
-        checklist: res.revision_plan || [],
-        readings: res.follow_up_questions || [],
+        checklist: [], // Adjust based on how you want to handle this now
+        readings: [],
       });
       toast.success("Revision guide generated!");
     } catch (err: any) {
@@ -410,7 +429,6 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
-        contexts: selectedContexts,
       });
 
       const rawText = res.explanation;
@@ -474,7 +492,6 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
-        contexts: selectedContexts,
       });
 
       setPlannerResult(res.explanation);
@@ -511,7 +528,6 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
-        contexts: selectedContexts,
       });
 
       setInsightsResult(res.explanation);
@@ -561,7 +577,6 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
       const res = await studentAiApi.getSupport({
         question: promptText,
-        contexts: selectedContexts,
       });
 
       setFeedbackExplanation(res.explanation);
@@ -703,15 +718,38 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
                   {/* Personal Resources section */}
                   <div>
-                    <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
-                      Personal Study Files
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
+                        Personal Study Files
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px] text-primary hover:bg-primary/5"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                      >
+                        {isUploading ? (
+                          <RefreshCw className="size-2.5 animate-spin mr-1" />
+                        ) : (
+                          <Sparkles className="size-2.5 mr-1" />
+                        )}
+                        Upload
+                      </Button>
+                      <input
+                        type="file"
+                        ref={fileInputRef}
+                        className="hidden"
+                        accept=".pdf,.docx,.txt"
+                        onChange={handleFileUpload}
+                      />
                     </div>
                     {loadingResources ? (
                       <div className="text-xs text-muted-foreground py-1 pl-2">
                         Loading files...
                       </div>
                     ) : resources.length === 0 ? (
-                      <div className="text-xs text-muted-foreground py-1 pl-2">
+                      <div className="text-xs text-muted-foreground py-1 pl-2 text-center bg-zinc-50 rounded-lg border border-dashed p-3">
                         No personal files uploaded.
                       </div>
                     ) : (
@@ -720,34 +758,62 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                           <div
                             key={file.id}
                             className={cn(
-                              "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-colors",
+                              "group flex items-center gap-2 p-2 rounded-lg border text-xs hover:bg-zinc-50 transition-colors",
                               selectedResource === file.id &&
                                 "border-primary bg-primary/5 text-primary",
                             )}
-                            onClick={() => {
-                              setSelectedResource(
-                                selectedResource === file.id ? null : file.id,
-                              );
-                              setResourcesDropdownOpen(false);
-                            }}
                           >
-                            <FileText className="size-3.5 shrink-0 text-emerald-500" />
-                            <div className="truncate flex-1 font-medium text-left">
-                              <div className="truncate">
-                                {file.display_name || file.original_filename}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Personal Study File
+                            <div
+                              className="flex-1 flex items-center gap-2 cursor-pointer"
+                              onClick={() => {
+                                setSelectedResource(
+                                  selectedResource === file.id ? null : file.id,
+                                );
+                                setResourcesDropdownOpen(false);
+                              }}
+                            >
+                              <FileText className="size-3.5 shrink-0 text-emerald-500" />
+                              <div className="truncate flex-1 font-medium text-left">
+                                <div className="truncate">
+                                  {file.display_name || file.original_filename}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "px-1.5 py-0 text-[8px] font-bold uppercase",
+                                      file.processing_status === "COMPLETED"
+                                        ? "bg-emerald-50 text-emerald-600 border-emerald-200"
+                                        : file.processing_status === "FAILED"
+                                          ? "bg-red-50 text-red-600 border-red-200"
+                                          : "bg-amber-50 text-amber-600 border-amber-200 animate-pulse",
+                                    )}
+                                  >
+                                    {file.processing_status}
+                                  </Badge>
+                                  <span className="text-[10px] text-muted-foreground">
+                                    Personal File
+                                  </span>
+                                </div>
                               </div>
                             </div>
-                            {selectedResource === file.id && (
-                              <CheckCircle2 className="size-3.5 text-primary shrink-0" />
-                            )}
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="size-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-600 hover:bg-red-50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteResource(file.id);
+                              }}
+                            >
+                              <ShieldAlert className="size-3" />
+                            </Button>
                           </div>
                         ))}
                       </div>
                     )}
                   </div>
+
                 </div>
               </div>
             )}
@@ -946,43 +1012,35 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                       </div>
                       <div>{msg.text}</div>
 
-                      {msg.revision_plan && msg.revision_plan.length > 0 && (
-                        <div className="mt-3 pt-2.5 border-t border-dashed border-zinc-200/60">
-                          <div className="font-bold text-[9px] uppercase tracking-wider text-primary mb-1">
-                            Revision Checklist:
-                          </div>
-                          <ul className="list-disc pl-4 space-y-1">
-                            {msg.revision_plan.map((step, idx) => (
-                              <li key={idx}>{step}</li>
-                            ))}
-                          </ul>
+                      {msg.fallback_used && (
+                        <div className="mt-2 p-2 bg-amber-50 border border-amber-200 rounded-lg text-[10px] text-amber-700 flex items-center gap-1.5">
+                          <ShieldAlert className="size-3" />
+                          No matching course materials found — answering from general knowledge.
                         </div>
                       )}
 
-                      {msg.follow_up_questions &&
-                        msg.follow_up_questions.length > 0 && (
-                          <div className="mt-3 pt-2.5 border-t border-dashed border-zinc-200/60">
-                            <div className="font-bold text-[9px] uppercase tracking-wider text-primary mb-1">
-                              Suggested Follow-ups:
-                            </div>
-                            <div className="flex flex-wrap gap-1.5 mt-1">
-                              {msg.follow_up_questions.map((q, idx) => (
-                                <Badge
-                                  key={idx}
-                                  variant="outline"
-                                  className="cursor-pointer hover:bg-zinc-100 text-[10px] py-0.5 px-2 bg-zinc-50 border-zinc-200"
-                                  onClick={() => setPrompt(q)}
-                                >
-                                  {q}
-                                </Badge>
-                              ))}
-                            </div>
+                      {msg.citations && msg.citations.length > 0 && (
+                        <div className="mt-4 pt-3 border-t border-zinc-200/60 space-y-2">
+                          <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-zinc-500">
+                            <FileText className="size-3" />
+                            Sources used in this answer
                           </div>
-                        )}
-
-                      {msg.safety_notice && (
-                        <div className="mt-2.5 text-[10px] text-destructive bg-destructive/5 p-2 rounded-lg border border-destructive/10">
-                          ⚠️ {msg.safety_notice}
+                          <div className="space-y-2">
+                            {msg.citations.map((cite, idx) => (
+                              <div key={idx} className="p-2 bg-zinc-50 border border-zinc-200/40 rounded-lg space-y-1">
+                                <div className="flex items-center justify-between text-[10px] font-bold text-zinc-700">
+                                  <div className="flex items-center gap-1 truncate">
+                                    <CheckCircle2 className="size-3 text-emerald-600" />
+                                    {cite.resource_name}
+                                  </div>
+                                  {cite.page_number && <span className="text-zinc-400">Page {cite.page_number}</span>}
+                                </div>
+                                <div className="text-[10px] text-zinc-500 italic line-clamp-2">
+                                  &quot;{cite.excerpt}...&quot;
+                                </div>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       )}
                     </div>

@@ -1051,7 +1051,11 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                   <div className="p-4 border border-zinc-200 bg-white rounded-xl">
                     <PureMultimodalInput
                       chatId="lecturer-chat-ai"
-                      messages={history}
+                      messages={history.map((msg, idx) => ({
+                        id: `msg-${idx}-${msg.role}`,
+                        content: msg.content,
+                        role: msg.role,
+                      }))}
                       attachments={attachments}
                       setAttachments={setAttachments}
                       onSendMessage={handleChatSendMessage}

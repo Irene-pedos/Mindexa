@@ -34,6 +34,7 @@ class StudentActiveAttempt(BaseModel):
     status: AttemptStatus
     started_at: Optional[datetime] = None
     expires_at: Optional[datetime] = None
+    termination_reason: Optional[str] = None  # BUG-02: populated for TERMINATED/AUTO_SUBMITTED attempts
 
 class StudentRecentResult(BaseModel):
     """Brief info about a recently released result."""
@@ -105,6 +106,7 @@ class StudentDashboardResponse(BaseModel):
     upcoming_assessments: list[StudentUpcomingAssessment] = []
     performance_trend: list[PerformanceTrendItem] = []
     workspaces: list[StudentCourseListItem] = []
+    current_academic_period: Optional[str] = None  # BUG-01: e.g. "2025/2026 Semester 2"
 
 # Rebuild models to resolve deferred type evaluation
 StudentDashboardSummary.model_rebuild()

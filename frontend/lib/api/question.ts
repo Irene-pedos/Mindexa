@@ -61,6 +61,8 @@ export const questionApi = {
     if (params.q) query.append("q", params.q);
     if (params.type) query.append("question_type", params.type);
     if (params.difficulty) query.append("difficulty", params.difficulty);
+    if (params.course_id) query.append("course_id", params.course_id);
+    if (params.subject) query.append("subject", params.subject);
     if (params.page) query.append("page", params.page.toString());
     if (params.page_size) query.append("page_size", params.page_size.toString());
     

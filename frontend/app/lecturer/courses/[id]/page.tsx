@@ -23,6 +23,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Plus,
   Loader2,
   Calendar,
@@ -70,7 +80,9 @@ export default function LecturerWorkspaceDetail() {
   const [loading, setLoading] = useState(true);
 
   const [uploading, setUploading] = useState(false);
+  const [isMaterialVisible, setIsMaterialVisible] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
+  const [deleteMaterialId, setDeleteMaterialId] = useState<string | null>(null);
 
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<{
@@ -129,7 +141,7 @@ export default function LecturerWorkspaceDetail() {
       formData.append("file", e.target.files[0]);
       formData.append("teaching_workspace_id", id);
       formData.append("material_category", "LECTURE_NOTES");
-      formData.append("is_student_visible", "true");
+      formData.append("is_student_visible", String(isMaterialVisible));
       await lecturerApi.uploadMaterial(formData);
       toast.success("Material uploaded successfully");
       const materialsData = await lecturerApi.getWorkspaceMaterials(id);
@@ -138,6 +150,21 @@ export default function LecturerWorkspaceDetail() {
       toast.error("Upload failed");
     } finally {
       setUploading(false);
+      // Reset input so the same file can be uploaded again if needed
+      e.target.value = "";
+    }
+  };
+
+  const confirmDeleteMaterial = async () => {
+    if (!deleteMaterialId) return;
+    try {
+      await lecturerApi.deleteMaterial(deleteMaterialId);
+      toast.success("Material deleted successfully");
+      setMaterials((prev) => prev.filter((m) => m.id !== deleteMaterialId));
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete material");
+    } finally {
+      setDeleteMaterialId(null);
     }
   };
 
@@ -192,22 +219,23 @@ export default function LecturerWorkspaceDetail() {
 
   if (!workspace) {
     return (
-      <div className="py-20 text-center text-muted-foreground">
-        Workspace not found.
+      <div className="py-20 text-center text-muted-foreground flex flex-col items-center justify-center gap-3">
+        <Database className="size-10 opacity-20" />
+        <p className="text-sm font-medium">Workspace not found.</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 animate-in fade-in duration-500">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-4">
         <div className="flex items-center gap-3 min-w-0">
           <Button
             variant="outline"
             size="icon"
             asChild
-            className="h-9 w-9 rounded-lg shrink-0"
+            className="h-9 w-9 rounded-xl shrink-0 border-border/60 hover:bg-muted/50 transition-colors"
           >
             <Link href="/lecturer/courses">
               <ChevronLeft className="size-5 text-muted-foreground" />
@@ -220,11 +248,11 @@ export default function LecturerWorkspaceDetail() {
             <div className="flex items-center gap-2 mt-1">
               <Badge
                 variant="outline"
-                className="text-[10px] font-medium px-1.5 h-5"
+                className="text-[10px] font-bold uppercase tracking-widest px-1.5 h-5 bg-primary/5 text-primary border-primary/20"
               >
                 {workspace.code}
               </Badge>
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-muted-foreground font-medium">
                 {workspace.academic_year}
               </span>
             </div>
@@ -235,13 +263,14 @@ export default function LecturerWorkspaceDetail() {
             variant="outline"
             size="sm"
             onClick={() => setArchiveDialogOpen(true)}
-            className="text-destructive hover:bg-destructive/10"
+            className="text-destructive hover:bg-destructive/10 border-destructive/20 rounded-lg text-xs font-semibold"
           >
             Archive Workspace
           </Button>
           <Button
             asChild
             size="sm"
+            className="rounded-lg text-xs font-semibold shadow-sm"
           >
             <Link href="/lecturer/assessments/new">
               <Plus className="mr-2 size-4" /> New Assessment
@@ -254,76 +283,76 @@ export default function LecturerWorkspaceDetail() {
         {/* Main Area */}
         <div className="lg:col-span-9 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
+            <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Class Average</p>
-                  <p className="text-2xl font-semibold tracking-tight text-primary">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Class Average</p>
+                  <p className="text-2xl font-bold tracking-tight text-primary">
                     {workspace.performance_avg.toFixed(1)}%
                   </p>
                 </div>
-                <TrendingUp className="size-5 text-muted-foreground opacity-70" />
+                <TrendingUp className="size-6 text-primary/30" />
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1">
-                  <p className="text-xs font-medium text-muted-foreground">Active Students</p>
-                  <p className="text-2xl font-semibold tracking-tight text-foreground">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Active Students</p>
+                  <p className="text-2xl font-bold tracking-tight text-foreground">
                     {workspace.student_count}
                   </p>
                 </div>
-                <Users className="size-5 text-muted-foreground opacity-70" />
+                <Users className="size-6 text-muted-foreground/30" />
               </CardContent>
             </Card>
 
-            <Card>
+            <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1 min-w-0">
-                  <p className="text-xs font-medium text-muted-foreground">Target Class</p>
-                  <p className="text-lg font-semibold truncate text-foreground/80 mt-1">
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Target Class</p>
+                  <p className="text-lg font-bold truncate text-foreground mt-1">
                     {workspace.class_name}
                   </p>
                 </div>
-                <Building2 className="size-5 text-muted-foreground opacity-70" />
+                <Building2 className="size-6 text-muted-foreground/30" />
               </CardContent>
             </Card>
           </div>
 
           {/* Progress */}
-          <Card>
+          <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl overflow-hidden">
             <CardContent className="p-5">
               <div className="mb-3 flex justify-between items-center">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-semibold">Syllabus Execution</h3>
-                  <p className="text-xs text-muted-foreground">Integrated workspace data</p>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Syllabus Execution</h3>
+                  <p className="text-xs text-muted-foreground font-medium">Integrated workspace data</p>
                 </div>
-                <span className="text-2xl font-semibold tracking-tight text-primary">
+                <span className="text-2xl font-bold tracking-tight text-primary">
                   {workspace.performance_avg.toFixed(1)}%
                 </span>
               </div>
               <Progress
                 value={workspace.performance_avg}
-                className="h-2 bg-muted"
+                className="h-2 bg-muted/50"
               />
             </CardContent>
           </Card>
 
           {/* Student Roster Table */}
-          <Card>
-            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3">
+          <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl overflow-hidden">
+            <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-border/40 bg-muted/10">
               <div className="space-y-1">
-                <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                  <Layers className="size-5 text-muted-foreground" /> Student Registry
+                <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
+                  <Layers className="size-4 text-primary" /> Student Registry
                 </CardTitle>
-                <CardDescription>Directory of all students enrolled in this course.</CardDescription>
+                <CardDescription className="text-[11px] font-medium text-muted-foreground">Directory of all students enrolled in this course.</CardDescription>
               </div>
               <div className="relative w-full sm:w-64">
-                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground" />
+                <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
                 <Input
                   placeholder="Search students..."
-                  className="pl-9 text-sm rounded-lg"
+                  className="pl-9 h-9 text-xs rounded-lg border-border/60 bg-background/50 focus-visible:ring-1"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
@@ -331,12 +360,12 @@ export default function LecturerWorkspaceDetail() {
             </CardHeader>
             <CardContent className="p-0">
               <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="pl-4">Student ID</TableHead>
-                    <TableHead>Student Details</TableHead>
-                    <TableHead>Course Progression</TableHead>
-                    <TableHead className="text-right pr-4">Actions</TableHead>
+                <TableHeader className="bg-muted/5 border-b border-border/40">
+                  <TableRow className="h-10 hover:bg-transparent border-none">
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider pl-6 text-muted-foreground">Student ID</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Student Details</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Course Progression</TableHead>
+                    <TableHead className="text-right text-[10px] font-bold uppercase tracking-wider pr-6 text-muted-foreground">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -344,43 +373,46 @@ export default function LecturerWorkspaceDetail() {
                     <TableRow>
                       <TableCell
                         colSpan={4}
-                        className="text-center py-12 text-sm text-muted-foreground"
+                        className="text-center py-12 text-sm text-muted-foreground font-medium"
                       >
-                        No students found.
+                        No students found matching your search.
                       </TableCell>
                     </TableRow>
                   ) : (
                     filteredRoster.map((student) => (
                       <TableRow
                         key={student.id}
-                        className="hover:bg-muted/50 transition-colors"
+                        className="hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer group"
+                        onClick={() => openRecord(student.id, student.name)}
                       >
-                        <TableCell className="font-mono text-xs text-muted-foreground pl-4">
+                        <TableCell className="font-mono text-[10px] font-medium text-muted-foreground/80 pl-6">
                           {student.student_id}
                         </TableCell>
                         <TableCell>
                           <div className="flex flex-col">
-                            <span className="font-medium text-sm text-foreground">
+                            <span className="font-bold text-sm text-foreground group-hover:text-primary transition-colors">
                               {student.name}
                             </span>
-                            <span className="text-xs text-muted-foreground">
+                            <span className="text-[10px] font-medium text-muted-foreground/80">
                               {student.email}
                             </span>
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Progress value={student.progress} className="w-16 h-1.5" />
-                            <span className="text-xs text-muted-foreground font-semibold tabular-nums">
+                          <div className="flex flex-col gap-1 w-32">
+                            <span className="text-[10px] text-muted-foreground font-bold tabular-nums">
                               {student.progress}%
                             </span>
+                            <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
+                              <div className="h-full bg-emerald-500" style={{ width: `${student.progress}%` }} />
+                            </div>
                           </div>
                         </TableCell>
-                        <TableCell className="text-right pr-4">
+                        <TableCell className="text-right pr-6">
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => openRecord(student.id, student.name)}
+                            className="h-8 px-3 text-[10px] font-bold uppercase tracking-widest rounded-lg border-border/60 group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary transition-all opacity-0 group-hover:opacity-100"
                           >
                             Trace Audit
                           </Button>
@@ -396,94 +428,136 @@ export default function LecturerWorkspaceDetail() {
 
         {/* Sidebar */}
         <div className="lg:col-span-3 space-y-6">
-          <Card className="bg-primary/5 border-primary/10">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold text-primary">
-                Quick Navigation
+          <Card className="bg-primary/[0.02] border-primary/10 rounded-xl shadow-none">
+            <CardHeader className="pb-3 border-b border-primary/10 bg-primary/[0.03]">
+              <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+                 Quick Navigation
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-3 pt-4">
               <Button
                 asChild
-                className="w-full justify-between"
-                size="sm"
+                className="w-full justify-between h-9 text-xs font-bold rounded-lg shadow-sm"
               >
                 <Link
                   href="/lecturer/assessments/new"
                 >
-                  New Assessment <ArrowRight className="size-4" />
+                  New Assessment <ArrowRight className="size-3.5" />
                 </Link>
               </Button>
               <Button
                 asChild
                 variant="outline"
-                className="w-full"
-                size="sm"
+                className="w-full h-9 text-xs font-bold rounded-lg border-primary/20 text-primary hover:bg-primary/10"
               >
                 <Link
                   href="/lecturer/question-bank"
                   className="flex items-center gap-2 justify-center"
                 >
-                  <Database className="size-4" /> Question Bank
+                  <Database className="size-3.5" /> Question Bank
                 </Link>
               </Button>
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between py-4 border-b">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <BookOpen className="size-4 text-muted-foreground" /> Course Materials ({materials.length})
+          <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl overflow-hidden">
+            <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b border-border/40 bg-muted/10">
+              <CardTitle className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-foreground">
+                <BookOpen className="size-4 text-primary" /> Course Materials
+                <Badge variant="outline" className="ml-1 text-[9px] font-bold py-0 h-4 border-border/60 text-muted-foreground">{materials.length}</Badge>
               </CardTitle>
-              <Button
-                variant="ghost"
-                size="icon"
-                disabled={uploading}
-                onClick={() =>
-                  document.getElementById("material-upload")?.click()
-                }
-              >
-                {uploading ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Upload className="size-4" />
-                )}
-              </Button>
-              <input
-                id="material-upload"
-                type="file"
-                className="hidden"
-                onChange={handleUploadMaterial}
-              />
+              <div className="flex items-center gap-3">
+                <label className="text-[10px] flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isMaterialVisible}
+                    onChange={(e) => setIsMaterialVisible(e.target.checked)}
+                    className="size-3 accent-primary rounded-sm"
+                  />
+                  Visible to students
+                </label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7 rounded-lg hover:bg-primary/10 hover:text-primary transition-colors"
+                  disabled={uploading}
+                  onClick={() =>
+                    document.getElementById("material-upload")?.click()
+                  }
+                >
+                  {uploading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="size-3.5" />
+                  )}
+                </Button>
+                <input
+                  id="material-upload"
+                  type="file"
+                  className="hidden"
+                  onChange={handleUploadMaterial}
+                />
+              </div>
             </CardHeader>
             <CardContent className="p-0">
               <ScrollArea className="h-64">
                 {materials.length === 0 ? (
-                  <div className="text-center py-12 px-4 text-xs text-muted-foreground italic">
-                    No files uploaded.
+                  <div className="flex flex-col items-center justify-center py-12 px-4 space-y-2 text-muted-foreground">
+                    <FileText className="size-6 opacity-20" />
+                    <p className="text-xs font-medium italic">No files uploaded.</p>
                   </div>
                 ) : (
-                  <div className="divide-y">
+                  <div className="divide-y divide-border/20">
                     {materials.map((m) => (
                       <div
                         key={m.id}
-                        className="flex items-center justify-between p-3 px-4 hover:bg-muted/50 transition-colors group"
+                        className="flex items-center justify-between p-3 px-4 hover:bg-primary/[0.03] transition-colors group cursor-pointer"
+                        onClick={async () => {
+                          try {
+                            await lecturerApi.downloadMaterial(m.id, m.original_filename);
+                            toast.success("Download started");
+                          } catch (err: any) {
+                            toast.error("Failed to download material");
+                          }
+                        }}
                       >
-                        <div className="flex items-center gap-2 truncate">
-                          <div className="bg-primary/5 p-1.5 rounded-lg text-primary">
+                        <div className="flex items-center gap-3 truncate">
+                          <div className="bg-primary/5 p-1.5 rounded-lg text-primary border border-primary/10">
                             <FileText className="size-4" />
                           </div>
                           <div className="truncate">
-                            <p className="text-xs font-medium truncate text-foreground">
+                            <p className="text-xs font-bold truncate text-foreground group-hover:text-primary transition-colors">
                               {m.display_name || m.original_filename}
                             </p>
-                            <p className="text-[10px] text-muted-foreground mt-0.5">
-                              {m.file_extension.replace(".", "").toUpperCase()} •{" "}
-                              {(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB
+                            <p className="text-[10px] font-medium text-muted-foreground/70 mt-0.5 tracking-tight flex items-center gap-1.5">
+                              <span>{m.file_extension.replace(".", "").toUpperCase()}</span>
+                              <span>•</span>
+                              <span>{(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB</span>
+                              {!m.is_student_visible && (
+                                <>
+                                  <span>•</span>
+                                  <span className="text-amber-600 bg-amber-50 px-1 rounded-sm border border-amber-200">Hidden</span>
+                                </>
+                              )}
                             </p>
                           </div>
                         </div>
-                        <Download className="size-3.5 text-muted-foreground opacity-50 group-hover:opacity-100 transition-opacity" />
+                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="h-6 w-6 text-primary hover:bg-primary/10">
+                            <Download className="size-3.5" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-6 w-6 text-destructive hover:bg-destructive/10"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteMaterialId(m.id);
+                            }}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -633,6 +707,27 @@ export default function LecturerWorkspaceDetail() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Delete Material Alert Dialog */}
+      <AlertDialog open={!!deleteMaterialId} onOpenChange={(o) => !o && setDeleteMaterialId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Material</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this material? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmDeleteMaterial}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

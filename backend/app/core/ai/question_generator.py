@@ -32,6 +32,12 @@ class GenerationContext:
     topic: str | None = None
     bloom_level: str | None = None
     additional_context: str | None = None
+    # RAG & blueprint context
+    workspace_id: uuid.UUID | None = None
+    course_material_context: str | None = None   # Retrieved from LecturerMaterialChunk via RAG
+    blueprint_constraints: str | None = None      # From assessment blueprint
+    learning_outcomes: str | None = None          # From course learning outcomes
+    marks_per_question: int | None = None         # From blueprint marks allocation
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     lecturer_id: uuid.UUID | None = None
 
@@ -109,6 +115,10 @@ async def generate_questions(
             topic=context.topic,
             bloom_level=context.bloom_level,
             additional_context=context.additional_context,
+            course_material_context=context.course_material_context,
+            blueprint_constraints=context.blueprint_constraints,
+            learning_outcomes=context.learning_outcomes,
+            marks_per_question=context.marks_per_question,
             batch_id=uuid.UUID(context.request_id) if context.request_id else None,
         )
 

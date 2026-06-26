@@ -184,7 +184,7 @@ class Settings(BaseSettings):
     # ─── Storage ──────────────────────────────────────────────────────────────
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
     STORAGE_LOCAL_DIR: str = "uploads"
-    MAX_UPLOAD_SIZE_MB: int = 25
+    MAX_UPLOAD_SIZE_MB: int = 100
     ALLOWED_UPLOAD_EXTENSIONS: list[str] = [
         ".pdf",
         ".doc",
@@ -217,7 +217,7 @@ class Settings(BaseSettings):
     JINA_BASE_URL: str = "https://api.jina.ai/v1"
     JINA_DEFAULT_MODEL: str = "jina-embeddings-v3"
     
-    DEFAULT_LLM_PROVIDER: Literal["groq", "openai", "anthropic"] = "groq"
+    DEFAULT_LLM_PROVIDER: Literal["groq", "openai", "anthropic", "gemini"] = "groq"
     DEFAULT_EMBEDDING_PROVIDER: Literal["groq", "openai", "anthropic", "jina"] = "jina"
     DEFAULT_EMBEDDING_MODEL: str = "jina-embeddings-v3"
     DEFAULT_LLM_MODEL: str = "llama-3.1-8b-instant"
@@ -234,7 +234,18 @@ class Settings(BaseSettings):
 
     # ─── Vector Store ─────────────────────────────────────────────────────────
     VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"
-    PGVECTOR_DIMENSION: int = 1024  # jina-embeddings-v3 default
+    PGVECTOR_DIMENSION: int = 768  # Updated to 768 for jina-embeddings-v3 per RAG spec
+
+    # ─── RAG Parameters ───────────────────────────────────────────────────────
+    RAG_TOP_K: int = 5
+    RAG_SIMILARITY_THRESHOLD: float = 0.35  # Lowered: cosine sim for good RAG matches is 0.40–0.65; 0.75 always triggers fallback
+    RAG_CHUNK_SIZE: int = 400
+    RAG_CHUNK_OVERLAP: int = 50
+    MAX_STUDENT_UPLOAD_SIZE_MB: int = 10
+
+    @property
+    def max_student_upload_size_bytes(self) -> int:
+        return self.MAX_STUDENT_UPLOAD_SIZE_MB * 1024 * 1024
 
     # ─── Pagination ───────────────────────────────────────────────────────────
     DEFAULT_PAGE_SIZE: int = 20

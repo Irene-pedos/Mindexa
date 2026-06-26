@@ -146,6 +146,26 @@ async def download_material(
     )
 
 
+@router.delete(
+    "/{material_id}",
+    summary="Delete a lecturer material",
+)
+async def delete_material(
+    material_id: uuid.UUID,
+    current_user=Depends(require_lecturer),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Soft-deletes a lecturer material.
+    """
+    service = ResourceService(db)
+    success = await service.delete_lecturer_material(current_user.id, material_id)
+    if not success:
+        raise NotFoundError("Material not found or unauthorized")
+    
+    return {"success": True, "message": "Material deleted successfully"}
+
+
 # ── Student Resources ──────────────────────────────────────────────────
 
 @router.post(

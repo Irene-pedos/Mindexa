@@ -1,12 +1,14 @@
 // app/(student)/dashboard/page.tsx
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import {
   studentApi,
   StudentDashboardResponse,
   StudentScheduleResponse,
+  StudentResourceResponse,
 } from "@/lib/api/student";
 import {
   notificationApi,
@@ -68,51 +70,128 @@ import {
 import { getAssessmentCategory, getAssessmentProgressStatus, isHighSecurityAssessment } from "@/lib/grading-architecture";
 import Link from "next/link";
 
+interface PersonalResource extends StudentResourceResponse {
+  title: string;
+  file_url?: string;
+  resource_type?: string;
+  subject?: string;
+}
+
+const NOTIFICATION_ICON_MAP: Record<string, React.ReactNode> = {
+  RESULT_RELEASED: <CheckCircle2 className="size-3.5 text-emerald-600" />,
+  GRADE_RELEASED: <CheckCircle2 className="size-3.5 text-emerald-600" />,
+  FEEDBACK_RELEASED: <MessageSquare className="size-3.5 text-primary" />,
+  INTEGRITY_WARNING: <Bell className="size-3.5 text-destructive" />,
+  INTEGRITY_ALERT: <ShieldAlert className="size-3.5 text-destructive" />,
+  ASSESSMENT_SCHEDULED: <Clock className="size-3.5 text-amber-600" />,
+  ASSESSMENT_REMINDER: <Clock className="size-3.5 text-amber-600" />,
+  REASSESSMENT_ASSIGNED: <AlertTriangle className="size-3.5 text-amber-600" />,
+  REVIEW_RESPONSE: <MessageSquare className="size-3.5 text-primary" />,
+};
+
+const getNotificationIcon = (type: string): React.ReactNode => {
+  return NOTIFICATION_ICON_MAP[type.toUpperCase()] ?? <Info className="size-3.5 text-muted-foreground" />;
+};
+
+const getTerminationLabel = (status: string, reason?: string): string => {
+  if (reason) return reason;
+  if (status === "AUTO_SUBMITTED") return "Attempt auto-submitted when time expired.";
+  if (status === "TERMINATED") return "Attempt ended due to integrity protocol.";
+  return "Attempt concluded.";
+};
+
+const getNotificationLink = (notification: { notification_type: string; related_id?: string | null | undefined }): string => {
+  const type = notification.notification_type.toUpperCase();
+  const id = notification.related_id;
+  if ((type.includes("RESULT") || type.includes("GRADE")) && id) return `/student/results/${id}`;
+  if (type.includes("ASSESSMENT") && id) return `/student/assessments/${id}`;
+  if (type.includes("INTEGRITY") && id) return `/student/results/${id}`;
+  if (type.includes("REASSESSMENT") && id) return `/student/assessments/${id}`;
+  return "/student/notifications";
+};
+
+const isCriticalNotification = (type: string): boolean => {
+  const t = type.toUpperCase();
+  return t.includes("INTEGRITY") || t.includes("ALERT") || t.includes("WARNING") || t.includes("TERMINATED");
+};
+
 export default function StudentDashboard() {
   const { user } = useAuth();
+  const router = useRouter();
+
+  // Role guard — redirect if not a student
+  useEffect(() => {
+    if (user && user.role !== "STUDENT") {
+      const redirectMap: Record<string, string> = {
+        LECTURER: "/lecturer/dashboard",
+        ADMIN: "/admin/dashboard",
+      };
+      window.location.replace(redirectMap[user.role] || "/");
+    }
+  }, [user]);
+
   const [data, setData] = useState<StudentDashboardResponse | null>(null);
-  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(
-    null,
-  );
-  const [notifications, setNotifications] =
-    useState<NotificationListResponse | null>(null);
-  const [resources, setResources] = useState<any[]>([]);
+  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(null);
+  const [notifications, setNotifications] = useState<NotificationListResponse | null>(null);
+  const [resources, setResources] = useState<PersonalResource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function loadDashboard() {
       try {
-        setLoadError(null);
-        const [dashboardData, scheduleData, notificationData, resourcesData] =
-          await Promise.all([
-            studentApi.getDashboard(),
-            studentApi.getSchedule(),
-            notificationApi.getNotifications(false, 1, 5), // Get latest 5
-            studentApi.getPersonalResources(),
-          ]);
-        setData(dashboardData);
-        setSchedule(scheduleData);
-        setNotifications(notificationData);
-        setResources(resourcesData);
-      } catch (err: any) {
-        setLoadError(err.message || "Failed to load dashboard data");
+        setSectionErrors({});
+        const [dashRes, schedRes, notifRes, resRes] = await Promise.allSettled([
+          studentApi.getDashboard(),
+          studentApi.getSchedule(),
+          // Note: API module does not support named params yet, using positional args
+          notificationApi.getNotifications(false, 1, 5),
+          studentApi.getPersonalResources(),
+        ]);
+        if (controller.signal.aborted) return;
+
+        if (dashRes.status === "fulfilled") setData(dashRes.value);
+        else setSectionErrors(prev => ({ ...prev, dashboard: dashRes.reason?.message || "Failed to load dashboard." }));
+
+        if (schedRes.status === "fulfilled") setSchedule(schedRes.value);
+        else setSectionErrors(prev => ({ ...prev, schedule: "Failed to load schedule." }));
+
+        if (notifRes.status === "fulfilled") setNotifications(notifRes.value);
+        else setSectionErrors(prev => ({ ...prev, notifications: "Failed to load notifications." }));
+
+        if (resRes.status === "fulfilled") {
+          setResources(
+            (resRes.value || []).map((r: any) => ({
+              ...r,
+              title: r.display_name || r.original_filename,
+            }))
+          );
+        }
+        // Resources failure is silent — non-critical
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
     }
+
     loadDashboard();
-  }, []);
+    return () => controller.abort();
+  }, [retryKey]);
 
   const violations = useMemo(() => {
     if (!data) return [];
-    return data.active_attempts.filter(a => a.status === 'TERMINATED' || a.status === 'AUTO_SUBMITTED');
+    return (data.active_attempts ?? []).filter(
+      (a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED"
+    );
   }, [data]);
 
-  const displayName =
-    (user?.profile as any)?.first_name ||
-    (user?.profile as any)?.display_name ||
-    "Student";
+  const displayName = user
+    ? ((user?.profile as { first_name?: string; display_name?: string })?.first_name ||
+       (user?.profile as { first_name?: string; display_name?: string })?.display_name ||
+       "Student")
+    : null; // null = still loading
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -164,43 +243,78 @@ export default function StudentDashboard() {
     return n.toString();
   }
 
-  const getNotificationIcon = (type: string) => {
-    const t = type.toLowerCase();
-    if (t.includes("result") || t.includes("grade") || t.includes("complete")) {
-      return <CheckCircle2 className="size-3.5" />;
-    }
-    if (
-      t.includes("discussion") ||
-      t.includes("reply") ||
-      t.includes("feedback")
-    ) {
-      return <MessageSquare className="size-3.5" />;
-    }
-    if (
-      t.includes("integrity") ||
-      t.includes("alert") ||
-      t.includes("warning")
-    ) {
-      return <Bell className="size-3.5 text-destructive" />;
-    }
-    return <Info className="size-3.5" />;
-  };
+  const unreadCount = useMemo(
+    () => (notifications?.items ?? []).filter((n) => !n.is_read).length,
+    [notifications]
+  );
+
+  const dueTodayCount = useMemo(() => {
+    const today = new Date();
+    today.setHours(23, 59, 59, 999);
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    return (data?.upcoming_assessments ?? []).filter((a) => {
+      const dateStr = a.window_end ?? "";
+      const end = new Date(dateStr);
+      return !isNaN(end.getTime()) && end >= startOfDay && end <= today;
+    }).length;
+  }, [data]);
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-4 w-72" />
+      <div className="space-y-4">
+        {/* Header skeleton */}
+        <div className="flex items-center justify-between px-1">
+          <div className="space-y-1.5">
+            <Skeleton className="h-7 w-52" />
+            <Skeleton className="h-3 w-40" />
           </div>
+          <Skeleton className="h-8 w-32 rounded-lg" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        {/* Metrics skeleton */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-28 w-full rounded-xl" />
+            <Skeleton key={i} className="h-24 w-full rounded-xl" />
           ))}
         </div>
-        <Skeleton className="h-[400px] w-full rounded-xl" />
+
+        {/* Quick actions skeleton */}
+        <Skeleton className="h-16 w-full rounded-xl" />
+
+        {/* Main content skeleton — mirrors lg:col-span-7 / lg:col-span-5 */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+          <div className="lg:col-span-7 space-y-4">
+            <Skeleton className="h-64 w-full rounded-xl" />
+            <Skeleton className="h-72 w-full rounded-xl" />
+            <Skeleton className="h-48 w-full rounded-xl" />
+          </div>
+          <div className="lg:col-span-5 space-y-4">
+            <Skeleton className="h-56 w-full rounded-xl" />
+            <Skeleton className="h-48 w-full rounded-xl" />
+            <Skeleton className="h-40 w-full rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (sectionErrors.dashboard && !data) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
+        <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5 max-w-sm w-full">
+          <AlertTriangle className="size-6 text-destructive mx-auto mb-3" />
+          <p className="text-sm font-semibold text-destructive mb-1">Dashboard failed to load</p>
+          <p className="text-xs text-muted-foreground mb-4">{sectionErrors.dashboard}</p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={() => setRetryKey(k => k + 1)}
+          >
+            Retry
+          </Button>
+        </div>
       </div>
     );
   }
@@ -212,10 +326,17 @@ export default function StudentDashboard() {
         <div className="flex items-center gap-2">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">
-              {greeting}, {displayName} 👋
+              {greeting},{" "}
+              {displayName ? (
+                <>{displayName} 👋</>
+              ) : (
+                <Skeleton className="inline-block h-6 w-28 align-middle" />
+              )}
             </h1>
             <p className="text-muted-foreground text-[9px] font-semibold uppercase tracking-widest mt-0.5">
-              Student Command Center • Registry Active
+              {data?.current_academic_period
+                ? `${data.current_academic_period} • Academic Registry`
+                : "Academic Registry"}
             </p>
           </div>
           <Popover>
@@ -243,6 +364,19 @@ export default function StudentDashboard() {
         <AcademicPlannerDropdown />
       </div>
 
+      {/* Due Today banner if applicable */}
+      {dueTodayCount > 0 && (
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.04] text-amber-700">
+          <AlertTriangle className="size-3.5 shrink-0" />
+          <p className="text-xs font-semibold flex-1">
+            {dueTodayCount} assessment{dueTodayCount > 1 ? "s" : ""} due today.{" "}
+            <Link href="/student/assessments" className="underline underline-offset-2 font-bold">
+              View now →
+            </Link>
+          </p>
+        </div>
+      )}
+
       {/* Metrics Overview */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {metrics.map((stat, index) => (
@@ -252,39 +386,17 @@ export default function StudentDashboard() {
                 {stat.title}
               </CardTitle>
               <CardToolbar>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="dim"
-                      size="sm"
-                      mode="icon"
-                      className="-me-1 opacity-40 hover:opacity-100 h-6 w-6"
-                    >
-                      <MoreHorizontal className="size-3" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    side="bottom"
-                    className="rounded-lg"
-                  >
-                    <DropdownMenuItem className="text-[10px] font-medium">
-                      <Settings className="size-3" />
-                      Detail View
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="text-[10px] font-medium">
-                      <Pin className="size-3" /> Pin Metric
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem
-                      variant="destructive"
-                      className="text-[10px] font-medium"
-                    >
-                      <Trash className="size-3" />
-                      Dismiss
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <Button
+                  variant="dim"
+                  size="sm"
+                  mode="icon"
+                  className="-me-1 opacity-40 hover:opacity-100 h-6 w-6"
+                  asChild
+                >
+                  <Link href="/student/results">
+                    <MoreHorizontal className="size-3" />
+                  </Link>
+                </Button>
               </CardToolbar>
             </CardHeader>
             <CardContent className="space-y-1 pt-0 px-3 pb-2.5">
@@ -324,31 +436,25 @@ export default function StudentDashboard() {
         ))}
       </div>
 
-      {loadError ? (
-        <Card className="border-destructive/10 bg-destructive/5 shadow-none rounded-lg">
-          <CardContent className="py-2 px-3 text-[10px] font-medium text-destructive">
-            {loadError}
-          </CardContent>
-        </Card>
-      ) : null}
-
       <QuickActions />
 
       {violations.length > 0 && (
-        <Card className="border-red-200 bg-red-50/50 shadow-none rounded-xl overflow-hidden mb-4">
-          <CardHeader className="py-3 px-5 border-b border-red-100 flex flex-row items-center gap-3">
-             <ShieldAlert className="size-5 text-red-600" />
-             <CardTitle className="text-xs font-bold uppercase tracking-widest text-red-700">Integrity Protocol Alerts</CardTitle>
+        <Card className="border-destructive/20 bg-destructive/[0.03] shadow-none rounded-xl overflow-hidden mb-4">
+          <CardHeader className="py-3 px-5 border-b border-destructive/10 flex flex-row items-center gap-3">
+             <ShieldAlert className="size-5 text-destructive" />
+             <CardTitle className="text-xs font-bold uppercase tracking-widest text-destructive">Integrity Protocol Alerts</CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-3">
              {violations.map(v => (
-               <div key={v.id} className="flex items-center justify-between bg-white/60 p-3 rounded-lg border border-red-100">
+               <div key={v.id} className="flex items-center justify-between bg-background/60 p-3 rounded-lg border border-destructive/10">
                   <div className="space-y-1">
-                     <p className="text-sm font-bold text-red-800">{v.assessment_title}</p>
-                     <p className="text-[10px] text-red-600 font-medium uppercase">Session Terminated due to security breach</p>
+                     <p className="text-sm font-bold text-destructive">{v.assessment_title}</p>
+                     <p className="text-[10px] text-destructive font-medium uppercase">
+                        {getTerminationLabel(v.status, v.termination_reason)}
+                     </p>
                   </div>
                   <Button variant="destructive" size="sm" className="h-8 text-[10px] font-bold uppercase" asChild>
-                     <Link href={`/student/results/${v.id}`}>Review Audit</Link>
+                     <Link href={`/student/results/${v.assessment_id ?? v.id}`}>Review Audit</Link>
                   </Button>
                </div>
              ))}
@@ -356,66 +462,102 @@ export default function StudentDashboard() {
         </Card>
       )}
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Left column – Schedule & Activity */}
-        <div className="xl:col-span-7 space-y-4">
+        <div className="lg:col-span-7 space-y-4">
           <UpcomingAssessments
-            activeAttempts={data?.active_attempts ?? []}
-            upcomingAssessments={data?.upcoming_assessments ?? []}
+            activeAttempts={(data?.active_attempts ?? []).slice(0, 5)}
+            upcomingAssessments={(data?.upcoming_assessments ?? []).slice(0, 5)}
           />
-          <StudentCalendar events={schedule?.events} />
+          {sectionErrors.schedule ? (
+            <Card className="border-destructive/15 bg-destructive/[0.02] shadow-none rounded-xl">
+              <CardContent className="py-6 text-center text-xs font-medium text-destructive">
+                {sectionErrors.schedule}
+              </CardContent>
+            </Card>
+          ) : (
+            <StudentCalendar events={schedule?.events} />
+          )}
 
           {/* Recent Notifications Card */}
           <Card className="shadow-none border rounded-xl overflow-hidden">
             <CardHeader className="py-2.5 px-4 border-b flex flex-row items-center justify-between space-y-0 bg-muted/5">
               <CardTitle className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 <Bell className="size-3" />
-                Recent Alerts
+                Notifications
+                {unreadCount > 0 && (
+                  <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary text-primary-foreground text-[8px] font-bold">
+                    {unreadCount}
+                  </span>
+                )}
               </CardTitle>
+              <Link
+                href="/student/notifications"
+                className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider hover:text-foreground transition-colors"
+              >
+                View All →
+              </Link>
             </CardHeader>
             <CardContent className="p-0">
-              <div className="divide-y divide-muted/20">
-                {notifications?.items && notifications.items.length > 0 ? (
-                  notifications.items.map((notification) => (
-                    <div
-                      key={notification.id}
-                      className="p-3 flex items-start gap-3 hover:bg-muted/10 transition-colors"
-                    >
-                      <div
-                        className={`mt-0.5 rounded-md p-1 ${notification.is_read ? "bg-muted text-muted-foreground" : "bg-primary/5 text-primary"}`}
+              {sectionErrors.notifications ? (
+                <div className="p-6 text-center text-xs font-medium text-destructive">
+                  {sectionErrors.notifications}
+                </div>
+              ) : (
+                <div className="divide-y divide-muted/20">
+                  {notifications?.items && notifications.items.length > 0 ? (
+                    notifications.items.map((notification) => (
+                      <Link
+                        key={notification.id}
+                        href={getNotificationLink(notification)}
+                        className={cn(
+                          "p-3 flex items-start gap-3 hover:bg-muted/10 transition-colors block",
+                          isCriticalNotification(notification.notification_type) &&
+                            "border-l-2 border-destructive bg-destructive/[0.02]"
+                        )}
                       >
-                        {getNotificationIcon(notification.notification_type)}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p
-                          className={`text-xs ${notification.is_read ? "font-medium text-muted-foreground" : "font-semibold text-foreground/80"}`}
-                        >
-                          {notification.title}
-                        </p>
-                        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                          {notification.body}
-                        </p>
-                        <p className="text-[8px] text-muted-foreground mt-1 font-semibold uppercase tracking-tight">
-                          {formatDistanceToNow(
-                            new Date(notification.created_at),
-                            { addSuffix: true },
+                        <div
+                          className={cn(
+                            "mt-0.5 rounded-md p-1",
+                            notification.is_read ? "bg-muted text-muted-foreground" : "bg-primary/5 text-primary"
                           )}
-                        </p>
-                      </div>
+                        >
+                          {getNotificationIcon(notification.notification_type)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p
+                            className={cn(
+                              "text-xs",
+                              notification.is_read ? "font-medium text-muted-foreground" : "font-semibold text-foreground/80"
+                            )}
+                          >
+                            {notification.title}
+                          </p>
+                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                            {notification.body}
+                          </p>
+                          <p className="text-[8px] text-muted-foreground mt-1 font-semibold uppercase tracking-tight">
+                            {formatDistanceToNow(
+                              new Date(notification.created_at),
+                              { addSuffix: true },
+                            )}
+                          </p>
+                        </div>
+                      </Link>
+                    ))
+                  ) : (
+                    <div className="p-8 text-center text-xs font-medium text-muted-foreground italic">
+                      No active notifications.
                     </div>
-                  ))
-                ) : (
-                  <div className="p-8 text-center text-xs font-medium text-muted-foreground italic">
-                    No active notifications.
-                  </div>
-                )}
-              </div>
+                  )}
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
 
         {/* Right column – Performance, Results & Study */}
-        <div className="xl:col-span-5 space-y-4">
+        <div className="lg:col-span-5 space-y-4">
           <PerformanceChart data={data?.performance_trend} />
           <RecentResults results={data?.recent_results ?? []} />
           <StudyResources resources={resources} />

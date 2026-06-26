@@ -2,65 +2,80 @@ import pytest
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 from app.services.rag_service import RAGService
-from app.core.ai.gateway import AIGateway
-from app.core.ai.providers import AIEmbeddingResponse
+from app.db.schemas.rag import RAGRetrievalResult
 
 @pytest.mark.asyncio
-async def test_rag_service_blocks_retrieval_during_active_assessment():
-    # Mock DB and Gateway
+async def test_rag_service_retrieve_context_for_lecturer_success():
+    # Mock DB
     db = AsyncMock()
-    gateway = AsyncMock(spec=AIGateway)
     
-    # Mock _has_active_assessment to return True
-    service = RAGService(db, gateway)
-    service._has_active_assessment = AsyncMock(return_value=True)
+    # Mock search results from session.execute
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        ("SQL indexes are data structures.", 1, 5, "Database Lecture 3", "lecture_3.pdf", 0.95),
+        ("B-Trees are self-balancing.", 2, 6, "Database Lecture 3", "lecture_3.pdf", 0.90)
+    ]
+    db.execute.return_value = mock_result
     
-    student_id = uuid.uuid4()
-    institution_id = uuid.uuid4()
+    service = RAGService(db)
     
-    chunks = await service.retrieve_context_for_student(student_id, institution_id, "What is SQL?")
+    # Mock _embed_question to prevent real Jina HTTP calls
+    service._embed_question = AsyncMock(return_value=[0.1] * 1536)
     
-    assert chunks == []
-    service._has_active_assessment.assert_called_once_with(student_id)
+    workspace_id = uuid.uuid4()
+    context = await service.retrieve_context_for_lecturer("What is a database index?", workspace_id)
+    
+    assert "[Source: Database Lecture 3, Page 5]" in context
+    assert "SQL indexes are data structures." in context
+    assert "[Source: Database Lecture 3, Page 6]" in context
+    assert "B-Trees are self-balancing." in context
+    
+    service._embed_question.assert_called_once_with("What is a database index?")
+    db.execute.assert_called_once()
+
 
 @pytest.mark.asyncio
-async def test_rag_service_retrieves_chunks_when_no_active_assessment():
-    # Mock DB and Gateway
+async def test_rag_service_retrieve_context_for_lecturer_fallback():
+    # Mock DB
     db = AsyncMock()
-    gateway = AsyncMock(spec=AIGateway)
     
-    # Mock gateway.embed to return a dummy embedding
-    gateway.embed.return_value = AIEmbeddingResponse(
-        embeddings=[[0.1] * 1536],
-        provider="openai",
-        model="text-embedding-3-small",
-        total_tokens=10
-    )
+    # Mock search results returning empty
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = []
+    db.execute.return_value = mock_result
     
-    # Mock DB execution for similarity search
-    # We need to mock the result of session.execute(stmt)
-    mock_result_student = MagicMock()
-    mock_result_student.fetchall.return_value = [
-        ("SQL content", 1, "notes.pdf", 0.9)
+    service = RAGService(db)
+    service._embed_question = AsyncMock(return_value=[0.1] * 1536)
+    
+    workspace_id = uuid.uuid4()
+    context = await service.retrieve_context_for_lecturer("Unknown Topic", workspace_id)
+    
+    assert context == ""
+    service._embed_question.assert_called_once()
+    db.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_rag_service_retrieve_context_for_student_success():
+    # Mock DB
+    db = AsyncMock()
+    
+    # Mock student allowed resource IDs and similarity search rows
+    service = RAGService(db)
+    service._embed_question = AsyncMock(return_value=[0.1] * 1536)
+    service._get_allowed_resource_ids = AsyncMock(return_value=[uuid.uuid4()])
+    
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        (uuid.uuid4(), "Normalised form reduces redundancy.", 1, {"page": 2}, uuid.uuid4(), "Normalisation Guide", 0.96)
     ]
-    
-    mock_result_lecturer = MagicMock()
-    mock_result_lecturer.fetchall.return_value = [
-        ("Lecturer SQL content", 2, "slides.pdf", "Lecture Slides", 0.95)
-    ]
-    
-    db.execute.side_effect = [mock_result_student, mock_result_lecturer]
-    
-    service = RAGService(db, gateway)
-    service._has_active_assessment = AsyncMock(return_value=False)
+    db.execute.return_value = mock_result
     
     student_id = uuid.uuid4()
-    institution_id = uuid.uuid4()
+    res = await service.retrieve_context("What is normalisation?", student_id)
     
-    chunks = await service.retrieve_context_for_student(student_id, institution_id, "What is SQL?")
-    
-    assert len(chunks) == 2
-    assert chunks[0]["score"] == 0.95  # Highest score first
-    assert chunks[0]["type"] == "lecturer_material"
-    assert chunks[1]["score"] == 0.9
-    assert chunks[1]["type"] == "student_resource"
+    assert isinstance(res, RAGRetrievalResult)
+    assert "Normalised form reduces redundancy." in res.context_string
+    assert not res.fallback_used
+    assert len(res.citations) == 1
+    assert res.citations[0].resource_name == "Normalisation Guide"

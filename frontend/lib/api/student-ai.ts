@@ -1,21 +1,22 @@
 import { apiClient } from "./client";
 
-export interface StudentSupportContext {
-  title: string;
-  content: string;
-  assessment_id?: string | null;
+export interface SourceCitation {
+  resource_name: string;
+  resource_id: string;
+  page_number: number | null;
+  chunk_index: number;
+  excerpt: string;
 }
 
 export interface StudentSupportRequest {
   question: string;
-  contexts?: StudentSupportContext[];
+  conversation_history?: Array<{ role: string; content: string }>;
 }
 
 export interface StudentSupportResponse {
   explanation: string;
-  revision_plan: string[];
-  follow_up_questions: string[];
-  safety_notice: string | null;
+  citations: SourceCitation[];
+  fallback_used: boolean;
   model?: string | null;
   provider?: string | null;
 }

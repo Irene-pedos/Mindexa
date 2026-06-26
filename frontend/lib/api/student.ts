@@ -27,6 +27,7 @@ export interface StudentActiveAttempt {
   status: string;
   started_at: string;
   expires_at?: string;
+  termination_reason?: string;
 }
 
 export interface StudentRecentResult {
@@ -69,16 +70,17 @@ export interface StudentCourseListItem {
   status: string;
   progress: number;
   academic_year: string;
-  workspace_id: string;
+  workspace_id?: string | null;
 }
 
 export interface StudentDashboardResponse {
   summary: StudentDashboardSummary;
-  active_attempts: StudentActiveAttempt[];
+  active_attempts?: StudentActiveAttempt[];
   recent_results: StudentRecentResult[];
   upcoming_assessments: StudentUpcomingAssessment[];
   performance_trend: PerformanceTrendItem[];
   workspaces: StudentCourseListItem[];
+  current_academic_period?: string;
 }
 
 export interface StudentCourseDetail {
@@ -147,16 +149,16 @@ export const studentApi = {
     return data.recent_results;
   },
   getPersonalResources: async (): Promise<StudentResourceResponse[]> => {
-    return apiClient("/resources/student-resources");
+    return apiClient("/student/resources");
   },
   uploadPersonalResource: async (formData: FormData): Promise<StudentResourceResponse> => {
-    return apiClient("/resources/student-resources", {
+    return apiClient("/student/resources/upload", {
       method: "POST",
       body: formData,
     });
   },
   deletePersonalResource: async (resourceId: string): Promise<void> => {
-    return apiClient(`/resources/student-resources/${resourceId}`, {
+    return apiClient(`/student/resources/${resourceId}`, {
       method: "DELETE",
     });
   },
@@ -165,7 +167,7 @@ export const studentApi = {
     const token = getToken();
     if (!token) throw new Error("Authentication required");
     
-    const response = await fetch(`${apiUrl}/resources/student-resources/download/${resourceId}`, {
+    const response = await fetch(`${apiUrl}/student/resources/download/${resourceId}`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },

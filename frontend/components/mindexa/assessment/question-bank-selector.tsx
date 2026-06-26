@@ -31,9 +31,11 @@ import { Separator } from "@/components/ui/separator";
 interface QuestionBankSelectorProps {
   onSelect: (question: QuestionBankItem) => void;
   selectedIds: string[];
+  courseId?: string;
+  subjectId?: string;
 }
 
-export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSelectorProps) {
+export function QuestionBankSelector({ onSelect, selectedIds, courseId, subjectId }: QuestionBankSelectorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [questions, setQuestions] = useState<QuestionBankItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -41,13 +43,23 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
   const [type, setType] = useState<string>("all");
   const [difficulty, setDifficulty] = useState<string>("all");
 
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => clearTimeout(handler);
+  }, [search]);
+
   const fetchQuestions = useCallback(async () => {
     setLoading(true);
     try {
       const response = await questionApi.getQuestions({
-        q: search,
+        q: debouncedSearch,
         type: type === "all" ? undefined : type,
         difficulty: difficulty === "all" ? undefined : difficulty,
+        course_id: courseId || undefined,
+        subject: subjectId || undefined,
         page_size: 50,
       });
       setQuestions(response.items);
@@ -57,7 +69,7 @@ export function QuestionBankSelector({ onSelect, selectedIds }: QuestionBankSele
     } finally {
       setLoading(false);
     }
-  }, [search, type, difficulty]);
+  }, [debouncedSearch, type, difficulty, courseId, subjectId]);
 
   useEffect(() => {
     if (isOpen) {

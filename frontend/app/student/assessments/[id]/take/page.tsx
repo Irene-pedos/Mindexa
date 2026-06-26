@@ -1,7 +1,7 @@
 // app/student/assessments/[id]/take/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   Card,
@@ -34,11 +34,14 @@ import {
   Bookmark,
   Wifi,
   WifiOff,
+  Loader2,
+  Upload,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { submissionApi } from "@/lib/api/submission";
+import { studentApi } from "@/lib/api/student";
 import { integrityApi } from "@/lib/api/integrity";
 import { apiClient } from "@/lib/api/client";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -78,13 +81,452 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 
-type Stage =
+// ─── Domain Types ────────────────────────────────────────────────────────────
+
+export type AssessmentType =
+  | "CAT" | "SUMMATIVE" | "FORMATIVE" | "HOMEWORK" | "GROUP_WORK" | "REASSESSMENT" | "ASSIGNMENT";
+
+export type QuestionType =
+  | "MCQ" | "TRUE_FALSE" | "MULTIPLE_CHOICE" | "MATCHING" | "ORDERING"
+  | "FILL_BLANK" | "SHORT_ANSWER" | "ESSAY" | "CASE_STUDY" | "COMPUTATIONAL";
+
+export type AnswerType =
+  | "SINGLE_OPTION" | "MULTI_OPTION" | "TEXT" | "MATCH_PAIRS"
+  | "ORDERED_LIST" | "FILL_BLANKS" | "FILE";
+
+export interface QuestionOption {
+  id: string;
+  text?: string;
+  option_text?: string;
+  option_text_right?: string;
+  match_value?: string;
+}
+
+export interface AssessmentQuestion {
+  id: string;
+  text?: string;
+  content?: string;
+  type: string;
+  question_type?: string;
+  marks: number;
+  options?: QuestionOption[];
+  assessment_section_id?: string;
+  section_title?: string;
+  section_instructions?: string;
+  imageUrl?: string;
+  caseStudyContext?: string;
+  min_words?: number;
+  max_words?: number;
+}
+
+export interface AssessmentMeta {
+  id: string;
+  title: string;
+  description?: string;
+  assessment_type: AssessmentType;
+  academic_year?: string;
+  duration_minutes?: number;
+  total_marks?: number;
+  is_password_protected?: boolean;
+  is_supervised?: boolean;
+  fullscreen_required?: boolean;
+  ai_assistance_allowed?: boolean;
+  is_open_book?: boolean;
+  max_attempts?: number;
+  end_date?: string;
+}
+
+export interface SavedSubmission {
+  question_id: string;
+  answer_type: AnswerType;
+  selected_option_ids?: string[];
+  match_pairs_json?: Record<string, string>;
+  fill_blank_answers?: Record<number, string>;
+  ordered_option_ids?: string[];
+  answer_text?: string;
+}
+
+export interface IntegrityWarning {
+  id?: string;
+  message: string;
+  warning_level: "WARNING_1" | "WARNING_2" | "WARNING_3";
+}
+
+export type AnswerValue =
+  | string
+  | string[]
+  | Record<string, string>
+  | Record<number, string>
+  | null
+  | undefined;
+
+export type Answers = Record<string, AnswerValue>;
+export type SaveStatus = "saving" | "saved" | "failed";
+
+export type Stage =
   | "intro"
   | "password"
   | "readiness"
   | "taking"
   | "submitted"
   | "terminated";
+
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const AUTOSAVE_DEBOUNCE_MS = 3000;
+const HEARTBEAT_INTERVAL_MS = 30000;
+const WS_RECONNECT_DELAY_MS = 5000;
+const DEVTOOLS_RESIZE_THRESHOLD_PX = 160;
+const WARN_10MIN_THRESHOLD_S = 600;
+const WARN_5MIN_THRESHOLD_S = 300;
+const MAX_INTEGRITY_WARNINGS = 3;
+const OFFLINE_QUEUE_MAX_BYTES = 2000000;
+
+// ─── Error Boundary ──────────────────────────────────────────────────────────
+
+class QuestionErrorBoundary extends React.Component<
+  { children: React.ReactNode; questionId: string },
+  { hasError: boolean }
+> {
+  constructor(props: { children: React.ReactNode; questionId: string }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error) {
+    console.error(`Question render error for ${this.props.questionId}:`, error);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-4 rounded-lg border border-destructive/20 bg-destructive/5 text-xs text-destructive font-medium text-center">
+          This question could not be rendered. Your previous answer has been preserved.
+          <br />
+          <button
+            className="mt-2 underline"
+            onClick={() => this.setState({ hasError: false })}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+// ─── Custom Hooks ────────────────────────────────────────────────────────────
+
+function useAssessmentTimer({
+  stage,
+  expiresAt,
+  onAutoSubmit,
+}: {
+  stage: Stage;
+  expiresAt: string | null;
+  onAutoSubmit: () => void;
+}) {
+  const [timeLeft, setTimeLeft] = useState(0);
+  const warned10mRef = useRef(false);
+  const warned5mRef = useRef(false);
+
+  useEffect(() => {
+    if (stage !== "taking" || !expiresAt) return;
+    const calculateTimeRemaining = () => {
+      const expiry = new Date(expiresAt);
+      if (Number.isNaN(expiry.getTime())) { setTimeLeft(0); return; }
+      const remaining = Math.max(0, Math.floor((expiry.getTime() - Date.now()) / 1000));
+      setTimeLeft(remaining);
+      if (remaining <= WARN_10MIN_THRESHOLD_S && !warned10mRef.current) {
+        warned10mRef.current = true;
+        toast.warning("10 minutes remaining in this assessment session.");
+      }
+      if (remaining <= WARN_5MIN_THRESHOLD_S && remaining > 0 && !warned5mRef.current) {
+        warned5mRef.current = true;
+        toast.error("Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.");
+      }
+      if (remaining <= 0) onAutoSubmit();
+    };
+    calculateTimeRemaining();
+    const timer = setInterval(calculateTimeRemaining, 1000);
+    return () => clearInterval(timer);
+  }, [stage, expiresAt, onAutoSubmit]);
+
+  return timeLeft;
+}
+
+function useIntegrityMonitor({
+  stage,
+  assessment,
+  isHighSecurity,
+  handleIntegrityEvent,
+  setIsFullscreen,
+}: {
+  stage: Stage;
+  assessment: AssessmentMeta | null;
+  isHighSecurity: boolean;
+  handleIntegrityEvent: (type: string, metadata?: Record<string, unknown>) => Promise<void>;
+  setIsFullscreen: (val: boolean) => void;
+}) {
+  // Fullscreen enforcement
+  useEffect(() => {
+    if (stage !== "taking" || !assessment?.fullscreen_required) return;
+
+    const checkFullscreen = () => {
+      const isFull = !!document.fullscreenElement;
+      setIsFullscreen(isFull);
+      if (!isFull) {
+        handleIntegrityEvent("FULLSCREEN_EXIT");
+      }
+    };
+
+    setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", checkFullscreen);
+    return () => {
+      document.removeEventListener("fullscreenchange", checkFullscreen);
+    };
+  }, [stage, assessment?.fullscreen_required, handleIntegrityEvent, setIsFullscreen]);
+
+  // Tab visibility changes
+  useEffect(() => {
+    if (stage !== "taking" || !isHighSecurity) return;
+    const handleVisibilityChange = () => {
+      if (document.hidden) handleIntegrityEvent("TAB_SWITCH");
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+  }, [stage, isHighSecurity, handleIntegrityEvent]);
+
+  // Other monitored browser events
+  useEffect(() => {
+    if (stage !== "taking") return;
+
+    const handleBlur = () => {
+      handleIntegrityEvent("WINDOW_BLUR");
+    };
+
+    const handleCopy = (e: ClipboardEvent) => {
+      e.preventDefault();
+      const selectedText = window.getSelection()?.toString() || "";
+      handleIntegrityEvent("COPY_ATTEMPT", {
+        content_length: selectedText.length,
+      });
+      toast.warning("Copying is disabled during the assessment.");
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      handleIntegrityEvent("PASTE_ATTEMPT");
+      toast.warning("Pasting is disabled during the assessment.");
+    };
+
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+      handleIntegrityEvent("RIGHT_CLICK_ATTEMPT");
+      toast.warning("Right-click menu is disabled.");
+    };
+
+    let lastWidth = window.innerWidth;
+    let lastHeight = window.innerHeight;
+    const handleResize = () => {
+      const threshold = DEVTOOLS_RESIZE_THRESHOLD_PX;
+      const widthDiff = Math.abs(window.innerWidth - lastWidth);
+      const heightDiff = Math.abs(window.innerHeight - lastHeight);
+
+      if (
+        (window.outerWidth - window.innerWidth > threshold ||
+          window.outerHeight - window.innerHeight > threshold) &&
+        (widthDiff > 50 || heightDiff > 50)
+      ) {
+        handleIntegrityEvent("DEVTOOLS_DETECTED");
+        toast.warning("Developer Tools activity is monitored.");
+      }
+      lastWidth = window.innerWidth;
+      lastHeight = window.innerHeight;
+    };
+
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("copy", handleCopy);
+    document.addEventListener("paste", handlePaste);
+    document.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("copy", handleCopy);
+      document.removeEventListener("paste", handlePaste);
+      document.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [stage, handleIntegrityEvent]);
+
+  // AI Assistance checking
+  useEffect(() => {
+    if (stage !== "taking" || !assessment) return;
+
+    if (assessment.ai_assistance_allowed === false) {
+      const ua = navigator.userAgent.toLowerCase();
+      const aiKeywords = [
+        "copilot",
+        "chatgpt",
+        "gemini",
+        "sider",
+        "monica",
+        "harpa",
+        "merlin",
+        "chathub",
+      ];
+      const detectedKeyword = aiKeywords.find((kw) => ua.includes(kw));
+
+      const windowKeys = Object.keys(window);
+      const extensionKeywords = [
+        "gpt",
+        "openai",
+        "copilot",
+        "gemini",
+        "monica",
+        "sider",
+      ];
+      const detectedProperty = windowKeys.find((key) =>
+        extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
+      );
+
+      if (detectedKeyword || detectedProperty) {
+        handleIntegrityEvent("AI_EXTENSION_DETECTED", {
+          userAgent: navigator.userAgent,
+          detected_keyword: detectedKeyword || null,
+          detected_property: detectedProperty || null,
+        });
+        toast.error(
+          "Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.",
+        );
+      }
+    }
+  }, [stage, assessment, handleIntegrityEvent]);
+}
+
+function useOfflineSync({
+  attemptId,
+  attemptToken,
+  saveAnswer,
+}: {
+  attemptId: string | null;
+  attemptToken: string | null;
+  saveAnswer: (
+    questionId: string,
+    qType: string,
+    answerVal: AnswerValue,
+    changeType: "autosave" | "manual_save"
+  ) => Promise<void>;
+}) {
+  const [isOnline, setIsOnline] = useState(true);
+
+  const queueLocalSave = useCallback(
+    (questionId: string, qType: string, answerVal: AnswerValue) => {
+      if (!attemptId) return;
+      const queueKey = `offline_saves_${attemptId}`;
+      const newItem = {
+        question_id: questionId,
+        q_type: qType,
+        answer_val: answerVal,
+        timestamp: Date.now(),
+      };
+      try {
+        const existingStr = localStorage.getItem(queueKey);
+        let queue = [];
+        if (existingStr) {
+          queue = JSON.parse(existingStr);
+        }
+        queue = queue.filter((item: any) => item.question_id !== questionId);
+        queue.push(newItem);
+
+        const queueStr = JSON.stringify(queue);
+        if (queueStr.length > OFFLINE_QUEUE_MAX_BYTES) {
+          // Keep only the latest 20 entries
+          queue = queue.slice(-20);
+        }
+
+        try {
+          localStorage.setItem(queueKey, JSON.stringify(queue));
+        } catch (e) {
+          toast.error("Local storage full — answer could not be cached offline.");
+        }
+      } catch (e) {
+        console.error("Failed to save answer locally", e);
+      }
+    },
+    [attemptId],
+  );
+
+  const flushOfflineQueue = useCallback(async () => {
+    if (!attemptId || !attemptToken) return;
+    const queueKey = `offline_saves_${attemptId}`;
+    try {
+      const queueStr = localStorage.getItem(queueKey);
+      if (!queueStr) return;
+      const queue = JSON.parse(queueStr);
+      if (queue.length === 0) return;
+
+      toast.info("Connection restored — syncing local answers...");
+
+      // Log a RECONNECT integrity event
+      await attemptApi.recordIntegrityEvent(
+        attemptId,
+        attemptToken,
+        "RECONNECT",
+        {
+          offline_saves_count: queue.length,
+        },
+      );
+
+      for (const item of queue) {
+        await saveAnswer(
+          item.question_id,
+          item.q_type,
+          item.answer_val,
+          "autosave",
+        );
+      }
+
+      toast.success("Connection restored — all answers synced");
+    } catch (err) {
+      console.error("Failed to flush offline queue", err);
+    }
+  }, [attemptId, attemptToken, saveAnswer]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const updateOnlineStatus = () => {
+      const online = navigator.onLine;
+      setIsOnline(online);
+      if (online) {
+        flushOfflineQueue();
+      }
+    };
+
+    window.addEventListener("online", updateOnlineStatus);
+    window.addEventListener("offline", updateOnlineStatus);
+    
+    const initialStatus = navigator.onLine;
+    setTimeout(() => {
+      setIsOnline(initialStatus);
+    }, 0);
+
+    return () => {
+      window.removeEventListener("online", updateOnlineStatus);
+      window.removeEventListener("offline", updateOnlineStatus);
+    };
+  }, [flushOfflineQueue]);
+
+  return { isOnline, queueLocalSave, flushOfflineQueue };
+}
 
 // --- DnD Components for Matching Pairs ---
 
@@ -130,11 +572,15 @@ function DroppableMatchTarget({
   premiseText,
   matchedValue,
   onRemove,
+  optionsPool,
+  onSelect,
 }: {
   premiseId: string;
   premiseText: string;
   matchedValue?: string;
   onRemove: () => void;
+  optionsPool: string[];
+  onSelect: (val: string) => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `target-${premiseId}`,
@@ -144,15 +590,15 @@ function DroppableMatchTarget({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex items-center gap-4 p-4 rounded-xl border transition-all duration-200",
+        "flex items-center gap-4 p-4 rounded-xl border transition-all duration-200 bg-background",
         isOver
           ? "bg-primary/5 border-primary"
           : matchedValue
-            ? "bg-primary/[0.01] border-primary/25"
-            : "bg-background border-muted/70 border-dashed",
+            ? "border-primary/25 shadow-sm"
+            : "border-muted/70",
       )}
     >
-      <div className="flex-1 text-sm font-medium text-foreground/80">
+      <div className="flex-1 text-sm font-semibold text-foreground/80">
         {premiseText}
       </div>
       <div className="shrink-0 text-muted-foreground/30">
@@ -160,47 +606,62 @@ function DroppableMatchTarget({
       </div>
       <div
         className={cn(
-          "w-[200px] h-10 rounded-lg border flex items-center justify-center px-3 transition-all relative group",
+          "w-[240px] h-10 rounded-lg border flex items-center justify-between px-3 transition-all relative group bg-muted/5",
           matchedValue
-            ? "bg-primary text-primary-foreground border-primary"
-            : "bg-muted/10 border-dashed border-muted-foreground/20",
+            ? "border-primary/30"
+            : "border-dashed border-muted-foreground/20",
         )}
       >
-        {matchedValue ? (
-          <>
-            <span className="font-semibold text-xs truncate">
-              {matchedValue}
-            </span>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onRemove();
-              }}
-              className="absolute -top-1.5 -right-1.5 size-5 rounded-full bg-destructive text-destructive-foreground flex items-center justify-center shadow-sm opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <X className="size-3" />
-            </button>
-          </>
-        ) : (
-          <span className="text-xs font-medium text-muted-foreground/45 animate-pulse">
-            Drop here
-          </span>
+        <select
+          value={matchedValue || ""}
+          onChange={(e) => {
+            const val = e.target.value;
+            if (val === "") {
+              onRemove();
+            } else {
+              onSelect(val);
+            }
+          }}
+          className="bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8"
+        >
+          <option value="" className="text-muted-foreground">Select match...</option>
+          {optionsPool.map((opt, i) => (
+            <option key={i} value={opt} className="text-foreground bg-background">
+              {opt}
+            </option>
+          ))}
+        </select>
+        {matchedValue && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onRemove();
+            }}
+            className="absolute right-3 text-destructive hover:text-destructive/80 transition-colors"
+          >
+            <X className="size-3.5" />
+          </button>
         )}
       </div>
     </div>
   );
 }
 
-function MatchingDnd({ q, currentVal, setAnswers }: any) {
+function MatchingDnd({ q, currentVal, setAnswers }: {
+  q: AssessmentQuestion;
+  currentVal: Record<string, string> | undefined;
+  setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+}) {
   const matchingAnswers = currentVal || {};
 
   const premises = useMemo(() => {
-    return (q.options || []).filter((o: any) => o.text || o.option_text);
+    return (q.options || []).filter((o: QuestionOption) => o.text || o.option_text);
   }, [q.options]);
 
   const responses = useMemo(() => {
     const raw = (q.options || []).map(
-      (o: any) =>
+      (o: QuestionOption) =>
         o.option_text_right || o.match_value || o.text || o.option_text,
     );
     return Array.from(new Set(raw))
@@ -223,7 +684,7 @@ function MatchingDnd({ q, currentVal, setAnswers }: any) {
       const droppedText = active.data.current?.text;
 
       if (droppedText) {
-        setAnswers((prev: any) => ({
+        setAnswers((prev: Answers) => ({
           ...prev,
           [q.id]: { ...matchingAnswers, [premiseId]: droppedText },
         }));
@@ -234,7 +695,7 @@ function MatchingDnd({ q, currentVal, setAnswers }: any) {
   const removeMatch = (premiseId: string) => {
     const newMatches = { ...matchingAnswers };
     delete newMatches[premiseId];
-    setAnswers((prev: any) => ({
+    setAnswers((prev: Answers) => ({
       ...prev,
       [q.id]: newMatches,
     }));
@@ -250,13 +711,20 @@ function MatchingDnd({ q, currentVal, setAnswers }: any) {
     >
       <div className="space-y-4">
         <div className="grid gap-2">
-          {premises.map((p: any) => (
+          {premises.map((p: QuestionOption) => (
             <DroppableMatchTarget
               key={p.id}
               premiseId={p.id}
-              premiseText={p.text || p.option_text}
+              premiseText={p.text || p.option_text || ""}
               matchedValue={matchingAnswers[p.id]}
               onRemove={() => removeMatch(p.id)}
+              optionsPool={responses.map((r) => r.text)}
+              onSelect={(val) => {
+                setAnswers((prev: Answers) => ({
+                  ...prev,
+                  [q.id]: { ...matchingAnswers, [p.id]: val },
+                }));
+              }}
             />
           ))}
         </div>
@@ -321,10 +789,14 @@ function DroppableBlank({
   index,
   value,
   onRemove,
+  optionsPool,
+  onSelect,
 }: {
   index: number;
   value?: string;
   onRemove: () => void;
+  optionsPool: string[];
+  onSelect: (val: string) => void;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `blank-${index}`,
@@ -334,7 +806,7 @@ function DroppableBlank({
     <span
       ref={setNodeRef}
       className={cn(
-        "inline-flex items-center justify-center min-w-[110px] h-8 mx-1.5 border-b-2 transition-all px-2.5 relative top-0.5 rounded bg-muted/10",
+        "inline-flex items-center justify-center min-w-[140px] h-8 mx-1.5 border-b-2 transition-all px-2.5 relative top-0.5 rounded bg-muted/10",
         isOver
           ? "bg-primary/10 border-primary"
           : value
@@ -342,33 +814,40 @@ function DroppableBlank({
             : "border-muted-foreground/20",
       )}
     >
-      {value ? (
-        <span
-          className="text-primary font-semibold text-sm flex items-center gap-1.5 cursor-pointer group"
-          onClick={(e) => {
-            e.stopPropagation();
+      <select
+        value={value || ""}
+        onChange={(e) => {
+          const val = e.target.value;
+          if (val === "") {
             onRemove();
-          }}
-        >
-          {value}
-          <X className="size-3.5 opacity-0 group-hover:opacity-100 transition-opacity text-primary/60 hover:text-primary" />
-        </span>
-      ) : (
-        <span className="text-muted-foreground/40 text-xs font-medium animate-pulse">
-          Drop
-        </span>
-      )}
+          } else {
+            onSelect(val);
+          }
+        }}
+        className="bg-transparent border-none text-xs font-semibold text-primary focus:outline-none cursor-pointer w-full text-center"
+      >
+        <option value="" className="text-muted-foreground/60">Select...</option>
+        {optionsPool.map((opt, i) => (
+          <option key={i} value={opt} className="text-foreground bg-background">
+            {opt}
+          </option>
+        ))}
+      </select>
     </span>
   );
 }
 
-function FillInTheBlanksDnd({ q, currentVal, setAnswers }: any) {
+function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
+  q: AssessmentQuestion;
+  currentVal: Record<number, string> | undefined;
+  setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+}) {
   const rawText = q.text || q.content || "";
   const parts = rawText.split("[blank]");
   const blankAnswers = currentVal || {};
 
   const pool = useMemo(() => {
-    return (q.options || []).map((o: any, i: number) => ({
+    return (q.options || []).map((o: QuestionOption, i: number) => ({
       id: o.id || `pool-${i}`,
       text: o.option_text || o.text || "",
     }));
@@ -386,7 +865,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: any) {
       const droppedText = active.data.current?.text;
 
       if (droppedText) {
-        setAnswers((prev: any) => ({
+        setAnswers((prev: Answers) => ({
           ...prev,
           [q.id]: { ...blankAnswers, [blankIndex]: droppedText },
         }));
@@ -397,7 +876,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: any) {
   const removeAnswer = (index: number) => {
     const newAnswers = { ...blankAnswers };
     delete newAnswers[index];
-    setAnswers((prev: any) => ({
+    setAnswers((prev: Answers) => ({
       ...prev,
       [q.id]: newAnswers,
     }));
@@ -421,6 +900,13 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: any) {
                   index={i}
                   value={blankAnswers[i]}
                   onRemove={() => removeAnswer(i)}
+                  optionsPool={pool.map(p => p.text)}
+                  onSelect={(val) => {
+                    setAnswers((prev: Answers) => ({
+                      ...prev,
+                      [q.id]: { ...blankAnswers, [i]: val },
+                    }));
+                  }}
                 />
               )}
             </React.Fragment>
@@ -428,7 +914,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: any) {
         </div>
 
         <div className="flex flex-wrap justify-center gap-2 p-4 rounded-lg bg-muted/5 border border-dashed border-muted/40">
-          {pool.map((ans: any) => (
+          {pool.map((ans) => (
             <DraggableFillBlankAnswer
               key={ans.id}
               id={ans.id}
@@ -521,13 +1007,17 @@ function SortableOrderItem({
   );
 }
 
-function OrderingQuestion({ q, currentVal, setAnswers }: any) {
-  const currentOrder = currentVal || q.options?.map((o: any) => o.id) || [];
+function OrderingQuestion({ q, currentVal, setAnswers }: {
+  q: AssessmentQuestion;
+  currentVal: string[] | undefined;
+  setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+}) {
+  const currentOrder = currentVal || q.options?.map((o: QuestionOption) => o.id) || [];
   const moveItem = (from: number, to: number) => {
     const newOrder = [...currentOrder];
     const [removed] = newOrder.splice(from, 1);
     newOrder.splice(to, 0, removed);
-    setAnswers((prev: any) => ({ ...prev, [q.id]: newOrder }));
+    setAnswers((prev: Answers) => ({ ...prev, [q.id]: newOrder }));
   };
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -535,12 +1025,12 @@ function OrderingQuestion({ q, currentVal, setAnswers }: any) {
       coordinateGetter: sortableKeyboardCoordinates,
     }),
   );
-  const handleDragEnd = (event: any) => {
+  const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (active && over && active.id !== over.id) {
-      const oldIndex = currentOrder.indexOf(active.id);
-      const newIndex = currentOrder.indexOf(over.id);
-      setAnswers((prev: any) => ({
+      const oldIndex = currentOrder.indexOf(active.id as string);
+      const newIndex = currentOrder.indexOf(over.id as string);
+      setAnswers((prev: Answers) => ({
         ...prev,
         [q.id]: arrayMove(currentOrder, oldIndex, newIndex),
       }));
@@ -561,7 +1051,7 @@ function OrderingQuestion({ q, currentVal, setAnswers }: any) {
         >
           <div className="space-y-1.5">
             {currentOrder.map((optId: string, idx: number) => {
-              const opt = q.options?.find((o: any) => o.id === optId);
+              const opt = q.options?.find((o: QuestionOption) => o.id === optId);
               return (
                 <SortableOrderItem
                   key={optId}
@@ -590,13 +1080,12 @@ export default function TakeAssessmentPage() {
   const assessmentId = params.id as string;
 
   const [stage, setStage] = useState<Stage>("intro");
-  const [assessment, setAssessment] = useState<any>(null);
+  const [assessment, setAssessment] = useState<AssessmentMeta | null>(null);
   const [attemptId, setAttemptId] = useState<string | null>(null);
   const [attemptToken, setAttemptToken] = useState<string | null>(null);
-  const [questions, setQuestions] = useState<any[]>([]);
+  const [questions, setQuestions] = useState<AssessmentQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, any>>({});
-  const [timeLeft, setTimeLeft] = useState(0);
+  const [answers, setAnswers] = useState<Answers>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -608,9 +1097,12 @@ export default function TakeAssessmentPage() {
   );
 
   const [passwordInput, setPasswordInput] = useState("");
+  const [passwordError, setPasswordError] = useState<string | null>(null);
   const [readinessChecked, setReadinessChecked] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [attemptNumber, setAttemptNumber] = useState<number>(1);
 
   const [flaggedQuestions, setFlaggedQuestions] = useState<
     Record<string, boolean>
@@ -618,20 +1110,21 @@ export default function TakeAssessmentPage() {
   const [skippedQuestions, setSkippedQuestions] = useState<
     Record<string, boolean>
   >({});
-  const [isOnline, setIsOnline] = useState<boolean>(true);
-  const [saveStatus, setSaveStatus] = useState<
-    Record<string, "saving" | "saved" | "failed">
-  >({});
+  const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
-  const [currentWarning, setCurrentWarning] = useState<any>(null);
+  const [currentWarning, setCurrentWarning] = useState<IntegrityWarning | null>(null);
   const [warningModalOpen, setWarningModalOpen] = useState(false);
+  const [isUploadingFile, setIsUploadingFile] = useState(false);
+  const [submittedAttempt, setSubmittedAttempt] = useState<any>(null);
+  const [isPollingScore, setIsPollingScore] = useState(false);
 
-  const timeSpentRef = React.useRef<Record<string, number>>({});
-  const lastSavedValuesRef = React.useRef<Record<string, any>>({});
-  const warned10mRef = React.useRef(false);
-  const warned5mRef = React.useRef(false);
-  const isNavigatingRef = React.useRef(false);
-  const stageRef = React.useRef<Stage>(stage);
+  const timeSpentRef = useRef<Record<string, number>>({});
+  const lastSavedValuesRef = useRef<Record<string, any>>({});
+  const isNavigatingRef = useRef(false);
+  const stageRef = useRef<Stage>(stage);
+  const processedWarningIds = useRef<Set<string>>(new Set());
+  const saveAnswerRef = useRef<((questionId: string, qType: string, answerVal: AnswerValue, changeType: "autosave" | "manual_save") => Promise<void>) | null>(null);
+  const readinessAbortControllerRef = useRef<AbortController | null>(null);
 
   const currentQ = questions[currentQuestionIndex];
   const isHighSecurity = useMemo(
@@ -643,14 +1136,15 @@ export default function TakeAssessmentPage() {
     [assessment],
   );
 
-  const getAnswerType = (questionType: string): string => {
+  const getAnswerType = (questionType: string): AnswerType => {
     const normalized = (questionType || "")
       .toLowerCase()
       .replace(/[^a-z0-9_]/g, "");
 
-    const map: Record<string, string> = {
+    const map: Record<string, AnswerType> = {
       mcq: "SINGLE_OPTION",
       truefalse: "SINGLE_OPTION",
+      true_final: "SINGLE_OPTION",
       true_false: "SINGLE_OPTION",
       singleoption: "SINGLE_OPTION",
       matching: "MATCH_PAIRS",
@@ -658,12 +1152,20 @@ export default function TakeAssessmentPage() {
       fillblank: "FILL_BLANKS",
       fillblanks: "FILL_BLANKS",
       fill_blank: "FILL_BLANKS",
+      multiplechoice: "SINGLE_OPTION",
+      multiple_choice: "SINGLE_OPTION",
+      multichoice: "SINGLE_OPTION",
+      multiselect: "SINGLE_OPTION",
+      multicorrect: "SINGLE_OPTION",
+      multi_correct: "SINGLE_OPTION",
+      checkbox: "SINGLE_OPTION",
       shortanswer: "TEXT",
       short_answer: "TEXT",
       essay: "TEXT",
       casestudy: "TEXT",
       case_study: "TEXT",
       computational: "TEXT",
+      practical: "FILE",
     };
     return map[normalized] ?? "TEXT";
   };
@@ -673,8 +1175,8 @@ export default function TakeAssessmentPage() {
     try {
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
       toast.info("Responses preserved.");
-    } catch (e) {
-      console.error("Auto-submit failed", e);
+    } catch (err: unknown) {
+      console.error("Auto-submit failed", err);
     }
   }, [attemptId, attemptToken]);
 
@@ -687,8 +1189,26 @@ export default function TakeAssessmentPage() {
     [autoSubmit],
   );
 
+  const startPollingScore = useCallback(async (attId: string, token: string) => {
+    setIsPollingScore(true);
+    let attempts = 0;
+    const interval = setInterval(async () => {
+      try {
+        const detail = await attemptApi.getAttemptDetail(attId, token);
+        setSubmittedAttempt(detail);
+        if (detail.total_score !== null || attempts >= 10) {
+          clearInterval(interval);
+          setIsPollingScore(false);
+        }
+      } catch (err) {
+        console.error("Error polling attempt score:", err);
+      }
+      attempts++;
+    }, 1000);
+  }, []);
+
   const handleIntegrityEvent = useCallback(
-    async (type: string, metadata: any = {}) => {
+    async (type: string, metadata: Record<string, unknown> = {}) => {
       if (!attemptId || !attemptToken) return;
       try {
         const res = await attemptApi.recordIntegrityEvent(
@@ -698,9 +1218,12 @@ export default function TakeAssessmentPage() {
           metadata,
         );
         if (res.warning_issued && res.warning) {
+          const warningId = res.warning.id || res.id;
+          if (warningId && processedWarningIds.current.has(warningId)) return;
+          if (warningId) processedWarningIds.current.add(warningId);
           setWarnings((prev) => {
             const newCount = prev + 1;
-            if (newCount >= 3) {
+            if (newCount >= MAX_INTEGRITY_WARNINGS) {
               terminateSession(`Warnings exceeded (${type}).`);
             } else {
               setCurrentWarning(res.warning);
@@ -709,45 +1232,34 @@ export default function TakeAssessmentPage() {
             return newCount;
           });
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Failed to record integrity event", err);
       }
     },
     [attemptId, attemptToken, terminateSession],
   );
 
-  // Network Status Tracking & Offline Queue flushing
-  const queueLocalSave = useCallback(
-    (questionId: string, qType: string, answerVal: any) => {
-      if (!attemptId) return;
-      const queueKey = `offline_saves_${attemptId}`;
-      const newItem = {
-        question_id: questionId,
-        q_type: qType,
-        answer_val: answerVal,
-        timestamp: Date.now(),
-      };
-      try {
-        const existingStr = localStorage.getItem(queueKey);
-        let queue = [];
-        if (existingStr) {
-          queue = JSON.parse(existingStr);
-        }
-        queue = queue.filter((item: any) => item.question_id !== questionId);
-        queue.push(newItem);
-        localStorage.setItem(queueKey, JSON.stringify(queue));
-      } catch (e) {
-        console.error("Failed to save answer locally", e);
-      }
-    },
-    [attemptId],
-  );
+  useIntegrityMonitor({
+    stage,
+    assessment,
+    isHighSecurity,
+    handleIntegrityEvent,
+    setIsFullscreen,
+  });
+
+  const { isOnline, queueLocalSave, flushOfflineQueue } = useOfflineSync({
+    attemptId,
+    attemptToken,
+    saveAnswer: useCallback(async (questionId, qType, answerVal, changeType) => {
+      await saveAnswerRef.current?.(questionId, qType, answerVal, changeType);
+    }, []),
+  });
 
   const saveAnswer = useCallback(
     async (
       questionId: string,
       qType: string,
-      answerVal: any,
+      answerVal: AnswerValue,
       changeType: "autosave" | "manual_save" = "autosave",
     ) => {
       if (!attemptId || !attemptToken) return;
@@ -771,12 +1283,22 @@ export default function TakeAssessmentPage() {
             : answerVal === null || answerVal === undefined
               ? ""
               : JSON.stringify(answerVal);
+      } else if (answerType === "FILE") {
+        if (typeof answerVal === "object" && answerVal !== null) {
+          payload.file_url = (answerVal as any).file_url || "";
+          payload.answer_text = (answerVal as any).answer_text || "";
+        } else {
+          payload.answer_text = typeof answerVal === "string" ? answerVal : "";
+          payload.file_url = "";
+        }
       } else if (answerType === "SINGLE_OPTION") {
         payload.selected_option_ids = Array.isArray(answerVal)
           ? answerVal
           : answerVal
             ? [answerVal]
             : [];
+      } else if (answerType === "MULTI_OPTION") {
+        payload.selected_option_ids = Array.isArray(answerVal) ? answerVal : [];
       } else if (answerType === "ORDERED_LIST") {
         payload.ordered_option_ids = Array.isArray(answerVal) ? answerVal : [];
       } else if (answerType === "MATCH_PAIRS") {
@@ -792,7 +1314,6 @@ export default function TakeAssessmentPage() {
         setSaveStatus((prev) => ({ ...prev, [questionId]: "saved" }));
         setLastSaved(new Date());
 
-        // Remove from local storage offline queue if it exists
         const queueKey = `offline_saves_${attemptId}`;
         const queueStr = localStorage.getItem(queueKey);
         if (queueStr) {
@@ -802,11 +1323,11 @@ export default function TakeAssessmentPage() {
               (item: any) => item.question_id !== questionId,
             );
             localStorage.setItem(queueKey, JSON.stringify(filtered));
-          } catch (e) {
+          } catch (e: unknown) {
             console.error(e);
           }
         }
-      } catch (err) {
+      } catch (err: unknown) {
         console.error("Save failed, queueing locally", err);
         setSaveStatus((prev) => ({ ...prev, [questionId]: "failed" }));
         queueLocalSave(questionId, qType, answerVal);
@@ -815,62 +1336,7 @@ export default function TakeAssessmentPage() {
     [attemptId, attemptToken, queueLocalSave],
   );
 
-  const flushOfflineQueue = useCallback(async () => {
-    if (!attemptId || !attemptToken) return;
-    const queueKey = `offline_saves_${attemptId}`;
-    try {
-      const queueStr = localStorage.getItem(queueKey);
-      if (!queueStr) return;
-      const queue = JSON.parse(queueStr);
-      if (queue.length === 0) return;
 
-      toast.info("Connection restored — syncing local answers...");
-
-      // Log a RECONNECT integrity event
-      await attemptApi.recordIntegrityEvent(
-        attemptId,
-        attemptToken,
-        "RECONNECT",
-        {
-          offline_saves_count: queue.length,
-        },
-      );
-
-      for (const item of queue) {
-        await saveAnswer(
-          item.question_id,
-          item.q_type,
-          item.answer_val,
-          "autosave",
-        );
-      }
-
-      toast.success("Connection restored — all answers synced");
-    } catch (err) {
-      console.error("Failed to flush offline queue", err);
-    }
-  }, [attemptId, attemptToken, saveAnswer]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    const updateOnlineStatus = () => {
-      const online = navigator.onLine;
-      setIsOnline(online);
-      if (online) {
-        flushOfflineQueue();
-      }
-    };
-
-    window.addEventListener("online", updateOnlineStatus);
-    window.addEventListener("offline", updateOnlineStatus);
-    setIsOnline(navigator.onLine);
-
-    return () => {
-      window.removeEventListener("online", updateOnlineStatus);
-      window.removeEventListener("offline", updateOnlineStatus);
-    };
-  }, [flushOfflineQueue]);
 
   // Sync / Load logic: Detect existing attempt on mount (Resume attempt support)
   const syncSavedSubmissions = async (attId: string) => {
@@ -886,26 +1352,38 @@ export default function TakeAssessmentPage() {
           savedAnswers[s.question_id] = s.fill_blank_answers || {};
         else if (s.answer_type === "ORDERED_LIST")
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
+        else if (s.answer_type === "FILE")
+          savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
         else savedAnswers[s.question_id] = s.answer_text;
       });
       setAnswers(savedAnswers);
       lastSavedValuesRef.current = savedAnswers;
-    } catch (e) {
-      console.error("Failed to sync submissions", e);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to sync submissions";
+      console.error(message, err);
       toast.warning("Could not load previously saved answers. Starting fresh.");
     }
   };
 
   useEffect(() => {
+    const controller = new AbortController();
+
     async function checkExistingSession() {
       try {
         setLoading(true);
         // Load assessment first
         const data = await assessmentApi.getAssessmentById(assessmentId);
+        if (controller.signal.aborted) return;
         setAssessment(data);
 
         // Check for student's IN_PROGRESS or PAUSED attempts
         const attemptsRes = await apiClient("/attempts/me");
+        if (controller.signal.aborted) return;
+        const completedAttempts = attemptsRes.items?.filter(
+          (a: any) => a.assessment_id === assessmentId && ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED"].includes(a.status)
+        ) || [];
+        setAttemptNumber(completedAttempts.length + 1);
+
         const activeAttempt = attemptsRes.items?.find(
           (a: any) =>
             a.assessment_id === assessmentId &&
@@ -925,6 +1403,7 @@ export default function TakeAssessmentPage() {
                   activeAttempt.id,
                   savedToken,
                 );
+                if (controller.signal.aborted) return;
                 const newToken = resumeData.access_token;
                 setAttemptToken(newToken);
                 sessionStorage.setItem(
@@ -932,19 +1411,22 @@ export default function TakeAssessmentPage() {
                   newToken,
                 );
                 setExpiresAt(resumeData.expires_at);
-                setTimeLeft(resumeData.seconds_remaining || 3600);
 
                 const attemptDetail = await attemptApi.getAttemptDetail(
                   activeAttempt.id,
                   newToken,
                 );
+                if (controller.signal.aborted) return;
                 setQuestions(attemptDetail.questions || []);
                 await syncSavedSubmissions(activeAttempt.id);
+                if (controller.signal.aborted) return;
                 setStage("taking");
-                if (data.fullscreen_required) enterFullscreen();
+                if (assessment?.fullscreen_required) enterFullscreen();
                 toast.success("Attempt resumed successfully.");
-              } catch (err: any) {
-                toast.error(err.message || "Failed to resume paused attempt.");
+              } catch (err: unknown) {
+                if (controller.signal.aborted) return;
+                const message = err instanceof Error ? err.message : "Failed to resume paused attempt.";
+                toast.error(message);
                 setStage("intro");
               }
             } else {
@@ -956,11 +1438,14 @@ export default function TakeAssessmentPage() {
                   activeAttempt.id,
                   savedToken,
                 );
+                if (controller.signal.aborted) return;
                 setQuestions(attemptDetail.questions || []);
                 await syncSavedSubmissions(activeAttempt.id);
+                if (controller.signal.aborted) return;
                 setStage("taking");
-                if (data.fullscreen_required) enterFullscreen();
-              } catch (err) {
+                if (assessment?.fullscreen_required) enterFullscreen();
+              } catch (err: unknown) {
+                if (controller.signal.aborted) return;
                 toast.error("Session token validation failed.");
                 setStage("intro");
               }
@@ -974,17 +1459,26 @@ export default function TakeAssessmentPage() {
         } else {
           setStage("intro");
         }
-      } catch (err: any) {
-        toast.error("Failed to load assessment context.");
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return;
+        const message = err instanceof Error ? err.message : "Failed to load assessment context.";
+        toast.error(message);
         router.push("/student/assessments");
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
     }
 
     if (assessmentId) {
       checkExistingSession();
     }
+
+    return () => {
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [assessmentId, router]);
 
   // WebSocket for real-time integrity reporting
@@ -1010,9 +1504,19 @@ export default function TakeAssessmentPage() {
           try {
             const data = JSON.parse(event.data);
             if (data.type === "warning" || data.warning) {
-              const warning = data.warning || data;
-              setCurrentWarning(warning);
-              setWarningModalOpen(true);
+              const warningId = data.warning?.id || data.id;
+              if (warningId && processedWarningIds.current.has(warningId)) return;
+              if (warningId) processedWarningIds.current.add(warningId);
+              setWarnings(prev => {
+                const newCount = prev + 1;
+                if (newCount >= 3) {
+                  terminateSession("Warnings exceeded.");
+                } else {
+                  setCurrentWarning(data.warning || data);
+                  setWarningModalOpen(true);
+                }
+                return newCount;
+              });
             }
           } catch (e) {
             console.error("Failed to parse WebSocket message", e);
@@ -1039,144 +1543,9 @@ export default function TakeAssessmentPage() {
       if (socket) socket.close();
       if (reconnectTimeout !== null) window.clearTimeout(reconnectTimeout);
     };
-  }, [stage, attemptId]);
+  }, [stage, attemptId, terminateSession]);
 
-  // Fullscreen enforcement
-  useEffect(() => {
-    if (stage !== "taking" || !assessment?.fullscreen_required) return;
 
-    const checkFullscreen = () => {
-      const isFull = !!document.fullscreenElement;
-      setIsFullscreen(isFull);
-      if (!isFull) {
-        handleIntegrityEvent("FULLSCREEN_EXIT");
-      }
-    };
-
-    setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", checkFullscreen);
-    return () => {
-      document.removeEventListener("fullscreenchange", checkFullscreen);
-    };
-  }, [stage, assessment?.fullscreen_required, handleIntegrityEvent]);
-
-  // Tab visibility changes
-  useEffect(() => {
-    if (stage !== "taking" || !isHighSecurity) return;
-    const handleVisibilityChange = () => {
-      if (document.hidden) handleIntegrityEvent("TAB_SWITCH");
-    };
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () =>
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [stage, isHighSecurity, handleIntegrityEvent]);
-
-  // Other monitored browser events
-  useEffect(() => {
-    if (stage !== "taking") return;
-
-    const handleBlur = () => {
-      handleIntegrityEvent("WINDOW_BLUR");
-    };
-
-    const handleCopy = (e: ClipboardEvent) => {
-      e.preventDefault();
-      const selectedText = window.getSelection()?.toString() || "";
-      handleIntegrityEvent("COPY_ATTEMPT", {
-        content_length: selectedText.length,
-      });
-      toast.warning("Copying is disabled during the assessment.");
-    };
-
-    const handlePaste = (e: ClipboardEvent) => {
-      e.preventDefault();
-      handleIntegrityEvent("PASTE_ATTEMPT");
-      toast.warning("Pasting is disabled during the assessment.");
-    };
-
-    const handleContextMenu = (e: MouseEvent) => {
-      e.preventDefault();
-      handleIntegrityEvent("RIGHT_CLICK_ATTEMPT");
-      toast.warning("Right-click menu is disabled.");
-    };
-
-    let lastWidth = window.innerWidth;
-    let lastHeight = window.innerHeight;
-    const handleResize = () => {
-      const threshold = 160;
-      const widthDiff = Math.abs(window.innerWidth - lastWidth);
-      const heightDiff = Math.abs(window.innerHeight - lastHeight);
-
-      if (
-        (window.outerWidth - window.innerWidth > threshold ||
-          window.outerHeight - window.innerHeight > threshold) &&
-        (widthDiff > 50 || heightDiff > 50)
-      ) {
-        handleIntegrityEvent("DEVTOOLS_DETECTED");
-        toast.warning("Developer Tools activity is monitored.");
-      }
-      lastWidth = window.innerWidth;
-      lastHeight = window.innerHeight;
-    };
-
-    window.addEventListener("blur", handleBlur);
-    document.addEventListener("copy", handleCopy);
-    document.addEventListener("paste", handlePaste);
-    document.addEventListener("contextmenu", handleContextMenu);
-    window.addEventListener("resize", handleResize);
-
-    return () => {
-      window.removeEventListener("blur", handleBlur);
-      document.removeEventListener("copy", handleCopy);
-      document.removeEventListener("paste", handlePaste);
-      document.removeEventListener("contextmenu", handleContextMenu);
-      window.removeEventListener("resize", handleResize);
-    };
-  }, [stage, handleIntegrityEvent]);
-
-  // AI Assistance checking
-  useEffect(() => {
-    if (stage !== "taking" || !assessment) return;
-
-    if (assessment.ai_assistance_allowed === false) {
-      const ua = navigator.userAgent.toLowerCase();
-      const aiKeywords = [
-        "copilot",
-        "chatgpt",
-        "gemini",
-        "sider",
-        "monica",
-        "harpa",
-        "merlin",
-        "chathub",
-      ];
-      const detectedKeyword = aiKeywords.find((kw) => ua.includes(kw));
-
-      const windowKeys = Object.keys(window);
-      const extensionKeywords = [
-        "gpt",
-        "openai",
-        "copilot",
-        "gemini",
-        "monica",
-        "sider",
-      ];
-      const detectedProperty = windowKeys.find((key) =>
-        extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
-      );
-
-      if (detectedKeyword || detectedProperty) {
-        handleIntegrityEvent("AI_EXTENSION_DETECTED", {
-          userAgent: navigator.userAgent,
-          detected_keyword: detectedKeyword || null,
-          detected_property: detectedProperty || null,
-        });
-        toast.error(
-          "Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.",
-        );
-      }
-    }
-  }, [stage, assessment, handleIntegrityEvent]);
 
   // Timer with server deadline countdown
   const saveAllPendingAnswers = useCallback(async () => {
@@ -1191,8 +1560,8 @@ export default function TakeAssessmentPage() {
         try {
           await saveAnswer(q.id, q.type, currentAnswer, "manual_save");
           lastSavedValuesRef.current[q.id] = currentAnswer;
-        } catch (e) {
-          console.error(`Failed to save pending answer for ${q.id}`, e);
+        } catch (err: unknown) {
+          console.error(`Failed to save pending answer for ${q.id}`, err);
         }
       }
     }
@@ -1204,52 +1573,24 @@ export default function TakeAssessmentPage() {
       await saveAllPendingAnswers();
       await attemptApi.submitAttempt(attemptId!, attemptToken!, true);
       setStage("submitted");
-      router.push(`/student/assessments/${assessmentId}/submitted`);
-    } catch (err) {
-      // Even on error, redirect - backend will auto-submit via Celery
+      if (attemptId && attemptToken) {
+        startPollingScore(attemptId, attemptToken);
+      }
+    } catch (err: unknown) {
       setStage("submitted");
-      router.push(`/student/assessments/${assessmentId}/submitted`);
+      if (attemptId && attemptToken) {
+        startPollingScore(attemptId, attemptToken);
+      }
+    } finally {
+      setSubmitting(false);
     }
-  }, [attemptId, attemptToken, assessmentId, saveAllPendingAnswers, router]);
+  }, [attemptId, attemptToken, saveAllPendingAnswers, startPollingScore]);
 
-  useEffect(() => {
-    if (stage !== "taking" || !expiresAt) return;
-
-    const calculateTimeRemaining = () => {
-      const expiry = new Date(expiresAt);
-      if (Number.isNaN(expiry.getTime())) {
-        console.error("Invalid expiry timestamp for attempt", expiresAt);
-        setTimeLeft(0);
-        return;
-      }
-
-      const remaining = Math.max(
-        0,
-        Math.floor((expiry.getTime() - Date.now()) / 1000),
-      );
-      setTimeLeft(remaining);
-
-      if (remaining <= 600 && remaining > 300 && !warned10mRef.current) {
-        warned10mRef.current = true;
-        toast.warning("10 minutes remaining in this assessment session.");
-      }
-      if (remaining <= 300 && remaining > 0 && !warned5mRef.current) {
-        warned5mRef.current = true;
-        toast.error(
-          "Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.",
-        );
-      }
-
-      if (remaining <= 0) {
-        handleAutoSubmit();
-      }
-    };
-
-    calculateTimeRemaining();
-    const timer = setInterval(calculateTimeRemaining, 1000);
-
-    return () => clearInterval(timer);
-  }, [stage, expiresAt, handleAutoSubmit]);
+  const timeLeft = useAssessmentTimer({
+    stage,
+    expiresAt,
+    onAutoSubmit: handleAutoSubmit,
+  });
 
   // Timer spent per question tracking
   useEffect(() => {
@@ -1273,34 +1614,53 @@ export default function TakeAssessmentPage() {
       return;
     }
 
-    const timer = setTimeout(() => {
-      saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
-      lastSavedValuesRef.current[currentQ.id] = currentAnswer;
-    }, 3000);
+    const controller = new AbortController();
 
-    return () => clearTimeout(timer);
+    const timer = setTimeout(async () => {
+      try {
+        await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
+        if (controller.signal.aborted) return;
+        lastSavedValuesRef.current[currentQ.id] = currentAnswer;
+      } catch (err: unknown) {
+        console.error(err);
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
   }, [answers, currentQ, stage, saveAnswer]);
 
   // Heartbeat Autosave (30s)
   useEffect(() => {
     if (stage !== "taking") return;
+    const controller = new AbortController();
 
     const interval = setInterval(async () => {
       if (currentQ) {
         const currentAnswer = answers[currentQ.id];
         if (currentAnswer !== undefined) {
-          await saveAnswer(
-            currentQ.id,
-            currentQ.type,
-            currentAnswer,
-            "autosave",
-          );
-          lastSavedValuesRef.current[currentQ.id] = currentAnswer;
+          try {
+            await saveAnswer(
+              currentQ.id,
+              currentQ.type,
+              currentAnswer,
+              "autosave",
+            );
+            if (controller.signal.aborted) return;
+            lastSavedValuesRef.current[currentQ.id] = currentAnswer;
+          } catch (err: unknown) {
+            console.error(err);
+          }
         }
       }
-    }, 30000);
+    }, HEARTBEAT_INTERVAL_MS);
 
-    return () => clearInterval(interval);
+    return () => {
+      controller.abort();
+      clearInterval(interval);
+    };
   }, [stage, currentQ, answers, saveAnswer]);
 
   // Navigation save
@@ -1343,13 +1703,14 @@ export default function TakeAssessmentPage() {
         document.exitFullscreen();
       setStage("submitted");
       toast.success("Submitted successfully.");
-    } catch (err: any) {
+      startPollingScore(attemptId, attemptToken);
+    } catch (err: unknown) {
       toast.error("Submission failed.");
     } finally {
       setSubmitting(false);
       setShowSubmitConfirm(false);
     }
-  }, [attemptId, attemptToken, saveAllPendingAnswers]);
+  }, [attemptId, attemptToken, saveAllPendingAnswers, startPollingScore]);
 
   const enterFullscreen = () => {
     document.documentElement
@@ -1359,15 +1720,14 @@ export default function TakeAssessmentPage() {
 
   const handleExitEnvironment = () => {
     if (stage === "taking" && isHighSecurity) {
-      if (!confirm("TERMINATE SESSION?")) return;
-      submitAssessment();
+      setShowTerminateConfirm(true);
       return;
     }
     router.back();
   };
 
   const handleStartAssessment = () => {
-    if (assessment.is_password_protected) setStage("password");
+    if (assessment?.is_password_protected) setStage("password");
     else setStage("readiness");
   };
   const handlePasswordSubmit = (e: React.FormEvent) => {
@@ -1377,24 +1737,31 @@ export default function TakeAssessmentPage() {
 
   const handleReadinessConfirm = async () => {
     if (!readinessChecked) return;
+    readinessAbortControllerRef.current?.abort();
+    const controller = new AbortController();
+    readinessAbortControllerRef.current = controller;
+
     try {
       const data = await attemptApi.startAttempt({
         assessment_id: assessmentId,
         password: passwordInput || undefined,
       });
+      if (controller.signal.aborted) return;
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
-      localStorage.setItem(`attempt_token_${data.id}`, data.access_token);
+      sessionStorage.setItem(`attempt_token_${data.id}`, data.access_token);
       setExpiresAt(data.expires_at);
-      setTimeLeft(data.seconds_remaining || 3600);
+      
       const attemptData = await attemptApi.getAttemptDetail(
         data.id,
         data.access_token,
       );
+      if (controller.signal.aborted) return;
       setQuestions(attemptData.questions || []);
       const savedAnswers: Record<string, any> = {};
       try {
         const subRes = await submissionApi.getSubmissionsForAttempt(data.id);
+        if (controller.signal.aborted) return;
         subRes.submissions?.forEach((s: any) => {
           if (s.answer_type === "SINGLE_OPTION")
             savedAnswers[s.question_id] = s.selected_option_ids?.[0];
@@ -1404,18 +1771,26 @@ export default function TakeAssessmentPage() {
             savedAnswers[s.question_id] = s.fill_blank_answers || {};
           else if (s.answer_type === "ORDERED_LIST")
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
+          else if (s.answer_type === "FILE")
+            savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
           else savedAnswers[s.question_id] = s.answer_text;
         });
         setAnswers(savedAnswers);
         lastSavedValuesRef.current = savedAnswers;
-      } catch (e) {
+      } catch (e: unknown) {
         console.error(e);
       }
       setStage("taking");
-      if (assessment.fullscreen_required) enterFullscreen();
-    } catch (err: any) {
+      if (assessment?.fullscreen_required) enterFullscreen();
+    } catch (err: unknown) {
+      if (controller.signal.aborted) return;
       toast.error("Start failed. Check credentials.");
-      if (err.code === "INVALID_PASSWORD") setStage("password");
+      const code = (err as { code?: string }).code;
+      const status = (err as { status?: number }).status;
+      if (code === "INVALID_PASSWORD" || status === 403) {
+        setStage("password");
+        setPasswordError("Incorrect password. Please try again.");
+      }
     }
   };
 
@@ -1428,52 +1803,116 @@ export default function TakeAssessmentPage() {
   const getAssessmentTypeLabel = (type: string) => {
     if (!type) return "";
     switch (type.toLowerCase()) {
-      case "cat":
-        return "Continuous Assessment Test";
-      case "assignment":
-        return "Assignment";
-      case "summative":
-        return "Summative Exam";
-      default:
-        return type;
+      case "cat": return "Continuous Assessment Test";
+      case "summative": return "Summative Examination";
+      case "formative": return "Formative Assessment";
+      case "homework": return "Homework Assignment";
+      case "group_work": return "Group Work";
+      case "reassessment": return "Reassessment";
+      case "assignment": return "Assignment";
+      default: return type;
     }
   };
-  const progress =
-    questions.length > 0
-      ? (Object.keys(answers).length / questions.length) * 100
-      : 0;
+  const sectionGroups = useMemo(() => {
+    const sectionIds = Array.from(new Set(questions.map((q) => q.assessment_section_id)));
+    return sectionIds.map((sectionId) => ({
+      sectionId,
+      questions: questions.filter((q) => q.assessment_section_id === sectionId),
+      title: questions.find((q) => q.assessment_section_id === sectionId)?.section_title || "General Section",
+    }));
+  }, [questions]);
 
-  const renderQuestion = (q: any) => {
+  const progress = useMemo(
+    () => questions.length > 0
+      ? (Object.keys(answers).length / questions.length) * 100
+      : 0,
+    [answers, questions.length]
+  );
+
+  const renderQuestion = (q: AssessmentQuestion): React.ReactNode => {
     if (!q) return null;
     const currentVal = answers[q.id];
     const type = (q.type || q.question_type || "")
       .toString()
       .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
+      .replace(/[^a-z0-9_]/g, "");
 
-    if (type === "mcq" || type === "truefalse" || type === "singleoption") {
+    // ─── A. MULTIPLE CHOICE QUESTIONS & MCQ ───
+    if (
+      type === "mcq" ||
+      type === "multiplechoice" ||
+      type === "multiple_choice" ||
+      type === "multichoice" ||
+      type === "singleoption" ||
+      type === "multiselect" ||
+      type === "multicorrect"
+    ) {
       return (
         <RadioGroup
-          value={currentVal || ""}
+          value={typeof currentVal === "string" ? currentVal : Array.isArray(currentVal) && currentVal.length > 0 ? currentVal[0] : ""}
           onValueChange={(val) =>
             setAnswers((prev) => ({ ...prev, [q.id]: val }))
           }
-          className="grid gap-1.5"
+          className="grid gap-3"
         >
-          {q.options?.map((opt: any) => (
+          {q.options?.map((opt: QuestionOption) => {
+            const isSelected = currentVal === opt.id || (Array.isArray(currentVal) && currentVal.includes(opt.id));
+            return (
+              <div
+                key={opt.id}
+                onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))}
+                className={cn(
+                  "flex items-center space-x-3 p-3.5 rounded-xl border transition-all cursor-pointer",
+                  isSelected
+                    ? "bg-primary/[0.03] border-primary/25 shadow-sm font-semibold"
+                    : "hover:bg-muted/5 border-muted/70",
+                )}
+              >
+                <RadioGroupItem value={opt.id} id={opt.id} className="size-4" />
+                <Label
+                  htmlFor={opt.id}
+                  className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
+                >
+                  {opt.text || opt.option_text || "Option"}
+                </Label>
+              </div>
+            );
+          })}
+        </RadioGroup>
+      );
+    }
+
+    // ─── B. TRUE / FALSE QUESTIONS ───
+    if (type === "truefalse" || type === "true_false") {
+      const tfOptions = (q.options && q.options.length >= 2)
+        ? q.options
+        : [
+            { id: "true", text: "True", option_text: "True" },
+            { id: "false", text: "False", option_text: "False" }
+          ];
+      return (
+        <RadioGroup
+          value={typeof currentVal === "string" ? currentVal : ""}
+          onValueChange={(val) =>
+            setAnswers((prev) => ({ ...prev, [q.id]: val }))
+          }
+          className="grid gap-3"
+        >
+          {tfOptions.map((opt: QuestionOption) => (
             <div
               key={opt.id}
+              onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))}
               className={cn(
-                "flex items-center space-x-3 p-3 rounded-md border transition-all cursor-pointer",
+                "flex items-center space-x-3 p-3.5 rounded-xl border transition-all cursor-pointer",
                 currentVal === opt.id
-                  ? "bg-primary/[0.03] border-primary/20"
-                  : "hover:bg-muted/5",
+                  ? "bg-primary/[0.03] border-primary/25 shadow-sm font-semibold"
+                  : "hover:bg-muted/5 border-muted/70",
               )}
             >
               <RadioGroupItem value={opt.id} id={opt.id} className="size-4" />
               <Label
                 htmlFor={opt.id}
-                className="flex-1 cursor-pointer font-medium text-[13px] text-foreground/80"
+                className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
               >
                 {opt.text || opt.option_text || "Option"}
               </Label>
@@ -1482,46 +1921,241 @@ export default function TakeAssessmentPage() {
         </RadioGroup>
       );
     }
-    if (type === "matching")
-      return (
-        <MatchingDnd q={q} currentVal={currentVal} setAnswers={setAnswers} />
-      );
-    if (type === "fillblank" || type === "fillblanks")
+
+    // ─── C. FILL IN THE BLANK ───
+    if (type === "fillblank" || type === "fillblanks" || type === "fillintheblank" || type === "fillintheblanks" || type === "fill_blank") {
       return (
         <FillInTheBlanksDnd
           q={q}
-          currentVal={currentVal}
+          currentVal={
+            currentVal && typeof currentVal === "object" && !Array.isArray(currentVal)
+              ? (currentVal as Record<number, string>)
+              : undefined
+          }
           setAnswers={setAnswers}
         />
       );
-    if (type === "ordering")
+    }
+
+    // ─── D. MATCHING ───
+    if (type === "matching") {
+      return (
+        <MatchingDnd
+          q={q}
+          currentVal={
+            currentVal && typeof currentVal === "object" && !Array.isArray(currentVal)
+              ? (currentVal as Record<string, string>)
+              : undefined
+          }
+          setAnswers={setAnswers}
+        />
+      );
+    }
+
+    // ─── E. SHORT ANSWER ───
+    if (type === "shortanswer" || type === "short_answer") {
+      const textVal = typeof currentVal === "string" ? currentVal : "";
+      return (
+        <div className="space-y-4">
+          <textarea
+            className="w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+            placeholder="Type your response here..."
+            value={textVal}
+            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+          />
+          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+            <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+          </div>
+        </div>
+      );
+    }
+
+    // ─── F. ESSAY ───
+    if (type === "essay") {
+      const textVal = typeof currentVal === "string" ? currentVal : "";
+      const wordCount = textVal.trim().split(/\s+/).filter(Boolean).length;
+      return (
+        <div className="space-y-4">
+          <textarea
+            className="w-full min-h-[250px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+            placeholder="Write your detailed essay here..."
+            value={textVal}
+            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+          />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+              <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
+            </div>
+            <span className="text-xs font-semibold text-muted-foreground/75 tabular-nums">
+              {wordCount} words
+            </span>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── G. CASE STUDY ───
+    if (type === "casestudy" || type === "case_study") {
+      const textVal = typeof currentVal === "string" ? currentVal : "";
+      return (
+        <div className="space-y-4">
+          {q.caseStudyContext && (
+            <div className="p-4 rounded-xl border border-amber-500/15 bg-amber-500/[0.02] text-sm leading-relaxed italic text-foreground/80">
+              <span className="block font-bold text-xs uppercase text-amber-600 mb-1.5 tracking-wider">Case Study Context Reference</span>
+              {q.caseStudyContext}
+            </div>
+          )}
+          <textarea
+            className="w-full min-h-[180px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+            placeholder="Write your analysis and response here..."
+            value={textVal}
+            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+          />
+          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+            <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
+          </div>
+        </div>
+      );
+    }
+
+    // ─── H. PRACTICAL ───
+    if (type === "practical" || type === "computational" || type === "computationalreasoning") {
+      const fileVal = typeof currentVal === "object" && currentVal !== null ? (currentVal as any) : { file_url: "", filename: "", answer_text: typeof currentVal === "string" ? currentVal : "" };
+      const fileUrl = fileVal.file_url || "";
+      const filename = fileVal.filename || "";
+      const answerText = fileVal.answer_text || "";
+
+      return (
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.01] space-y-1">
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary/60">Instructions & Required Deliverables</p>
+            <p className="text-sm text-foreground/80 leading-relaxed font-medium">
+              Please upload the required deliverable files and add your response comments below.
+            </p>
+          </div>
+
+          {type === "practical" && (
+            <div className="space-y-2">
+              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">Deliverable File</Label>
+              {fileUrl ? (
+                <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] shadow-sm">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <FileText className="size-5 text-emerald-600 shrink-0" />
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">{filename || "uploaded_file"}</p>
+                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-primary hover:underline">
+                        Download Uploaded File
+                      </a>
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 text-destructive hover:bg-destructive/10 rounded-lg"
+                    onClick={() => {
+                      const newVal = { ...fileVal, file_url: "", filename: "" };
+                      setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+                    }}
+                  >
+                    <X className="size-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-muted/5",
+                    isUploadingFile ? "opacity-60 pointer-events-none" : "border-muted-foreground/25"
+                  )}
+                  onClick={() => {
+                    const input = document.createElement("input");
+                    input.type = "file";
+                    input.onchange = async (e) => {
+                      const file = (e.target as HTMLInputElement).files?.[0];
+                      if (!file) return;
+                      setIsUploadingFile(true);
+                      try {
+                        const formData = new FormData();
+                        formData.append("file", file);
+                        formData.append("subject_tag", "practical-assessment");
+                        const res = await studentApi.uploadPersonalResource(formData);
+                        const downloadUrl = `/resources/student-resources/download/${res.id}`;
+                        const newVal = {
+                          ...fileVal,
+                          file_url: downloadUrl,
+                          filename: file.name,
+                        };
+                        setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+                        toast.success("Deliverable file uploaded successfully.");
+                      } catch (err) {
+                        console.error("Upload failed", err);
+                        toast.error("File upload failed.");
+                      } finally {
+                        setIsUploadingFile(false);
+                      }
+                    };
+                    input.click();
+                  }}
+                >
+                  {isUploadingFile ? (
+                    <Loader2 className="size-8 text-primary animate-spin" />
+                  ) : (
+                    <Upload className="size-8 text-muted-foreground/60" />
+                  )}
+                  <div className="text-center">
+                    <p className="text-xs font-semibold text-foreground/80">
+                      {isUploadingFile ? "Uploading..." : "Click to select and upload deliverable file"}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground/60 mt-0.5">Supports PDF, DOCX, ZIP, JPG, PNG up to 10MB</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+              {type === "practical" ? "Comments & Supporting Notes" : "Your Reasoning / Calculations"}
+            </Label>
+            <textarea
+              className={cn(
+                "w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
+                (type === "computational" || type === "computationalreasoning") && "font-mono"
+              )}
+              placeholder={type === "practical" ? "Write your explanation or notes here..." : "Show your formulas and calculations here..."}
+              value={answerText}
+              onChange={(e) => {
+                const newVal = { ...fileVal, answer_text: e.target.value };
+                setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+              }}
+            />
+          </div>
+
+          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+            <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+          </div>
+        </div>
+      );
+    }
+
+    if (type === "ordering") {
       return (
         <OrderingQuestion
           q={q}
-          currentVal={currentVal}
+          currentVal={Array.isArray(currentVal) ? currentVal : undefined}
           setAnswers={setAnswers}
         />
       );
+    }
 
+    // Default Fallback
+    const textVal = typeof currentVal === "string" ? currentVal : "";
     return (
-      <div className="space-y-4">
-        {q.caseStudyContext && (
-          <div className="p-4 rounded-md border border-amber-100 bg-amber-50/20 text-[13px] leading-relaxed italic text-foreground/70">
-            {q.caseStudyContext}
-          </div>
-        )}
-        <textarea
-          className="w-full min-h-[200px] p-4 rounded-md border bg-background focus:border-primary/40 outline-none text-sm leading-relaxed"
-          placeholder="Composition..."
-          value={currentVal || ""}
-          onChange={(e) =>
-            setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
-          }
-        />
-        <div className="flex items-center gap-2 text-[9px] text-muted-foreground uppercase font-bold tracking-widest px-0.5 opacity-40">
-          <Shield className="size-3" /> Secure Trace Active
-        </div>
-      </div>
+      <textarea
+        className="w-full min-h-[120px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+        placeholder="Type your response here..."
+        value={textVal}
+        onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+      />
     );
   };
 
@@ -1563,31 +2197,146 @@ export default function TakeAssessmentPage() {
       </div>
     );
 
-  if (stage === "submitted")
+  if (stage === "submitted") {
+    const AUTO_GRADED_TYPES = ["mcq", "truefalse", "true_final", "true_false", "matching", "fillblank", "fillblanks", "fillintheblank", "fillintheblanks", "ordering"];
+    const LECTURER_REVIEW_TYPES = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational", "computationalreasoning"];
+
+    const autoGradedQuestions = questions.filter((q) => {
+      const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+      return AUTO_GRADED_TYPES.includes(t) || t === "mcq" || t === "true_false";
+    });
+    const openQuestions = questions.filter((q) => {
+      const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+      return LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
+    });
+
+    const autoGradedMax = autoGradedQuestions.reduce((acc, q) => acc + (q.marks || 0), 0);
+    const openMax = openQuestions.reduce((acc, q) => acc + (q.marks || 0), 0);
+    const totalMax = questions.reduce((acc, q) => acc + (q.marks || 0), 0);
+    const hasOpenQuestions = openQuestions.length > 0;
+
+    const displayAutoGradedScore = submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
+      ? `${submittedAttempt.total_score} / ${autoGradedMax} Marks`
+      : isPollingScore
+        ? "Calculating..."
+        : `${autoGradedMax} Marks`;
+
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="max-w-md w-full shadow-none border rounded-xl overflow-hidden text-center">
-          <CardContent className="p-8 space-y-5">
-            <CheckCircle className="size-12 text-emerald-500 mx-auto" />
+        <Card className="max-w-xl w-full border border-border/60 shadow-xl rounded-2xl overflow-hidden bg-background">
+          <CardHeader className="text-center py-8 bg-muted/10 border-b border-border/40 space-y-3">
+            <div className="inline-flex items-center justify-center size-14 rounded-full bg-emerald-50 border border-emerald-200">
+              <CheckCircle className="size-8 text-emerald-600" />
+            </div>
             <div className="space-y-1.5">
-              <CardTitle className="text-xl font-semibold tracking-tight">
-                Assessment Finalized
+              <CardTitle className="text-2xl font-bold tracking-tight text-foreground">
+                Assessment Submission Receipt
               </CardTitle>
-              <p className="text-sm text-muted-foreground">
-                Your assessment attempt has been successfully and securely
-                recorded.
+              <p className="text-sm font-medium text-muted-foreground">
+                {assessment?.title || "Assessment Session"}
               </p>
             </div>
+            <div className="flex justify-center gap-2 pt-1">
+              {hasOpenQuestions ? (
+                <Badge className="h-6.5 px-3 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 border-amber-500/25 rounded-full font-bold uppercase tracking-wider text-[10px]">
+                  Partially Graded
+                </Badge>
+              ) : (
+                <Badge className="h-6.5 px-3 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20 border-emerald-500/25 rounded-full font-bold uppercase tracking-wider text-[10px]">
+                  Fully Graded
+                </Badge>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="p-6 md:p-8 space-y-6">
+            <div className="space-y-4">
+              {/* Auto Graded Section */}
+              <div className="flex items-start gap-4 p-4 rounded-xl border border-border/50 bg-background/50">
+                <div className="size-6 bg-emerald-500/10 rounded-full flex items-center justify-center shrink-0 border border-emerald-500/20">
+                  <Check className="size-3.5 text-emerald-600" />
+                </div>
+                <div className="flex-1 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-foreground">Auto-Graded Section</h3>
+                    <Badge variant="outline" className="text-[10px] font-bold text-emerald-600 bg-emerald-500/5 border-emerald-500/10">
+                      ✔ Completed
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Objective feedback generated instantly. Auto-graded questions (Multiple Choice, True/False, Matching, and Fill in the Blanks) have been graded.
+                  </p>
+                  <p className="text-sm font-semibold text-foreground pt-1.5 flex items-center gap-1.5">
+                    Score: <span className="text-emerald-600 font-bold tabular-nums">{displayAutoGradedScore}</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Lecturer Review Section */}
+              {hasOpenQuestions && (
+                <div className="flex items-start gap-4 p-4 rounded-xl border border-amber-500/15 bg-amber-500/[0.01]">
+                  <div className="size-6 bg-amber-500/10 rounded-full flex items-center justify-center shrink-0 border border-amber-500/20">
+                    <Clock className="size-3.5 text-amber-600" />
+                  </div>
+                  <div className="flex-1 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-bold text-sm text-foreground">Lecturer Review Section</h3>
+                      <Badge variant="outline" className="text-[10px] font-bold text-amber-600 bg-amber-500/5 border-amber-500/15 animate-pulse">
+                        ⏳ Pending Review
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      This assessment contains open-ended questions (e.g. Essay, Short Answer, Practical deliverables) which require manual review and score assignment by your lecturer.
+                    </p>
+                    <p className="text-sm font-semibold text-foreground pt-1.5 flex items-center gap-1.5">
+                      Pending Marks: <span className="text-amber-600 font-bold tabular-nums">{openMax} Marks (Pending Review)</span>
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Estimated Total Section */}
+            <div className="p-4 rounded-xl border border-dashed border-border/80 bg-muted/5 flex flex-col items-center justify-center text-center space-y-1.5">
+              {hasOpenQuestions ? (
+                <>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest opacity-80 flex items-center gap-1.5">
+                    Estimated Total Score
+                  </p>
+                  <p className="text-lg font-bold text-foreground">
+                    Estimated total not yet available
+                  </p>
+                  <p className="text-[10px] text-muted-foreground max-w-sm">
+                    Your final assessment score will be calculated and released once all pending responses are graded by your lecturer.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-widest opacity-80">
+                    Final Score
+                  </p>
+                  <p className="text-3xl font-extrabold text-emerald-600 tabular-nums">
+                    {submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
+                      ? `${submittedAttempt.total_score} / ${totalMax}`
+                      : `${totalMax}`}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground">
+                    This assessment contained only auto-graded questions. Your results have been finalized.
+                  </p>
+                </>
+              )}
+            </div>
+
             <Button
               onClick={() => router.push("/student/dashboard")}
-              className="w-full h-10 text-xs font-medium rounded-lg shadow-sm bg-primary hover:bg-primary/90"
+              className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
             >
-              Back to Dashboard
+              Return to Student Dashboard
             </Button>
           </CardContent>
         </Card>
       </div>
     );
+  }
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans">
@@ -1618,7 +2367,7 @@ export default function TakeAssessmentPage() {
           <Separator orientation="vertical" className="h-5" />
           <div className="min-w-0">
             <div className="font-semibold text-sm truncate max-w-[240px] text-foreground/95">
-              {assessment.title}
+              {assessment?.title}
             </div>
           </div>
         </div>
@@ -1636,6 +2385,16 @@ export default function TakeAssessmentPage() {
           >
             <Timer className="size-4" /> {formatTime(timeLeft)}
           </div>
+          {warnings > 0 && (
+            <div className={cn(
+              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold",
+              warnings === 1 && "border-amber-500/20 text-amber-600 bg-amber-500/10",
+              warnings >= 2 && "border-destructive/20 text-destructive bg-destructive/10 animate-pulse",
+            )}>
+              <AlertTriangle className="size-3.5" />
+              {warnings}/3 Warnings
+            </div>
+          )}
           <Button
             onClick={() => setShowSubmitConfirm(true)}
             variant="destructive"
@@ -1648,7 +2407,7 @@ export default function TakeAssessmentPage() {
         </div>
       </div>
 
-      {stage === "intro" && (
+      {stage === "intro" && assessment && (
         <div className="flex-1 flex items-center justify-center p-4">
           <Card className="max-w-xl w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
             <CardHeader className="text-center py-6 bg-muted/20 border-b border-border/40">
@@ -1678,7 +2437,26 @@ export default function TakeAssessmentPage() {
                     {assessment.total_marks || 100} Points
                   </p>
                 </div>
+                {assessment.end_date && (
+                  <div className="p-4 border border-border/60 rounded-xl bg-muted/5 col-span-2">
+                    <p className="text-xs text-muted-foreground/80 font-medium mb-1">Closes At</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {new Date(assessment.end_date).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </p>
+                  </div>
+                )}
               </div>
+              {(assessment.max_attempts || 1) > 1 && (
+                <div className="flex items-center justify-between p-3 rounded-lg border border-border/40 bg-muted/5 text-xs font-medium">
+                  <span className="text-muted-foreground">Attempt</span>
+                  <span className="font-semibold text-foreground">
+                    {attemptNumber} of {assessment.max_attempts}
+                  </span>
+                </div>
+              )}
               <div className="space-y-4">
                 <p className="text-sm text-muted-foreground leading-relaxed">
                   {assessment.description ||
@@ -1731,9 +2509,15 @@ export default function TakeAssessmentPage() {
                   placeholder="SESSION PASSWORD"
                   className="h-11 rounded-lg text-center text-lg font-semibold tracking-[0.4em] border-border/60 bg-background/50 hover:bg-background/80 focus:bg-background transition-all"
                   value={passwordInput}
-                  onChange={(e) => setPasswordInput(e.target.value)}
+                  onChange={(e) => {
+                    setPasswordInput(e.target.value);
+                    setPasswordError(null);
+                  }}
                   autoFocus
                 />
+                {passwordError && (
+                  <p className="text-xs text-destructive font-medium text-center">{passwordError}</p>
+                )}
                 <Button
                   type="submit"
                   className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
@@ -1746,60 +2530,85 @@ export default function TakeAssessmentPage() {
         </div>
       )}
 
-      {stage === "readiness" && (
-        <div className="flex-1 flex items-center justify-center p-4">
-          <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
-            <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
-              <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                Protocol Declaration
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="p-6 space-y-6">
-              <div className="space-y-2">
-                {[
-                  "Locked evaluation environment.",
-                  "Comprehensive activity logging active.",
-                  "Termination protocols strictly enforced.",
-                ].map((text, i) => (
-                  <div
-                    key={i}
-                    className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
-                  >
-                    <Check className="size-4 text-emerald-600 shrink-0" />
-                    <span className="text-xs font-medium text-foreground/75">
-                      {text}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <div className="space-y-4">
-                <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                  <Checkbox
-                    id="readiness"
-                    checked={readinessChecked}
-                    onCheckedChange={(c) => setReadinessChecked(!!c)}
-                    className="mt-0.5 size-4 rounded border-primary/30"
-                  />
-                  <Label
-                    htmlFor="readiness"
-                    className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
-                  >
-                    I declare and commit adherence to the institutional academic
-                    integrity standards.
-                  </Label>
+      {stage === "readiness" && (() => {
+        const readinessItems = [
+          assessment?.fullscreen_required && {
+            text: "You must remain in full-screen mode throughout this assessment.",
+            icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
+          },
+          assessment?.is_supervised && {
+            text: "This session is actively monitored by your lecturer.",
+            icon: <Shield className="size-4 text-primary shrink-0" />,
+          },
+          assessment?.ai_assistance_allowed === false && {
+            text: "AI tools and browser extensions are blocked during this assessment.",
+            icon: <Lock className="size-4 text-destructive shrink-0" />,
+          },
+          {
+            text: "Your browser activity is logged. Tab switches, copy attempts, and window focus changes are recorded.",
+            icon: <Check className="size-4 text-emerald-600 shrink-0" />,
+          },
+          {
+            text: `Receiving 3 integrity warnings will terminate your session. You currently have 0 warnings.`,
+            icon: <AlertTriangle className="size-4 text-amber-600 shrink-0" />,
+          },
+          assessment?.duration_minutes && {
+            text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
+            icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
+          },
+        ].filter(Boolean);
+
+        return (
+          <div className="flex-1 flex items-center justify-center p-4">
+            <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
+              <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
+                <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                  Protocol Declaration
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6 space-y-6">
+                <div className="space-y-2">
+                  {readinessItems.map((item: any, i: number) => (
+                    <div
+                      key={i}
+                      className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
+                    >
+                      {item.icon}
+                      <span className="text-xs font-medium text-foreground/75">
+                        {item.text}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-                <Button
-                  onClick={handleReadinessConfirm}
-                  disabled={!readinessChecked}
-                  className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
-                >
-                  Commit & Begin Assessment
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      )}
+                <div className="space-y-4">
+                  <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                    <Checkbox
+                      id="readiness"
+                      checked={readinessChecked}
+                      onCheckedChange={(c) => setReadinessChecked(!!c)}
+                      className="mt-0.5 size-4 rounded border-primary/30"
+                    />
+                    <Label
+                      htmlFor="readiness"
+                      className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
+                    >
+                      I declare and commit adherence to the institutional academic
+                      integrity standards.
+                    </Label>
+                  </div>
+                  <Button
+                    onClick={handleReadinessConfirm}
+                    disabled={!readinessChecked}
+                    className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
+                  >
+                    Commit & Begin Assessment
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        );
+      })()}
 
       {stage === "taking" && (
         <div className="flex-1 flex overflow-hidden bg-muted/[0.01]">
@@ -1912,6 +2721,17 @@ export default function TakeAssessmentPage() {
                     </div>
                   </CardHeader>
                   <CardContent className="p-6 md:p-10">
+                    {/* Show section instructions when entering a new section */}
+                    {currentQ?.section_instructions && (
+                      <div className="mb-6 p-4 rounded-lg border border-primary/10 bg-primary/[0.02]">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-primary/60 mb-1.5">
+                          Section Instructions
+                        </p>
+                        <p className="text-sm text-foreground/75 leading-relaxed">
+                          {currentQ.section_instructions}
+                        </p>
+                      </div>
+                    )}
                     <div className="space-y-4 mb-8">
                       <div className="flex items-start gap-3.5">
                         <span className="size-7 bg-muted/60 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0">
@@ -1932,7 +2752,9 @@ export default function TakeAssessmentPage() {
                       )}
                     </div>
                     <div className="ml-10.5 min-h-[120px]">
-                      {renderQuestion(currentQ)}
+                      <QuestionErrorBoundary questionId={currentQ?.id || ""}>
+                        {renderQuestion(currentQ)}
+                      </QuestionErrorBoundary>
                     </div>
                   </CardContent>
                   <CardFooter className="bg-muted/5 p-4 flex justify-between border-t border-border/40">
@@ -1983,20 +2805,12 @@ export default function TakeAssessmentPage() {
             )}
           </div>
 
-          <div className="w-60 border-l border-border/40 bg-background p-5 hidden lg:flex flex-col">
+          <div className="w-48 lg:w-60 border-l border-border/40 bg-background p-5 hidden md:flex flex-col">
             <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60 mb-4 px-1">
               Assessment Matrix
             </h3>
             <div className="space-y-5 overflow-y-auto pr-1 pb-6">
-              {Array.from(
-                new Set(questions.map((q) => q.assessment_section_id)),
-              ).map((sectionId) => {
-                const sectionQuestions = questions.filter(
-                  (q) => q.assessment_section_id === sectionId,
-                );
-                const firstQuestion = sectionQuestions[0];
-                const sectionTitle =
-                  firstQuestion?.section_title || "General Section";
+              {sectionGroups.map(({ sectionId, questions: sectionQuestions, title: sectionTitle }) => {
                 return (
                   <div key={sectionId || "gen"} className="space-y-2">
                     <div className="text-xs font-semibold text-muted-foreground/75 px-1 truncate">
@@ -2054,9 +2868,17 @@ export default function TakeAssessmentPage() {
               })}
             </div>
             <div className="mt-auto pt-4 border-t border-dashed border-border/40">
-              <div className="flex items-center gap-2 font-medium text-xs text-muted-foreground/50">
-                <div className="size-2 rounded-full bg-primary animate-pulse" />{" "}
-                Secure Sync Live
+              <div className={cn(
+                "flex items-center gap-2 font-medium text-xs",
+                isOnline ? "text-muted-foreground/50" : "text-amber-600"
+              )}>
+                <div className={cn(
+                  "size-2 rounded-full",
+                  isOnline
+                    ? "bg-primary animate-pulse"
+                    : "bg-amber-500"
+                )} />
+                {isOnline ? "Secure Sync Live" : "Offline — Saving Locally"}
               </div>
             </div>
           </div>
@@ -2085,17 +2907,18 @@ export default function TakeAssessmentPage() {
           </p>
           <Button
             onClick={async () => {
-              if (currentWarning) {
+              if (currentWarning?.id) {
                 try {
                   await integrityApi.acknowledgeWarning({
                     warning_id: currentWarning.id,
                     access_token: attemptToken!,
                   });
-                  setWarningModalOpen(false);
                 } catch (e) {
                   toast.error("Failed to acknowledge warning.");
                 }
               }
+              setWarningModalOpen(false);
+              setCurrentWarning(null);
             }}
             className="w-full h-10 text-xs font-semibold rounded-lg shadow-none bg-destructive hover:bg-destructive/90 text-destructive-foreground"
           >
@@ -2184,6 +3007,26 @@ export default function TakeAssessmentPage() {
               disabled={submitting}
             >
               Confirm submission
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTerminateConfirm} onOpenChange={setShowTerminateConfirm}>
+        <DialogContent className="sm:max-w-sm p-6 border-none shadow-xl rounded-xl bg-background text-center">
+          <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
+          <DialogTitle className="text-base font-semibold text-destructive">
+            Terminate Session?
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground mt-2 mb-5 leading-relaxed font-normal">
+            This will end your assessment attempt. Your saved answers will be preserved.
+          </p>
+          <div className="flex gap-3">
+            <Button variant="outline" className="flex-1 h-9 text-xs rounded-lg" onClick={() => setShowTerminateConfirm(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" className="flex-1 h-9 text-xs rounded-lg" onClick={() => { setShowTerminateConfirm(false); submitAssessment(); }}>
+              Terminate
             </Button>
           </div>
         </DialogContent>

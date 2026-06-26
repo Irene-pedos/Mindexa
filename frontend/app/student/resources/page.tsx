@@ -37,6 +37,16 @@ export default function StudentResourcesPage() {
     loadResources()
   }, [])
 
+  // Auto-poll every 4 seconds while any resource is still processing
+  useEffect(() => {
+    const hasPending = resources.some(
+      (r) => r.processing_status === "PENDING" || r.processing_status === "PROCESSING"
+    )
+    if (!hasPending) return
+    const timer = setTimeout(() => loadResources(), 4000)
+    return () => clearTimeout(timer)
+  }, [resources])
+
   // Cleanup preview URL
   useEffect(() => {
     return () => {
@@ -70,17 +80,35 @@ export default function StudentResourcesPage() {
 
       setUploadingFiles((prev) => [...prev, newUpload])
 
+      // BUG-28 fix: simulate incremental progress since fetch() has no XHR progress events
+      const progressInterval = setInterval(() => {
+        setUploadingFiles((prev) =>
+          prev.map((item) =>
+            item.id === uploadId && item.progress < 70
+              ? { ...item, progress: Math.min(item.progress + 12, 70) }
+              : item
+          )
+        )
+      }, 400)
+
       try {
         const formData = new FormData()
         formData.append("file", file)
 
         await studentApi.uploadPersonalResource(formData)
+        // Jump to 100 on success before removing
+        setUploadingFiles((prev) =>
+          prev.map((item) => (item.id === uploadId ? { ...item, progress: 100 } : item))
+        )
         toast.success(`${file.name} uploaded successfully`)
         loadResources()
       } catch (err) {
         toast.error(`Failed to upload ${file.name}`)
       } finally {
-        setUploadingFiles((prev) => prev.filter((item) => item.id !== uploadId))
+        clearInterval(progressInterval)
+        setTimeout(() => {
+          setUploadingFiles((prev) => prev.filter((item) => item.id !== uploadId))
+        }, 600)
       }
     }
 
@@ -215,10 +243,15 @@ export default function StudentResourcesPage() {
                         <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 h-5">{resource.file_extension}</Badge>
                         <span>{resource.subject_tag || "General"}</span> • <span>{(resource.file_size_bytes / (1024 * 1024)).toFixed(1)} MB</span> • <span>{format(new Date(resource.created_at), "MMM d, yyyy")}</span>
                       </div>
-                      {resource.processing_status !== "COMPLETED" && (
+                      {/* Only show badge when not yet successfully processed */}
+                      {resource.processing_status !== "PROCESSED" && (
                          <div className="mt-1 flex items-center gap-2">
                             <Badge variant="secondary" className="text-[9px] h-4">
-                               {resource.processing_status === "PROCESSING" ? "INDEXING FOR AI..." : resource.processing_status}
+                               {resource.processing_status === "PROCESSING" || resource.processing_status === "PENDING"
+                                 ? "INDEXING FOR AI..."
+                                 : resource.processing_status === "FAILED"
+                                 ? "INDEXING FAILED"
+                                 : resource.processing_status}
                             </Badge>
                          </div>
                       )}
@@ -275,7 +308,7 @@ export default function StudentResourcesPage() {
                       className="w-full h-full border-none"
                       title="Resource Preview"
                    />
-                ) : viewingResource?.mime_type.startsWith("image/") ? (
+                ) : viewingResource?.mime_type?.startsWith("image/") ? (
                    <div className="w-full h-full flex items-center justify-center p-4">
                       <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain shadow-lg" />
                    </div>

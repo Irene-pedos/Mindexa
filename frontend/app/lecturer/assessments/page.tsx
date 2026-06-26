@@ -89,11 +89,8 @@ const STATUS_TABS = [
   { value: "all", label: "All" },
   { value: "DRAFT", label: "Drafts" },
   { value: "PUBLISHED", label: "Published" },
-  { value: "SCHEDULED", label: "Scheduled" },
   { value: "ACTIVE", label: "Active" },
   { value: "CLOSED", label: "Closed" },
-  { value: "ARCHIVED", label: "Archived" },
-  { value: "CANCELLED", label: "Cancelled" },
 ] as const;
 
 const ASSESSMENT_TYPES = [
@@ -237,7 +234,7 @@ function DeleteDialog({
             Cancel
           </AlertDialogCancel>
           <AlertDialogAction
-            className="h-8 rounded-lg text-xs bg-destructive hover:bg-destructive/90"
+            className="h-8 rounded-lg text-xs text-white bg-destructive hover:bg-destructive/90"
             disabled={!canConfirm || busy}
             onClick={handleConfirm}
           >
@@ -598,33 +595,8 @@ export default function ManageAssessmentsPage() {
               </SelectContent>
             </Select>
 
-            {/* Grading mode filter */}
-            <Select
-              value={gradingFilter}
-              onValueChange={(v) => {
-                setGradingFilter(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="w-36 h-7 text-[11px] rounded-lg bg-background border-muted/60 shadow-none font-medium">
-                <CheckSquare className="mr-1.5 size-3 text-muted-foreground/60" />
-                <SelectValue placeholder="Grading" />
-              </SelectTrigger>
-              <SelectContent className="rounded-xl text-xs">
-                <SelectItem value="all" className="text-xs">
-                  All grading
-                </SelectItem>
-                {GRADING_MODES.map((m) => (
-                  <SelectItem key={m} value={m} className="text-xs">
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             {/* Clear filters */}
             {(typeFilter !== "all" ||
-              gradingFilter !== "all" ||
               searchTerm) && (
               <Button
                 variant="ghost"
@@ -742,9 +714,6 @@ export default function ManageAssessmentsPage() {
                           Type
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
-                          Grading
-                        </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
                           Release
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9">
@@ -762,7 +731,7 @@ export default function ManageAssessmentsPage() {
                       {assessments.length === 0 ? (
                         <TableRow>
                           <TableCell
-                            colSpan={9}
+                            colSpan={8}
                             className="text-center py-20 text-muted-foreground"
                           >
                             <div className="flex flex-col items-center gap-3">
@@ -865,20 +834,6 @@ export default function ManageAssessmentsPage() {
                                 </Badge>
                               </TableCell>
 
-                              {/* Grading mode */}
-                              <TableCell className="text-center">
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "text-[8px] font-bold uppercase tracking-tight h-4 px-1.5 rounded",
-                                    gradingModeStyle(item.grading_mode),
-                                  )}
-                                >
-                                  {item.grading_mode === "AI_ASSISTED"
-                                    ? "AI"
-                                    : item.grading_mode}
-                                </Badge>
-                              </TableCell>
 
                               {/* Release mode */}
                               <TableCell className="text-center">

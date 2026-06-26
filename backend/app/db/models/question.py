@@ -18,7 +18,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey, Index, UniqueConstraint, text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -125,12 +125,20 @@ class Question(BaseModel, table=True):
 
     is_approved: bool = Field(default=False, nullable=False, index=True)
     approved_by_id: uuid.UUID | None = Field(default=None, nullable=True)
-    approved_at: datetime | None = Field(default=None, nullable=True)
+    approved_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     is_shared: bool = Field(default=False, nullable=False, index=True)
     is_active: bool = Field(default=True, nullable=False)
 
     is_in_question_bank: bool = Field(default=False, nullable=False)
-    bank_added_at: datetime | None = Field(default=None, nullable=True)
+    bank_added_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     bank_added_by_id: uuid.UUID | None = Field(default=None, nullable=True)
 
     version: int = Field(default=1, nullable=False)
@@ -376,11 +384,35 @@ class AIGenerationBatch(BaseModel, table=True):
     full_prompt: str | None = Field(default=None, nullable=True)
     additional_context: str | None = Field(default=None, nullable=True)
 
+    # ── RAG & blueprint context ────────────────────────────────────────────────
+    # Links to the workspace whose uploaded materials were used for RAG grounding
+    teaching_workspace_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("teaching_workspace.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    # Blueprint rules passed in for AI alignment
+    blueprint_constraints: str | None = Field(default=None, nullable=True)
+    learning_outcomes: str | None = Field(default=None, nullable=True)
+    marks_per_question: int | None = Field(default=None, nullable=True)
+
     status: AIBatchStatus = Field(default=AIBatchStatus.PENDING, nullable=False, index=True)
     total_generated: int = Field(default=0, nullable=False)
     total_failed: int = Field(default=0, nullable=False)
-    started_at: datetime | None = Field(default=None, nullable=True)
-    completed_at: datetime | None = Field(default=None, nullable=True)
+    started_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
+    completed_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     error_message: str | None = Field(default=None, nullable=True)
     ai_model_used: str | None = Field(default=None, nullable=True)
     ai_provider: str | None = Field(default=None, nullable=True)
@@ -430,6 +462,14 @@ class AIGeneratedQuestion(BaseModel, table=True):
     review_status: AIQuestionDecision = Field(
         default=AIQuestionDecision.PENDING, nullable=False, index=True
     )
+    promoted_question_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
 
     batch: Optional["AIGenerationBatch"] = Relationship(back_populates="generated_questions")
     review: Optional["AIQuestionReview"] = Relationship(
@@ -467,7 +507,10 @@ class AIQuestionReview(BaseModel, table=True):
     modified_options_json: str | None = Field(default=None, nullable=True)
     modified_explanation: str | None = Field(default=None, nullable=True)
     reviewer_notes: str | None = Field(default=None, nullable=True)
-    reviewed_at: datetime = Field(nullable=False)
+    reviewed_at: datetime = Field(
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
 
     generated_question: Optional["AIGeneratedQuestion"] = Relationship(back_populates="review")
     assessment_question: Optional["AssessmentQuestion"] = Relationship(back_populates="ai_review")
@@ -518,12 +561,19 @@ class QuestionBankEntry(BaseModel, table=True):
     )
 
     times_used: int = Field(default=0, nullable=False)
-    last_used_at: datetime | None = Field(default=None, nullable=True)
+    last_used_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     is_active: bool = Field(default=True, nullable=False)
 
     question: Optional["Question"] = Relationship(back_populates="bank_entry")
     assessment_questions: list["AssessmentQuestion"] = Relationship(back_populates="bank_entry")
 
+
+# Backward-compatible alias used by the model registry and older repositories.
+AIQuestionGenerationBatch = AIGenerationBatch
 
 # Backward-compatible alias used by the model registry and older repositories.
 AIQuestionGenerationBatch = AIGenerationBatch

@@ -473,7 +473,10 @@ class LecturerCourseAssignment(BaseModel, table=True):
         sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id"), primary_key=True)
     )
     assignment_role: str = Field(default="PRIMARY", max_length=50)
-    assigned_at: datetime = Field(default_factory=utcnow)
+    assigned_at: datetime = Field(
+        default_factory=utcnow,
+        sa_type=DateTime(timezone=True),
+    )
     is_active: bool = Field(default=True)
 
     # Relationships

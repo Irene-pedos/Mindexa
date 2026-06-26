@@ -206,6 +206,7 @@ class IntegrityFlag(BaseModel, table=True):
     resolved_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
     )
     resolution_notes: str | None = Field(
         default=None,

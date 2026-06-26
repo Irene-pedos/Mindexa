@@ -1,17 +1,20 @@
-import pytest
-import uuid
 import json
+import uuid
 from unittest.mock import AsyncMock, MagicMock
-from app.agents.assessment_generator_agent import AssessmentGeneratorAgent, GeneratedQuestion
+
+import pytest
+from app.agents.assessment_generator_agent import (AssessmentGeneratorAgent,
+                                                   GeneratedQuestion)
 from app.core.ai.gateway import AIGateway
 from app.core.ai.providers import AICompletionResponse
 from app.core.exceptions import ValidationError
+
 
 @pytest.mark.asyncio
 async def test_assessment_generator_agent_returns_validated_output():
     # Mock Gateway
     gateway = AsyncMock(spec=AIGateway)
-    
+
     # Mock successful response
     mock_questions = [
         {
@@ -25,13 +28,13 @@ async def test_assessment_generator_agent_returns_validated_output():
             "bloom_level": "remember"
         }
     ]
-    
+
     gateway.complete.return_value = AICompletionResponse(
         content=json.dumps(mock_questions),
         provider="groq",
         model="llama3-8b",
     )
-    
+
     agent = AssessmentGeneratorAgent(gateway)
     questions, prompt = await agent.generate(
         lecturer_id=uuid.uuid4(),
@@ -40,7 +43,7 @@ async def test_assessment_generator_agent_returns_validated_output():
         count=1,
         topic="Geography"
     )
-    
+
     assert len(questions) == 1
     assert isinstance(questions[0], GeneratedQuestion)
     assert questions[0].question == "What is the capital of France?"
@@ -50,6 +53,41 @@ async def test_assessment_generator_agent_returns_validated_output():
     assert "Geography" in prompt
 
 @pytest.mark.asyncio
+async def test_assessment_generator_agent_normalizes_common_payload_variants():
+    gateway = AsyncMock(spec=AIGateway)
+    gateway.complete.return_value = AICompletionResponse(
+        content=json.dumps({
+            "questions": [{
+                "stem": "What is 2 + 2?",
+                "choices": [
+                    {"option_text": "4", "is_correct": True, "explanation": "Correct"},
+                    {"option_text": "5", "is_correct": False, "explanation": "Incorrect"},
+                ],
+                "explanation": "4 is the correct sum.",
+                "difficulty": "easy",
+                "bloom_level": "remember",
+            }]
+        }),
+        provider="groq",
+        model="llama3-8b",
+    )
+
+    agent = AssessmentGeneratorAgent(gateway)
+    questions, prompt = await agent.generate(
+        lecturer_id=uuid.uuid4(),
+        question_type="mcq",
+        difficulty="easy",
+        count=1,
+        topic="Mathematics",
+    )
+
+    assert len(questions) == 1
+    assert questions[0].question == "What is 2 + 2?"
+    assert len(questions[0].options) == 2
+    assert questions[0].options[0].text == "4"
+    assert "Mathematics" in prompt
+
+@pytest.mark.asyncio
 async def test_assessment_generator_agent_rejects_malformed_json():
     gateway = AsyncMock(spec=AIGateway)
     gateway.complete.return_value = AICompletionResponse(
@@ -57,7 +95,7 @@ async def test_assessment_generator_agent_rejects_malformed_json():
         provider="groq",
         model="llama3-8b",
     )
-    
+
     agent = AssessmentGeneratorAgent(gateway)
     with pytest.raises(ValidationError) as exc_info:
         await agent.generate(
@@ -66,7 +104,7 @@ async def test_assessment_generator_agent_rejects_malformed_json():
             difficulty="easy",
             count=1
         )
-    
+
     assert exc_info.value.code == "AI_OUTPUT_VALIDATION_FAILED"
 
 @pytest.mark.asyncio
@@ -84,7 +122,7 @@ async def test_assessment_generator_agent_rejects_missing_fields():
         provider="groq",
         model="llama3-8b",
     )
-    
+
     agent = AssessmentGeneratorAgent(gateway)
     with pytest.raises(ValidationError) as exc_info:
         await agent.generate(
@@ -93,5 +131,5 @@ async def test_assessment_generator_agent_rejects_missing_fields():
             difficulty="easy",
             count=1
         )
-    
+
     assert exc_info.value.code == "AI_OUTPUT_VALIDATION_FAILED"

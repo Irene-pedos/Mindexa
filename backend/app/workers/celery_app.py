@@ -23,6 +23,7 @@ celery_app = Celery(
     include=[
         "app.workers.tasks",
         "app.workers.tasks.grading",
+        "app.workers.tasks.document_processing",
     ],
 )
 
@@ -32,9 +33,11 @@ celery_app.conf.task_queues = (
     Queue("email",         Exchange("email"),          routing_key="email"),
     Queue("cleanup",       Exchange("cleanup"),        routing_key="cleanup"),
     Queue("high_priority", Exchange("high_priority"),  routing_key="high_priority"),
+    Queue("rag",           Exchange("rag"),            routing_key="rag"),
 )
 
 celery_app.conf.task_routes = {
+    "tasks.process_uploaded_document": {"queue": "rag"},
     "app.workers.tasks.grading.trigger_grading_for_attempt": {"queue": "grading"},
     "app.workers.tasks.process_ai_grading_job":    {"queue": "grading"},
     "app.workers.tasks.send_email_notification":   {"queue": "email"},

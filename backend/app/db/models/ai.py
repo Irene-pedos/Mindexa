@@ -43,7 +43,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, ForeignKey
+from sqlalchemy import Column, DateTime, ForeignKey
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -245,7 +245,11 @@ class AIActionLog(AppendOnlyModel, table=True):
         default=None,
         nullable=True,
     )
-    human_reviewed_at: Optional[datetime] = Field(default=None, nullable=True)
+    human_reviewed_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     # Plain UUID — the lecturer/admin who reviewed this output
     reviewed_by_id: Optional[uuid.UUID] = Field(
         default=None,
@@ -407,8 +411,16 @@ class AIGradeReview(BaseModel, table=True):
         nullable=True,
         index=True,
     )
-    review_started_at: Optional[datetime] = Field(default=None, nullable=True)
-    review_completed_at: Optional[datetime] = Field(default=None, nullable=True)
+    review_started_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
+    review_completed_at: Optional[datetime] = Field(
+        default=None,
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     review_duration_seconds: Optional[int] = Field(default=None, nullable=True)
     lecturer_notes: Optional[str] = Field(
         default=None,

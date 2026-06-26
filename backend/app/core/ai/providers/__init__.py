@@ -11,6 +11,7 @@ from app.core.ai.providers.base_provider import (
 from app.core.ai.providers.groq_provider import GroqProvider
 from app.core.ai.providers.jina_provider import JinaProvider
 from app.core.ai.providers.openai_provider import OpenAIProvider
+from app.core.ai.providers.gemini_provider import GeminiProvider
 
 __all__ = [
     "AICompletionRequest",
@@ -24,4 +25,5 @@ __all__ = [
     "GroqProvider",
     "JinaProvider",
     "OpenAIProvider",
+    "GeminiProvider",
 ]

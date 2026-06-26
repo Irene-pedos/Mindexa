@@ -7,6 +7,7 @@ export interface NotificationResponse {
   title: string;
   body: string;
   action_url?: string;
+  related_id?: string | null;
   is_read: boolean;
   created_at: string;
 }

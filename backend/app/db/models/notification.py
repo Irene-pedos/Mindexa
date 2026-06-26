@@ -354,10 +354,14 @@ class ScheduledEvent(BaseModel, table=True):
 
     # ── Timing ────────────────────────────────────────────────────────────────
 
-    starts_at: datetime = Field(nullable=False)
+    starts_at: datetime = Field(
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
     ends_at: datetime | None = Field(
         default=None,
         nullable=True,
+        sa_type=DateTime(timezone=True),
         # NULL for point-in-time events (e.g. RESULT_RELEASE).
         # Set for window events (e.g. ASSESSMENT_WINDOW).
     )
@@ -382,7 +386,11 @@ class ScheduledEvent(BaseModel, table=True):
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_cancelled: bool = Field(default=False, nullable=False)
-    cancelled_at: datetime | None = Field(default=None, nullable=True)
+    cancelled_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     cancellation_reason: str | None = Field(
         default=None,
         nullable=True,
@@ -549,19 +557,30 @@ class Reminder(BaseModel, table=True):
 
     # ── Scheduling ────────────────────────────────────────────────────────────
 
-    fires_at: datetime = Field(nullable=False)
+    fires_at: datetime = Field(
+        nullable=False,
+        sa_type=DateTime(timezone=True),
+    )
 
     # ── State ─────────────────────────────────────────────────────────────────
 
     is_fired: bool = Field(default=False, nullable=False)
-    fired_at: datetime | None = Field(default=None, nullable=True)
+    fired_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     fired_notification_id: uuid.UUID | None = Field(
         default=None,
         nullable=True,
         # Plain UUID — the Notification row created when this reminder fired.
     )
     is_cancelled: bool = Field(default=False, nullable=False)
-    cancelled_at: datetime | None = Field(default=None, nullable=True)
+    cancelled_at: datetime | None = Field(
+        default=None, 
+        nullable=True,
+        sa_type=DateTime(timezone=True),
+    )
     cancellation_reason: str | None = Field(
         default=None,
         nullable=True,

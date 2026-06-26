@@ -42,7 +42,7 @@ from app.db.enums import (AttemptStatus, DifficultyLevel, GradingMode,
                           QuestionSourceType)
 from app.db.enums import QuestionType as DbQuestionType
 from app.db.enums import ResultReleaseMode, SupervisorRole
-from app.db.models.assessment import AssessmentSupervisor
+from app.db.models.assessment import Assessment, AssessmentSupervisor
 from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -246,7 +246,7 @@ class AssessmentService:
                     f"Invalid result_release_mode: '{data.result_release_mode}'. "
                     f"Valid values are: {', '.join([r.value for r in ResultReleaseMode])}"
                 ) from e
-        if data.subject is not None:
+        if hasattr(data, "subject") and data.subject is not None:
             update_fields["subject"] = data.subject
         if data.total_marks is not None:
             update_fields["total_marks"] = data.total_marks
@@ -286,6 +286,15 @@ class AssessmentService:
             update_fields["max_attempts"] = data.max_attempts
         if data.is_password_protected is not None:
             update_fields["is_password_protected"] = data.is_password_protected
+            if data.is_password_protected:
+                if getattr(data, "access_password", None):
+                    update_fields["access_password_hash"] = hash_password(data.access_password)
+            else:
+                update_fields["access_password_hash"] = None
+        elif getattr(data, "access_password", None):
+            is_protected = update_fields.get("is_password_protected", assessment.is_password_protected)
+            if is_protected:
+                update_fields["access_password_hash"] = hash_password(data.access_password)
         if data.fullscreen_required is not None:
             update_fields["fullscreen_required"] = data.fullscreen_required
         if data.is_supervised is not None:
@@ -302,6 +311,49 @@ class AssessmentService:
             update_fields["randomize_options"] = data.randomize_options
 
         # Update target sections (class groups)
+        # Update target sections (class groups)
+        async def add_or_restore_target_in_wizard(class_sec_id):
+            res = await self.db.execute(
+                select(AssessmentTargetSection).where(
+                    AssessmentTargetSection.assessment_id == assessment_id,
+                    AssessmentTargetSection.class_section_id == class_sec_id
+                )
+            )
+            existing = res.scalars().first()
+            if existing:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.added_by_id = current_user.id
+            else:
+                target = AssessmentTargetSection(
+                    assessment_id=assessment_id,
+                    class_section_id=class_sec_id,
+                    added_by_id=current_user.id
+                )
+                self.db.add(target)
+
+        async def add_or_restore_supervisor_in_wizard(supervisor_uuid, role):
+            res = await self.db.execute(
+                select(AssessmentSupervisor).where(
+                    AssessmentSupervisor.assessment_id == assessment_id,
+                    AssessmentSupervisor.supervisor_id == supervisor_uuid
+                )
+            )
+            existing = res.scalars().first()
+            if existing:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.supervisor_role = role
+                existing.assigned_by_id = current_user.id
+            else:
+                sup = AssessmentSupervisor(
+                    assessment_id=assessment_id,
+                    supervisor_id=supervisor_uuid,
+                    supervisor_role=role,
+                    assigned_by_id=current_user.id
+                )
+                self.db.add(sup)
+
         if data.class_group_ids is not None:
             # Clear existing targets
             from app.db.models.academic import ClassSection, TeachingAssignment
@@ -324,12 +376,7 @@ class AssessmentService:
                 )
                 section_id = res.scalar_one_or_none()
                 if section_id:
-                    target = AssessmentTargetSection(
-                        assessment_id=assessment_id,
-                        class_section_id=section_id,
-                        added_by_id=current_user.id
-                    )
-                    self.db.add(target)
+                    await add_or_restore_target_in_wizard(section_id)
 
         if "teaching_workspace_id" in update_fields and update_fields["teaching_workspace_id"]:
             from app.db.models.academic import TeachingWorkspace
@@ -345,12 +392,7 @@ class AssessmentService:
             )
             ws_section_id = res.scalar_one_or_none()
             if ws_section_id:
-                target = AssessmentTargetSection(
-                    assessment_id=assessment_id,
-                    class_section_id=ws_section_id,
-                    added_by_id=current_user.id
-                )
-                self.db.add(target)
+                await add_or_restore_target_in_wizard(ws_section_id)
 
         # Update supervisors
         if data.supervisor_ids is not None:
@@ -365,13 +407,7 @@ class AssessmentService:
             )
             for sup_id in data.supervisor_ids:
                 role = SupervisorRole.PRIMARY if str(sup_id) == str(assessment.created_by_id) else SupervisorRole.ASSISTANT
-                sup = AssessmentSupervisor(
-                    assessment_id=assessment_id,
-                    supervisor_id=sup_id,
-                    supervisor_role=role,
-                    assigned_by_id=current_user.id
-                )
-                self.db.add(sup)
+                await add_or_restore_supervisor_in_wizard(sup_id, role)
 
         # Advance wizard step if moving forward
         if step > (assessment.draft_step or 0):
@@ -1001,18 +1037,12 @@ class AssessmentService:
         self,
         data: BulkAssessmentPublishRequest,
         current_user: User,
-    ) -> FinalizeAssessmentResponse:
+    ) -> Assessment:
         assessment = await self._build_bulk_assessment(data, current_user)
-        return FinalizeAssessmentResponse(
-            id=assessment.id,
-            title=assessment.title,
-            status=assessment.status.value if hasattr(assessment.status, 'value') else str(assessment.status),
-            is_finalized=False,
-            finalized_at=None,
-            validation_passed=True,
-            errors=[],
-            warnings=[],
-        )
+        await self.db.flush()
+        assessment_id = assessment.id
+        self.db.expire(assessment)
+        return await self._repo.get_by_id(assessment_id)
 
     async def _build_bulk_assessment(
         self,
@@ -1027,14 +1057,15 @@ class AssessmentService:
             "CAT": "CAT",
             "Summative": "SUMMATIVE",
             "Groupwork": "GROUP_WORK",
+            "Reassessment": "REASSESSMENT",
         }
         assessment_type = mode_mapping.get(data.metadata.mode, "FORMATIVE")
         is_group = data.metadata.mode == "Groupwork"
 
-        # Instructions logic: merge selected and custom
-        instructions = "\n".join(data.metadata.selectedInstructions)
-        if data.metadata.customInstructions:
-            instructions += f"\n\nAdditional Instructions:\n{data.metadata.customInstructions}"
+        # Instructions logic: merge selected and custom using a consistent split marker
+        selected_list = data.metadata.selectedInstructions or []
+        custom_text = data.metadata.customInstructions or ""
+        instructions = "\n".join(selected_list) + "\n\nAdditional Instructions:\n" + custom_text
 
         # Calculate window start/end
         window_start = data.metadata.windowStart
@@ -1181,7 +1212,10 @@ class AssessmentService:
                 "subject_id": subject_id,
                 "academic_year": data.metadata.academic_year,
                 "grading_mode": GradingMode.MANUAL,
-                "result_release_mode": ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
+                "result_release_mode": (
+                    ResultReleaseMode.SCHEDULED if data.rules.resultRelease == "scheduled"
+                    else (ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE)
+                ),
                 "total_marks": sum(s.marks for s in data.blueprint),
                 "passing_marks": data.metadata.passing_marks,
                 "instructions": instructions,
@@ -1217,7 +1251,10 @@ class AssessmentService:
                 academic_year=data.metadata.academic_year,
                 created_by_id=current_user.id,
                 grading_mode=GradingMode.MANUAL,
-                result_release_mode=ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE,
+                result_release_mode=(
+                    ResultReleaseMode.SCHEDULED if data.rules.resultRelease == "scheduled"
+                    else (ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE)
+                ),
                 total_marks=sum(s.marks for s in data.blueprint),
                 passing_marks=data.metadata.passing_marks,
                 instructions=instructions,
@@ -1243,18 +1280,26 @@ class AssessmentService:
             )
 
         # 3. Update Security Settings
+        access_password_hash = None
+        if data.rules.passwordProtected:
+            if data.rules.accessPassword:
+                access_password_hash = hash_password(data.rules.accessPassword)
+            elif data.id:
+                # Keep existing password hash for draft updates
+                access_password_hash = assessment.access_password_hash
+
         security_fields = {
             "max_attempts": data.rules.attempts,
             "window_start": window_start,
             "window_end": window_end,
             "result_release_at": data.rules.resultReleaseAt,
             "is_password_protected": data.rules.passwordProtected,
-            "access_password_hash": hash_password(data.rules.accessPassword) if data.rules.passwordProtected and data.rules.accessPassword else None,
+            "access_password_hash": access_password_hash,
             "fullscreen_required": data.rules.browserRestricted,
             "is_supervised": data.rules.supervised,
             "ai_assistance_allowed": data.rules.aiAllowed,
             "is_open_book": data.rules.openBook,
-            "integrity_monitoring_enabled": True,
+            "integrity_monitoring_enabled": data.rules.integrityMonitoring if data.rules.integrityMonitoring is not None else True,
             "randomize_questions": data.rules.shuffleQuestions,
             "randomize_options": data.rules.shuffleOptions,
             "late_penalty_percent": data.rules.latePenaltyPercent,
@@ -1265,6 +1310,26 @@ class AssessmentService:
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
         # 3.1. Target Classes (Many-to-Many)
+        async def add_or_restore_target_in_bulk(class_sec_id):
+            res = await self.db.execute(
+                select(AssessmentTargetSection).where(
+                    AssessmentTargetSection.assessment_id == assessment.id,
+                    AssessmentTargetSection.class_section_id == class_sec_id
+                )
+            )
+            existing = res.scalars().first()
+            if existing:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.added_by_id = current_user.id
+            else:
+                target = AssessmentTargetSection(
+                    assessment_id=assessment.id,
+                    class_section_id=class_sec_id,
+                    added_by_id=current_user.id
+                )
+                self.db.add(target)
+
         # Clear existing targets for re-publish/update
         await self.db.execute(
             update(AssessmentTargetSection)
@@ -1278,12 +1343,7 @@ class AssessmentService:
             )
             ws_section_id = res.scalar_one_or_none()
             if ws_section_id:
-                target = AssessmentTargetSection(
-                    assessment_id=assessment.id,
-                    class_section_id=ws_section_id,
-                    added_by_id=current_user.id
-                )
-                self.db.add(target)
+                await add_or_restore_target_in_bulk(ws_section_id)
 
         if data.metadata.class_group_ids:
             for cg_id in data.metadata.class_group_ids:
@@ -1300,73 +1360,136 @@ class AssessmentService:
                 )
                 section_id = res.scalar_one_or_none()
                 if section_id:
-                    target = AssessmentTargetSection(
-                        assessment_id=assessment.id,
-                        class_section_id=section_id,
-                        added_by_id=current_user.id
-                    )
                     # Check to avoid duplicate if it's the same as ws_section_id
                     if not teaching_workspace_id or str(section_id) != str(ws_section_id):
-                        self.db.add(target)
+                        await add_or_restore_target_in_bulk(section_id)
 
         await self.db.flush()
 
         # 4. Create Sections & Questions
         section_id_map = {}
         for i, b_sec in enumerate(data.blueprint):
+            sec_uuid = None
+            try:
+                sec_uuid = uuid.UUID(str(b_sec.id))
+            except (ValueError, TypeError):
+                pass
+
             section = await self._repo.create_section(
+                id=sec_uuid,
                 assessment_id=assessment.id,
                 title=b_sec.section,
                 order_index=i,
                 allocated_marks=b_sec.marks,
                 description=b_sec.topics,
-                allowed_question_types={"types": b_sec.allowedTypes},
+                question_count_target=b_sec.questions,
+                allowed_question_types={
+                    "types": b_sec.allowedTypes or ["mcq"],
+                    "difficulty": b_sec.difficulty or "Medium",
+                    "bloom_level": b_sec.bloomLevel or "understand",
+                },
                 difficulty_distribution=b_sec.difficultyDistribution,
                 ai_generation_prompt_hint=b_sec.aiPromptHint,
             )
             section_id_map[b_sec.id] = section.id
 
-        # Add questions
+        # Add or update questions
         from app.db.models.question import Question as QuestionModel
 
         for i, q in enumerate(data.questions):
-            # Map frontend question type to DB enum
             q_type_map = {
                 "mcq": DbQuestionType.MCQ,
                 "truefalse": DbQuestionType.TRUE_FALSE,
+                "true_false": DbQuestionType.TRUE_FALSE,
                 "shortanswer": DbQuestionType.SHORT_ANSWER,
+                "short_answer": DbQuestionType.SHORT_ANSWER,
                 "essay": DbQuestionType.ESSAY,
                 "matching": DbQuestionType.MATCHING,
                 "fillblank": DbQuestionType.FILL_BLANK,
+                "fill_blank": DbQuestionType.FILL_BLANK,
                 "computational": DbQuestionType.COMPUTATIONAL,
                 "ordering": DbQuestionType.ORDERING,
                 "casestudy": DbQuestionType.CASE_STUDY,
+                "case_study": DbQuestionType.CASE_STUDY,
             }
-            raw_type = (q.type or "shortanswer").lower()
+            raw_type = (q.type or "shortanswer").lower().replace("_", "")
             db_q_type = q_type_map.get(raw_type, DbQuestionType.SHORT_ANSWER)
 
-            new_q = QuestionModel(
-                content=q.text or "",
-                image_url=q.imageUrl,
-                question_type=db_q_type,
-                marks=q.marks or 0,
-                difficulty=DifficultyLevel.MEDIUM,
-                created_by_id=current_user.id,
-                is_approved=True,
-                is_in_question_bank=False,
-                source_type=QuestionSourceType.MANUAL,
-                grading_mode=GradingMode.MANUAL if db_q_type in [
-                    DbQuestionType.SHORT_ANSWER,
-                    DbQuestionType.ESSAY,
-                    DbQuestionType.COMPUTATIONAL,
-                    DbQuestionType.CASE_STUDY
-                ] else GradingMode.AUTO
-            )
-            if q.caseStudyContext:
-                new_q.case_study_context = q.caseStudyContext
+            q_uuid = None
+            existing_q = None
+            is_bank_question = False
 
-            self.db.add(new_q)
-            await self.db.flush()
+            if q.id.startswith("q-bank-"):
+                stripped = q.id.replace("q-bank-", "")
+                last_hyphen = stripped.rfind("-")
+                bank_uuid_str = stripped[:last_hyphen] if last_hyphen != -1 else stripped
+                try:
+                    q_uuid = uuid.UUID(bank_uuid_str)
+                    is_bank_question = True
+                except (ValueError, TypeError):
+                    pass
+            else:
+                try:
+                    q_uuid = uuid.UUID(str(q.id))
+                except (ValueError, TypeError):
+                    pass
+
+            if is_bank_question:
+                existing_copy = None
+                if assessment.id:
+                    res = await self.db.execute(
+                        select(QuestionModel)
+                        .where(
+                            QuestionModel.parent_question_id == q_uuid,
+                            QuestionModel.source_assessment_id == assessment.id,
+                            QuestionModel.is_deleted == False
+                        )
+                    )
+                    existing_copy = res.scalars().first()
+                if existing_copy:
+                    existing_q = existing_copy
+                    is_bank_question = False
+                else:
+                    existing_q = None
+            elif q_uuid:
+                existing_q = await self.db.get(QuestionModel, q_uuid)
+
+            if existing_q and not is_bank_question:
+                existing_q.content = q.text or ""
+                existing_q.image_url = q.imageUrl
+                existing_q.question_type = db_q_type
+                existing_q.marks = q.marks or 0
+                existing_q.case_study_context = q.caseStudyContext
+                existing_q.is_deleted = False
+                existing_q.deleted_at = None
+                
+                await self._question_repo.delete_all_options(existing_q.id)
+                await self._question_repo.delete_all_blanks(existing_q.id)
+                new_q = existing_q
+            else:
+                new_q = QuestionModel(
+                    content=q.text or "",
+                    image_url=q.imageUrl,
+                    question_type=db_q_type,
+                    marks=q.marks or 0,
+                    difficulty=DifficultyLevel.MEDIUM,
+                    created_by_id=current_user.id,
+                    is_approved=True,
+                    is_in_question_bank=False,
+                    source_type=QuestionSourceType.BANK_INSERT if is_bank_question else QuestionSourceType.MANUAL,
+                    source_assessment_id=assessment.id,
+                    parent_question_id=q_uuid if is_bank_question else None,
+                    grading_mode=GradingMode.MANUAL if db_q_type in [
+                        DbQuestionType.SHORT_ANSWER,
+                        DbQuestionType.ESSAY,
+                        DbQuestionType.COMPUTATIONAL,
+                        DbQuestionType.CASE_STUDY
+                    ] else GradingMode.AUTO
+                )
+                if q.caseStudyContext:
+                    new_q.case_study_context = q.caseStudyContext
+                self.db.add(new_q)
+                await self.db.flush()
 
             # Handle options based on question type
             if q.options:
@@ -1408,10 +1531,21 @@ class AssessmentService:
                                 case_sensitive=False
                             )
                             blank_count += 1
-                elif db_q_type in [DbQuestionType.SHORT_ANSWER, DbQuestionType.ESSAY, DbQuestionType.COMPUTATIONAL, DbQuestionType.CASE_STUDY]:
+                elif db_q_type in [DbQuestionType.SHORT_ANSWER, DbQuestionType.ESSAY, DbQuestionType.COMPUTATIONAL]:
                     # Store sample answer in explanation if provided
                     if q.options and len(q.options) > 0 and q.options[0].option_text:
                         new_q.explanation = q.options[0].option_text
+                elif db_q_type == DbQuestionType.CASE_STUDY:
+                    if q.options and len(q.options) > 0 and q.options[0].option_text:
+                        new_q.explanation = q.options[0].option_text
+                    for opt in q.options:
+                        await self._question_repo.add_option(
+                            question_id=new_q.id,
+                            content=opt.option_text or "",
+                            order_index=opt.order_index or 0,
+                            match_value=opt.option_text_right,
+                            is_correct=True
+                        )
 
             # Map Group ID safely
             target_group_id = None
@@ -1421,45 +1555,68 @@ class AssessmentService:
                 except (ValueError, TypeError):
                     pass
 
+            # Resolve section ID safely
+            section_id = None
+            if q.sectionId:
+                section_id = section_id_map.get(q.sectionId)
+                if not section_id:
+                    try:
+                        section_id = uuid.UUID(str(q.sectionId))
+                    except (ValueError, TypeError):
+                        pass
+
+            if not section_id and section_id_map:
+                section_id = list(section_id_map.values())[0]
+
             await self._repo.add_question(
                 assessment_id=assessment.id,
                 question_id=new_q.id,
                 order_index=i,
                 added_via=QuestionAddedVia.MANUAL_WRITE,
-                assessment_section_id=section_id_map.get(q.sectionId),
+                assessment_section_id=section_id,
                 group_id=target_group_id,
                 marks_override=q.marks,
                 is_required=q.is_required if q.is_required is not None else True,
             )
 
         # 5. Handle Supervisors
-        from sqlalchemy import delete
+        async def add_or_restore_supervisor_in_bulk(supervisor_uuid, role):
+            res = await self.db.execute(
+                select(AssessmentSupervisor).where(
+                    AssessmentSupervisor.assessment_id == assessment.id,
+                    AssessmentSupervisor.supervisor_id == supervisor_uuid
+                )
+            )
+            existing = res.scalars().first()
+            if existing:
+                existing.is_deleted = False
+                existing.deleted_at = None
+                existing.supervisor_role = role
+                existing.assigned_by_id = current_user.id
+            else:
+                sup = AssessmentSupervisor(
+                    assessment_id=assessment.id,
+                    supervisor_id=supervisor_uuid,
+                    supervisor_role=role,
+                    assigned_by_id=current_user.id
+                )
+                self.db.add(sup)
 
         # Clear existing supervisors for updates
         await self.db.execute(
-            delete(AssessmentSupervisor).where(AssessmentSupervisor.assessment_id == assessment.id)
+            update(AssessmentSupervisor)
+            .where(AssessmentSupervisor.assessment_id == assessment.id)
+            .values(is_deleted=True, deleted_at=datetime.now(UTC))
         )
 
         # Add creator as primary supervisor
-        creator_supervisor = AssessmentSupervisor(
-            assessment_id=assessment.id,
-            supervisor_id=current_user.id,
-            supervisor_role=SupervisorRole.PRIMARY,
-            assigned_by_id=current_user.id
-        )
-        self.db.add(creator_supervisor)
+        await add_or_restore_supervisor_in_bulk(current_user.id, SupervisorRole.PRIMARY)
 
         # Add extra supervisors from payload
         if data.rules.supervisor_ids:
             for s_id in data.rules.supervisor_ids:
                 if str(s_id) == str(current_user.id):
                     continue
-                extra_supervisor = AssessmentSupervisor(
-                    assessment_id=assessment.id,
-                    supervisor_id=s_id,
-                    supervisor_role=SupervisorRole.ASSISTANT,
-                    assigned_by_id=current_user.id
-                )
-                self.db.add(extra_supervisor)
+                await add_or_restore_supervisor_in_bulk(s_id, SupervisorRole.ASSISTANT)
 
         return assessment

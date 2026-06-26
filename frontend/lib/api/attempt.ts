@@ -26,4 +26,9 @@ export const attemptApi = {
       })
     }),
   getAttemptsForAssessment: (assessmentId: string) => apiClient(`/attempts/assessment/${assessmentId}`),
+  grantReassessment: (attemptId: string, data: Record<string, unknown>) => 
+    apiClient(`/attempts/${attemptId}/reassessment`, { 
+      method: "POST", 
+      body: JSON.stringify(data) 
+    }),
 };

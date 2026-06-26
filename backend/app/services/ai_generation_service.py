@@ -89,6 +89,8 @@ class AIGenerationService:
                 "Students cannot access the AI generation service."
             )
 
+        effective_teaching_workspace_id = data.teaching_workspace_id
+
         # Validate assessment if linked
         if data.assessment_id:
             assessment = await self._assessment_repo.get_by_id_simple(
@@ -101,6 +103,8 @@ class AIGenerationService:
                     "Cannot generate questions for a finalized assessment.",
                     code="ASSESSMENT_FINALIZED",
                 )
+            if not effective_teaching_workspace_id:
+                effective_teaching_workspace_id = assessment.teaching_workspace_id
 
         sections_dict = None
         if data.sections:
@@ -122,6 +126,10 @@ class AIGenerationService:
             topic=data.topic,
             bloom_level=data.bloom_level,
             additional_context=data.additional_context,
+            teaching_workspace_id=effective_teaching_workspace_id,
+            blueprint_constraints=data.blueprint_constraints,
+            learning_outcomes=data.learning_outcomes,
+            marks_per_question=data.marks_per_question,
         )
 
         # Ensure the batch is flushed to the DB before dispatching Celery.
@@ -270,6 +278,7 @@ class AIGenerationService:
         )
 
         promoted_question = None
+        assessment_question = None
 
         # Promote if approved or edited
         if data.decision in (AIQuestionDecision.APPROVED, AIQuestionDecision.EDITED):
@@ -310,7 +319,6 @@ class AIGenerationService:
                     source_assessment_id=source_assessment_id,
                 )
 
-            assessment_question = None
             # Optionally add to assessment
             if data.add_to_assessment_id and promoted_question:
                 assessment = await self._assessment_repo.get_by_id_simple(
@@ -318,9 +326,12 @@ class AIGenerationService:
                 )
                 if assessment and not assessment.draft_is_complete:
                     marks = data.marks_if_added or 1
-                    existing_count = await self._assessment_repo.count_questions(
-                        data.add_to_assessment_id
+                    section_id = data.add_to_section_id or ai_question.target_section_id
+                    
+                    next_index = await self._assessment_repo.get_next_order_index(
+                        data.add_to_assessment_id, section_id
                     )
+
                     added_via = (
                         QuestionAddedVia.AI_GENERATED_MODIFIED.value
                         if data.decision == AIQuestionDecision.EDITED
@@ -330,9 +341,9 @@ class AIGenerationService:
                         assessment_id=data.add_to_assessment_id,
                         question_id=promoted_question.id,
                         marks_override=marks,
-                        order_index=existing_count,
+                        order_index=next_index,
                         added_via=added_via,
-                        assessment_section_id=data.add_to_section_id or ai_question.target_section_id,
+                        assessment_section_id=section_id,
                         ai_review_id=review.id,
                     )
         else:
@@ -403,12 +414,26 @@ class AIGenerationService:
         if options_json:
             try:
                 options = json.loads(options_json)
+                q_type_upper = str(ai_question.question_type).upper()
+                is_matching = q_type_upper == "MATCHING"
+                is_case_study = q_type_upper == "CASE_STUDY"
                 for i, opt in enumerate(options):
+                    m_key = None
+                    m_val = None
+                    if is_matching or is_case_study:
+                        m_key = opt.get("text") or opt.get("content") or opt.get("option_text") or ""
+                        m_val = opt.get("explanation") or opt.get("option_text_right") or ""
+                    
+                    # For case study sub-questions, order_index stores the marks value
+                    order_idx = opt.get("order_index") if opt.get("order_index") is not None else i
+
                     await self._question_repo.add_option(
                         question_id=question.id,
-                        content=opt.get("text", ""),
-                        is_correct=bool(opt.get("is_correct", False)),
-                        order_index=i,
+                        content=opt.get("text") or opt.get("content") or opt.get("option_text") or "",
+                        is_correct=bool(opt.get("is_correct", False) if not is_matching else True),
+                        order_index=int(order_idx),
+                        match_key=m_key,
+                        match_value=m_val,
                     )
             except (json.JSONDecodeError, TypeError, KeyError):
                 pass  # Proceed without options if parsing fails

@@ -5,13 +5,15 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar as CalendarIcon, Clock, AlertCircle, Link as LinkIcon, ChevronRight } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, AlertCircle, Link as LinkIcon, ChevronRight, ChevronLeft } from "lucide-react";
 import {
   format,
   startOfMonth,
   endOfMonth,
   eachDayOfInterval,
   isSameDay,
+  addMonths,
+  subMonths,
 } from "date-fns";
 import { cn } from "@/lib/utils";
 import { studentApi, StudentScheduleEvent } from "@/lib/api/student";
@@ -89,15 +91,33 @@ export default function StudentSchedulePage() {
         <Card className="xl:col-span-5 shadow-none border">
           <CardHeader className="border-b bg-muted/5 py-3 px-4">
             <CardTitle className="flex items-center justify-between text-sm">
+              {/* BUG-15 fix: previous/next month navigation */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md"
+                onClick={() => setSelectedDate(d => subMonths(d, 1))}
+                aria-label="Previous month"
+              >
+                <ChevronLeft className="size-4" />
+              </Button>
               <span className="flex items-center gap-2 font-semibold">
                 <CalendarIcon className="size-4 text-primary" />
                 {format(selectedDate, "MMMM yyyy")}
               </span>
-              <Badge variant="outline" className="text-[10px] font-medium uppercase tracking-tight">AY 25/26</Badge>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7 rounded-md"
+                onClick={() => setSelectedDate(d => addMonths(d, 1))}
+                aria-label="Next month"
+              >
+                <ChevronRight className="size-4" />
+              </Button>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            {/* Calendar Grid */}
+            {/* Calendar Grid — add first-day-of-week offset to align dates correctly */}
             <div className="grid grid-cols-7 gap-1 text-center mb-6">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
                 <div
@@ -107,7 +127,10 @@ export default function StudentSchedulePage() {
                   {day}
                 </div>
               ))}
-
+              {/* Empty offset cells so day 1 falls on the correct weekday */}
+              {Array.from({ length: startOfMonth(selectedDate).getDay() }).map((_, i) => (
+                <div key={`offset-${i}`} />
+              ))}
               {daysInMonth.map((day, idx) => {
                 const dayEvents = getEventsForDate(day);
                 const isToday = isSameDay(day, today);

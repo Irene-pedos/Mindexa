@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.exceptions import ValidationError
 from app.db.models.resource import LecturerMaterial, StudentResource
+from app.db.models.academic_resource import AcademicResource
 from app.db.repositories.resource_repo import ResourceRepository
 from app.db.schemas.resource import LecturerMaterialCreate, StudentResourceResponse
 
@@ -89,9 +90,25 @@ class ResourceService:
         await self.db.commit()
         await self.db.refresh(material)
 
-        # 7. Enqueue background RAG processing
-        from app.workers.tasks import process_lecturer_material
-        process_lecturer_material.delay(str(material.id))
+        # 6.5 Create AcademicResource for new RAG pipeline
+        academic_res = AcademicResource(
+            title=material.display_name,
+            file_name=material.original_filename,
+            file_path=material.file_path,
+            file_size=material.file_size_bytes,
+            mime_type=material.mime_type,
+        )
+        self.db.add(academic_res)
+        await self.db.commit()
+        await self.db.refresh(academic_res)
+
+        material.academic_resource_id = academic_res.id
+        await self.db.commit()
+        await self.db.refresh(material)
+
+        # 7. Enqueue background RAG processing (New Pipeline)
+        from app.workers.tasks.document_processing import process_uploaded_document
+        process_uploaded_document.delay(str(academic_res.id))
 
         return material
 
@@ -102,6 +119,22 @@ class ResourceService:
     async def get_material(self, material_id: uuid.UUID) -> Optional[LecturerMaterial]:
         """Get a specific material."""
         return await self.repo.get_material_by_id(material_id)
+
+    async def delete_lecturer_material(self, lecturer_id: uuid.UUID, material_id: uuid.UUID) -> bool:
+        """Soft delete a lecturer material if they own it."""
+        from sqlalchemy import update, func
+        
+        material = await self.get_material(material_id)
+        if not material or material.lecturer_id != lecturer_id:
+            return False
+            
+        stmt = (
+            update(LecturerMaterial)
+            .where(LecturerMaterial.id == material_id)
+            .values(is_deleted=True, deleted_at=func.now())
+        )
+        result = await self.db.execute(stmt)
+        return result.rowcount > 0
 
     # ── Student Resources ────────────────────────────────────────────────────
 
@@ -161,9 +194,25 @@ class ResourceService:
         await self.db.commit()
         await self.db.refresh(resource)
 
-        # 6. Enqueue background RAG processing
-        from app.workers.tasks import process_student_resource
-        process_student_resource.delay(str(resource.id))
+        # 5.5 Create AcademicResource for new RAG pipeline
+        academic_res = AcademicResource(
+            title=resource.display_name,
+            file_name=resource.original_filename,
+            file_path=resource.file_path,
+            file_size=resource.file_size_bytes,
+            mime_type=resource.mime_type,
+        )
+        self.db.add(academic_res)
+        await self.db.commit()
+        await self.db.refresh(academic_res)
+
+        resource.academic_resource_id = academic_res.id
+        await self.db.commit()
+        await self.db.refresh(resource)
+
+        # 6. Enqueue background RAG processing (New Pipeline)
+        from app.workers.tasks.document_processing import process_uploaded_document
+        process_uploaded_document.delay(str(academic_res.id))
 
         return resource
 

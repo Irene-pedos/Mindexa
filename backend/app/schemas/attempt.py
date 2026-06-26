@@ -79,14 +79,17 @@ class AttemptQuestionResponse(BaseModel):
     content: str
     text: Optional[str] = None
     caseStudyContext: Optional[str] = Field(None, validation_alias="case_study_context")
-    imageUrl: Optional[str] = None
+    image_url: Optional[str] = Field(None, alias="imageUrl")
     marks: int
     order_index: int
     assessment_section_id: Optional[uuid.UUID] = None
     section_title: Optional[str] = None
     options: Optional[List[AttemptQuestionOption]] = None
 
-    model_config = {"from_attributes": True, "populate_by_name": True}
+    model_config = {
+        "from_attributes": True,
+        "populate_by_name": True
+    }
 
 class AttemptDetailResponse(BaseModel):
     """Full attempt detail — returned to student during active attempt."""

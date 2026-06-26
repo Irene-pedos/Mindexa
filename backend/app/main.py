@@ -3,46 +3,27 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
+from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
+                               ai_generation, analytics, assessment, attempt,
+                               auth, blueprint, gemini, grading, group_work,
+                               health, integrity, lecturer, notification,
+                               question, resource, result, student, student_ai,
+                               submission)
+from app.core.config import settings
+from app.core.handlers import register_exception_handlers
+from app.core.logging import get_logger
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.api.v1.routes import (
-    admin,
-    ai_generation,
-    assessment,
-    attempt,
-    auth,
-    blueprint,
-    gemini,
-    grading,
-    group_work,
-    health,
-    integrity,
-    lecturer,
-    notification,
-    question,
-    resource,
-    result,
-    student,
-    student_ai,
-    submission,
-    academic,
-    admin_academic,
-    analytics,
-    admin_ai_audit,
-    )
-
-from app.core.config import settings
-from app.core.logging import get_logger
-from app.core.handlers import register_exception_handlers
-
 logger = get_logger(__name__)
 
 
-from fastapi.staticfiles import StaticFiles
 import os
+
+from fastapi.staticfiles import StaticFiles
+
 
 def create_app() -> FastAPI:
     """Application factory for the Mindexa Platform API."""
@@ -60,6 +41,14 @@ def create_app() -> FastAPI:
     os.makedirs("uploads", exist_ok=True)
     app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
+    from app.api.v1.routes import (academic, admin, admin_academic,
+                                   admin_ai_audit, ai_generation, analytics,
+                                   assessment, attempt, auth, blueprint,
+                                   gemini, grading, group_work, health,
+                                   integrity, lecturer, notification, question,
+                                   resource, result, student, student_ai,
+                                   student_resources, submission)
+
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
     app.include_router(admin_ai_audit.router, prefix=settings.API_V1_STR)
     app.include_router(analytics.router, prefix=settings.API_V1_STR)
@@ -68,6 +57,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router, prefix=settings.API_V1_STR)
     app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
+    app.include_router(student_resources.router, prefix=settings.API_V1_STR)
     app.include_router(student_ai.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)
     app.include_router(resource.router, prefix=settings.API_V1_STR)

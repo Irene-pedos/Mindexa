@@ -117,7 +117,10 @@ from app.db.models.question import (
     QuestionBlank,
     QuestionOption,
 )
-from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk, ResourceChunk, StudentResource
+from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk, StudentResourceChunk, StudentResource
+from app.db.models.academic_resource import AcademicResource
+from app.db.models.resource_chunk import ResourceChunk
+from app.db.models.study_support_session import StudySupportSession
 from app.db.models.result import AssessmentResult, ResultBreakdown
 
 __all__: list[str] = [
@@ -191,9 +194,12 @@ __all__: list[str] = [
     "Reminder",
     # ── Resources ──────────────────────────────────────────────────────────────
     "StudentResource",
-    "ResourceChunk",
+    "StudentResourceChunk",
     "LecturerMaterial",
     "LecturerMaterialChunk",
+    "AcademicResource",
+    "ResourceChunk",
+    "StudySupportSession",
     # —— Results ————————————————————————————————————————————————————————————————————————————
     "AssessmentResult",
     "ResultBreakdown",

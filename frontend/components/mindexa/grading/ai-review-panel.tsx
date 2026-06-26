@@ -107,18 +107,11 @@ export function AIReviewPanel({ queueItemId, responseId, maxScore, onSuggestionA
 
         {!hasSuggestion ? (
           <div className="flex flex-col items-center justify-center py-6 text-center space-y-3">
-            <p className="text-sm text-muted-foreground">No AI suggestion exists for this response yet.</p>
-            {queueItemId && (
-              <Button 
-                variant="outline" 
-                size="sm" 
-                onClick={handleRequestSuggestion}
-                disabled={requesting}
-                className="bg-background"
-              >
-                {requesting ? <><Loader2 className="mr-2 size-3 animate-spin"/> Processing...</> : "Request AI Suggestion"}
-              </Button>
-            )}
+            <Loader2 className="size-6 text-primary/50 animate-spin mb-2" />
+            <p className="text-sm font-medium text-foreground">AI Review in Progress</p>
+            <p className="text-xs text-muted-foreground max-w-[250px]">
+              The AI grading assistant automatically processes submissions in the background. Please check back shortly for the suggested score and rationale.
+            </p>
           </div>
         ) : (
           <div className="space-y-4">

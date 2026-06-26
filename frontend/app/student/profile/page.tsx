@@ -33,6 +33,20 @@ export default function ProfileSettingsPage() {
     phone_number: "",
   });
 
+  // BUG-16 fix: notification preferences with persistent state
+  const [browserNotifications, setBrowserNotifications] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pref_browser_notifs") !== "false";
+    }
+    return true;
+  });
+  const [emailNotifications, setEmailNotifications] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pref_email_notifs") !== "false";
+    }
+    return true;
+  });
+
   useEffect(() => {
     if (user) {
       setFormData({
@@ -49,6 +63,9 @@ export default function ProfileSettingsPage() {
     try {
       const updatedUser = await authApi.updateProfile(formData);
       localStorage.setItem("user", JSON.stringify(updatedUser));
+      // Persist notification prefs
+      localStorage.setItem("pref_browser_notifs", String(browserNotifications));
+      localStorage.setItem("pref_email_notifs", String(emailNotifications));
       checkAuth(); // Refresh global auth state
       toast.success("Profile updated successfully");
     } catch (err) {
@@ -56,6 +73,11 @@ export default function ProfileSettingsPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // BUG-31 fix: change password handler
+  const handleChangePassword = () => {
+    toast.info("To change your password, please contact your institution's IT support or use the forgot-password flow from the login page.");
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -283,7 +305,12 @@ export default function ProfileSettingsPage() {
                 Receive reminders for upcoming assessments
               </div>
             </div>
-            <Switch defaultChecked />
+            {/* BUG-16 fix: controlled switch with state */}
+            <Switch
+              checked={browserNotifications}
+              onCheckedChange={setBrowserNotifications}
+              id="pref-browser-notifs"
+            />
           </div>
 
           <Separator />
@@ -295,12 +322,18 @@ export default function ProfileSettingsPage() {
                 Result releases, deadline changes, and appeals
               </div>
             </div>
-            <Switch defaultChecked />
+            {/* BUG-16 fix: controlled switch with state */}
+            <Switch
+              checked={emailNotifications}
+              onCheckedChange={setEmailNotifications}
+              id="pref-email-notifs"
+            />
           </div>
 
           <Separator />
 
-          <Button variant="outline" className="w-full">
+          {/* BUG-31 fix: button now calls handleChangePassword */}
+          <Button variant="outline" className="w-full" onClick={handleChangePassword}>
             Change Password
           </Button>
         </CardContent>

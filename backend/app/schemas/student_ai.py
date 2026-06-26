@@ -26,7 +26,7 @@ class StudentSupportRequest(BaseModel):
     """Student Support Agent request."""
 
     question: str = Field(..., min_length=3, max_length=4000)
-    contexts: list[StudentSupportContextRequest] = Field(default_factory=list, max_length=5)
+    conversation_history: list[dict] = Field(default_factory=list)
 
     model_config = {"str_strip_whitespace": True}
 
@@ -35,8 +35,7 @@ class StudentSupportResponse(BaseModel):
     """Validated Student Support Agent response."""
 
     explanation: str
-    revision_plan: list[str] = Field(default_factory=list)
-    follow_up_questions: list[str] = Field(default_factory=list)
-    safety_notice: str | None = None
-    model: str
-    provider: str
+    citations: list[dict] = Field(default_factory=list)
+    fallback_used: bool = False
+    model: str | None = None
+    provider: str | None = None

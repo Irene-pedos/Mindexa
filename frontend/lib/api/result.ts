@@ -4,6 +4,13 @@ import { apiClient } from "./client";
 export const resultApi = {
   getResultByAttempt: (attemptId: string) => apiClient(`/results/attempt/${attemptId}`),
   getStudentResults: () => apiClient("/results/me"),
+  getMyResults: (params: { page?: number; page_size?: number } = {}) => {
+    const searchParams = new URLSearchParams();
+    if (params.page !== undefined) searchParams.append("page", params.page.toString());
+    if (params.page_size !== undefined) searchParams.append("page_size", params.page_size.toString());
+    const qs = searchParams.toString();
+    return apiClient(`/results/me${qs ? `?${qs}` : ""}`);
+  },
   getAssessmentResults: (assessmentId: string, params: Record<string, any> = {}) => {
     const searchParams = new URLSearchParams();
     Object.entries(params).forEach(([key, value]) => {
@@ -19,4 +26,13 @@ export const resultApi = {
     method: "POST",
     body: JSON.stringify({ justification: reason })
   }),
+  updateReleasePolicy: (assessmentId: string, data: Record<string, unknown>) => 
+    apiClient(`/results/assessment/${assessmentId}/release-policy`, {
+      method: "PATCH",
+      body: JSON.stringify(data)
+    }),
+  triggerImmediateRelease: (assessmentId: string) => 
+    apiClient(`/results/assessment/${assessmentId}/trigger-release`, {
+      method: "POST"
+    }),
 };

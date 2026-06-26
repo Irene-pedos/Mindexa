@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import uuid
-
 import pytest
 
-from app.agents.student_support_agent import StudentSupportAgent, StudentSupportContext
+from app.agents.student_support_agent import StudySupportAgent
 from app.core.ai.providers import AICompletionResponse
-from app.core.exceptions import ValidationError
+from app.core.ai.gateway import AIGateway
 
 
 class FakeGateway:
@@ -26,49 +25,63 @@ class FakeGateway:
         )
 
 
-@pytest.mark.asyncio
-async def test_student_support_agent_returns_validated_output() -> None:
-    gateway = FakeGateway(
-        """
-        {
-          "explanation": "A database index helps the database find rows faster.",
-          "revision_plan": ["Review primary keys", "Practice EXPLAIN plans"],
-          "follow_up_questions": ["Do you want an example query?"],
-          "safety_notice": "This is study guidance, not exam content."
-        }
-        """
-    )
-    agent = StudentSupportAgent(gateway)
+def test_study_support_agent_build_system_prompt() -> None:
+    agent = StudySupportAgent(FakeGateway("Hello"))
+    
+    prompt_with_context = agent._build_system_prompt(has_context=True)
+    assert "Mindexa Study Support Agent" in prompt_with_context
+    assert "using ONLY the provided course material context" in prompt_with_context
 
-    result = await agent.answer(
-        student_id=uuid.uuid4(),
-        actor_role="STUDENT",
+    prompt_without_context = agent._build_system_prompt(has_context=False)
+    assert "Mindexa Study Support Agent" in prompt_without_context
+    assert "Answer from general academic knowledge only" in prompt_without_context
+
+
+def test_study_support_agent_build_user_prompt() -> None:
+    agent = StudySupportAgent(FakeGateway("Hello"))
+    
+    prompt_with_context = agent._build_user_prompt(
         question="What is an index?",
-        contexts=[
-            StudentSupportContext(
-                title="Database notes",
-                content="Indexes are data structures that speed up lookup operations.",
-            )
-        ],
+        context="Indexes are fast",
+        fallback=False
     )
+    assert "Student Question:\nWhat is an index?" in prompt_with_context
+    assert "Retrieved Course Material Context:\nIndexes are fast" in prompt_with_context
 
-    assert result.explanation.startswith("A database index")
-    assert result.revision_plan == ["Review primary keys", "Practice EXPLAIN plans"]
-    assert gateway.last_kwargs["action_type"].value == "STUDY_SUPPORT"
-    assert "hidden records" in gateway.last_request.messages[0].content
+    prompt_without_context = agent._build_user_prompt(
+        question="What is an index?",
+        context="",
+        fallback=True
+    )
+    assert "Student Question:\nWhat is an index?" in prompt_without_context
+    assert "No course materials were found." in prompt_without_context
 
 
 @pytest.mark.asyncio
-async def test_student_support_agent_rejects_invalid_provider_output() -> None:
-    gateway = FakeGateway("This is not JSON")
-    agent = StudentSupportAgent(gateway)
-
-    with pytest.raises(ValidationError) as exc_info:
-        await agent.answer(
-            student_id=uuid.uuid4(),
-            actor_role="STUDENT",
-            question="Explain normalization",
-            contexts=[],
-        )
-
-    assert exc_info.value.code == "AI_OUTPUT_VALIDATION_FAILED"
+async def test_study_support_agent_call_llm() -> None:
+    gateway = FakeGateway("Sample Answer")
+    agent = StudySupportAgent(gateway)
+    student_id = uuid.uuid4()
+    
+    response = await agent._call_llm(
+        system_prompt="System instructions",
+        user_prompt="User question context",
+        history=[
+            {"role": "user", "content": "hi"},
+            {"role": "assistant", "content": "hello"}
+        ],
+        student_id=student_id
+    )
+    
+    assert response == "Sample Answer"
+    assert gateway.last_request is not None
+    messages = gateway.last_request.messages
+    assert len(messages) == 4
+    assert messages[0].role == "system"
+    assert messages[0].content == "System instructions"
+    assert messages[1].role == "user"
+    assert messages[1].content == "hi"
+    assert messages[2].role == "assistant"
+    assert messages[2].content == "hello"
+    assert messages[3].role == "user"
+    assert messages[3].content == "User question context"

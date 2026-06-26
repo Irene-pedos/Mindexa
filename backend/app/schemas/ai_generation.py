@@ -23,6 +23,7 @@ class GenerateQuestionsSectionRequest(BaseModel):
     difficulty: str = Field(default="medium")
     bloom_level: str | None = None
     count: int = Field(default=5, ge=1, le=20)
+    marks_per_question: int | None = Field(default=None, ge=1)
 
     @field_validator("question_type")
     @classmethod
@@ -70,7 +71,8 @@ class GenerateQuestionsRequest(BaseModel):
     Request to generate a batch of questions via AI.
 
     The AI generator uses subject, topic, question_type, difficulty,
-    and additional_context to produce structured question output.
+    bloom_level, course_material_context (from RAG), blueprint_constraints,
+    and learning_outcomes to produce structured, grounded question output.
     All generated questions require lecturer review before use.
     """
 
@@ -84,9 +86,10 @@ class GenerateQuestionsRequest(BaseModel):
         default=None,
         description="Extra context for the AI: curriculum notes, learning outcomes, etc."
     )
-    assessment_id: uuid.UUID = Field(
-        ...,
-        description="Link this batch to a specific assessment"
+    # Link to assessment (required to enforce safety rules — AI never touches finalized assessments)
+    assessment_id: uuid.UUID | None = Field(
+        default=None,
+        description="Link this batch to a specific draft assessment (optional during early generation)"
     )
     target_section_id: uuid.UUID | None = Field(
         default=None,
@@ -96,10 +99,29 @@ class GenerateQuestionsRequest(BaseModel):
         default=None,
         description="Optional list of section requirements to generate for in a single batch"
     )
+    # RAG source: which workspace's uploaded materials to retrieve context from
+    teaching_workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description="Teaching workspace ID — used to retrieve uploaded course materials for RAG grounding"
+    )
+    # Blueprint alignment
+    blueprint_constraints: str | None = Field(
+        default=None,
+        description="Blueprint rules: marks allocation, difficulty distribution, weighting per section"
+    )
+    learning_outcomes: str | None = Field(
+        default=None,
+        description="Course learning outcomes that the questions must address"
+    )
+    marks_per_question: int | None = Field(
+        default=None,
+        ge=1,
+        description="Marks allocated per question, from the blueprint"
+    )
 
     VALID_TYPES: ClassVar[set[str]] = {
         "mcq", "true_false", "short_answer", "essay",
-        "matching", "fill_blank", "computational", "case_study", "ordering"
+        "matching", "fill_blank", "computational", "case_study", "ordering", "practical"
     }
     VALID_DIFFICULTIES: ClassVar[set[str]] = {"easy", "medium", "hard"}
     VALID_BLOOM: ClassVar[set[str]] = {
@@ -184,15 +206,22 @@ class ReviewAIQuestionRequest(BaseModel):
     @field_validator("decision")
     @classmethod
     def validate_decision(cls, v: str) -> str:
-        allowed = {d for d in [
-            AIQuestionDecision.APPROVED,
-            AIQuestionDecision.REJECTED,
-            AIQuestionDecision.EDITED,
-            AIQuestionDecision.NEEDS_REVISION,
-        ]}
-        if v not in allowed:
+        if not isinstance(v, str):
+            raise ValueError("decision must be a string")
+        v_upper = v.strip().upper()
+        mapping = {
+            "APPROVED": "ACCEPTED",
+            "EDITED": "MODIFIED",
+            "REJECTED": "REJECTED",
+            "NEEDS_REVISION": "NEEDS_REVISION",
+            "ACCEPTED": "ACCEPTED",
+            "MODIFIED": "MODIFIED",
+        }
+        mapped = mapping.get(v_upper, v_upper)
+        allowed = {"ACCEPTED", "MODIFIED", "REJECTED", "NEEDS_REVISION"}
+        if mapped not in allowed:
             raise ValueError(f"decision must be one of: {', '.join(sorted(allowed))}")
-        return v
+        return mapped
 
     @field_validator("modified_question_text")
     @classmethod
@@ -217,7 +246,7 @@ class AIGeneratedQuestionResponse(BaseModel):
     parsed_explanation: str | None
     parse_error: str | None
     review_status: str
-    promoted_question_id: uuid.UUID | None
+    promoted_question_id: uuid.UUID | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

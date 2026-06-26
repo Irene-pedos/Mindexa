@@ -65,10 +65,11 @@ async def test_indexing():
             print("SUCCESS: Processing finished.")
             
             # 4. Check chunks
-            from app.db.models.resource import ResourceChunk
+            from app.db.models.resource import StudentResourceChunk
             from sqlalchemy import select
-            
-            stmt = select(ResourceChunk).where(ResourceChunk.student_resource_id == resource.id)
+
+            stmt = select(StudentResourceChunk).where(StudentResourceChunk.student_resource_id == resource.id)
+
             res = await db.execute(stmt)
             chunks = res.scalars().all()
             print(f"Found {len(chunks)} chunks in database.")

@@ -480,7 +480,7 @@ function ScoreBreakdownCard({
 export default function StudentAssessmentResultPage() {
   const params = useParams();
   const router = useRouter();
-  const attemptId = params.id as string;
+  const assessmentId = params.id as string; // This is the ASSESSMENT id, not attempt id
 
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<AssessmentResultResponse | null>(null);
@@ -488,8 +488,14 @@ export default function StudentAssessmentResultPage() {
   useEffect(() => {
     async function loadResult() {
       try {
-        const data = await resultApi.getResultByAttempt(attemptId);
-        setResult(data);
+        // Fetch the paginated results list and find the one matching this assessment
+        const data = await resultApi.getMyResults({ page: 1, page_size: 50 });
+        const match = (data.items || []).find((r: any) => r.assessment_id === assessmentId);
+        if (match) {
+          // Now fetch full result details using the attempt_id from the result
+          const full = await resultApi.getResultByAttempt(match.attempt_id || match.id);
+          setResult(full);
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "";
         if (!msg.toLowerCase().includes("available")) {
@@ -501,7 +507,7 @@ export default function StudentAssessmentResultPage() {
       }
     }
     loadResult();
-  }, [attemptId]);
+  }, [assessmentId]);
 
   // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {

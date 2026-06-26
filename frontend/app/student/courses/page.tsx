@@ -162,7 +162,13 @@ export default function StudentWorkspacesPage() {
                   </div>
                   <div className="text-right">
                     <p className="text-muted-foreground">Status</p>
-                    <p className="font-medium text-emerald-600">Active</p>
+                    <p className={`font-medium ${
+                      ws.status === 'ACTIVE' ? 'text-emerald-600' :
+                      ws.status === 'COMPLETED' ? 'text-blue-600' :
+                      'text-muted-foreground'
+                    }`}>
+                      {ws.status === 'ACTIVE' ? 'Active' : ws.status === 'COMPLETED' ? 'Completed' : ws.status || 'Active'}
+                    </p>
                   </div>
                 </div>
 

@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,13 +14,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetDescription,
-} from "@/components/ui/sheet";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -31,7 +24,6 @@ import { Label } from "@/components/ui/label";
 import {
   Search,
   BrainCircuit,
-  Filter,
   Users,
   RefreshCcw,
   Clock,
@@ -42,6 +34,20 @@ import {
   User,
   Layers,
   ArrowUpDown,
+  ShieldAlert,
+  FileText,
+  Check,
+  X,
+  History,
+  AlertTriangle,
+  TrendingUp,
+  BarChart,
+  Calendar,
+  Lock,
+  Unlock,
+  CheckCircle2,
+  School,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
@@ -54,6 +60,11 @@ import { useDebounce } from "@/hooks/use-debounce";
 import { gradingApi } from "@/lib/api/grading";
 import { lecturerApi, WorkspaceListItem } from "@/lib/api/lecturer";
 import { assessmentApi } from "@/lib/api/assessment";
+import { attemptApi } from "@/lib/api/attempt";
+import { submissionApi } from "@/lib/api/submission";
+import { resultApi } from "@/lib/api/result";
+import { integrityApi } from "@/lib/api/integrity";
+
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
@@ -61,8 +72,174 @@ import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-
 import { ModerationPanel } from "@/components/mindexa/grading/moderation-panel";
 import { ResultReleasePanel } from "@/components/mindexa/grading/result-release-panel";
 
+// ─── Interfaces ───────────────────────────────────────────────────────────────
+
+interface GradingQueueItem {
+  id: string;
+  student_id: string;
+  student_name: string;
+  assessment_title: string;
+  assessment_id: string;
+  question_id: string;
+  question_title: string;
+  question_type: string;
+  attempt_id: string;
+  response_id: string;
+  status: "PENDING" | "AI_SUGGESTED" | "COMPLETED" | "UNDER_REVIEW" | "PENDING_RELEASE" | "RELEASED";
+  submitted_at: string | null;
+  student_answer: string | null;
+  ai_suggested_score: number | null;
+  ai_confidence: number | null;
+  ai_feedback_draft: string | null;
+  score: number | null;
+  feedback: string | null;
+  is_flagged: boolean;
+  integrity_risk_score: number;
+  class_section_id: string;
+  institution_name?: string;
+  workspace_title?: string;
+}
+
+interface AttemptDetail {
+  id: string;
+  attempt_number: number;
+  status: "IN_PROGRESS" | "SUBMITTED" | "AUTO_SUBMITTED" | "GRADED" | "RELEASED";
+  time_taken_seconds: number | null;
+  integrity_risk_score: number;
+  tab_switch_count: number;
+  fullscreen_exit_count: number;
+  copy_attempt_count: number;
+  reconnect_count: number;
+  total_integrity_warnings: number;
+  warning_count: number;
+  questions: AttemptQuestion[];
+  integrity_hold: boolean;
+  integrity_hold_reason: string | null;
+}
+
+interface AttemptQuestion {
+  id: string;
+  type: string;
+  question_type?: string;
+  text?: string;
+  content?: string;
+  marks: number;
+  caseStudyContext?: string;
+  rubric?: any;
+}
+
+interface RubricCriteria {
+  id: string;
+  label: string;
+  max_score: number;
+  descriptor?: string;
+}
+
+interface RubricScore {
+  criteria_id: string;
+  score: number;
+}
+
+interface SubmissionRecord {
+  id: string;
+  question_id: string;
+  answer_text: string | null;
+  answer_type: "TEXT" | "FILE" | "CHOICE" | "MATCH" | "ORDER";
+  file_url: string | null;
+  score: number | null;
+  override_score: number | null;
+  ai_suggested_score: number | null;
+  ai_feedback_draft: string | null;
+  feedback: string | null;
+  is_final: boolean;
+}
+
+interface ClassStatRecord {
+  class_id: string;
+  class_name: string;
+  workspace_title: string;
+  total_students: number;
+  submitted_count: number;
+  not_submitted_count: number;
+  pending_review_count: number;
+  reviewed_count: number;
+  released_count: number;
+  latest_submission_at: string | null;
+}
+
+interface ClassAiSummary {
+  ai_generated_at: string;
+  average_score: number;
+  pass_rate: number;
+  strong_topics: string[];
+  weak_topics: string[];
+  students_needing_attention: { name: string; reason: string }[];
+  common_mistakes: string[];
+}
+
+interface AuditLog {
+  id: string;
+  change_type: string;
+  created_at: string;
+  created_by_id: string | null;
+  new_value: {
+    override_score?: number;
+    score?: number;
+    feedback?: string;
+    max_attempts?: number;
+    passing_marks?: number;
+  } | null;
+  previous_value: Record<string, unknown> | null;
+}
+
+interface AssessmentSummary {
+  id: string;
+  title: string;
+  assessment_type: string;
+  total_marks: number;
+  grading_mode: string;
+  window_end: string | null;
+}
+
+interface QuestionSummary {
+  id: string;
+  question_id?: string;
+  question?: {
+    content?: string;
+    question_type?: string;
+    title?: string;
+  };
+}
+
+interface ReleaseValidationState {
+  valid: boolean;
+  errors: string[];
+  gradedCount: number;
+  totalCount: number;
+}
+
+interface BatchGradeItemState {
+  score: string;
+  feedback: string;
+}
+
+interface AnalyticsData {
+  class_average: number;
+  highest_score: number;
+  lowest_score: number;
+  pass_rate: number;
+  question_difficulty: Array<{
+    question_title: string;
+    question_type: string;
+    average_score: number;
+    max_score: number;
+    difficulty: "Easy" | "Medium" | "Hard";
+  }>;
+  ai_narrative: string | null;
+}
+
 export default function LecturerGradingQueue() {
-  const [data, setData] = useState<any[]>([]);
+  const [data, setData] = useState<GradingQueueItem[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -75,38 +252,201 @@ export default function LecturerGradingQueue() {
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 500);
 
+  const [institutionFilter, setInstitutionFilter] = useState<string>("all");
+  const [courseFilter, setCourseFilter] = useState<string>("all");
+  const [submissionDateFilter, setSubmissionDateFilter] = useState<string>("");
+
   // Metadata for Filters
-  const [assessments, setAssessments] = useState<any[]>([]);
+  const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
   const [activeTab, setActiveTab] = useState("individuals");
 
-  // Selection & Decision
-  const [selectedStudent, setSelectedStudent] = useState<any | null>(null);
+  // Hierarchy Navigation State
+  const [selectedWorkspace, setSelectedWorkspace] = useState<WorkspaceListItem | null>(null);
+  const [selectedAssessment, setSelectedAssessment] = useState<AssessmentSummary | null>(null);
+  const [selectedClass, setSelectedClass] = useState<ClassStatRecord | null>(null);
+  const [classStats, setClassStats] = useState<ClassStatRecord[]>([]);
+  const [classAiSummary, setClassAiSummary] = useState<ClassAiSummary | null>(null);
+  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0);
+
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [hasMore, setHasMore] = useState<boolean>(false);
+  const PAGE_SIZE = 50;
+
+  const [batchGradeState, setBatchGradeState] = useState<Record<string, BatchGradeItemState>>({});
+
+  const [analyticsData, setAnalyticsData] = useState<AnalyticsData | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+
+  const fetchAnalytics = useCallback(async (asmtId: string) => {
+    setAnalyticsLoading(true);
+    try {
+      const res = await gradingApi.getAssessmentAnalytics(asmtId);
+      setAnalyticsData(res);
+    } catch (error: unknown) {
+      console.error("Failed to fetch analytics", error);
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === "analytics" && selectedAssessment?.id) {
+      fetchAnalytics(selectedAssessment.id);
+    }
+  }, [activeTab, selectedAssessment, fetchAnalytics]);
+
+  const getBatchItem = (responseId: string): BatchGradeItemState =>
+    batchGradeState[responseId] ?? { score: "", feedback: "" };
+
+  const setBatchItem = (responseId: string, field: keyof BatchGradeItemState, value: string) =>
+    setBatchGradeState(prev => ({
+      ...prev,
+      [responseId]: { ...getBatchItem(responseId), [field]: value },
+    }));
+
+  const handleAcceptAllAi = async () => {
+    // 1. Filter items that are ready for AI confirmation
+    const aiReadyItems = filteredData.filter(item => 
+      item.status === "AI_SUGGESTED" && (item.ai_confidence || 0) >= confidenceThreshold / 100
+    );
+
+    if (aiReadyItems.length === 0) {
+      toast.info("No AI-suggested submissions match the current threshold.");
+      return;
+    }
+
+    // 2. Deduplicate by response_id to avoid redundant requests
+    const uniqueResponseIds = Array.from(new Set(aiReadyItems.map(item => item.response_id)));
+
+    setIsSaving(true);
+    try {
+      const results = await Promise.allSettled(uniqueResponseIds.map(responseId => 
+        gradingApi.saveGrade(responseId, {
+          accept_ai_suggestion: true,
+          is_final: true,
+        })
+      ));
+
+      const fulfilled = results.filter(r => r.status === "fulfilled").length;
+      const rejected = results.filter(r => r.status === "rejected").length;
+
+      if (rejected === 0) {
+        toast.success(`Successfully accepted all ${fulfilled} AI suggestions.`);
+      } else {
+        toast.warning(`Processed ${fulfilled} items, but ${rejected} failed. Refreshing queue...`);
+      }
+      
+      fetchSubmissions();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Batch processing operation failed";
+      toast.error(msg);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleBackToWorkspaces = () => {
+    setSelectedWorkspace(null);
+    setSelectedAssessment(null);
+    setSelectedClass(null);
+    setAssessmentId("all");
+    setClassSectionId("all");
+  };
+
+  const handleBackToAssessments = () => {
+    setSelectedAssessment(null);
+    setSelectedClass(null);
+    setAssessmentId("all");
+    setClassSectionId("all");
+  };
+
+  const handleBackToClasses = () => {
+    setSelectedClass(null);
+    setClassSectionId("all");
+  };
+
+  const fetchClassStats = async (asmtId: string) => {
+    setLoading(true);
+    try {
+      const res = await gradingApi.getAssessmentClassStats(asmtId);
+      setClassStats(res.classes || []);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to fetch class grading stats";
+      toast.error(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchClassAiSummary = async (asmtId: string, classId: string) => {
+    try {
+      const res = await gradingApi.getClassAiSummary(asmtId, classId);
+      setClassAiSummary(res);
+    } catch (error: unknown) {
+      console.error("Failed to fetch class AI summary", error);
+    }
+  };
+
+  // Selection & Decision (SpeedGrader View)
+  const [selectedStudent, setSelectedStudent] = useState<GradingQueueItem | null>(null);
+  const [activeAttempt, setActiveAttempt] = useState<AttemptDetail | null>(null);
+  const [activeSubmissions, setActiveSubmissions] = useState<SubmissionRecord[]>([]);
+  const [activeQuestionIndex, setActiveQuestionIndex] = useState<number>(0);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [reviewTab, setReviewTab] = useState<"question" | "integrity" | "reassessment" | "audit">("question");
+
   const [overrideScore, setOverrideScore] = useState<string>("");
   const [finalFeedback, setFinalFeedback] = useState<string>("");
-  const [rubricScores, setRubricScores] = useState<any[]>([]);
+  const [rubricScores, setRubricScores] = useState<RubricScore[]>([]);
   const [reviewStartedAt, setReviewStartedAt] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(true);
 
+  // Reassessment options form state
+  const [allowReassessment, setAllowReassessment] = useState(false);
+  const [maxAttempts, setMaxAttempts] = useState(2);
+  const [passMark, setPassMark] = useState(50);
+  const [reassessmentWindow, setReassessmentWindow] = useState("7");
+
+  // Batch Grading state
+  const [selectedBatchQuestionTitle, setSelectedBatchQuestionTitle] = useState<string>("all");
+
   // Moderation state
-  const [moderationQuestionId, setModerationQuestionId] = useState<
-    string | null
-  >(null);
-  const [moderationAssessmentId, setModerationAssessmentId] =
-    useState<string>("all");
-  const [questions, setQuestions] = useState<any[]>([]);
+  const [moderationQuestionId, setModerationQuestionId] = useState<string | null>(null);
+  const [moderationAssessmentId, setModerationAssessmentId] = useState<string>("all");
+  const [questions, setQuestions] = useState<QuestionSummary[]>([]);
+
+  // Result Release Policies
+  const [releasePolicy, setReleasePolicy] = useState<"immediate" | "scheduled" | "hold">("hold");
+  const [releaseDate, setReleaseDate] = useState("");
+  const [releaseValidation, setReleaseValidation] = useState<ReleaseValidationState>({
+    valid: true,
+    errors: [],
+    gradedCount: 0,
+    totalCount: 0,
+  });
 
   useEffect(() => {
     fetchMetadata();
   }, []);
 
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedClass, selectedAssessment, status, questionType, sortBy, debouncedSearch]);
+
   const fetchSubmissions = useCallback(async () => {
+    if (!selectedClass && !selectedAssessment) return;
     setLoading(true);
     try {
-      const params: any = { page_size: 50, sort_by: sortBy };
-      if (assessmentId !== "all") params.assessment_id = assessmentId;
-      if (classSectionId !== "all") params.class_section_id = classSectionId;
+      const params: Record<string, string | number | boolean> = { 
+        page_size: PAGE_SIZE, 
+        page: currentPage,
+        sort_by: sortBy 
+      };
+      if (selectedAssessment) params.assessment_id = selectedAssessment.id;
+      if (selectedClass) params.class_section_id = selectedClass.class_id;
       if (questionType !== "all") params.question_type = questionType;
       if (status !== "all") params.status = status;
       if (debouncedSearch) params.q = debouncedSearch;
@@ -114,40 +454,95 @@ export default function LecturerGradingQueue() {
       const response = await gradingApi.getGradingQueue(params);
       setData(response.items || []);
       setTotal(response.total || 0);
-    } catch (error: any) {
-      toast.error("Queue trace failure");
+      setHasMore((response.items?.length ?? 0) === PAGE_SIZE);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Queue trace failure";
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
   }, [
-    assessmentId,
-    classSectionId,
+    selectedAssessment,
+    selectedClass,
     questionType,
     status,
     sortBy,
     debouncedSearch,
+    currentPage,
   ]);
 
   const fetchQuestions = useCallback(async (asmtId: string) => {
     try {
       const res = await assessmentApi.getAssessmentQuestions(asmtId);
       setQuestions(res || []);
-    } catch (err) {
-      console.error(err);
+    } catch (error: unknown) {
+      console.error(error);
+    }
+  }, []);
+
+  const runReleaseValidation = useCallback(async (asmtId: string) => {
+    try {
+      const res = await resultApi.getAssessmentResults(asmtId);
+      const items = res.items || [];
+      const errorsList: string[] = [];
+      let gradedQ = 0;
+      let totalQ = 0;
+
+      items.forEach((r: { student_name: string; graded_question_count: number; total_question_count: number; integrity_hold: boolean }) => {
+        gradedQ += r.graded_question_count || 0;
+        totalQ += r.total_question_count || 0;
+        if (r.graded_question_count < r.total_question_count) {
+          errorsList.push(`${r.student_name}: ${r.total_question_count - r.graded_question_count} questions remaining ungraded.`);
+        }
+        if (r.integrity_hold) {
+          errorsList.push(`${r.student_name}: Unresolved active integrity hold.`);
+        }
+      });
+
+      setReleaseValidation({
+        valid: errorsList.length === 0,
+        errors: errorsList,
+        gradedCount: gradedQ,
+        totalCount: totalQ,
+      });
+    } catch (error: unknown) {
+      console.error(error);
     }
   }, []);
 
   useEffect(() => {
-    if (activeTab === "individuals") fetchSubmissions();
-  }, [activeTab, fetchSubmissions]);
+    const controller = new AbortController();
+    if (activeTab === "individuals") {
+      if (selectedClass) fetchSubmissions();
+      else if (selectedAssessment) fetchClassStats(selectedAssessment.id);
+    }
+    if (activeTab === "release" && assessmentId !== "all") runReleaseValidation(assessmentId);
+    return () => controller.abort();
+  }, [activeTab, fetchSubmissions, assessmentId, runReleaseValidation, selectedClass, selectedAssessment]);
 
   useEffect(() => {
+    const controller = new AbortController();
+    if (selectedWorkspace) {
+      assessmentApi.getAssessments({ workspace_id: selectedWorkspace.id }).then(res => {
+        if (controller.signal.aborted) return;
+        setAssessments(res.items || []);
+      });
+    } else {
+      // Re-fetch all if no workspace selected? Or just wait for metadata.
+      fetchMetadata();
+    }
+    return () => controller.abort();
+  }, [selectedWorkspace]);
+
+  useEffect(() => {
+    const controller = new AbortController();
     if (moderationAssessmentId !== "all")
       fetchQuestions(moderationAssessmentId);
     else {
       setQuestions([]);
       setModerationQuestionId(null);
     }
+    return () => controller.abort();
   }, [moderationAssessmentId, fetchQuestions]);
 
   const fetchMetadata = async () => {
@@ -158,24 +553,86 @@ export default function LecturerGradingQueue() {
       ]);
       setAssessments(asmtRes.items || []);
       setWorkspaces(wsRes || []);
-    } catch (err) {
-      console.error(err);
+    } catch (error: unknown) {
+      console.error(error);
     }
   };
 
-  const handleOpenReview = async (item: any) => {
+  const fetchResponseLogs = async (responseId: string) => {
+    setAuditLoading(true);
     try {
-      const detail = await gradingApi.getGradeDetail(item.response_id);
-      setSelectedStudent({ ...item, ...detail });
-      setOverrideScore(
-        detail.ai_suggested_score?.toString() || detail.score?.toString() || "",
-      );
-      setFinalFeedback(detail.feedback || "");
-      setRubricScores(detail.rubric_scores || []);
+      const logs = await submissionApi.getSubmissionLogs(responseId);
+      setAuditLogs(logs || []);
+    } catch (error: unknown) {
+      console.error("Failed to fetch response audit logs", error);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const handleOpenReview = async (item: GradingQueueItem) => {
+    setLoading(true);
+    try {
+      const attemptRes = await attemptApi.getAttempt(item.attempt_id);
+      const subRes = await submissionApi.getSubmissionsForAttempt(item.attempt_id);
+
+      setActiveAttempt(attemptRes);
+      setActiveSubmissions(subRes.submissions || []);
+
+      // Find question index matching queue item
+      const idx = attemptRes.questions?.findIndex((q: AttemptQuestion) => q.id === item.question_id);
+      const activeIdx = idx >= 0 ? idx : 0;
+      setActiveQuestionIndex(activeIdx);
+
+      const activeQuestion = attemptRes.questions?.[activeIdx];
+      const activeSub = subRes.submissions?.find((s: SubmissionRecord) => s.question_id === activeQuestion?.id);
+
+      if (activeSub) {
+        fetchResponseLogs(activeSub.id);
+        const detail = await gradingApi.getGradeDetail(activeSub.id);
+        setOverrideScore(detail.score?.toString() || detail.ai_suggested_score?.toString() || "");
+        setFinalFeedback(detail.feedback || "");
+        setRubricScores(detail.rubric_scores || []);
+      } else {
+        setOverrideScore("");
+        setFinalFeedback("");
+        setRubricScores([]);
+        setAuditLogs([]);
+      }
+
+      setSelectedStudent(item);
       setReviewStartedAt(new Date());
-      setShowAiPanel(true);
-    } catch (e) {
-      toast.error("Entry acquisition failure");
+      setAllowReassessment(false);
+      setReviewTab("question");
+    } catch (error: unknown) {
+      toast.error("Failed to load student attempt details");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSelectQuestion = async (index: number) => {
+    if (!activeAttempt) return;
+    setActiveQuestionIndex(index);
+    const q = activeAttempt.questions[index];
+    const submission = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
+
+    if (submission) {
+      fetchResponseLogs(submission.id);
+      try {
+        const detail = await gradingApi.getGradeDetail(submission.id);
+        setOverrideScore(detail.score?.toString() || detail.ai_suggested_score?.toString() || "");
+        setFinalFeedback(detail.feedback || "");
+        setRubricScores(detail.rubric_scores || []);
+        setShowAiPanel(true);
+      } catch (error: unknown) {
+        console.error("Failed to fetch grade details for question", error);
+      }
+    } else {
+      setOverrideScore("");
+      setFinalFeedback("");
+      setRubricScores([]);
+      setAuditLogs([]);
     }
   };
 
@@ -183,7 +640,15 @@ export default function LecturerGradingQueue() {
     isFinal: boolean,
     acceptAi: boolean = false,
   ) => {
-    if (!selectedStudent) return;
+    if (!selectedStudent || !activeAttempt) return;
+    const currentQuestion = activeAttempt.questions?.[activeQuestionIndex];
+    const currentSubmission = activeSubmissions.find((s: SubmissionRecord) => s.question_id === currentQuestion?.id);
+
+    if (!currentSubmission) {
+      toast.error("No student submission registered for this question node");
+      return;
+    }
+
     if (isFinal && !acceptAi && overrideScore === "") {
       toast.error("Score required for finalization");
       return;
@@ -194,10 +659,10 @@ export default function LecturerGradingQueue() {
       const duration = reviewStartedAt
         ? Math.floor((new Date().getTime() - reviewStartedAt.getTime()) / 1000)
         : 0;
-      const payload: any = {
+      const payload: Record<string, string | number | boolean | RubricScore[]> = {
         accept_ai_suggestion: acceptAi,
         is_final: isFinal,
-        review_started_at: reviewStartedAt?.toISOString(),
+        review_started_at: reviewStartedAt?.toISOString() || "",
         review_duration_seconds: duration,
         rubric_scores: rubricScores,
       };
@@ -207,24 +672,167 @@ export default function LecturerGradingQueue() {
         payload.feedback = finalFeedback;
       }
 
-      await gradingApi.saveGrade(selectedStudent.response_id, payload);
-      toast.success(isFinal ? "Decision recorded" : "Draft preserved");
+      await gradingApi.saveGrade(currentSubmission.id, payload);
+      toast.success(isFinal ? "Decision recorded successfully" : "Draft preserved");
+
+      // Reload attempt submissions
+      const subRes = await submissionApi.getSubmissionsForAttempt(activeAttempt.id);
+      setActiveSubmissions(subRes.submissions || []);
 
       if (isFinal) {
-        setSelectedStudent(null);
-        fetchSubmissions();
+        // Auto-navigate to next pending manual question
+        const nextPendingIdx = activeAttempt.questions.findIndex((q: AttemptQuestion, idx: number) => {
+          if (idx <= activeQuestionIndex) return false;
+          const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+          const isManual = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational"].includes(t);
+          if (!isManual) return false;
+          const sub = subRes.submissions?.find((s: SubmissionRecord) => s.question_id === q.id);
+          return !sub || !sub.is_final;
+        });
+
+        if (nextPendingIdx >= 0) {
+          handleSelectQuestion(nextPendingIdx);
+        } else {
+          setActiveAttempt(null);
+          setSelectedStudent(null);
+          fetchSubmissions();
+        }
       }
-    } catch (e: any) {
+    } catch (error: unknown) {
       toast.error("Save failure");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleRubricChange = (scores: any[]) => {
+  const handleRubricChange = (scores: RubricScore[]) => {
     setRubricScores(scores);
     const total = scores.reduce((acc, curr) => acc + curr.score, 0);
     setOverrideScore(total.toString());
+  };
+
+  // Reassessment Grants
+  const handleGrantReassessment = async () => {
+    if (!activeAttempt) return;
+    try {
+      await attemptApi.grantReassessment(activeAttempt.id, {
+        max_attempts: maxAttempts,
+        passing_marks: passMark,
+        window_days: parseInt(reassessmentWindow),
+      });
+      toast.success("Reassessment granted. Student is authorized for a new attempt.");
+      setAuditLogs((prev: AuditLog[]) => [
+        {
+          id: "new-reassessment-log",
+          change_type: "REASSESSMENT_GRANTED",
+          created_at: new Date().toISOString(),
+          new_value: { max_attempts: maxAttempts, passing_marks: passMark },
+          previous_value: null,
+          created_by_id: null,
+        },
+        ...prev,
+      ]);
+    } catch (error: unknown) {
+      toast.error("Failed to grant reassessment");
+    }
+  };
+
+  // Batch Grading helpers
+  const groupedBatchQuestions = useMemo(() => {
+    const groups: Record<string, GradingQueueItem[]> = {};
+    data.forEach((item: GradingQueueItem) => {
+      const qTitle = item.question_title || "General Question";
+      if (!groups[qTitle]) groups[qTitle] = [];
+      groups[qTitle].push(item);
+    });
+    return groups;
+  }, [data]);
+
+  const handleBatchApplyAi = async (responseId: string, score: number) => {
+    try {
+      await gradingApi.saveGrade(responseId, {
+        override_score: score,
+        is_final: true,
+      });
+      toast.success("AI suggested score applied");
+      fetchSubmissions();
+    } catch (error: unknown) {
+      toast.error("Failed to apply AI suggestion");
+    }
+  };
+
+  const handleSaveBatchGrade = async (responseId: string, scoreStr: string, feedback: string) => {
+    const parsedScore = parseFloat(scoreStr);
+    if (isNaN(parsedScore)) {
+      toast.error("Please enter a valid score");
+      return;
+    }
+    try {
+      await gradingApi.saveGrade(responseId, {
+        override_score: parsedScore,
+        feedback: feedback,
+        is_final: true,
+      });
+      toast.success("Grade confirmed");
+      fetchSubmissions();
+    } catch (error: unknown) {
+      toast.error("Failed to save grade");
+    }
+  };
+
+  const handleSaveReleasePolicy = async (asmtId: string) => {
+    try {
+      await resultApi.updateReleasePolicy(asmtId, {
+        policy: releasePolicy,
+        release_date: releasePolicy === "scheduled" ? releaseDate : null,
+      });
+      toast.success("Release policy saved successfully");
+    } catch (error: unknown) {
+      toast.error("Failed to save release policy");
+    }
+  };
+
+  const handleTriggerImmediateRelease = async (asmtId: string) => {
+    setIsSaving(true);
+    try {
+      await resultApi.triggerImmediateRelease(asmtId);
+      toast.success("Results released to students immediately.");
+      runReleaseValidation(asmtId);
+    } catch (error: unknown) {
+      toast.error("Failed to trigger immediate release");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleLiftIntegrityHold = async () => {
+    if (!activeAttempt) return;
+    setIsSaving(true);
+    try {
+      await integrityApi.liftHold(activeAttempt.id);
+      toast.success("Integrity hold lifted. Student result is now eligible for release.");
+      // Refresh the attempt
+      const updated = await attemptApi.getAttempt(activeAttempt.id);
+      setActiveAttempt(updated);
+    } catch (error: unknown) {
+      toast.error("Failed to lift integrity hold");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleToggleManualFlag = async () => {
+    if (!selectedStudent || !activeAttempt) return;
+    setIsSaving(true);
+    try {
+      await integrityApi.toggleFlag(activeAttempt.id, !selectedStudent.is_flagged);
+      toast.success(selectedStudent.is_flagged ? "Attempt unflagged." : "Attempt flagged for institutional review.");
+      setSelectedStudent(prev => prev ? { ...prev, is_flagged: !prev.is_flagged } : prev);
+    } catch (error: unknown) {
+      toast.error("Failed to update flag status");
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const stats = useMemo(
@@ -236,16 +844,694 @@ export default function LecturerGradingQueue() {
     [data],
   );
 
+  const institutions = useMemo(() => {
+    const list = workspaces.map((w) => w.institution_name).filter(Boolean);
+    return Array.from(new Set(list));
+  }, [workspaces]);
+
+  const courses = useMemo(() => {
+    const list = workspaces.map((w) => w.title).filter(Boolean);
+    return Array.from(new Set(list));
+  }, [workspaces]);
+
+  const filteredData = useMemo(() => {
+    return data.filter((item: GradingQueueItem) => {
+      // TODO: Ensure GET /grading/queue includes institution_name and workspace_title
+      // on each GradingQueueItem so institution and course filters work correctly.
+
+      // 1. Institution Filter
+      if (institutionFilter !== "all") {
+        if (!item.institution_name || item.institution_name !== institutionFilter) return false;
+      }
+      
+      // 2. Course Filter
+      if (courseFilter !== "all") {
+        if (!item.workspace_title || item.workspace_title !== courseFilter) return false;
+      }
+      
+      // 3. Submission Date Filter
+      if (submissionDateFilter) {
+        if (!item.submitted_at) return false;
+        const itemDate = new Date(item.submitted_at).toISOString().split("T")[0];
+        if (itemDate !== submissionDateFilter) return false;
+      }
+      
+      // 4. Confidence Threshold Filter (Only applies to AI Suggested)
+      if (confidenceThreshold > 0 && item.status === "AI_SUGGESTED") {
+        if ((item.ai_confidence || 0) < confidenceThreshold / 100) return false;
+      }
+      
+      return true;
+    });
+  }, [data, institutionFilter, courseFilter, submissionDateFilter, confidenceThreshold]);
+
+  // SpeedGrader Review workspace UI
+  if (activeAttempt) {
+    const currentQuestion = activeAttempt.questions?.[activeQuestionIndex];
+    const currentSubmission = activeSubmissions.find((s) => s.question_id === currentQuestion?.id);
+    const qType = (currentQuestion?.type || currentQuestion?.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+    const isAutoGraded = ["mcq", "truefalse", "true_false", "matching", "fillblank", "fillblanks", "ordering"].includes(qType);
+
+    return (
+      <div className="min-h-screen bg-background flex flex-col font-sans text-foreground">
+        {/* SpeedGrader Header */}
+        <div className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur-md px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setActiveAttempt(null);
+                setSelectedStudent(null);
+                fetchSubmissions();
+              }}
+              className="h-9 px-3 border border-border/60 rounded-xl hover:bg-muted/50 transition-colors"
+            >
+              <X className="size-4 mr-1.5" /> Close Workspace
+            </Button>
+            <div className="h-5 w-px bg-border/40" />
+            <div>
+              <h1 className="text-sm font-bold text-foreground leading-none">
+                Grading Workspace: {selectedStudent?.student_name}
+              </h1>
+              <p className="text-xs text-muted-foreground mt-1 font-medium">
+                {selectedStudent?.assessment_title} • Attempt #{activeAttempt.attempt_number}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-3 bg-muted/20 border border-border/50 rounded-xl p-1 px-3 h-9 text-xs font-semibold">
+              <span className="flex items-center gap-1 text-muted-foreground">
+                <Clock className="size-3.5" /> Spent: {activeAttempt.time_taken_seconds ? `${Math.floor(activeAttempt.time_taken_seconds / 60)}m ${activeAttempt.time_taken_seconds % 60}s` : "N/A"}
+              </span>
+              <div className="h-4 w-px bg-border/20" />
+              <div className="flex items-center gap-1.5">
+                <span className={cn(
+                  "size-2 rounded-full",
+                  activeAttempt.integrity_risk_score > 70 ? "bg-red-500" : activeAttempt.integrity_risk_score > 30 ? "bg-amber-500" : "bg-emerald-500"
+                )} />
+                <span className="text-foreground/80">Integrity Risk: {activeAttempt.integrity_risk_score || 0}%</span>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs font-semibold border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 rounded-lg shadow-sm"
+              onClick={async () => {
+                const openQs = activeAttempt.questions.filter((q: AttemptQuestion) => {
+                  const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+                  return ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational"].includes(t);
+                });
+                const ungraded = openQs.filter((q: AttemptQuestion) => {
+                  const sub = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
+                  return !sub || !sub.is_final;
+                });
+                if (ungraded.length > 0) {
+                  toast.error(`Cannot finalize. ${ungraded.length} manually graded questions are not finalized yet.`);
+                } else {
+                  toast.success("All validations passed! Ready for release.");
+                }
+              }}
+            >
+              Verify Marks
+            </Button>
+          </div>
+        </div>
+
+        {/* SpeedGrader Workspace Grid */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Navigation Sidebar */}
+          <div className="w-64 border-r border-border/40 bg-muted/5 flex flex-col p-4 space-y-4">
+            <h3 className="text-xs font-bold uppercase tracking-widest text-muted-foreground/60 px-1">
+              Assessment Outline
+            </h3>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+              {activeAttempt.questions?.map((q: AttemptQuestion, idx: number) => {
+                const sub = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
+                const qTypeStr = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+                const isAuto = ["mcq", "truefalse", "true_false", "matching", "fillblank", "fillblanks", "ordering"].includes(qTypeStr);
+
+                let statusBadge = (
+                  <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-amber-500/5 text-amber-600 border-amber-500/15">
+                    Pending
+                  </Badge>
+                );
+                if (isAuto) {
+                  statusBadge = (
+                    <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-emerald-500/5 text-emerald-600 border-emerald-500/15">
+                      Finalized
+                    </Badge>
+                  );
+                } else if (sub) {
+                  if (sub.is_final) {
+                    statusBadge = (
+                      <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-emerald-500/5 text-emerald-600 border-emerald-500/15">
+                        Finalized
+                      </Badge>
+                    );
+                  } else if (sub.score !== null || sub.override_score !== null || overrideScore !== "") {
+                    statusBadge = (
+                      <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-indigo-500/5 text-indigo-600 border-indigo-500/15">
+                        Reviewed
+                      </Badge>
+                    );
+                  } else if (sub.ai_suggested_score !== null) {
+                    statusBadge = (
+                      <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-blue-500/5 text-blue-600 border-blue-500/15 animate-pulse">
+                        AI Suggested
+                      </Badge>
+                    );
+                  }
+                }
+
+                return (
+                  <button
+                    key={q.id}
+                    onClick={() => handleSelectQuestion(idx)}
+                    className={cn(
+                      "w-full text-left p-3 rounded-xl border transition-all flex items-center justify-between",
+                      idx === activeQuestionIndex
+                        ? "ring-2 ring-primary ring-offset-1 border-primary bg-background shadow-sm"
+                        : "border-border/50 bg-background/50 hover:bg-background"
+                    )}
+                  >
+                    <div className="space-y-1 min-w-0 pr-2">
+                      <p className={cn("text-xs font-bold truncate", idx === activeQuestionIndex ? "text-primary" : "text-foreground/80")}>
+                        Question {idx + 1}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground/60 truncate capitalize">
+                        {q.type?.replace("_", " ").toLowerCase()} • {q.marks || 0} pts
+                      </p>
+                    </div>
+                    {statusBadge}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Main Dual Pane Workspace */}
+          <div className="flex-1 flex overflow-hidden">
+            {/* Left Pane (Question, Reference, Rubric, Integrity, Reassessment, Audit) */}
+            <div className="flex-1 border-r border-border/40 p-6 overflow-y-auto space-y-6 bg-background">
+              <div className="flex border-b border-border/40 pb-2 gap-4">
+                <button
+                  onClick={() => setReviewTab("question")}
+                  className={cn(
+                    "text-xs font-semibold pb-2 border-b-2 transition-all",
+                    reviewTab === "question" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                >
+                  Question & Rubric
+                </button>
+                <button
+                  onClick={() => setReviewTab("integrity")}
+                  className={cn(
+                    "text-xs font-semibold pb-2 border-b-2 transition-all",
+                    reviewTab === "integrity" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                >
+                  Integrity Review
+                </button>
+                <button
+                  onClick={() => setReviewTab("reassessment")}
+                  className={cn(
+                    "text-xs font-semibold pb-2 border-b-2 transition-all",
+                    reviewTab === "reassessment" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                >
+                  Reassessment
+                </button>
+                <button
+                  onClick={() => setReviewTab("audit")}
+                  className={cn(
+                    "text-xs font-semibold pb-2 border-b-2 transition-all",
+                    reviewTab === "audit" ? "border-primary text-primary" : "border-transparent text-muted-foreground"
+                  )}
+                >
+                  Audit Trail
+                </button>
+              </div>
+
+              {reviewTab === "question" && (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/85">
+                      Question Text
+                    </Label>
+                    <div className="p-4 rounded-xl border border-border/60 bg-muted/10 text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap">
+                      {currentQuestion?.text || currentQuestion?.content}
+                    </div>
+                  </div>
+
+                  {currentQuestion?.caseStudyContext && (
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/85">
+                        Case Study Context / Reference Answer
+                      </Label>
+                      <div className="p-4 rounded-xl border border-primary/15 bg-primary/[0.01] text-xs leading-relaxed italic text-foreground/80 whitespace-pre-wrap">
+                        {currentQuestion.caseStudyContext}
+                      </div>
+                    </div>
+                  )}
+
+                  {currentQuestion?.rubric ? (
+                    <RubricGradingPanel
+                      rubric={currentQuestion.rubric}
+                      currentScores={rubricScores}
+                      onScoresChange={handleRubricChange}
+                    />
+                  ) : (
+                    <div className="py-6 border-t border-dashed text-center text-xs text-muted-foreground/60 italic">
+                      No explicit rubric criteria configured for this question node.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {reviewTab === "integrity" && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <ShieldAlert className="size-5 text-destructive" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Integrity Incidents Report</h3>
+                  </div>
+
+                  {activeAttempt.status === "AUTO_SUBMITTED" && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 text-red-700">
+                      <AlertTriangle className="size-5 shrink-0 mt-0.5" />
+                      <div className="space-y-1">
+                        <p className="text-xs font-bold uppercase tracking-wider">Forced Auto-Submission</p>
+                        <p className="text-xs leading-relaxed">
+                          This assessment session expired or was terminated by security enforcement and was automatically finalized by the system.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 border border-border/50 bg-background/50 rounded-xl space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Tab Switching Events</span>
+                      <p className="text-xl font-bold text-foreground tabular-nums">{activeAttempt.tab_switch_count || 0}</p>
+                    </div>
+                    <div className="p-4 border border-border/50 bg-background/50 rounded-xl space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Fullscreen Exits</span>
+                      <p className="text-xl font-bold text-foreground tabular-nums">{activeAttempt.fullscreen_exit_count || 0}</p>
+                    </div>
+                    <div className="p-4 border border-border/50 bg-background/50 rounded-xl space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Copy / Paste Actions</span>
+                      <p className="text-xl font-bold text-foreground tabular-nums">{activeAttempt.copy_attempt_count || 0}</p>
+                    </div>
+                    <div className="p-4 border border-border/50 bg-background/50 rounded-xl space-y-1">
+                      <span className="text-[10px] uppercase font-bold text-muted-foreground">Disconnects / Drops</span>
+                      <p className="text-xl font-bold text-foreground tabular-nums">{activeAttempt.reconnect_count || 0}</p>
+                    </div>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-border bg-muted/10 space-y-2">
+                    <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Warnings Issued</p>
+                    <p className="text-xs text-foreground/80 leading-relaxed font-medium">
+                      Student received {activeAttempt.total_integrity_warnings || activeAttempt.warning_count || 0} integrity warnings during the timed session.
+                    </p>
+                  </div>
+
+                  {activeAttempt.integrity_hold && (
+                    <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-3 text-red-700">
+                        <Lock className="size-5 shrink-0 mt-0.5" />
+                        <div className="space-y-1">
+                          <p className="text-xs font-bold uppercase tracking-wider">Integrity Hold Active</p>
+                          <p className="text-xs leading-relaxed">
+                            {activeAttempt.integrity_hold_reason || "This attempt has been placed on hold pending review."}
+                          </p>
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0 h-8 text-xs font-semibold border-red-500/20 bg-red-500/5 text-red-700 hover:bg-red-500/10 rounded-lg"
+                        onClick={handleLiftIntegrityHold}
+                        disabled={isSaving}
+                      >
+                        <Unlock className="size-3.5 mr-1.5" /> Lift Hold
+                      </Button>
+                    </div>
+                  )}
+
+                  <div className="pt-4 border-t border-border/40 flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <p className="text-xs font-bold text-foreground">Manual Flag</p>
+                      <p className="text-[10px] text-muted-foreground">Flag this attempt for institutional review and block result release until resolved.</p>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className={cn(
+                        "h-8 text-xs font-semibold rounded-lg",
+                        selectedStudent?.is_flagged
+                          ? "border-amber-500/20 bg-amber-500/5 text-amber-700 hover:bg-amber-500/10"
+                          : "border-border/60 hover:bg-muted/40"
+                      )}
+                      onClick={handleToggleManualFlag}
+                      disabled={isSaving}
+                    >
+                      {selectedStudent?.is_flagged ? (
+                        <><ShieldAlert className="size-3.5 mr-1.5" /> Unflag Attempt</>
+                      ) : (
+                        <><ShieldAlert className="size-3.5 mr-1.5" /> Flag Attempt</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {reviewTab === "reassessment" && (
+                <div className="space-y-6">
+                  <div className="flex items-center gap-2">
+                    <RefreshCcw className="size-5 text-primary" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Reassessment Management</h3>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Authorize the student to re-take this assessment under institutional guidelines. Reassessment preserves all historical attempts, scores, and integrity logs.
+                  </p>
+
+                  <div className="space-y-4 pt-2">
+                    <div className="flex items-center justify-between p-3.5 bg-muted/10 border rounded-xl">
+                      <div className="space-y-0.5">
+                        <Label className="text-xs font-bold text-foreground">Enable Reassessment</Label>
+                        <p className="text-[10px] text-muted-foreground">Authorize student a new grading window</p>
+                      </div>
+                      <input
+                        type="checkbox"
+                        checked={allowReassessment}
+                        onChange={(e) => setAllowReassessment(e.target.checked)}
+                        className="size-4 text-primary accent-primary rounded border cursor-pointer"
+                      />
+                    </div>
+
+                    {allowReassessment && (
+                      <div className="space-y-4 p-4 border border-border/50 bg-background/50 rounded-xl animate-fade-in">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-muted-foreground">Maximum Attempts</Label>
+                            <Input
+                              type="number"
+                              value={maxAttempts}
+                              onChange={(e) => setMaxAttempts(parseInt(e.target.value))}
+                              className="h-9 text-xs rounded-lg"
+                            />
+                          </div>
+                          <div className="space-y-1.5">
+                            <Label className="text-xs font-semibold text-muted-foreground">Pass Mark Requirement (%)</Label>
+                            <Input
+                              type="number"
+                              value={passMark}
+                              onChange={(e) => setPassMark(parseInt(e.target.value))}
+                              className="h-9 text-xs rounded-lg"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-semibold text-muted-foreground">Reassessment Window (Days)</Label>
+                          <Select value={reassessmentWindow} onValueChange={setReassessmentWindow}>
+                            <SelectTrigger className="h-9 text-xs rounded-lg bg-background">
+                              <SelectValue placeholder="Days" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="3">3 Days</SelectItem>
+                              <SelectItem value="7">7 Days</SelectItem>
+                              <SelectItem value="14">14 Days</SelectItem>
+                              <SelectItem value="30">30 Days</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <Button
+                          onClick={handleGrantReassessment}
+                          className="w-full h-10 text-xs font-semibold mt-2 rounded-xl"
+                        >
+                          Authorize and Grant Reassessment
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {reviewTab === "audit" && (
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <History className="size-5 text-primary" />
+                    <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Academic Audit Trail</h3>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    Permanent chronological record of every evaluation action, score modification, and feedback revision.
+                  </p>
+
+                  <div className="space-y-2.5 pt-2">
+                    {auditLoading ? (
+                      <div className="py-12 flex justify-center"><Loader2 className="size-5 text-primary animate-spin" /></div>
+                    ) : auditLogs.length === 0 ? (
+                      <div className="py-12 border border-dashed rounded-xl text-center text-xs text-muted-foreground/60 italic">
+                        No previous grading actions recorded for this question response.
+                      </div>
+                    ) : (
+                      auditLogs.map((log: AuditLog) => (
+                        <div key={log.id} className="p-3 border border-border/50 bg-background/50 rounded-xl text-xs space-y-1.5 shadow-sm">
+                          <div className="flex justify-between items-center">
+                            <span className="font-bold uppercase tracking-wider text-[9px] text-primary">{log.change_type}</span>
+                            <span className="text-[10px] text-muted-foreground/60">{new Date(log.created_at).toLocaleString()}</span>
+                          </div>
+                          {log.new_value && (
+                            <div className="font-medium text-foreground/80 leading-relaxed">
+                              Modified score to: <span className="font-bold text-foreground">{log.new_value.override_score ?? log.new_value.score ?? "N/A"} pts</span>
+                              {log.new_value.feedback && (
+                                <p className="italic text-[11px] text-muted-foreground mt-1 font-medium">Feedback: &quot;{log.new_value.feedback.substring(0, 100)}...&quot;</p>
+                              )}
+                            </div>
+                          )}
+                          <p className="text-[10px] text-muted-foreground/50">Actor: Lecturer ID {log.created_by_id || "System Engine"}</p>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Right Pane (Response, AI Suggestions, Marks, Feedback) */}
+            <div className="flex-1 p-6 overflow-y-auto space-y-6 bg-muted/[0.01]">
+              <div className="space-y-2">
+                <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/85">
+                  Student Response Trace
+                </Label>
+                {currentSubmission?.answer_type === "FILE" && currentSubmission?.file_url ? (
+                  <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex items-center justify-between">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileText className="size-5 text-primary shrink-0" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">
+                          {currentSubmission.file_url.split("/").pop() || "deliverable_file"}
+                        </p>
+                        <a
+                          href={currentSubmission.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-medium text-primary hover:underline"
+                        >
+                          Download Deliverable File
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="text-sm leading-relaxed border border-border/60 rounded-xl p-4 bg-background shadow-sm whitespace-pre-wrap text-foreground/90 min-h-[140px]">
+                  {currentSubmission?.answer_text || currentSubmission?.file_url ? (
+                    currentSubmission.answer_text
+                  ) : (
+                    <span className="italic text-muted-foreground/50">No response recorded.</span>
+                  )}
+                </div>
+              </div>
+
+              {!isAutoGraded && currentSubmission && (
+                <div className="space-y-3">
+                  <AIReviewPanel
+                    queueItemId={selectedStudent?.id}
+                    responseId={currentSubmission.id}
+                    maxScore={currentQuestion?.marks || 10}
+                    onSuggestionApplied={(score) => setOverrideScore(score.toString())}
+                  />
+
+                  <AIFeedbackEditor
+                    responseId={currentSubmission.id}
+                    initialDraft={currentSubmission.ai_feedback_draft || undefined}
+                    onDraftApplied={(text) => setFinalFeedback(text)}
+                  />
+                </div>
+              )}
+
+              {!isAutoGraded && currentSubmission && (
+                <div className="bg-primary/[0.02] border border-primary/15 rounded-xl p-4 space-y-3 shadow-sm my-3">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary">
+                    <BrainCircuit className="size-4" /> AI Grading Decisions Action Hub
+                  </div>
+                  <p className="text-[11px] text-muted-foreground leading-relaxed">
+                    Instantly accept, modify, or reject AI suggestions to accelerate your academic evaluation.
+                  </p>
+                  
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs font-semibold h-8 rounded-lg border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 hover:text-emerald-700"
+                      onClick={() => {
+                        if (currentSubmission.ai_suggested_score !== null && currentSubmission.ai_suggested_score !== undefined) {
+                          setOverrideScore(currentSubmission.ai_suggested_score.toString());
+                        }
+                        if (currentSubmission.ai_feedback_draft) {
+                          setFinalFeedback(currentSubmission.ai_feedback_draft);
+                        }
+                        toast.success("AI suggested score & feedback applied.");
+                      }}
+                    >
+                      Accept AI
+                    </Button>
+                    
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs font-semibold h-8 rounded-lg border-amber-500/20 bg-amber-500/5 text-amber-600 hover:bg-amber-500/10 hover:text-amber-700"
+                      onClick={() => {
+                        toast.info("Enter a custom grade in the score field below.");
+                      }}
+                    >
+                      Modify / Custom
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs font-semibold h-8 rounded-lg border-red-500/20 bg-red-500/5 text-red-600 hover:bg-red-500/10 hover:text-red-700"
+                      onClick={() => {
+                        setOverrideScore("");
+                        setFinalFeedback("");
+                        toast.info("Clearing suggestions. Custom grade expected.");
+                      }}
+                    >
+                      Reject AI
+                    </Button>
+
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-xs font-semibold h-8 rounded-lg border-blue-500/20 bg-blue-500/5 text-blue-600 hover:bg-blue-500/10 hover:text-blue-700"
+                      onClick={() => {
+                        if (currentSubmission.ai_feedback_draft) {
+                          setFinalFeedback(currentSubmission.ai_feedback_draft);
+                          toast.success("AI draft feedback approved and copied.");
+                        } else {
+                          toast.error("No AI feedback draft found to approve.");
+                        }
+                      }}
+                    >
+                      Approve Draft
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {!isAutoGraded && (
+                <div className="pt-4 border-t border-dashed border-border/40 space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+                      Lecturer Comments & Feedback
+                    </Label>
+                    <Textarea
+                      placeholder="Provide details on strengths, weaknesses, and improvement tips..."
+                      className="text-xs min-h-[90px] border-border/60 bg-background focus-visible:ring-1 transition-colors rounded-xl"
+                      value={finalFeedback}
+                      onChange={(e) => setFinalFeedback(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="relative">
+                        <Input
+                          type="number"
+                          value={overrideScore}
+                          onChange={(e) => setOverrideScore(e.target.value)}
+                          className="w-24 h-10 text-sm font-semibold text-center pr-7 border-border/60 bg-background rounded-lg"
+                        />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-semibold text-muted-foreground/60 select-none">
+                          pts
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground/75 font-medium">
+                        out of {currentQuestion?.marks || 10} Points Maximum
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3 pb-8 pt-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleSaveDecision(false)}
+                        disabled={isSaving}
+                        className="h-10 text-xs font-semibold rounded-xl border-border/60 hover:bg-muted/40 shadow-sm"
+                      >
+                        {isSaving ? <Loader2 className="size-4 animate-spin" /> : "Save Draft"}
+                      </Button>
+                      <Button
+                        onClick={() => handleSaveDecision(true)}
+                        disabled={isSaving}
+                        className="h-10 text-xs font-semibold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground shadow-md transition-all"
+                      >
+                        Confirm Evaluation
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {isAutoGraded && (
+                <div className="p-4 rounded-xl border border-border/50 bg-muted/10 flex items-center gap-3 text-xs text-muted-foreground">
+                  <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />
+                  <div>
+                    <span className="font-bold text-foreground">Auto-Graded Question</span>
+                    <p className="text-[11px] mt-0.5 leading-relaxed">
+                      This question type ({currentQuestion?.type || currentQuestion?.question_type}) is automatically scored by the system. No manual input is required. The score has already been applied.
+                    </p>
+                    {currentSubmission?.score !== null && (
+                      <p className="mt-1 font-semibold text-foreground/80">
+                        Recorded Score: <span className="text-emerald-600 font-bold">{currentSubmission?.score} / {currentQuestion?.marks} pts</span>
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Precision Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-border/40">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Grading Queue
+            Grading & Review Center
           </h1>
           <p className="text-sm text-muted-foreground">
-            {total} pending submission{total !== 1 ? "s" : ""} awaiting review and evaluation
+            {total} manual evaluation submission{total !== 1 ? "s" : ""} awaiting review
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -283,7 +1569,13 @@ export default function LecturerGradingQueue() {
             value="individuals"
             className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <User className="size-3.5 opacity-80" /> Individuals
+            <User className="size-3.5 opacity-80" /> Review Queue
+          </TabsTrigger>
+          <TabsTrigger
+            value="batch"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
+          >
+            <Layers className="size-3.5 opacity-80" /> Batch Grading
           </TabsTrigger>
           <TabsTrigger
             value="moderation"
@@ -295,234 +1587,686 @@ export default function LecturerGradingQueue() {
             value="release"
             className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <Send className="size-3.5 opacity-80" /> Release Results
+            <Send className="size-3.5 opacity-80" /> Result Release
+          </TabsTrigger>
+          <TabsTrigger
+            value="analytics"
+            className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
+          >
+            <TrendingUp className="size-3.5 opacity-80" /> Analytics
           </TabsTrigger>
           <TabsTrigger
             value="groups"
             className="text-xs font-medium px-4 py-2 rounded-lg gap-1.5 transition-all"
           >
-            <Users className="size-3.5 opacity-80" /> Group Submissions
+            <Users className="size-3.5 opacity-80" /> Groups
           </TabsTrigger>
         </TabsList>
 
         <TabsContent value="individuals" className="mt-4 space-y-4">
-          {/* Compact Filter Bar */}
-          <div className="bg-card/30 border border-border/50 rounded-xl p-2.5 flex flex-wrap items-center gap-2.5 backdrop-blur-sm shadow-none">
-            <div className="relative flex-1 min-w-[200px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
-              <Input
-                placeholder="Search students, assessments..."
-                className="pl-9 h-9 text-xs border-border/60 bg-background/50 hover:bg-background/85 transition-all rounded-lg focus-visible:ring-1"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+          {/* Breadcrumbs */}
+          {(selectedWorkspace || selectedAssessment || selectedClass) && (
+            <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground mb-4">
+              <button onClick={handleBackToWorkspaces} className="hover:text-primary transition-colors flex items-center gap-1">
+                <School className="size-3.5" /> Workspaces
+              </button>
+              {selectedWorkspace && (
+                <>
+                  <ChevronRight className="size-3" />
+                  <button onClick={handleBackToAssessments} className="hover:text-primary transition-colors">{selectedWorkspace.title}</button>
+                </>
+              )}
+              {selectedAssessment && (
+                <>
+                  <ChevronRight className="size-3" />
+                  <button onClick={handleBackToClasses} className="hover:text-primary transition-colors">{selectedAssessment.title}</button>
+                </>
+              )}
+              {selectedClass && (
+                <>
+                  <ChevronRight className="size-3" />
+                  <span className="text-foreground font-semibold">{selectedClass.class_name}</span>
+                </>
+              )}
             </div>
+          )}
 
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={assessmentId} onValueChange={setAssessmentId}>
-                <SelectTrigger className="w-[170px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
-                  <SelectValue placeholder="Assessment" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Assessments</SelectItem>
-                  {assessments.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.title}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={classSectionId} onValueChange={setClassSectionId}>
-                <SelectTrigger className="w-[140px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
-                  <SelectValue placeholder="Section" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Sections</SelectItem>
-                  {workspaces.map((ws) => (
-                    <SelectItem key={ws.id} value={ws.id}>{ws.class_name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select value={questionType} onValueChange={setQuestionType}>
-                <SelectTrigger className="w-[120px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
-                  <SelectValue placeholder="Q-Type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Types</SelectItem>
-                  <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
-                  <SelectItem value="ESSAY">Essay</SelectItem>
-                  <SelectItem value="CASE_STUDY">Case Study</SelectItem>
-                </SelectContent>
-              </Select>
-
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-[130px] h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/85 transition-colors">
-                  <div className="flex items-center gap-1.5">
-                    <ArrowUpDown className="size-3.5 opacity-60" />
-                    <span>Sort</span>
-                  </div>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="date_asc">Oldest First</SelectItem>
-                  <SelectItem value="date_desc">Newest First</SelectItem>
-                  <SelectItem value="ai_confidence">AI Confidence</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
-            <Table>
-              <TableHeader className="bg-muted/15 border-b border-border/40">
-                <TableRow className="h-10 hover:bg-transparent border-none">
-                  <TableHead className="text-xs font-semibold px-4 text-muted-foreground">
-                    Student
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground">
-                    Assessment Context
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground">
-                    Question Trace
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground">
-                    Status
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground">
-                    Integrity Risk
-                  </TableHead>
-                  <TableHead className="text-right text-xs font-semibold pr-4 text-muted-foreground">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  Array.from({ length: 10 }).map((_, i) => (
-                    <TableRow key={i} className="h-12 border-border/10">
-                      <TableCell colSpan={6} className="px-4">
-                        <Skeleton className="h-5 w-full rounded" />
-                      </TableCell>
-                    </TableRow>
-                  ))
-                ) : data.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={6}
-                      className="h-44 text-center text-sm font-medium text-muted-foreground"
-                    >
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <Users className="size-8 opacity-20" />
-                        <p>Grading queue is empty. No submissions require manual review.</p>
-                      </div>
-                    </TableCell>
+          {!selectedWorkspace ? (
+            <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none animate-in fade-in duration-300">
+              <Table>
+                <TableHeader className="bg-muted/15 border-b border-border/40">
+                  <TableRow className="h-10 hover:bg-transparent border-none">
+                    <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">Institution</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Teaching Workspace</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Class Section</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Students</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Avg Perf.</TableHead>
+                    <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">Actions</TableHead>
                   </TableRow>
-                ) : (
-                  data.map((item) => (
-                    <TableRow
-                      key={item.id}
-                      className="group hover:bg-primary/5 h-12 border-border/10 transition-all duration-200"
+                </TableHeader>
+                <TableBody>
+                  {workspaces.map((ws: WorkspaceListItem) => (
+                    <TableRow 
+                      key={ws.id} 
+                      className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
+                      onClick={() => setSelectedWorkspace(ws)}
                     >
-                      <TableCell className="px-4 py-2">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-semibold text-foreground/90 group-hover:text-primary transition-colors">
-                            {item.student_name}
-                          </span>
-                          <span className="text-[11px] text-muted-foreground/60">
-                            {item.class_section_name || "Global Course"}
-                          </span>
-                        </div>
+                      <TableCell className="px-6 py-2">
+                        <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20">
+                          {ws.institution_name}
+                        </Badge>
                       </TableCell>
                       <TableCell className="py-2">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium text-foreground/85 line-clamp-1">
-                            {item.assessment_title}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground/55 flex items-center gap-1">
-                            <Clock className="size-3 opacity-60" />
-                            {item.submitted_at
-                              ? formatDistanceToNow(
-                                  new Date(item.submitted_at),
-                                  { addSuffix: true },
-                                )
-                              : "N/A"}
-                          </span>
-                        </div>
+                        <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{ws.title}</span>
                       </TableCell>
-                      <TableCell className="py-2">
-                        <div className="flex flex-col">
-                          <span className="text-sm font-medium text-foreground/80 line-clamp-1">
-                            {item.question_title}
-                          </span>
-                          <span className="text-[10px] font-semibold text-primary/70 capitalize">
-                            {item.question_type?.replace("_", " ").toLowerCase()}
-                          </span>
-                        </div>
+                      <TableCell className="py-2 text-xs font-medium text-muted-foreground/80">{ws.class_name}</TableCell>
+                      <TableCell className="py-2 text-center">
+                        <span className="text-xs font-bold text-foreground/70 flex items-center justify-center gap-1.5">
+                          <Users className="size-3.5 opacity-50" /> {ws.student_count}
+                        </span>
                       </TableCell>
-                      <TableCell className="py-2">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] px-2.5 py-0.5 rounded-full capitalize font-semibold shadow-none border",
-                              item.status === "AI_SUGGESTED"
-                                ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
-                                : "bg-amber-500/10 text-amber-600 border-amber-500/20",
-                            )}
-                          >
-                            <span className={cn(
-                              "size-1.5 rounded-full mr-1.5 inline-block",
-                              item.status === "AI_SUGGESTED" ? "bg-blue-500 animate-pulse" : "bg-amber-500"
-                            )} />
-                            {item.status.replace("_", " ").toLowerCase()}
-                          </Badge>
-                          {item.ai_confidence !== null && (
-                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground/60">
-                              <BrainCircuit className="size-3" />
-                              <span className="font-semibold tabular-nums">
-                                {Math.round(item.ai_confidence * 100)}%
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-2">
-                        <div className="flex items-center gap-2">
-                          <div className="w-12 h-1.5 bg-muted rounded-full overflow-hidden shrink-0 border border-border/20">
-                            <div
-                              className={cn(
-                                "h-full rounded-full transition-all",
-                                item.integrity_risk_score > 70
-                                  ? "bg-red-500"
-                                  : item.integrity_risk_score > 30
-                                    ? "bg-amber-500"
-                                    : "bg-emerald-500",
-                              )}
-                              style={{
-                                width: `${item.integrity_risk_score || 0}%`,
-                              }}
-                            />
+                      <TableCell className="py-2 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="text-xs font-bold text-foreground/80">{ws.performance_avg}%</span>
+                          <div className="w-16 h-1 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500" style={{ width: `${ws.performance_avg}%` }} />
                           </div>
-                          <span className="text-xs font-semibold tabular-nums text-muted-foreground/80">
-                            {item.integrity_risk_score || 0}%
-                          </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-right pr-4 py-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 px-3 text-xs font-medium rounded-lg border-border/60 hover:bg-primary hover:text-primary-foreground hover:border-primary active:scale-95 transition-all duration-300 h-8"
-                          onClick={() => handleOpenReview(item)}
-                        >
-                          Grade
+                      <TableCell className="text-right pr-6 py-2">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                          <ChevronRight className="size-4" />
                         </Button>
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
+                  ))}
+                  {workspaces.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-44 text-center text-sm font-medium text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center gap-3">
+                          <School className="size-8 opacity-20" />
+                          <p>No active workspaces found for your account.</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          ) : !selectedAssessment ? (
+            <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none animate-in fade-in duration-300">
+              <Table>
+                <TableHeader className="bg-muted/15 border-b border-border/40">
+                  <TableRow className="h-10 hover:bg-transparent border-none">
+                    <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">Type</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Assessment Title</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Marks</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">Grading Mode</TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Deadline</TableHead>
+                    <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {assessments.map((asmt: AssessmentSummary) => (
+                    <TableRow 
+                      key={asmt.id} 
+                      className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
+                      onClick={() => {
+                        setSelectedAssessment(asmt);
+                        fetchClassStats(asmt.id);
+                      }}
+                    >
+                      <TableCell className="px-6 py-2">
+                        <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-wider bg-indigo-500/5 text-indigo-600 border-indigo-500/20">
+                          {asmt.assessment_type.replace("_", " ")}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{asmt.title}</span>
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <span className="text-xs font-bold text-foreground/70">{asmt.total_marks} Pts</span>
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <Badge variant="outline" className="text-[9px] font-bold uppercase bg-muted/10 text-muted-foreground border-border/50">
+                          {asmt.grading_mode}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1.5 font-medium">
+                          <Calendar className="size-3.5 opacity-60" />
+                          {asmt.window_end ? formatDistanceToNow(new Date(asmt.window_end), { addSuffix: true }) : "No deadline"}
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-right pr-6 py-2">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity">
+                          <ChevronRight className="size-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {assessments.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-44 text-center text-sm font-medium text-muted-foreground">
+                        <div className="flex flex-col items-center justify-center gap-3">
+                          <FolderOpen className="size-8 opacity-20" />
+                          <p>No assessments found in this workspace.</p>
+                          <Button variant="link" size="sm" onClick={handleBackToWorkspaces}>Back to Workspaces</Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+          ) : !selectedClass ? (
+            <div className="space-y-6">
+              {/* Class Overview Metrics */}
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { label: "Total Students", value: classStats.reduce((acc, c) => acc + c.total_students, 0), icon: Users, color: "text-blue-600" },
+                  { label: "Submitted", value: classStats.reduce((acc, c) => acc + c.submitted_count, 0), icon: CheckCircle2, color: "text-indigo-600" },
+                  { label: "Not Submitted", value: classStats.reduce((acc, c) => acc + c.not_submitted_count, 0), icon: AlertTriangle, color: "text-amber-600" },
+                  { label: "Pending Review", value: classStats.reduce((acc, c) => acc + c.pending_review_count, 0), icon: Clock, color: "text-rose-600" },
+                  { label: "Reviewed", value: classStats.reduce((acc, c) => acc + c.reviewed_count, 0), icon: Check, color: "text-emerald-600" },
+                  { label: "Released", value: classStats.reduce((acc, c) => acc + c.released_count, 0), icon: Send, color: "text-primary" },
+                ].map((stat, i) => (
+                  <Card key={i} className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50">
+                    <CardContent className="p-4 space-y-1">
+                      <div className="flex items-center justify-between">
+                        <stat.icon className={cn("size-4 opacity-70", stat.color)} />
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/60">{stat.label}</span>
+                      </div>
+                      <p className="text-2xl font-bold tracking-tight">{stat.value}</p>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              {/* Classes Table */}
+              <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
+                <Table>
+                  <TableHeader className="bg-muted/15 border-b border-border/40">
+                    <TableRow className="h-10 hover:bg-transparent border-none">
+                      <TableHead className="text-xs font-semibold px-4 text-muted-foreground">Class Name</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Teaching Workspace</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Submissions</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Pending Review</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Reviewed</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Released</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground">Latest Submission</TableHead>
+                      <TableHead className="text-right text-xs font-semibold pr-4 text-muted-foreground">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      Array.from({ length: 3 }).map((_, i) => (
+                        <TableRow key={i} className="h-14 border-border/10">
+                          <TableCell colSpan={8} className="px-4"><Skeleton className="h-5 w-full rounded" /></TableCell>
+                        </TableRow>
+                      ))
+                    ) : classStats.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={8} className="h-44 text-center text-sm font-medium text-muted-foreground">
+                          No classes assigned to this assessment.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      classStats.map((c: ClassStatRecord) => (
+                        <TableRow key={c.class_id} className="group hover:bg-primary/5 h-14 border-border/10 transition-all duration-200">
+                          <TableCell className="px-4 py-2">
+                            <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{c.class_name}</span>
+                          </TableCell>
+                          <TableCell className="py-2 text-xs text-muted-foreground font-medium">{c.workspace_title}</TableCell>
+                          <TableCell className="py-2">
+                            <div className="flex flex-col">
+                              <span className="text-xs font-bold text-foreground/80">{c.submitted_count} / {c.total_students}</span>
+                              <div className="w-20 h-1 bg-muted rounded-full mt-1 overflow-hidden">
+                                <div className="h-full bg-indigo-500" style={{ width: `${(c.submitted_count / c.total_students) * 100}%` }} />
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <Badge variant="outline" className="text-[10px] font-bold bg-rose-500/5 text-rose-600 border-rose-500/20">
+                              {c.pending_review_count} Pending
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <Badge variant="outline" className="text-[10px] font-bold bg-emerald-500/5 text-emerald-600 border-emerald-500/20">
+                              {c.reviewed_count} Done
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <Badge variant="outline" className="text-[10px] font-bold bg-primary/5 text-primary border-primary/20">
+                              {c.released_count} Released
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1.5 font-medium">
+                              <Clock className="size-3.5 opacity-60" />
+                              {c.latest_submission_at ? formatDistanceToNow(new Date(c.latest_submission_at), { addSuffix: true }) : "N/A"}
+                            </span>
+                          </TableCell>
+                          <TableCell className="text-right pr-4 py-2">
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="h-8 px-3 text-xs font-bold rounded-lg border-border/60 hover:bg-primary hover:text-primary-foreground transition-all"
+                              onClick={() => {
+                                setSelectedClass(c);
+                                fetchSubmissions();
+                                fetchClassAiSummary(selectedAssessment.id, c.class_id);
+                              }}
+                            >
+                              Open Class
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Class AI Summary Header */}
+              {classAiSummary && (
+                <Card className="border-primary/20 bg-primary/[0.02] shadow-none overflow-hidden animate-in fade-in slide-in-from-top-4">
+                  <CardHeader className="py-4 px-6 border-b border-primary/10 flex flex-row items-center justify-between bg-primary/[0.03]">
+                    <div className="flex items-center gap-2">
+                      <BrainCircuit className="size-5 text-primary" />
+                      <div>
+                        <CardTitle className="text-sm font-bold text-primary uppercase tracking-wider">AI Pedagogical Insights Summary</CardTitle>
+                        <CardDescription className="text-[10px] font-medium text-primary/70">Generated at {new Date(classAiSummary.ai_generated_at).toLocaleString()}</CardDescription>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-primary/60 uppercase tracking-widest">Avg Score</p>
+                        <p className="text-xl font-bold text-primary tracking-tight">{classAiSummary.average_score}%</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-[10px] font-bold text-primary/60 uppercase tracking-widest">Pass Rate</p>
+                        <p className="text-xl font-bold text-primary tracking-tight">{classAiSummary.pass_rate}%</p>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="p-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-emerald-600 uppercase tracking-wider">
+                          <CheckCircle2 className="size-4" /> Strong Topics
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {classAiSummary.strong_topics.map((topic: string, i: number) => (
+                            <Badge key={i} variant="outline" className="bg-emerald-500/5 text-emerald-700 border-emerald-500/20 text-[10px] font-semibold">{topic}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-rose-600 uppercase tracking-wider">
+                          <AlertTriangle className="size-4" /> Weak Topics
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {classAiSummary.weak_topics.map((topic: string, i: number) => (
+                            <Badge key={i} variant="outline" className="bg-rose-500/5 text-rose-700 border-rose-500/20 text-[10px] font-semibold">{topic}</Badge>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs font-bold text-primary uppercase tracking-wider">
+                          <Users className="size-4" /> Attention Required
+                        </div>
+                        <ul className="space-y-2">
+                          {classAiSummary.students_needing_attention.map((s: { name: string; reason: string }, i: number) => (
+                            <li key={i} className="text-[11px] font-medium flex items-start gap-2 text-foreground/80">
+                              <span className="size-1.5 rounded-full bg-primary mt-1 shrink-0" />
+                              <span><span className="font-bold text-foreground">{s.name}</span>: {s.reason}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                    {classAiSummary.common_mistakes?.length > 0 && (
+                      <div className="mt-6 pt-6 border-t border-primary/10">
+                        <h4 className="text-xs font-bold text-primary uppercase tracking-wider mb-3">Common Analytical Omissions</h4>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {classAiSummary.common_mistakes.map((mistake: string, i: number) => (
+                            <div key={i} className="flex items-center gap-3 p-3 rounded-xl bg-background border border-primary/10 text-[11px] font-medium text-foreground/90">
+                              <span className="flex items-center justify-center size-5 rounded-full bg-primary/10 text-primary font-bold">{i+1}</span>
+                              {mistake}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Batch Actions Panel */}
+              <div className="bg-card/30 border border-border/50 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4 backdrop-blur-sm">
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="relative w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
+                    <Input
+                      placeholder="Search students..."
+                      className="pl-9 h-9 text-xs border-border/60 bg-background/50 focus-visible:ring-1 rounded-lg"
+                      value={search}
+                      onChange={(e) => setSearch(e.target.value)}
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 bg-background/50 border border-border/60 rounded-lg px-3 h-9">
+                    <BrainCircuit className="size-3.5 text-blue-600" />
+                    <span className="text-[10px] font-bold uppercase text-muted-foreground whitespace-nowrap">Min Confidence:</span>
+                    <Select value={confidenceThreshold.toString()} onValueChange={(v) => setConfidenceThreshold(parseInt(v))}>
+                      <SelectTrigger className="w-[80px] h-7 text-[10px] border-none bg-transparent font-bold">
+                        <SelectValue placeholder="All" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">All</SelectItem>
+                        <SelectItem value="50">50%+</SelectItem>
+                        <SelectItem value="70">70%+</SelectItem>
+                        <SelectItem value="80">80%+</SelectItem>
+                        <SelectItem value="90">90%+</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <Select value={status} onValueChange={setStatus}>
+                    <SelectTrigger className="w-[130px] h-9 text-xs rounded-lg border-border/60 bg-background/50">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="PENDING">Pending Review</SelectItem>
+                      <SelectItem value="AI_SUGGESTED">AI Reviewed</SelectItem>
+                      <SelectItem value="COMPLETED">Lecturer Reviewed</SelectItem>
+                      <SelectItem value="UNDER_REVIEW">Under Review</SelectItem>
+                      <SelectItem value="PENDING_RELEASE">Pending Release</SelectItem>
+                      <SelectItem value="RELEASED">Released</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={sortBy} onValueChange={setSortBy}>
+                    <SelectTrigger className="w-[130px] h-9 text-xs rounded-lg border-border/60 bg-background/50">
+                      <div className="flex items-center gap-1.5">
+                        <ArrowUpDown className="size-3.5 opacity-60" />
+                        <span>Sort</span>
+                      </div>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="date_asc">Oldest First</SelectItem>
+                      <SelectItem value="date_desc">Newest First</SelectItem>
+                      <SelectItem value="ai_confidence">AI Confidence</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-9 text-xs font-bold border-indigo-500/20 bg-indigo-500/5 text-indigo-600 hover:bg-indigo-500/10 rounded-lg"
+                    onClick={handleAcceptAllAi}
+                    disabled={isSaving}
+                  >
+                    {isSaving ? <Loader2 className="size-3 animate-spin mr-2" /> : <CheckCircle2 className="size-3 mr-2" />}
+                    Accept AI ({confidenceThreshold > 0 ? `${confidenceThreshold}%+` : "All"})
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    className="h-9 text-xs font-bold border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 rounded-lg"
+                    onClick={() => setActiveTab("release")}
+                  >
+                    <Send className="size-3 mr-2" /> Result Release
+                  </Button>
+                </div>
+              </div>
+
+              {/* Student Table */}
+              <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none animate-in fade-in duration-300">
+                <Table>
+                  <TableHeader className="bg-muted/15 border-b border-border/40">
+                    <TableRow className="h-10 hover:bg-transparent border-none">
+                      <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">Student Name</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Submission Time</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Status</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">AI Status</TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Review Status</TableHead>
+                      <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {loading ? (
+                      Array.from({ length: 5 }).map((_, i) => (
+                        <TableRow key={i} className="h-14 border-border/10">
+                          <TableCell colSpan={6} className="px-6"><Skeleton className="h-5 w-full rounded" /></TableCell>
+                        </TableRow>
+                      ))
+                    ) : filteredData.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={6} className="h-44 text-center text-sm font-medium text-muted-foreground">
+                          No submissions match current filters.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      filteredData.map((item: GradingQueueItem) => {
+                        // Determine Overall Status for Column 3
+                        let overallStatus = "Pending";
+                        if (item.status === "RELEASED") overallStatus = "Released";
+                        else if (item.status === "PENDING_RELEASE") overallStatus = "Pending Release";
+                        else if (item.status === "UNDER_REVIEW") overallStatus = "Under Review";
+                        else if (item.status === "COMPLETED") overallStatus = "Lecturer Reviewed";
+                        else if (item.status === "AI_SUGGESTED") overallStatus = "AI Reviewed";
+
+                        return (
+                          <TableRow 
+                            key={item.id} 
+                            className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
+                            onClick={() => handleOpenReview(item)}
+                          >
+                            <TableCell className="px-6 py-2">
+                              <div className="flex flex-col">
+                                <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">{item.student_name}</span>
+                                <span className="text-[10px] text-muted-foreground/60 font-medium tracking-tight">ID: {item.student_id?.substring(0, 8)}</span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <span className="text-[11px] text-muted-foreground/80 flex items-center gap-1.5 font-semibold">
+                                <Clock className="size-3.5 opacity-60" />
+                                {item.submitted_at ? formatDistanceToNow(new Date(item.submitted_at), { addSuffix: true }) : "N/A"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] px-2.5 py-0.5 rounded-full capitalize font-bold border shadow-none",
+                                  overallStatus === "Released" ? "bg-primary/5 text-primary border-primary/20" :
+                                  overallStatus === "Pending Release" ? "bg-indigo-500/5 text-indigo-600 border-indigo-500/20" :
+                                  overallStatus === "Under Review" ? "bg-violet-500/5 text-violet-600 border-violet-500/20" :
+                                  overallStatus === "Lecturer Reviewed" ? "bg-emerald-500/5 text-emerald-600 border-emerald-500/20" :
+                                  overallStatus === "AI Reviewed" ? "bg-blue-500/5 text-blue-600 border-blue-500/20" :
+                                  "bg-amber-500/5 text-amber-600 border-amber-500/20"
+                                )}
+                              >
+                                {overallStatus}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-2">
+                              {item.status === "AI_SUGGESTED" ? (
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className="text-[9px] font-bold bg-blue-500/5 text-blue-600 border-blue-500/10">
+                                    AI SUGGESTED
+                                  </Badge>
+                                  <span className="text-[10px] font-bold text-blue-600/70">{Math.round((item.ai_confidence || 0) * 100)}% Confidence</span>
+                                </div>
+                              ) : (
+                                <span className="text-[10px] font-bold text-muted-foreground/40 italic">Not Assisted</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2">
+                              <div className="flex items-center gap-1.5">
+                                <div className={cn(
+                                  "size-1.5 rounded-full",
+                                  item.status === "COMPLETED" || item.status === "RELEASED" ? "bg-emerald-500" : "bg-amber-500 animate-pulse"
+                                )} />
+                                <span className="text-[11px] font-bold text-foreground/80 lowercase first-letter:uppercase">
+                                  {item.status === "COMPLETED" || item.status === "RELEASED" ? "Finalized" : "Pending Confirmation"}
+                                </span>
+                              </div>
+                            </TableCell>
+                            <TableCell className="text-right pr-6 py-2">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="h-8 px-4 text-[10px] font-bold rounded-lg border-border/60 group-hover:bg-primary group-hover:text-primary-foreground group-hover:border-primary transition-all uppercase tracking-widest"
+                              >
+                                Grade
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {(hasMore || currentPage > 1) && (
+                <div className="flex items-center justify-between px-2 pt-3">
+                  <span className="text-xs text-muted-foreground font-medium">
+                    Showing page {currentPage} · {filteredData.length} of {total} submissions
+                  </span>
+                  <div className="flex gap-2">
+                    {currentPage > 1 && (
+                      <Button variant="outline" size="sm" className="h-8 text-xs rounded-lg"
+                        onClick={() => setCurrentPage(p => p - 1)}>
+                        Previous
+                      </Button>
+                    )}
+                    {hasMore && (
+                      <Button variant="outline" size="sm" className="h-8 text-xs rounded-lg"
+                        onClick={() => setCurrentPage(p => p + 1)}>
+                        Load More
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="batch" className="mt-4 space-y-4">
+          <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
+            <CardHeader className="p-4 border-b border-border/30 bg-muted/10 flex flex-col sm:flex-row items-start sm:items-center gap-4 space-y-0">
+              <div className="flex-1 w-full space-y-1.5">
+                <Label className="text-xs font-semibold text-muted-foreground/80">
+                  Select Question to Batch Grade
+                </Label>
+                <Select
+                  value={selectedBatchQuestionTitle}
+                  onValueChange={setSelectedBatchQuestionTitle}
+                >
+                  <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                    <SelectValue placeholder="Choose question..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Select Question...</SelectItem>
+                    {Object.keys(groupedBatchQuestions).map((title, idx) => (
+                      <SelectItem key={idx} value={title}>
+                        Q: {title.substring(0, 60)}...
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </CardHeader>
+            <CardContent className="p-5">
+              {selectedBatchQuestionTitle === "all" ? (
+                <div className="py-20 text-center text-sm font-medium text-muted-foreground">
+                  <p className="italic">Select a question node to grade all student responses side-by-side.</p>
+                </div>
+              ) : (
+                <div className="space-y-6">
+                  <div className="p-4 rounded-xl border border-primary/20 bg-primary/5">
+                    <span className="block text-xs font-bold text-primary uppercase tracking-wider mb-1">Batch Question prompt</span>
+                    <p className="text-sm font-semibold">{selectedBatchQuestionTitle}</p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {groupedBatchQuestions[selectedBatchQuestionTitle]?.map((item: GradingQueueItem) => (
+                      <Card key={item.response_id} className="border border-border/50 bg-background/50">
+                        <CardHeader className="py-3 px-4 border-b bg-muted/5 flex flex-row items-center justify-between">
+                          <div>
+                            <p className="text-xs font-bold text-foreground">{item.student_name}</p>
+                            <p className="text-[10px] text-muted-foreground">Risk Score: {item.integrity_risk_score}%</p>
+                          </div>
+                          <Badge variant="outline" className="text-[10px] capitalize bg-amber-500/5 text-amber-600 border-amber-500/10">
+                            {item.status.replace("_", " ").toLowerCase()}
+                          </Badge>
+                        </CardHeader>
+                        <CardContent className="p-4 space-y-4">
+                          <div className="space-y-1">
+                            <p className="text-[10px] uppercase font-bold text-muted-foreground">Response</p>
+                            <div className="text-xs p-3 bg-background border rounded-lg whitespace-pre-wrap leading-relaxed min-h-[80px]">
+                              {item.student_answer || <span className="italic text-muted-foreground">No response.</span>}
+                            </div>
+                          </div>
+
+                          {item.ai_suggested_score !== null && (
+                            <div className="p-2.5 bg-primary/5 rounded-lg border border-primary/10 flex justify-between items-center text-xs">
+                              <span className="font-semibold text-primary">AI Suggestion: {item.ai_suggested_score} pts (Confidence: {Math.round((item.ai_confidence || 0) * 100)}%)</span>
+                              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleBatchApplyAi(item.response_id, item.ai_suggested_score!)}>Use Suggestion</Button>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-3 gap-3 items-end">
+                            <div className="space-y-1">
+                              <Label className="text-[10px] uppercase font-bold text-muted-foreground">Score</Label>
+                              <Input
+                                type="number"
+                                value={getBatchItem(item.response_id).score}
+                                onChange={(e) => setBatchItem(item.response_id, "score", e.target.value)}
+                                className="h-8 text-xs font-bold"
+                                placeholder="Score"
+                              />
+                            </div>
+                            <div className="col-span-2 space-y-1">
+                              <Label className="text-[10px] uppercase font-bold text-muted-foreground">Feedback</Label>
+                              <Input
+                                value={getBatchItem(item.response_id).feedback}
+                                onChange={(e) => setBatchItem(item.response_id, "feedback", e.target.value)}
+                                className="h-8 text-xs"
+                                placeholder="Feedback comments..."
+                              />
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end pt-1">
+                            <Button
+                              size="sm"
+                              onClick={async () => {
+                                const item_state = getBatchItem(item.response_id);
+                                await handleSaveBatchGrade(item.response_id, item_state.score, item_state.feedback);
+                              }}
+                              className="h-8 text-xs font-semibold"
+                            >
+                              Confirm Grade
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="moderation" className="mt-4">
@@ -559,14 +2303,14 @@ export default function LecturerGradingQueue() {
                   >
                     <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
                       <SelectValue placeholder="Choose question..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {questions.map((q, idx) => (
-                        <SelectItem key={q.id} value={q.id}>
-                          Q{idx + 1}: {q.title || q.content?.substring(0, 45)}...
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {questions.map((q: QuestionSummary, idx: number) => (
+                          <SelectItem key={q.id} value={q.question_id || q.id}>
+                            Q{idx + 1}: {q.question?.title || q.question?.content?.substring(0, 45)}...
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
                   </Select>
                 </div>
               )}
@@ -594,7 +2338,7 @@ export default function LecturerGradingQueue() {
                   <SelectValue placeholder="Choose assessment..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {assessments.map((a) => (
+                  {assessments.map((a: AssessmentSummary) => (
                     <SelectItem key={a.id} value={a.id}>
                       {a.title}
                     </SelectItem>
@@ -602,15 +2346,226 @@ export default function LecturerGradingQueue() {
                 </SelectContent>
               </Select>
             </CardHeader>
-            <CardContent className="p-5">
+            <CardContent className="p-5 space-y-6">
               {assessmentId === "all" ? (
                 <div className="py-20 text-center text-sm font-medium text-muted-foreground">
                   <p className="italic">Awaiting release context selection.</p>
                 </div>
               ) : (
-                <ResultReleasePanel assessmentId={assessmentId} />
+                <div className="space-y-6">
+                  {/* Validation checklist */}
+                  <div className="p-4 border rounded-xl bg-background space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <Scale className="size-4 text-primary" /> Result Release Validation Audit
+                    </h4>
+
+                    {releaseValidation.errors.length > 0 ? (
+                      <div className="space-y-2">
+                        <div className="p-3 bg-red-500/10 border border-red-500/15 rounded-xl flex items-start gap-2.5 text-red-700">
+                          <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                          <div className="space-y-1 text-xs">
+                            <p className="font-bold">Validation Errors Detected</p>
+                            <ul className="list-disc pl-4 space-y-1">
+                              {releaseValidation.errors.map((err: string, i: number) => (
+                                <li key={i}>{err}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-emerald-500/10 border border-emerald-500/15 rounded-xl flex items-center gap-2.5 text-emerald-700 text-xs font-bold">
+                        <CheckCircle2 className="size-4 shrink-0" />
+                        All validations passed! Ready for final released state.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Release settings policy form */}
+                  <div className="p-4 border rounded-xl bg-background space-y-4">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">Release Configuration</h4>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs font-semibold text-muted-foreground">Release Policy</Label>
+                        <Select value={releasePolicy} onValueChange={(val: "immediate" | "scheduled" | "hold") => setReleasePolicy(val)}>
+                          <SelectTrigger className="h-9 text-xs rounded-lg">
+                            <SelectValue placeholder="Policy" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="immediate">Release Immediately</SelectItem>
+                            <SelectItem value="scheduled">Release On Specific Date</SelectItem>
+                            <SelectItem value="hold">Hold Results</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {releasePolicy === "scheduled" && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-semibold text-muted-foreground">Scheduled Date</Label>
+                          <Input
+                            type="datetime-local"
+                            value={releaseDate}
+                            onChange={(e) => setReleaseDate(e.target.value)}
+                            className="h-9 text-xs rounded-lg"
+                          />
+                        </div>
+                      )}
+
+                      <div className="flex items-end">
+                        <Button
+                          onClick={() => handleSaveReleasePolicy(assessmentId)}
+                          className="w-full h-9 text-xs font-semibold rounded-lg"
+                        >
+                          Save Release Policy
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {releasePolicy === "immediate" && releaseValidation.valid && (
+                    <div className="p-4 border border-emerald-500/20 bg-emerald-500/5 rounded-xl flex items-center justify-between gap-4">
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">Ready to Release</p>
+                        <p className="text-[11px] text-emerald-700/80">
+                          All validations passed. Click to immediately publish results to students.
+                        </p>
+                      </div>
+                      <Button
+                        className="h-9 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
+                        onClick={() => handleTriggerImmediateRelease(assessmentId)}
+                        disabled={isSaving}
+                      >
+                        {isSaving ? <Loader2 className="size-4 animate-spin" /> : <><Unlock className="size-3.5 mr-1.5" /> Release Results Now</>}
+                      </Button>
+                    </div>
+                  )}
+
+                  {releasePolicy === "immediate" && !releaseValidation.valid && (
+                    <div className="p-4 border border-red-500/20 bg-red-500/5 rounded-xl text-xs text-red-700 font-semibold">
+                      Cannot release: resolve all validation errors above before triggering release.
+                    </div>
+                  )}
+
+                  <ResultReleasePanel assessmentId={assessmentId} />
+                </div>
               )}
             </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics" className="mt-4">
+          <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm p-6 space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <BarChart className="size-5 text-primary" />
+                <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Class Performance Analytics</h3>
+              </div>
+              {selectedAssessment && (
+                <Badge variant="outline" className="text-[10px] font-bold uppercase tracking-widest bg-primary/5 text-primary border-primary/20">
+                  {selectedAssessment.title}
+                </Badge>
+              )}
+            </div>
+
+            {!selectedAssessment ? (
+              <div className="py-20 text-center space-y-3 bg-muted/10 border border-dashed rounded-xl">
+                <BarChart className="size-10 text-muted-foreground/30 mx-auto" />
+                <p className="text-sm font-medium text-muted-foreground">Select an assessment to view deep pedagogical analytics.</p>
+              </div>
+            ) : analyticsLoading ? (
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <Skeleton className="h-64 w-full rounded-xl" />
+                  <Skeleton className="h-64 w-full rounded-xl" />
+                </div>
+              </div>
+            ) : !analyticsData ? (
+              <div className="py-20 text-center text-sm font-medium text-muted-foreground italic">
+                No analytics data available for this assessment.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 animate-in fade-in duration-500">
+                  {[
+                    { label: "Class Average Score", value: `${analyticsData.class_average}%`, icon: TrendingUp, color: "text-primary" },
+                    { label: "Highest Evaluation", value: `${analyticsData.highest_score}%`, icon: CheckCircle2, color: "text-emerald-600" },
+                    { label: "Lowest Evaluation", value: `${analyticsData.lowest_score}%`, icon: AlertTriangle, color: "text-rose-600" },
+                    { label: "Evaluation Pass Rate", value: `${analyticsData.pass_rate}%`, icon: Check, color: "text-indigo-600" },
+                  ].map((stat, i) => (
+                    <div key={i} className="p-4 border border-border/50 rounded-xl bg-background/50 space-y-1 shadow-sm">
+                      <div className="flex items-center justify-between opacity-60">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">{stat.label}</span>
+                        <stat.icon className={cn("size-3.5", stat.color)} />
+                      </div>
+                      <p className={cn("text-2xl font-bold tracking-tight", stat.color)}>{stat.value}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                  {/* Question Difficulty analysis */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Question Difficulty Trace</h4>
+                    <div className="border border-border/50 rounded-xl overflow-hidden bg-background shadow-sm">
+                      <Table>
+                        <TableHeader className="bg-muted/15 border-b border-border/40">
+                          <TableRow className="h-9 hover:bg-transparent">
+                            <TableHead className="text-[10px] font-bold uppercase pl-4">Question</TableHead>
+                            <TableHead className="text-[10px] font-bold uppercase">Type</TableHead>
+                            <TableHead className="text-[10px] font-bold uppercase">Avg Score</TableHead>
+                            <TableHead className="text-[10px] font-bold uppercase text-right pr-4">Difficulty</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="text-xs">
+                          {analyticsData.question_difficulty.map((q, i) => (
+                            <TableRow key={i} className="h-10 hover:bg-muted/5 transition-colors border-border/10">
+                              <TableCell className="font-bold pl-4 max-w-[200px] truncate">{q.question_title}</TableCell>
+                              <TableCell className="capitalize text-muted-foreground/80 font-medium">{q.question_type.replace("_", " ").toLowerCase()}</TableCell>
+                              <TableCell className="font-bold text-foreground/70">{q.average_score} / {q.max_score}</TableCell>
+                              <TableCell className="text-right pr-4">
+                                <Badge variant="outline" className={cn(
+                                  "text-[9px] font-bold px-2 py-0 h-5",
+                                  q.difficulty === "Easy" ? "bg-emerald-500/5 text-emerald-600 border-emerald-500/20" :
+                                  q.difficulty === "Medium" ? "bg-amber-500/5 text-amber-600 border-amber-500/20" :
+                                  "bg-rose-500/5 text-rose-600 border-rose-500/20"
+                                )}>
+                                  {q.difficulty}
+                                </Badge>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  {/* Narrative Summaries */}
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">AI Performance Summary</h4>
+                    <div className="p-5 rounded-xl border border-primary/20 bg-primary/[0.02] space-y-3 text-xs leading-relaxed text-foreground/80 shadow-sm">
+                      <div className="flex items-center gap-2 border-b border-primary/10 pb-2 mb-2">
+                        <BrainCircuit className="size-4 text-primary" />
+                        <span className="font-bold text-primary uppercase tracking-widest">Narrative Analytics</span>
+                      </div>
+                      {analyticsData.ai_narrative ? (
+                        <p className="font-medium italic leading-relaxed whitespace-pre-wrap">{analyticsData.ai_narrative}</p>
+                      ) : (
+                        <p className="italic text-muted-foreground/60 text-center py-6">AI narrative processing incomplete for this assessment.</p>
+                      )}
+                      <div className="pt-2 flex justify-end">
+                        <Button variant="ghost" size="sm" className="h-7 text-[9px] font-bold uppercase tracking-widest text-primary hover:bg-primary/5">
+                          Regenerate Narrative
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
           </Card>
         </TabsContent>
 
@@ -631,161 +2586,6 @@ export default function LecturerGradingQueue() {
           </Card>
         </TabsContent>
       </Tabs>
-
-      {/* Decision Sheet */}
-      <Sheet
-        open={!!selectedStudent}
-        onOpenChange={(open) => !open && setSelectedStudent(null)}
-      >
-        <SheetContent className="sm:max-w-2xl overflow-y-auto p-0 border-l border-border/40 shadow-2xl rounded-l-2xl">
-          {selectedStudent && (
-            <div className="flex flex-col h-full bg-background font-sans">
-              <div className="p-6 border-b border-border/45 bg-muted/15">
-                <div className="flex items-center gap-2 mb-1.5">
-                  <Badge
-                    variant="outline"
-                    className="text-xs px-2.5 py-0.5 rounded-full font-semibold border-primary/20 bg-primary/5 text-primary/70 shadow-none capitalize"
-                  >
-                    Response Audit
-                  </Badge>
-                  <span className="text-xs font-semibold text-muted-foreground/60 capitalize">
-                    {selectedStudent.question_type?.replace("_", " ").toLowerCase()}
-                  </span>
-                </div>
-                <SheetTitle className="text-xl font-semibold tracking-tight text-foreground/90 leading-tight">
-                  {selectedStudent.student_name}
-                </SheetTitle>
-                <SheetDescription className="text-xs text-muted-foreground mt-1 font-medium">
-                  {selectedStudent.assessment_title}
-                </SheetDescription>
-              </div>
-
-              <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-muted-foreground/80">
-                    Question Node Description
-                  </Label>
-                  <div className="text-sm leading-relaxed bg-muted/15 p-4 rounded-xl border border-border/40 text-foreground/85">
-                    {selectedStudent.question_text}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-muted-foreground/80">
-                    Student Response Trace
-                  </Label>
-                  <div className="text-sm leading-relaxed border border-border/50 rounded-xl p-4 bg-background shadow-sm whitespace-pre-wrap text-foreground/90">
-                    {selectedStudent.student_answer || (
-                      <span className="italic text-muted-foreground">No response recorded.</span>
-                    )}
-                  </div>
-                </div>
-
-                {selectedStudent.rubric && (
-                  <RubricGradingPanel
-                    rubric={selectedStudent.rubric}
-                    currentScores={rubricScores}
-                    onScoresChange={handleRubricChange}
-                  />
-                )}
-
-                {showAiPanel && selectedStudent.ai_suggested_score !== null ? (
-                  <div className="space-y-3">
-                    <AIReviewPanel
-                      queueItemId={selectedStudent.id}
-                      responseId={selectedStudent.response_id}
-                      maxScore={selectedStudent.max_score || 10}
-                      onSuggestionApplied={(score) =>
-                        setOverrideScore(score.toString())
-                      }
-                    />
-                    <div className="flex justify-end">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setShowAiPanel(false)}
-                        className="text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg h-7 gap-1.5"
-                      >
-                        Discard Analysis
-                      </Button>
-                    </div>
-                  </div>
-                ) : selectedStudent.ai_suggested_score !== null ? (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setShowAiPanel(true)}
-                    className="w-full text-xs font-medium h-9 border-dashed border-primary/20 bg-primary/[0.01] text-primary/70 hover:bg-primary/[0.03] rounded-lg"
-                  >
-                    <BrainCircuit className="size-3.5 mr-2" /> Restore Analysis
-                  </Button>
-                ) : null}
-
-                <AIFeedbackEditor
-                  responseId={selectedStudent.response_id}
-                  initialDraft={selectedStudent.ai_feedback_draft}
-                  onDraftApplied={(text) => setFinalFeedback(text)}
-                />
-
-                <div className="pt-6 border-t border-border/40 space-y-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-muted-foreground/80">
-                      Lecturer Evaluation Feedback
-                    </Label>
-                    <Textarea
-                      placeholder="Provide detailed feedback on this response..."
-                      className="text-sm min-h-[90px] border-border/60 bg-muted/10 focus-visible:ring-1 transition-colors rounded-xl"
-                      value={finalFeedback}
-                      onChange={(e) => setFinalFeedback(e.target.value)}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-3">
-                    <div className="flex items-center gap-3">
-                      <div className="relative">
-                        <Input
-                          type="number"
-                          value={overrideScore}
-                          onChange={(e) => setOverrideScore(e.target.value)}
-                          className="w-24 h-10 text-sm font-semibold text-center pr-7 border-border/60 rounded-lg"
-                        />
-                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-xs font-medium text-muted-foreground/60 select-none">
-                          pts
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted-foreground/65">
-                        out of {selectedStudent.max_score} Maximum
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pb-8 pt-2">
-                      <Button
-                        variant="outline"
-                        onClick={() => handleSaveDecision(false)}
-                        disabled={isSaving}
-                        className="h-10 text-xs font-medium rounded-lg border-border/60 hover:bg-muted/40 shadow-sm"
-                      >
-                        {isSaving ? (
-                          <Loader2 className="size-4 animate-spin" />
-                        ) : (
-                          "Save Draft"
-                        )}
-                      </Button>
-                      <Button
-                        onClick={() => handleSaveDecision(true)}
-                        disabled={isSaving}
-                        className="h-10 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/95 text-primary-foreground shadow-md transition-all"
-                      >
-                        Confirm Evaluation
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }

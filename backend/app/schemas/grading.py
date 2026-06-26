@@ -287,3 +287,49 @@ class ModerateGradeRequest(BaseModel):
     revision_reason: str = Field(..., min_length=10, max_length=1000)
     feedback_update: str | None = None
     internal_notes: str | None = None
+
+
+class AIReviewSuggestionResponse(BaseModel):
+    status: str
+    item_id: uuid.UUID
+    response_id: uuid.UUID
+    suggested_score: float | None
+
+
+# ---------------------------------------------------------------------------
+# CLASS-CENTRIC GRADING SCHEMAS
+# ---------------------------------------------------------------------------
+
+class ClassGradingStats(BaseModel):
+    """Grading progress for a single class section."""
+    class_id: uuid.UUID
+    class_name: str
+    workspace_id: uuid.UUID
+    workspace_title: str
+    total_students: int
+    submitted_count: int
+    not_submitted_count: int
+    pending_review_count: int
+    reviewed_count: int
+    released_count: int
+    latest_submission_at: datetime | None = None
+
+
+class AssessmentClassStatsResponse(BaseModel):
+    """Aggregated grading status for all classes assigned to an assessment."""
+    assessment_id: uuid.UUID
+    assessment_title: str
+    classes: list[ClassGradingStats]
+
+
+class ClassAiSummaryResponse(BaseModel):
+    """AI-generated pedagogical summary for a class's performance."""
+    class_id: uuid.UUID
+    class_name: str
+    average_score: float
+    pass_rate: float
+    strong_topics: list[str]
+    weak_topics: list[str]
+    common_mistakes: list[str]
+    students_needing_attention: list[dict[str, Any]] # student_id, name, reason
+    ai_generated_at: datetime

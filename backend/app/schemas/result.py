@@ -30,6 +30,15 @@ class ReleaseResultsRequest(BaseModel):
     )
 
 
+class AssessmentReleasePolicyRequest(BaseModel):
+    """
+    Body for PATCH /results/assessment/{assessment_id}/release-policy.
+    Update the assessment's result release configuration.
+    """
+    policy: str # string from frontend: 'immediate', 'scheduled', 'hold'
+    release_date: datetime | None = None
+
+
 class ClearIntegrityHoldRequest(BaseModel):
     """
     Body for POST /results/{result_id}/clear-hold.
@@ -51,7 +60,10 @@ class ClearIntegrityHoldRequest(BaseModel):
 
 class ResultBreakdownItem(BaseModel):
     """Per-question breakdown within a result."""
-    model_config = {"from_attributes": True}
+    model_config = {
+        "from_attributes": True,
+        "populate_by_name": True
+    }
 
     id: uuid.UUID
     question_id: uuid.UUID
@@ -66,7 +78,7 @@ class ResultBreakdownItem(BaseModel):
     question_text: str | None = None
     question_type: str | None = None
     section_title: str | None = None
-    imageUrl: str | None = None
+    image_url: str | None = Field(None, alias="imageUrl")
     student_answer: str | None = None
     correct_answer: str | None = None
     options: list[dict] | None = None

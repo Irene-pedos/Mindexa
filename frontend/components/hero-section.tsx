@@ -5,11 +5,7 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { motion } from "motion/react";
-import {
-  Sparkles,
-  ArrowUpRight,
-  ChevronRight,
-} from "lucide-react";
+import { Sparkles, ArrowUpRight, ChevronRight } from "lucide-react";
 import { HeroHeader } from "./header";
 
 // ─── HeroBadge ────────────────────────────────────────────────────────────────
@@ -91,10 +87,7 @@ function BottomRightCorner() {
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          <path
-            d="M56 56V0C56 30.9279 30.9279 56 0 56H56Z"
-            fill="#f0f0f0"
-          />
+          <path d="M56 56V0C56 30.9279 30.9279 56 0 56H56Z" fill="#f0f0f0" />
         </svg>
       </div>
 
@@ -107,10 +100,7 @@ function BottomRightCorner() {
           fill="none"
           xmlns="http://www.w3.org/2000/svg"
         >
-          <path
-            d="M56 56H0C30.9279 56 56 30.9279 56 0V56Z"
-            fill="#f0f0f0"
-          />
+          <path d="M56 56H0C30.9279 56 56 30.9279 56 0V56Z" fill="#f0f0f0" />
         </svg>
       </div>
 
@@ -147,7 +137,6 @@ export default function HeroSection() {
 
       <div className="w-full h-screen flex items-center justify-center p-3 md:p-5 bg-[#f0f0f0]">
         <section className="relative w-full max-w-[1536px] h-full rounded-[1.5rem] md:rounded-[3rem] overflow-hidden shadow-none flex flex-col items-center bg-white/10 group">
-
           {/* ── Background image (replaces video) ── */}
           <div className="absolute inset-0 z-0">
             <Image
@@ -155,7 +144,7 @@ export default function HeroSection() {
               alt="Students focused during digital exam"
               fill
               priority
-              className="object-cover object-[65%] lg:object-center brightness-75"
+              className="object-cover object-[65%] lg:object-center brightness-65"
             />
             {/* subtle gradient so text is always legible */}
             <div className="absolute inset-0 bg-gradient-to-b from-black/20 via-transparent to-black/30" />
@@ -163,9 +152,8 @@ export default function HeroSection() {
 
           {/* ── Content layer ── */}
           <div className="relative z-10 w-full h-full flex flex-col items-center">
-
             {/* Navbar placeholder — HeroHeader is fixed/absolute, sits above */}
-            <div className="w-full pt-20" />
+            <div className="w-full pt-45" />
 
             {/* ── Text container ── */}
             <div className="w-full flex flex-col items-center pt-8 px-6 text-center max-w-4xl">
@@ -202,8 +190,8 @@ export default function HeroSection() {
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
-                  className="flex items-center justify-center bg-[rgba(30,50,90,0.85)] text-white rounded-full pl-2 pr-6 py-2 gap-3 hover:bg-[rgba(30,50,90,1)] transition-colors"
-                  onClick={() => window.location.href = "/signup"}
+                  className="flex items-center justify-center bg-primary text-white rounded-full pl-2 pr-6 py-2 gap-3 hover:bg-[rgba(30,50,90,1)] transition-colors"
+                  onClick={() => (window.location.href = "/signup")}
                 >
                   <div className="bg-white/20 p-1.5 rounded-full flex items-center justify-center">
                     <ArrowUpRight className="w-4 h-4 text-white" />

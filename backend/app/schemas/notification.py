@@ -13,7 +13,8 @@ class NotificationResponse(BaseModel):
     notification_type: NotificationType
     title: str
     body: str
-    action_url: Optional[str] = None
+    action_url: Optional[str] = None   # deep-link URL (preferred over related_id where available)
+    related_id: Optional[uuid.UUID] = None  # BUG-06: UUID of the related result/assessment
     is_read: bool
     created_at: datetime
 

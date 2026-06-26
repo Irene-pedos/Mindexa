@@ -1,4 +1,3 @@
-// app/(student)/results/page.tsx
 "use client";
 
 import { useEffect, useState } from "react";
@@ -28,6 +27,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { studentApi, StudentRecentResult } from "@/lib/api/student";
+import { resultApi } from "@/lib/api/result";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -54,9 +54,29 @@ export default function StudentResultsPage() {
   useEffect(() => {
     async function loadResults() {
       try {
-        const data = await studentApi.getDashboard();
-        setResults(data.recent_results);
-        setOverallGPA(data.summary.cgpa.value);
+        // BUG-12 fix: use /results/me for the full paginated list, not the dashboard
+        // which only returns the last few entries.
+        const [resultsData, dashboardData] = await Promise.all([
+          resultApi.getMyResults({ page: 1, page_size: 100 }),
+          studentApi.getDashboard(),
+        ]);
+        // ResultSummary shape differs slightly from StudentRecentResult;
+        // map the common fields so the existing UI keeps working.
+        const items = (resultsData.items || []).map((r: any) => ({
+          id: r.attempt_id || r.id,
+          assessment_title: r.assessment_title || "Assessment",
+          assessment_type: r.assessment_type || "",
+          course_code: r.course_code,
+          course_name: r.course_name,
+          academic_year: r.academic_year,
+          score: r.total_score ?? r.score ?? 0,
+          total_marks: r.total_marks ?? 0,
+          percentage: r.percentage ?? 0,
+          letter_grade: r.letter_grade,
+          released_at: r.released_at,
+        }));
+        setResults(items);
+        setOverallGPA(dashboardData.summary.cgpa.value);
       } catch (err) {
         console.error("Failed to load results", err);
       } finally {

@@ -1,24 +1,32 @@
+import { apiClient } from "@/lib/api/client";
+
 export interface GenerateQuestionsSectionRequest {
   section_id: string;
   topic?: string;
-  question_type?: "mcq" | "true_false" | "short_answer" | "essay" | "matching" | "fill_blank";
+  question_type?: "mcq" | "true_false" | "short_answer" | "essay" | "matching" | "fill_blank" | "case_study" | "computational" | "ordering" | "practical";
   type?: string;
   difficulty?: "easy" | "medium" | "hard";
-  bloom_level?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
+  bloom_level?: string;
   count?: number;
 }
 
 export interface GenerateQuestionsRequest {
-  subject: string;
+  subject?: string;
   topic: string;
-  question_type: "mcq" | "true_false" | "short_answer" | "essay" | "matching" | "fill_blank";
+  question_type: "mcq" | "true_false" | "short_answer" | "essay" | "matching" | "fill_blank" | "case_study" | "computational" | "ordering" | "practical";
   difficulty: "easy" | "medium" | "hard";
   count: number;
-  bloom_level?: "remember" | "understand" | "apply" | "analyze" | "evaluate" | "create";
+  bloom_level?: string;
   additional_context?: string;
   target_assessment_id?: string;
   target_section_id?: string;
   sections?: GenerateQuestionsSectionRequest[];
+  // RAG grounding: which workspace's materials to retrieve context from
+  workspace_id?: string;
+  // Blueprint alignment
+  blueprint_constraints?: string;
+  learning_outcomes?: string;
+  marks_per_question?: number;
 }
 
 export interface GeneratedQuestionOptionResponse {
@@ -88,11 +96,23 @@ export interface ReviewAIQuestionRequest {
 
 export const aiGenerationApi = {
   async generateQuestions(data: GenerateQuestionsRequest): Promise<AIGenerationBatchDetailResponse> {
-    const { target_assessment_id, target_section_id, ...rest } = data;
+    const {
+      target_assessment_id,
+      target_section_id,
+      workspace_id,
+      blueprint_constraints,
+      learning_outcomes,
+      marks_per_question,
+      ...rest
+    } = data;
     const payload = {
       ...rest,
-      assessment_id: target_assessment_id,
-      target_section_id: target_section_id,
+      assessment_id: target_assessment_id ?? undefined,
+      target_section_id: target_section_id ?? undefined,
+      teaching_workspace_id: workspace_id ?? undefined,
+      blueprint_constraints: blueprint_constraints ?? undefined,
+      learning_outcomes: learning_outcomes ?? undefined,
+      marks_per_question: marks_per_question ?? undefined,
     };
     const res = await apiClient("/ai/generate", {
         method: "POST",
@@ -112,9 +132,19 @@ export const aiGenerationApi = {
   },
 
   async reviewQuestion(aiQuestionId: string, data: ReviewAIQuestionRequest): Promise<any> {
+    const decisionMap: Record<string, string> = {
+      approved: "ACCEPTED",
+      edited: "MODIFIED",
+      rejected: "REJECTED",
+      needs_revision: "NEEDS_REVISION",
+    };
+    const payload = {
+      ...data,
+      decision: decisionMap[data.decision] || data.decision,
+    };
     return apiClient(`/ai/review/${aiQuestionId}`, {
         method: "POST",
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
     });
   },
 };

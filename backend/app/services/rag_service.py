@@ -1,265 +1,327 @@
-"""
-app/services/rag_service.py
-
-Retrieval-Augmented Generation (RAG) service for Mindexa.
-Handles document parsing, chunking, embedding, and filtered retrieval.
-"""
-
+from __future__ import annotations
 import uuid
-import os
-from typing import List, Optional, Tuple
-from datetime import datetime, UTC
-
-from sqlalchemy import select, and_, or_, text, exists, not_, func
+import httpx
+from typing import Any, Dict, List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-
-from app.core.ai.gateway import AIGateway
-from app.core.ai.providers import AIEmbeddingRequest
+from sqlalchemy import select, text, and_, or_, bindparam
+from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
+from app.db.enums import ResourceCategory, EnrollmentStatus
+from app.db.models.resource_chunk import ResourceChunk
+from app.db.models.academic_resource import AcademicResource
+from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk, StudentResource
+from app.db.models.academic import StudentEnrollment, TeachingWorkspace
+from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
 from app.core.config import settings
-from app.core.logger import get_logger
-from app.db.models.resource import StudentResource, ResourceChunk, LecturerMaterial, LecturerMaterialChunk
-from app.db.models.academic import StudentEnrollment, ClassSection, Course
-from app.db.enums import ResourceProcessingStatus, AttemptStatus
-from app.db.models.attempt import AssessmentAttempt
+from app.core.logging import get_logger
 
-logger = get_logger("mindexa.rag_service")
-
+logger = get_logger(__name__)
 
 class RAGService:
-    def __init__(self, db: AsyncSession, gateway: AIGateway) -> None:
+    def __init__(self, db: AsyncSession):
         self.db = db
-        self.gateway = gateway
-        self.splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
-            chunk_overlap=100,
-            separators=["\n\n", "\n", ".", " ", ""],
-        )
+        self.jina_api_key = settings.JINA_API_KEY
+        self.jina_base_url = settings.JINA_BASE_URL
+        self.embedding_model = settings.JINA_DEFAULT_MODEL
 
-    # ── Retrieval ────────────────────────────────────────────────────────────
+    # ── Lecturer-side RAG ─────────────────────────────────────────────────────
 
-    async def retrieve_context_for_student(
+    async def retrieve_context_for_lecturer(
         self,
+        topic: str,
+        teaching_workspace_id: uuid.UUID,
+        top_k: int = 8,
+    ) -> str:
+        """
+        Retrieve relevant text chunks from lecturer-uploaded materials for a given topic.
+
+        Used to ground AI question generation in actual course content.
+
+        Args:
+            topic: The question topic / subject the AI is generating for.
+            teaching_workspace_id: The teaching workspace whose materials to search.
+            top_k: Max number of chunks to retrieve.
+
+        Returns:
+            A formatted context string to inject into the AI prompt.
+            Returns empty string if no processed materials found (graceful fallback).
+        """
+        logger.info(
+            "Lecturer RAG retrieval started",
+            workspace_id=str(teaching_workspace_id),
+            topic_preview=topic[:80],
+        )
+
+        try:
+            query_embedding = await self._embed_question(topic)
+        except Exception as exc:
+            logger.warning("Lecturer RAG: embedding failed, skipping context", error=str(exc))
+            return ""
+
+        embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+        # Query LecturerMaterialChunk directly — scoped to this workspace's materials.
+        # Join back to LecturerMaterial to get display_name for citations.
+        stmt = (
+            text("""
+                SELECT
+                    lmc.content,
+                    lmc.chunk_index,
+                    lmc.source_page,
+                    lm.display_name,
+                    lm.original_filename,
+                    (1 - (lmc.embedding <=> CAST(:query_embedding AS vector))) as similarity
+                FROM lecturer_material_chunk lmc
+                JOIN lecturer_material lm ON lmc.lecturer_material_id = lm.id
+                WHERE lm.teaching_workspace_id = CAST(:workspace_id AS uuid)
+                  AND lm.is_deleted = FALSE
+                  AND lm.is_current = TRUE
+                  AND lm.processing_status = 'PROCESSED'
+                  AND lmc.embedding IS NOT NULL
+                ORDER BY lmc.embedding <=> CAST(:query_embedding AS vector)
+                LIMIT :top_k
+            """)
+        )
+
+        try:
+            result = await self.db.execute(stmt, {
+                "query_embedding": embedding_literal,
+                "workspace_id": str(teaching_workspace_id),
+                "top_k": top_k,
+            })
+            rows = result.fetchall()
+        except Exception as exc:
+            logger.warning("Lecturer RAG: vector search failed, skipping context", error=str(exc))
+            return ""
+
+        logger.info(
+            "Lecturer RAG vector search complete",
+            rows_returned=len(rows),
+            workspace_id=str(teaching_workspace_id),
+        )
+
+        if not rows:
+            logger.warning(
+                "Lecturer RAG: no chunks found for workspace — AI will generate without material context",
+                workspace_id=str(teaching_workspace_id),
+            )
+            return ""
+
+        # Build formatted context string
+        parts = []
+        for row in rows:
+            content, chunk_index, source_page, display_name, original_filename, similarity = row
+            source_label = display_name or original_filename or "Course Material"
+            page_ref = f", Page {source_page}" if source_page else ""
+            parts.append(f"[Source: {source_label}{page_ref}]\n{content}\n")
+            logger.debug(
+                "Lecturer chunk retrieved",
+                source=source_label,
+                chunk_index=chunk_index,
+                similarity=round(float(similarity), 4),
+            )
+
+        return "\n".join(parts)
+
+    async def retrieve_context(
+        self,
+        question: str,
         student_id: uuid.UUID,
-        institution_id: uuid.UUID,
-        query_text: str,
-        top_k: int = 5,
-    ) -> List[dict]:
+        top_k: int = None,
+    ) -> RAGRetrievalResult:
         """
-        Retrieve relevant chunks from student's personal resources and
-        visible lecturer learning resources.
-
-        ENFORCES:
-            1. Assessment Protection Layer: Block if student has an active exam.
-            2. Visibility Rules: Only materials from student's enrolled courses.
-            3. Data Minimization: Only top-K relevant snippets.
+        Full RAG retrieval pipeline.
         """
-        # 1. Assessment Protection Layer
-        if await self._has_active_assessment(student_id):
-            logger.warning("RAG retrieval blocked: student %s has an active assessment", student_id)
-            return []
+        top_k = top_k or settings.RAG_TOP_K
+        logger.info("RAG retrieval started", student_id=str(student_id), question_preview=question[:80])
 
-        # 2. Generate query embedding
-        try:
-            embed_resp = await self.gateway.embed(
-                AIEmbeddingRequest(input=query_text),
-                actor_id=student_id,
-                actor_role="student",
-                prompt_summary=f"RAG query: {query_text[:50]}...",
+        # 1. Generate embedding for the student's question
+        query_embedding = await self._embed_question(question)
+        logger.info("Query embedding generated", dim=len(query_embedding))
+
+        # 2. Get allowed academic_resource_ids
+        allowed_resource_ids = await self._get_allowed_resource_ids(student_id)
+        logger.info("Allowed resource IDs found", count=len(allowed_resource_ids), ids=[str(r) for r in allowed_resource_ids])
+
+        if not allowed_resource_ids:
+            logger.warning("No allowed resources found for student — falling back", student_id=str(student_id))
+            return RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True
             )
-            query_vector = embed_resp.embeddings[0]
-        except Exception as exc:
-            logger.error("RAG embedding failed: %s", str(exc))
-            return []
 
-        # 3. Retrieve from personal StudentResource chunks
-        student_chunks = await self._search_student_chunks(student_id, query_vector, top_k)
+        # 3. Query pgvector for top_k nearest chunks
+        # Format the query embedding as a pgvector literal string: '[0.1,0.2,...]'
+        embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-        # 4. Retrieve from visible LecturerMaterial chunks (Filtered by Course Enrollment)
-        lecturer_chunks = await self._search_lecturer_chunks(student_id, institution_id, query_vector, top_k)
+        # asyncpg needs explicit type information for the UUID array parameter.
+        # We use bindparam with ARRAY(PG_UUID()) so SQLAlchemy/asyncpg encodes
+        # the Python list of UUIDs correctly — DO NOT pass a PG array literal string.
+        stmt = (
+            text("""
+                SELECT rc.id, rc.content, rc.chunk_index, rc.metadata_json, rc.resource_id,
+                       ar.title as resource_name,
+                       (1 - (rc.embedding <=> CAST(:query_embedding AS vector))) as similarity
+                FROM resource_chunks rc
+                JOIN academic_resources ar ON rc.resource_id = ar.id
+                WHERE rc.resource_id = ANY(:allowed_ids)
+                  AND rc.embedding IS NOT NULL
+                ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
+                LIMIT :top_k
+            """)
+            .bindparams(
+                bindparam("allowed_ids", type_=ARRAY(PG_UUID()))
+            )
+        )
 
-        # 5. Combine and sort
-        combined = student_chunks + lecturer_chunks
-        combined.sort(key=lambda x: x["score"], reverse=True)
+        result = await self.db.execute(stmt, {
+            "query_embedding": embedding_literal,
+            "allowed_ids": [rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
+                            for rid in allowed_resource_ids],
+            "top_k": top_k,
+        })
+        
+        rows = result.fetchall()
+        logger.info("Vector search complete", rows_returned=len(rows), top_k=top_k)
+        
+        chunks = []
+        citations = []
+        chunk_ids = []
+        total_similarity = 0.0
+        
+        for row in rows:
+            chunk_id, content, chunk_index, metadata, res_id, res_name, similarity = row
+            logger.debug("Chunk retrieved", resource=res_name, chunk_index=chunk_index, similarity=round(float(similarity), 4))
+            chunks.append({
+                "content": content,
+                "resource_name": res_name,
+                "metadata": metadata
+            })
+            chunk_ids.append(chunk_id)
+            total_similarity += similarity
+            
+            citations.append(SourceCitation(
+                resource_name=res_name,
+                resource_id=res_id,
+                page_number=metadata.get("page") if metadata else None,
+                chunk_index=chunk_index,
+                excerpt=content[:120]
+            ))
 
-        return combined[:top_k]
+        avg_similarity = total_similarity / len(rows) if rows else 0.0
+        fallback_used = avg_similarity < settings.RAG_SIMILARITY_THRESHOLD or not rows
 
-    async def _has_active_assessment(self, student_id: uuid.UUID) -> bool:
-        """Check if the student has any IN_PROGRESS attempt for a summative assessment."""
-        stmt = select(AssessmentAttempt).where(
+        logger.info(
+            "RAG decision",
+            avg_similarity=round(avg_similarity, 4),
+            threshold=settings.RAG_SIMILARITY_THRESHOLD,
+            fallback_used=fallback_used,
+            chunks_used=len(chunks),
+        )
+
+        context_string = self._build_context_string(chunks) if not fallback_used else ""
+        
+        return RAGRetrievalResult(
+            context_string=context_string,
+            citations=citations if not fallback_used else [],
+            chunk_ids_used=chunk_ids if not fallback_used else [],
+            retrieval_score=avg_similarity,
+            fallback_used=fallback_used
+        )
+
+    async def _embed_question(self, question: str) -> List[float]:
+        """Generate embedding for query text using Jina API."""
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.jina_api_key}"
+        }
+        url = f"{self.jina_base_url}/embeddings"
+        payload = {
+            "model": self.embedding_model,
+            "task": "retrieval.query",
+            "dimensions": 768,
+            "input": [question]
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(url, headers=headers, json=payload)
+            if response.status_code != 200:
+                logger.error("Jina embedding failed", status=response.status_code, text=response.text)
+                raise Exception("Failed to generate embedding")
+            
+            data = response.json()
+            return data["data"][0]["embedding"]
+
+    async def _get_allowed_resource_ids(self, student_id: uuid.UUID) -> List[uuid.UUID]:
+        """
+        Get academic_resource_ids allowed for this student.
+        Rules:
+        1. Student's own personal study resources.
+        2. Lecturer materials for enrolled courses IF student-visible.
+        3. STRICTLY EXCLUDE: Lecturer-private, Question Banks, Unreleased Assessments,
+           Answer keys, Materials from other courses.
+        """
+        # 1. Own resources — select the academic_resource_id FK
+        stmt_own = select(StudentResource.academic_resource_id).where(
             and_(
-                AssessmentAttempt.student_id == student_id,
-                AssessmentAttempt.status == AttemptStatus.IN_PROGRESS,
+                StudentResource.student_id == student_id,
+                StudentResource.is_deleted == False,
+                StudentResource.academic_resource_id.is_not(None),  # must have been linked to RAG pipeline
             )
         )
-        result = await self.db.execute(stmt)
-        return result.scalar_one_or_none() is not None
+        res_own = await self.db.execute(stmt_own)
+        own_ids = [r for r in res_own.scalars().all() if r]
+        logger.info("Own resource IDs", student_id=str(student_id), count=len(own_ids), ids=[str(i) for i in own_ids])
 
-    async def _search_student_chunks(
-        self, student_id: uuid.UUID, vector: List[float], top_k: int
-    ) -> List[dict]:
-        """Vector similarity search on student_resource_chunks."""
-        stmt = text(
-            """
-            SELECT rc.content, rc.source_page, sr.original_filename,
-                   (1 - (rc.embedding <=> :vector)) as score
-            FROM resource_chunk rc
-            JOIN student_resource sr ON rc.student_resource_id = sr.id
-            WHERE sr.student_id = :student_id
-              AND sr.is_deleted = false
-              AND rc.embedding IS NOT NULL
-            ORDER BY rc.embedding <=> :vector
-            LIMIT :top_k
-            """
-        )
-        result = await self.db.execute(
-            stmt, {"vector": str(vector), "student_id": student_id, "top_k": top_k}
-        )
-        
-        return [
-            {
-                "content": row[0],
-                "source": f"{row[2]} (Page {row[1]})" if row[1] else row[2],
-                "score": row[3],
-                "type": "student_resource"
-            }
-            for row in result.fetchall()
-        ]
-
-    async def _search_lecturer_chunks(
-        self, student_id: uuid.UUID, institution_id: uuid.UUID, vector: List[float], top_k: int
-    ) -> List[dict]:
-        """Vector similarity search on lecturer_material_chunks, filtered by course enrollment."""
-        
-        # We need to ensure the student is enrolled in the course that the material belongs to
-        stmt = text(
-            """
-            SELECT lmc.content, lmc.source_page, lm.original_filename, lm.display_name,
-                   (1 - (lmc.embedding <=> :vector)) as score
-            FROM lecturer_material_chunk lmc
-            JOIN lecturer_material lm ON lmc.lecturer_material_id = lm.id
-            JOIN teaching_assignment ta ON ta.course_id = lm.course_id
-            JOIN student_enrollment se ON se.class_section_id = ta.class_section_id
-            WHERE se.student_id = :student_id
-              AND lm.institution_id = :institution_id
-              AND lm.is_student_visible = true
-              AND lm.is_current = true
-              AND lmc.embedding IS NOT NULL
-            ORDER BY lmc.embedding <=> :vector
-            LIMIT :top_k
-            """
-        )
-        
-        result = await self.db.execute(
-            stmt, {
-                "vector": str(vector), 
-                "student_id": student_id,
-                "institution_id": institution_id, 
-                "top_k": top_k
-            }
+        # 2. Lecturer materials for enrolled courses
+        # Access path: Student → Enrollment (ACTIVE) → ClassSection → Workspace → Material → AcademicResource
+        # NOTE: TeachingWorkspace.class_section_id is nullable.
+        # We join via class_section_id when available, and also check via course_id
+        # on the TeachingAssignment as a fallback.
+        stmt_lecturer = (
+            select(LecturerMaterial.academic_resource_id)
+            .join(TeachingWorkspace, LecturerMaterial.teaching_workspace_id == TeachingWorkspace.id)
+            .join(
+                StudentEnrollment,
+                and_(
+                    StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id,
+                    TeachingWorkspace.class_section_id.is_not(None),
+                ),
+            )
+            .join(AcademicResource, LecturerMaterial.academic_resource_id == AcademicResource.id)
+            .where(
+                and_(
+                    StudentEnrollment.student_id == student_id,
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE,
+                    LecturerMaterial.is_student_visible == True,
+                    LecturerMaterial.is_deleted == False,
+                    LecturerMaterial.is_current == True,
+                    LecturerMaterial.assessment_id.is_(None),
+                    AcademicResource.resource_category != ResourceCategory.QUESTION_BANK,
+                    AcademicResource.resource_category != ResourceCategory.ANSWER_KEY,
+                )
+            )
         )
 
-        return [
-            {
-                "content": row[0],
-                "source": f"{row[3] or row[2]} (Page {row[1]})" if row[1] else (row[3] or row[2]),
-                "score": row[4],
-                "type": "lecturer_material"
-            }
-            for row in result.fetchall()
-        ]
+        res_lecturer = await self.db.execute(stmt_lecturer)
+        lecturer_ids = [r for r in res_lecturer.scalars().all() if r]
+        logger.info("Lecturer material IDs", student_id=str(student_id), count=len(lecturer_ids))
 
-    # ── Processing ───────────────────────────────────────────────────────────
+        all_ids = list(set(own_ids + lecturer_ids))
+        logger.info("Total allowed resource IDs", student_id=str(student_id), total=len(all_ids))
+        return all_ids
 
-    async def process_student_resource(self, resource_id: uuid.UUID) -> None:
-        """Parse, chunk, and embed a StudentResource."""
-        resource = await self.db.get(StudentResource, resource_id)
-        if not resource:
-            return
-
-        resource.processing_status = ResourceProcessingStatus.PROCESSING
-        resource.processing_started_at = datetime.now(UTC)
-        await self.db.commit()
-
-        try:
-            text_content = await self._extract_text(resource.file_path)
-            chunks = self.splitter.split_text(text_content)
+    def _build_context_string(self, chunks: List[Dict[str, Any]]) -> str:
+        """Format retrieved chunks into a clean context string."""
+        parts = []
+        for chunk in chunks:
+            source_label = f"[Source: {chunk['resource_name']}"
+            if chunk['metadata'] and chunk['metadata'].get('page'):
+                source_label += f", Page {chunk['metadata']['page']}"
+            source_label += "]"
             
-            for i, chunk_text in enumerate(chunks):
-                embed_resp = await self.gateway.embed(
-                    AIEmbeddingRequest(input=chunk_text),
-                    subject_entity_type="student_resource",
-                    subject_entity_id=resource.id,
-                )
-                
-                chunk_record = ResourceChunk(
-                    student_resource_id=resource.id,
-                    student_id=resource.student_id,
-                    chunk_index=i,
-                    content=chunk_text,
-                    token_count=embed_resp.total_tokens,
-                    embedding=embed_resp.embeddings[0],
-                    embedding_model=embed_resp.model,
-                )
-                self.db.add(chunk_record)
-
-            resource.processing_status = ResourceProcessingStatus.COMPLETED
-            resource.processing_completed_at = datetime.now(UTC)
-            resource.chunk_count = len(chunks)
-            await self.db.commit()
-
-        except Exception as exc:
-            logger.error("Failed to process student resource %s: %s", resource_id, str(exc))
-            resource.processing_status = ResourceProcessingStatus.FAILED
-            resource.processing_error = str(exc)[:1000]
-            await self.db.commit()
-
-    async def process_lecturer_material(self, material_id: uuid.UUID) -> None:
-        """Parse, chunk, and embed a LecturerMaterial (Learning Resource)."""
-        material = await self.db.get(LecturerMaterial, material_id)
-        if not material:
-            return
-
-        material.processing_status = ResourceProcessingStatus.PROCESSING
-        material.processing_started_at = datetime.now(UTC)
-        await self.db.commit()
-
-        try:
-            text_content = await self._extract_text(material.file_path)
-            chunks = self.splitter.split_text(text_content)
-            
-            for i, chunk_text in enumerate(chunks):
-                embed_resp = await self.gateway.embed(
-                    AIEmbeddingRequest(input=chunk_text),
-                    subject_entity_type="lecturer_material",
-                    subject_entity_id=material.id,
-                )
-                
-                chunk_record = LecturerMaterialChunk(
-                    lecturer_material_id=material.id,
-                    institution_id=material.institution_id,
-                    course_id=material.course_id,
-                    chunk_index=i,
-                    content=chunk_text,
-                    token_count=embed_resp.total_tokens,
-                    embedding=embed_resp.embeddings[0],
-                    embedding_model=embed_resp.model,
-                )
-                self.db.add(chunk_record)
-
-            material.processing_status = ResourceProcessingStatus.COMPLETED
-            material.processing_completed_at = datetime.now(UTC)
-            material.chunk_count = len(chunks)
-            await self.db.commit()
-
-        except Exception as exc:
-            logger.error("Failed to process lecturer learning resource %s: %s", material_id, str(exc))
-            material.processing_status = ResourceProcessingStatus.FAILED
-            material.processing_error = str(exc)[:1000]
-            await self.db.commit()
-
-    async def _extract_text(self, file_path: str) -> str:
-        """Extract raw text from a learning resource file."""
-        absolute_path = os.path.join(settings.UPLOAD_DIR, file_path)
-        # Dummy extractor for now
-        return f"Content extracted from {file_path}. This is a placeholder for learning resource content."
+            parts.append(f"{source_label}\n{chunk['content']}\n")
+        
+        return "\n".join(parts)

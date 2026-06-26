@@ -72,8 +72,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import delete, func, update, or_, not_, and_, exists
+from sqlalchemy import and_, delete, func, not_, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -81,8 +82,8 @@ from sqlmodel import col, select
 from app.db.enums import (
     AssessmentStatus,
     AssessmentType,
-    GroupAssignmentMode,
     GradingMode,
+    GroupAssignmentMode,
     QuestionDistributionMode,
     ResultReleaseMode,
 )
@@ -231,8 +232,9 @@ class AssessmentRepository:
 
         Excludes soft-deleted records.
         """
+        from app.db.models.academic import ClassSection
+        from app.db.models.assessment import AssessmentTargetSection
         from app.db.models.question import AssessmentQuestion, Question
-        from sqlalchemy.orm import selectinload
 
         result = await self.db.execute(
             select(Assessment)
@@ -243,7 +245,9 @@ class AssessmentRepository:
                 selectinload(Assessment.blueprint_rules),
                 selectinload(Assessment.draft_progress),
                 selectinload(Assessment.supervisors),
-                selectinload(Assessment.target_sections),
+                selectinload(Assessment.target_sections)
+                .selectinload(AssessmentTargetSection.class_section)
+                .selectinload(ClassSection.class_group),
                 selectinload(Assessment.publish_validations),
                 selectinload(Assessment.assessment_questions)
                 .selectinload(AssessmentQuestion.question)
@@ -263,7 +267,6 @@ class AssessmentRepository:
         Lightweight load — minimal relationships for schema properties.
         """
         from app.db.models.academic import TeachingWorkspace
-        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
@@ -312,7 +315,6 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
-        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
@@ -359,7 +361,6 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
-        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(
@@ -457,6 +458,7 @@ class AssessmentRepository:
     async def create_section(
         self,
         *,
+        id: uuid.UUID | None = None,
         assessment_id: uuid.UUID,
         title: str,
         order_index: int,
@@ -469,6 +471,7 @@ class AssessmentRepository:
         ai_generation_prompt_hint: str | None = None,
     ) -> AssessmentSection:
         section = AssessmentSection(
+            id=id or uuid.uuid4(),
             assessment_id=assessment_id,
             title=title,
             description=description,
@@ -507,6 +510,7 @@ class AssessmentRepository:
     async def sum_marks(self, assessment_id: uuid.UUID) -> int:
         """Sum the marks for all non-deleted questions in an assessment."""
         from sqlalchemy import case
+
         from app.db.models.question import Question
 
         result = await self.db.execute(
@@ -658,6 +662,30 @@ class AssessmentRepository:
         await self.db.flush()
         return aq
 
+    async def get_rubric_for_question(self, question_id: uuid.UUID) -> Any | None:
+        """Get the rubric assigned to a question, including criteria and levels."""
+        from app.db.models.assessment import Rubric, RubricCriterion
+        from app.db.models.question import Question
+
+        # First, find the question to get the rubric_id
+        q_result = await self.db.execute(
+            select(Question).where(col(Question.id) == question_id)
+        )
+        question = q_result.scalar_one_or_none()
+        if not question or not question.rubric_id:
+            return None
+
+        # Fetch the rubric with selectinload criteria and levels
+        r_result = await self.db.execute(
+            select(Rubric)
+            .options(
+                selectinload(Rubric.criteria)
+                .selectinload(RubricCriterion.levels)
+            )
+            .where(col(Rubric.id) == question.rubric_id)
+        )
+        return r_result.scalar_one_or_none()
+
     async def get_assessment_question(
         self, assessment_id: uuid.UUID, question_id: uuid.UUID
     ) -> AssessmentQuestion | None:
@@ -697,7 +725,6 @@ class AssessmentRepository:
         Return all AssessmentQuestion rows for an assessment,
         ordered by order_index. Each row has question selectin-loaded.
         """
-        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(AssessmentQuestion)
             .options(
@@ -723,7 +750,6 @@ class AssessmentRepository:
         assessment_id: uuid.UUID,
         group_id: uuid.UUID | None = None,
     ) -> list[AssessmentQuestion]:
-        from sqlalchemy.orm import selectinload
         stmt = (
             select(AssessmentQuestion)
             .options(
@@ -749,6 +775,26 @@ class AssessmentRepository:
             )
         )
         return result.scalar_one()
+
+    async def get_next_order_index(
+        self, assessment_id: uuid.UUID, assessment_section_id: uuid.UUID | None
+    ) -> int:
+        """Get the next unique order_index for a section or overall."""
+        # Row lock the assessment to serialize concurrent operations and prevent unique violations
+        lock_stmt = select(Assessment.id).where(col(Assessment.id) == assessment_id).with_for_update()
+        await self.db.execute(lock_stmt)
+
+        stmt = select(func.max(AssessmentQuestion.order_index)).where(
+            col(AssessmentQuestion.assessment_id) == assessment_id
+        )
+        if assessment_section_id is not None:
+            stmt = stmt.where(col(AssessmentQuestion.assessment_section_id) == assessment_section_id)
+        else:
+            stmt = stmt.where(col(AssessmentQuestion.assessment_section_id).is_(None))
+            
+        result = await self.db.execute(stmt)
+        max_val = result.scalar_one()
+        return (max_val + 1) if max_val is not None else 0
 
     async def count_questions_for_group(
         self,
@@ -1318,8 +1364,9 @@ class AssessmentRepository:
         Used before rebuilding an assessment during a bulk update.
         """
         from sqlalchemy import delete
+
         from app.db.models.assessment import AssessmentSection
-        from app.db.models.question import AssessmentQuestion, Question
+        from app.db.models.question import AssessmentQuestion
 
         await self.db.execute(
             delete(AssessmentSection).where(
@@ -1370,7 +1417,13 @@ class AssessmentRepository:
             - Student is enrolled in a class section targeted by this assessment
               OR (no targets defined AND student enrolled in assessment's course)
         """
-        from app.db.models.academic import Course, StudentEnrollment, ClassSection, TeachingWorkspace, TeachingAssignment
+        from app.db.models.academic import (
+            ClassSection,
+            Course,
+            StudentEnrollment,
+            TeachingAssignment,
+            TeachingWorkspace,
+        )
         
         # Base filters
         filters = [
@@ -1454,7 +1507,6 @@ class AssessmentRepository:
         elif sort == "title":
             order_by = col(Assessment.title).asc()
 
-        from sqlalchemy.orm import selectinload
         result = await self.db.execute(
             select(Assessment)
             .options(

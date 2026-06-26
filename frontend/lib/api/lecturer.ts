@@ -1,5 +1,5 @@
 // frontend/lib/api/lecturer.ts
-import { apiClient } from "./client";
+import { apiClient, resolveApiUrl, getToken } from "./client";
 
 export interface LecturerDashboardSummary {
   active_classes_count: number;
@@ -287,5 +287,36 @@ export const lecturerApi = {
   },
   getWorkspaceMaterials: async (workspaceId: string): Promise<LecturerMaterialResponse[]> => {
     return apiClient(`/resources/workspaces/${workspaceId}/materials`);
+  },
+  deleteMaterial: async (materialId: string): Promise<void> => {
+    return apiClient(`/resources/${materialId}`, {
+      method: "DELETE",
+    });
+  },
+  downloadMaterial: async (materialId: string, filename: string): Promise<void> => {
+    const apiUrl = resolveApiUrl();
+    const token = getToken();
+    if (!token) throw new Error("Authentication required");
+    
+    const response = await fetch(`${apiUrl}/resources/download/${materialId}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to download material");
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
   },
 };

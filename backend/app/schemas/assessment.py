@@ -12,6 +12,7 @@ Covers:
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from app.core.constants import AssessmentType, GradingMode
 from app.db.enums import GroupAssignmentMode, QuestionDistributionMode
@@ -45,6 +46,10 @@ class AssessmentSectionResponse(BaseModel):
     instructions: str | None
     order_index: int
     allocated_marks: int | None
+    question_count_target: int | None = None
+    allowed_question_types: dict | list | None = None
+    difficulty_distribution: dict | None = None
+    ai_generation_prompt_hint: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -100,14 +105,14 @@ class AssessmentQuestionResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
     question_id: uuid.UUID
-    section_id: uuid.UUID | None = Field(None, validation_alias="assessment_section_id")
-    marks: int = Field(..., validation_alias="marks_override")
+    section_id: uuid.UUID | None = Field(None, validation_alias="assessment_section_id", serialization_alias="assessment_section_id")
+    marks: int = Field(..., validation_alias="marks_override", serialization_alias="marks_override")
     order_index: int
     added_via: str
     is_required: bool
     question: QuestionDetailResponse | None = None
 
-    model_config = {"from_attributes": True, "populate_by_name": True}
+    model_config = {"from_attributes": True, "populate_by_name": True, "by_alias": True}
 
 
 # ─── Assessment Draft Progress Schema ─────────────────────────────────────────
@@ -116,12 +121,12 @@ class AssessmentQuestionResponse(BaseModel):
 class AssessmentDraftProgressResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
-    current_step: int
-    last_saved_at: datetime
-    step_data: str | None
-    validation_errors: str | None
+    current_step: int = Field(default=1, validation_alias="last_active_step")
+    last_saved_at: datetime = Field(default_factory=datetime.now, validation_alias="updated_at")
+    step_data: str | None = None
+    validation_errors: str | None = None
 
-    model_config = {"from_attributes": True}
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 # ─── Assessment Create / Update ───────────────────────────────────────────────
@@ -269,6 +274,7 @@ class AssessmentGeneralUpdate(BaseModel):
     # Security/Integrity additions
     max_attempts: int | None = Field(default=None, ge=1, le=10)
     is_password_protected: bool | None = None
+    access_password: str | None = Field(default=None, min_length=4, max_length=50)
     fullscreen_required: bool | None = None
     is_supervised: bool | None = None
     ai_assistance_allowed: bool | None = None
@@ -346,8 +352,41 @@ class AssessmentTargetSectionResponse(BaseModel):
     assessment_id: uuid.UUID
     class_section_id: uuid.UUID
     added_by_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    option_id: uuid.UUID | None = None
+    class_group_id: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def extract_related_ids(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            return data
+        
+        from sqlalchemy import inspect
+        try:
+            state = inspect(data)
+            dept_id = None
+            cg_id = None
+            opt_id = None
+            if "class_section" not in state.unloaded:
+                class_sec = data.class_section
+                if class_sec is not None:
+                    dept_id = class_sec.department_id
+                    cg_id = class_sec.class_group_id
+                    sec_state = inspect(class_sec)
+                    if "class_group" not in sec_state.unloaded:
+                        cg = class_sec.class_group
+                        if cg is not None:
+                            opt_id = cg.option_id
+            
+            data.department_id = dept_id
+            data.class_group_id = cg_id
+            data.option_id = opt_id
+        except Exception:
+            pass
+        return data
 
 
 class AssessmentDetailResponse(BaseModel):
@@ -394,6 +433,10 @@ class AssessmentDetailResponse(BaseModel):
     created_by_id: uuid.UUID
     created_at: datetime
     updated_at: datetime
+    teaching_workspace_id: uuid.UUID | None = None
+    course_id: uuid.UUID | None = None
+    subject_id: uuid.UUID | None = None
+    academic_year: str | None = None
 
     sections: list[AssessmentSectionResponse] = []
     assessment_questions: list[AssessmentQuestionResponse] = []
@@ -439,6 +482,7 @@ class BulkAssessmentSection(BaseModel):
     questions: int | str | None = 0
     difficulty: str | None = "Medium"
     allowedTypes: list[str] | None = []
+    bloomLevel: str | None = "understand"
     aiPromptHint: str | None = None
     difficultyDistribution: dict[str, int] | None = None
 
@@ -467,7 +511,7 @@ class BulkAssessmentOption(BaseModel):
 
 class BulkAssessmentQuestion(BaseModel):
     id: str
-    sectionId: str
+    sectionId: str | None = None
     groupId: str | uuid.UUID | None = None
     text: str | None = ""
     type: str | None = "mcq"
@@ -556,6 +600,7 @@ class BulkAssessmentRules(BaseModel):
     requireAllMemberApproval: bool | None = False
     requireAllMemberParticipation: bool | None = False
     supervisor_ids: list[uuid.UUID] | None = []
+    integrityMonitoring: bool | None = True
 
     @model_validator(mode="before")
     @classmethod
