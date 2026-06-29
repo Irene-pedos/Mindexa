@@ -157,6 +157,7 @@ class AssessmentRepository:
         require_all_member_approval: bool = False,
         require_all_member_participation: bool = False,
         appeal_window_days: int | None = None,
+        late_submission_allowed: bool = False,
         late_penalty_percent: float | None = None,
         grace_period_minutes: int | None = None,
         autosave_token: uuid.UUID | None = None,
@@ -203,6 +204,7 @@ class AssessmentRepository:
             require_all_member_approval=require_all_member_approval,
             require_all_member_participation=require_all_member_participation,
             appeal_window_days=appeal_window_days,
+            late_submission_allowed=late_submission_allowed,
             late_penalty_percent=late_penalty_percent,
             grace_period_minutes=grace_period_minutes,
             autosave_token=autosave_token,
@@ -776,13 +778,17 @@ class AssessmentRepository:
         )
         return result.scalar_one()
 
+    async def lock_assessment(self, assessment_id: uuid.UUID) -> None:
+        """Acquire an exclusive row lock on the assessment to serialize operations."""
+        lock_stmt = select(Assessment.id).where(col(Assessment.id) == assessment_id).with_for_update()
+        await self.db.execute(lock_stmt)
+
     async def get_next_order_index(
         self, assessment_id: uuid.UUID, assessment_section_id: uuid.UUID | None
     ) -> int:
         """Get the next unique order_index for a section or overall."""
         # Row lock the assessment to serialize concurrent operations and prevent unique violations
-        lock_stmt = select(Assessment.id).where(col(Assessment.id) == assessment_id).with_for_update()
-        await self.db.execute(lock_stmt)
+        await self.lock_assessment(assessment_id)
 
         stmt = select(func.max(AssessmentQuestion.order_index)).where(
             col(AssessmentQuestion.assessment_id) == assessment_id

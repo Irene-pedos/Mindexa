@@ -59,25 +59,26 @@ class RAGService:
 
         embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-        # Query LecturerMaterialChunk directly — scoped to this workspace's materials.
-        # Join back to LecturerMaterial to get display_name for citations.
+        # Query resource_chunks scoped to this workspace's materials.
+        # Join back to LecturerMaterial to filter and get details.
         stmt = (
             text("""
                 SELECT
-                    lmc.content,
-                    lmc.chunk_index,
-                    lmc.source_page,
+                    rc.content,
+                    rc.chunk_index,
+                    rc.metadata_json,
                     lm.display_name,
                     lm.original_filename,
-                    (1 - (lmc.embedding <=> CAST(:query_embedding AS vector))) as similarity
-                FROM lecturer_material_chunk lmc
-                JOIN lecturer_material lm ON lmc.lecturer_material_id = lm.id
+                    (1 - (rc.embedding <=> CAST(:query_embedding AS vector))) as similarity
+                FROM resource_chunks rc
+                JOIN academic_resources ar ON rc.resource_id = ar.id
+                JOIN lecturer_material lm ON lm.academic_resource_id = ar.id
                 WHERE lm.teaching_workspace_id = CAST(:workspace_id AS uuid)
                   AND lm.is_deleted = FALSE
                   AND lm.is_current = TRUE
                   AND lm.processing_status = 'PROCESSED'
-                  AND lmc.embedding IS NOT NULL
-                ORDER BY lmc.embedding <=> CAST(:query_embedding AS vector)
+                  AND rc.embedding IS NOT NULL
+                ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :top_k
             """)
         )
@@ -109,8 +110,28 @@ class RAGService:
         # Build formatted context string
         parts = []
         for row in rows:
-            content, chunk_index, source_page, display_name, original_filename, similarity = row
+            content, chunk_index, metadata_json, display_name, original_filename, similarity = row
+            if similarity is not None and float(similarity) < 0.22:
+                continue
             source_label = display_name or original_filename or "Course Material"
+            
+            source_page = None
+            if metadata_json:
+                if isinstance(metadata_json, dict):
+                    source_page = metadata_json.get("page")
+                elif isinstance(metadata_json, int):
+                    source_page = metadata_json
+                elif isinstance(metadata_json, str):
+                    try:
+                        import json
+                        parsed = json.loads(metadata_json)
+                        if isinstance(parsed, dict):
+                            source_page = parsed.get("page")
+                        else:
+                            source_page = parsed
+                    except Exception:
+                        source_page = metadata_json
+            
             page_ref = f", Page {source_page}" if source_page else ""
             parts.append(f"[Source: {source_label}{page_ref}]\n{content}\n")
             logger.debug(
@@ -119,6 +140,13 @@ class RAGService:
                 chunk_index=chunk_index,
                 similarity=round(float(similarity), 4),
             )
+
+        if not parts:
+            logger.warning(
+                "Lecturer RAG: no chunks met similarity threshold (>= 0.22) — AI will generate without material context",
+                workspace_id=str(teaching_workspace_id),
+            )
+            return ""
 
         return "\n".join(parts)
 

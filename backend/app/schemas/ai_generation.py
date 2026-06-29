@@ -247,6 +247,9 @@ class AIGeneratedQuestionResponse(BaseModel):
     parse_error: str | None
     review_status: str
     promoted_question_id: uuid.UUID | None = None
+    # True  → grounded in lecturer's uploaded course materials (RAG)
+    # False → generated from the AI model's general knowledge
+    grounded_by_rag: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

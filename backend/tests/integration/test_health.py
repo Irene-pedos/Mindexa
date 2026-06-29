@@ -15,23 +15,23 @@ from httpx import AsyncClient
 class TestLiveness:
 
     async def test_returns_200(self, client: AsyncClient):
-        response = await client.get("/health/live")
+        response = await client.get("/api/v1/health/live")
         assert response.status_code == 200
 
     async def test_response_shape(self, client: AsyncClient):
-        body = (await client.get("/health/live")).json()
+        body = (await client.get("/api/v1/health/live")).json()
         assert body["status"] == "alive"
 
     async def test_no_auth_required(self, client: AsyncClient):
-        response = await client.get("/health/live")
+        response = await client.get("/api/v1/health/live")
         assert response.status_code not in (401, 403)
 
     async def test_request_id_header_present(self, client: AsyncClient):
-        response = await client.get("/health/live")
+        response = await client.get("/api/v1/health/live")
         assert "x-request-id" in response.headers
 
     async def test_security_headers_present(self, client: AsyncClient):
-        response = await client.get("/health/live")
+        response = await client.get("/api/v1/health/live")
         assert response.headers.get("x-content-type-options") == "nosniff"
         assert response.headers.get("x-frame-options") == "DENY"
 
@@ -40,12 +40,12 @@ class TestLiveness:
 class TestReadiness:
 
     async def test_returns_valid_status_code(self, client: AsyncClient):
-        response = await client.get("/health/ready")
+        response = await client.get("/api/v1/health/ready")
         # 200 = fully ready, 503 = degraded — both are valid responses
         assert response.status_code in (200, 503)
 
     async def test_response_contains_checks(self, client: AsyncClient):
-        body = (await client.get("/health/ready")).json()
+        body = (await client.get("/api/v1/health/ready")).json()
         assert "status" in body
         assert "database" in body
         assert "redis" in body
@@ -53,10 +53,10 @@ class TestReadiness:
         assert "status" in body["redis"]
 
     async def test_check_values_are_ok_or_degraded(self, client: AsyncClient):
-        body = (await client.get("/health/ready")).json()
+        body = (await client.get("/api/v1/health/ready")).json()
         for check_value in (body["database"]["status"], body["redis"]["status"]):
             assert check_value in ("ok", "degraded")
 
     async def test_no_auth_required(self, client: AsyncClient):
-        response = await client.get("/health/ready")
+        response = await client.get("/api/v1/health/ready")
         assert response.status_code not in (401, 403)

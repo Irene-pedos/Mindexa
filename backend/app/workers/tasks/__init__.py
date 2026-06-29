@@ -631,26 +631,10 @@ def process_ai_generation_batch(
             )
 
         if workspace_id and not course_material_context.strip():
-            message = (
-                "AI generation requires processed lecture materials for the selected "
-                "teaching workspace. Upload notes from the course page and wait until "
-                "processing completes before generating assessment questions."
+            logger.info(
+                "Lecturer RAG context is empty/unrelated — falling back to general AI Knowledge mode",
+                extra={"batch_id": batch_id},
             )
-            await repo.update_batch_status(
-                batch_id=batch.id,
-                status=AIBatchStatus.FAILED.value,
-                total_generated=0,
-                total_failed=batch.total_requested,
-                error_message=message,
-                completed_at=datetime.now(UTC),
-            )
-            await session.commit()
-            return {
-                "batch_id": batch_id,
-                "status": AIBatchStatus.FAILED.value,
-                "generated": 0,
-                "error": message,
-            }
 
         # Blueprint & learning outcome context stored on the batch
         blueprint_constraints = getattr(batch, "blueprint_constraints", None)
@@ -724,6 +708,8 @@ def process_ai_generation_batch(
                             parsed_explanation=generated.explanation,
                             parse_error=generated.parse_error,
                             target_section_id=sec_uuid,
+                            # True when the section had RAG context from course materials
+                            grounded_by_rag=bool(sec_context and sec_context.strip()),
                         )
                 except Exception as sec_exc:
                     logger.error("Failed to generate for section %s: %s", sec_id_str, str(sec_exc))
@@ -789,6 +775,8 @@ def process_ai_generation_batch(
                     parsed_explanation=generated.explanation,
                     parse_error=generated.parse_error,
                     target_section_id=batch.target_section_id,
+                    # True when the batch had RAG context from course materials
+                    grounded_by_rag=bool(course_material_context and course_material_context.strip()),
                 )
 
             # Determine final batch status

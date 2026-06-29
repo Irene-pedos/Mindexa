@@ -92,6 +92,7 @@ class Question(BaseModel, table=True):
     image_url: str | None = Field(default=None, nullable=True)
     explanation: str | None = Field(default=None, nullable=True)
     case_study_context: str | None = Field(default=None, nullable=True)
+    computational_type: str | None = Field(default=None, nullable=True)
 
     marks: int = Field(default=1, nullable=False)
     difficulty: DifficultyLevel = Field(default=DifficultyLevel.MEDIUM, nullable=False, index=True)
@@ -459,6 +460,9 @@ class AIGeneratedQuestion(BaseModel, table=True):
     parsed_options_json: str | None = Field(default=None, nullable=True)
     parsed_explanation: str | None = Field(default=None, nullable=True)
     parse_error: str | None = Field(default=None, nullable=True)
+    # True  → question was grounded in uploaded lecture materials (via RAG)
+    # False → question was generated from the AI model's general knowledge
+    grounded_by_rag: bool = Field(default=False, nullable=False)
     review_status: AIQuestionDecision = Field(
         default=AIQuestionDecision.PENDING, nullable=False, index=True
     )

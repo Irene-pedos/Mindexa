@@ -189,6 +189,87 @@ class BlueprintService:
             else:
                 warnings.extend(rule_violations)
 
+        # Section-level validations (checking question counts, difficulty splits, and format mappings match targets)
+        for section in (assessment.sections or []):
+            section_questions = [aq for aq in questions if aq.assessment_section_id == section.id]
+
+            # 1. Section Marks Validation
+            sec_marks_sum = sum(self._question_marks(aq) for aq in section_questions)
+            if section.allocated_marks and sec_marks_sum != section.allocated_marks:
+                violations.append(
+                    BlueprintViolation(
+                        rule_type="section_marks",
+                        rule_id=None,
+                        is_blocking=True,
+                        message=f"Section '{section.title}' marks sum ({sec_marks_sum}) does not match allocated marks ({section.allocated_marks}).",
+                        expected=section.allocated_marks,
+                        actual=sec_marks_sum,
+                    )
+                )
+
+            # 2. Section Question Count Validation
+            if section.question_count_target is not None:
+                actual_count = len(section_questions)
+                if actual_count != section.question_count_target:
+                    violations.append(
+                        BlueprintViolation(
+                            rule_type="section_question_count",
+                            rule_id=None,
+                            is_blocking=True,
+                            message=f"Section '{section.title}' has {actual_count} questions, but target is {section.question_count_target}.",
+                            expected=section.question_count_target,
+                            actual=actual_count,
+                        )
+                    )
+
+            # 3. Section Question Types Validation
+            if section.allowed_question_types and isinstance(section.allowed_question_types, dict):
+                allowed_types = section.allowed_question_types.get("types")
+                if allowed_types and isinstance(allowed_types, list):
+                    norm_allowed = [t.lower().replace("_", "") for t in allowed_types]
+                    if "mixed" not in norm_allowed:
+                        for aq in section_questions:
+                            if aq.question:
+                                q_type_str = self._enum_value(aq.question.question_type).lower().replace("_", "")
+                                if q_type_str not in norm_allowed:
+                                    violations.append(
+                                        BlueprintViolation(
+                                            rule_type="section_question_type",
+                                            rule_id=None,
+                                            is_blocking=True,
+                                            message=f"Question '{aq.question.content[:40]}...' in section '{section.title}' has type '{aq.question.question_type.value}', which is not allowed by the section settings.",
+                                            expected=", ".join(allowed_types),
+                                            actual=aq.question.question_type.value,
+                                        )
+                                    )
+
+            # 4. Section Difficulty Distribution Validation
+            if section.difficulty_distribution and isinstance(section.difficulty_distribution, dict) and len(section_questions) > 0:
+                sec_diff_counts = {"easy": 0, "medium": 0, "hard": 0}
+                for aq in section_questions:
+                    if aq.question and aq.question.difficulty:
+                        diff_str = self._enum_value(aq.question.difficulty).lower()
+                        if diff_str in sec_diff_counts:
+                            sec_diff_counts[diff_str] += 1
+
+                tolerance = 10
+                for diff_level, target_pct in section.difficulty_distribution.items():
+                    if target_pct is None:
+                        continue
+                    actual_cnt = sec_diff_counts.get(diff_level.lower(), 0)
+                    actual_pct = round((actual_cnt / len(section_questions)) * 100)
+                    if abs(actual_pct - int(target_pct)) > tolerance:
+                        warnings.append(
+                            BlueprintViolation(
+                                rule_type="section_difficulty_distribution",
+                                rule_id=None,
+                                is_blocking=False,
+                                message=f"Section '{section.title}' difficulty '{diff_level}' is {actual_pct}%, but target is {target_pct}% (+/-{tolerance}%).",
+                                expected=int(target_pct),
+                                actual=actual_pct,
+                            )
+                        )
+
         is_valid = len(violations) == 0
         return BlueprintValidationResult(
             assessment_id=assessment_id,

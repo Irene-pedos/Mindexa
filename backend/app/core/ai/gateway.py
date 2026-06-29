@@ -188,11 +188,16 @@ class AIGateway:
                         errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")
                         break  # Fallback to next provider
                     attempt += 1
-                    # Exponential backoff (e.g., 0.5 * 2, 0.5 * 4, 0.5 * 8, 0.5 * 16)
-                    sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
-                    # Add a small random jitter (0 to 0.5 seconds) to avoid synchronized requests
-                    import random
-                    sleep_time += random.uniform(0.0, 0.5)
+                    # Prefer the provider's own Retry-After value; fall back to
+                    # exponential back-off with a small jitter.
+                    if exc.retry_after is not None:
+                        sleep_time = exc.retry_after + 0.25  # small buffer
+                    else:
+                        import random
+                        sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                        sleep_time += random.uniform(0.0, 0.5)
+                    # Never wait more than 30 seconds per attempt
+                    sleep_time = min(sleep_time, 30.0)
                     await sleep(sleep_time)
                 except ServiceUnavailableError as exc:
                     errors.append(f"{provider.name}: {exc}")

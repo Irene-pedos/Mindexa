@@ -57,21 +57,24 @@ def test_study_support_agent_build_user_prompt() -> None:
     assert "No course materials were found." in prompt_without_context
 
 
-@pytest.mark.asyncio
-async def test_study_support_agent_call_llm() -> None:
+def test_study_support_agent_call_llm() -> None:
+    import anyio
     gateway = FakeGateway("Sample Answer")
     agent = StudySupportAgent(gateway)
     student_id = uuid.uuid4()
     
-    response = await agent._call_llm(
-        system_prompt="System instructions",
-        user_prompt="User question context",
-        history=[
-            {"role": "user", "content": "hi"},
-            {"role": "assistant", "content": "hello"}
-        ],
-        student_id=student_id
-    )
+    async def run():
+        return await agent._call_llm(
+            system_prompt="System instructions",
+            user_prompt="User question context",
+            history=[
+                {"role": "user", "content": "hi"},
+                {"role": "assistant", "content": "hello"}
+            ],
+            student_id=student_id
+        )
+    
+    response = anyio.run(run)
     
     assert response == "Sample Answer"
     assert gateway.last_request is not None

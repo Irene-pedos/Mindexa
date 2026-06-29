@@ -309,6 +309,12 @@ class AssessmentService:
             update_fields["randomize_questions"] = data.randomize_questions
         if data.randomize_options is not None:
             update_fields["randomize_options"] = data.randomize_options
+        if data.late_submission_allowed is not None:
+            update_fields["late_submission_allowed"] = data.late_submission_allowed
+        if data.late_penalty_percent is not None:
+            update_fields["late_penalty_percent"] = data.late_penalty_percent
+        if data.grace_period_minutes is not None:
+            update_fields["grace_period_minutes"] = data.grace_period_minutes
 
         # Update target sections (class groups)
         # Update target sections (class groups)
@@ -696,6 +702,14 @@ class AssessmentService:
         except Exception:
             # No blueprint defined — that's allowed
             pass
+        # Check 5b: Fill-in-the-blank placeholder validation
+        for aq in (assessment.assessment_questions or []):
+            if aq.question and aq.question.question_type == DbQuestionType.FILL_BLANK:
+                content = aq.question.content or ""
+                if "[blank]" not in content:
+                    errors.append(
+                        f"Fill-in-the-blank question '{content[:40]}...' must contain the '[blank]' placeholder in its text."
+                    )
 
         # Check 6: Group-work configuration must be complete before publish
         if assessment.is_group_assessment:
@@ -1271,6 +1285,7 @@ class AssessmentService:
                 require_all_member_approval=data.rules.requireAllMemberApproval if is_group else False,
                 require_all_member_participation=data.rules.requireAllMemberParticipation if is_group else False,
                 appeal_window_days=data.metadata.appealWindowDays if is_group else None,
+                late_submission_allowed=data.rules.lateSubmissionAllowed,
                 late_penalty_percent=data.rules.latePenaltyPercent,
                 grace_period_minutes=data.rules.gracePeriodMinutes,
                 autosave_token=data.rules.autosaveToken,
@@ -1302,6 +1317,7 @@ class AssessmentService:
             "integrity_monitoring_enabled": data.rules.integrityMonitoring if data.rules.integrityMonitoring is not None else True,
             "randomize_questions": data.rules.shuffleQuestions,
             "randomize_options": data.rules.shuffleOptions,
+            "late_submission_allowed": data.rules.lateSubmissionAllowed,
             "late_penalty_percent": data.rules.latePenaltyPercent,
             "grace_period_minutes": data.rules.gracePeriodMinutes,
             "audience_type": data.metadata.audience_type or "all",
@@ -1460,6 +1476,7 @@ class AssessmentService:
                 existing_q.question_type = db_q_type
                 existing_q.marks = q.marks or 0
                 existing_q.case_study_context = q.caseStudyContext
+                existing_q.computational_type = q.computationalType
                 existing_q.is_deleted = False
                 existing_q.deleted_at = None
                 
@@ -1484,7 +1501,8 @@ class AssessmentService:
                         DbQuestionType.ESSAY,
                         DbQuestionType.COMPUTATIONAL,
                         DbQuestionType.CASE_STUDY
-                    ] else GradingMode.AUTO
+                    ] else GradingMode.AUTO,
+                    computational_type=q.computationalType
                 )
                 if q.caseStudyContext:
                     new_q.case_study_context = q.caseStudyContext
@@ -1538,11 +1556,12 @@ class AssessmentService:
                 elif db_q_type == DbQuestionType.CASE_STUDY:
                     if q.options and len(q.options) > 0 and q.options[0].option_text:
                         new_q.explanation = q.options[0].option_text
-                    for opt in q.options:
+                    for idx, opt in enumerate(q.options):
                         await self._question_repo.add_option(
                             question_id=new_q.id,
                             content=opt.option_text or "",
-                            order_index=opt.order_index or 0,
+                            order_index=idx,
+                            match_key=opt.match_key,
                             match_value=opt.option_text_right,
                             is_correct=True
                         )
@@ -1568,15 +1587,28 @@ class AssessmentService:
             if not section_id and section_id_map:
                 section_id = list(section_id_map.values())[0]
 
+            # Look up QuestionBankEntry ID if this question is copied from bank
+            bank_entry_id = None
+            parent_q_id = q_uuid if is_bank_question else getattr(new_q, "parent_question_id", None)
+            if parent_q_id:
+                from app.db.models.question import QuestionBankEntry
+                res_be = await self.db.execute(
+                    select(QuestionBankEntry).where(QuestionBankEntry.question_id == parent_q_id)
+                )
+                bank_entry = res_be.scalars().first()
+                if bank_entry:
+                    bank_entry_id = bank_entry.id
+
             await self._repo.add_question(
                 assessment_id=assessment.id,
                 question_id=new_q.id,
                 order_index=i,
-                added_via=QuestionAddedVia.MANUAL_WRITE,
+                added_via=QuestionAddedVia.BANK_INSERT if parent_q_id else QuestionAddedVia.MANUAL_WRITE,
                 assessment_section_id=section_id,
                 group_id=target_group_id,
                 marks_override=q.marks,
                 is_required=q.is_required if q.is_required is not None else True,
+                bank_entry_id=bank_entry_id,
             )
 
         # 5. Handle Supervisors

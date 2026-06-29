@@ -238,6 +238,25 @@ async def save_draft_bulk(
     return AssessmentDetailResponse.model_validate(result)
 
 
+@router.put(
+    "/draft/{assessment_id}",
+    response_model=AssessmentDetailResponse,
+    summary="Bulk Update Draft (Frontend Alignment)",
+)
+async def update_draft_bulk(
+    assessment_id: uuid.UUID,
+    body: BulkAssessmentPublishRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentDetailResponse:
+    svc = _service(db)
+    body.id = assessment_id
+    result = await svc.bulk_save_draft_assessment(body, current_user)
+    await db.commit()
+    return AssessmentDetailResponse.model_validate(result)
+
+
+
 # ---------------------------------------------------------------------------
 # WIZARD STEP SAVE
 # ---------------------------------------------------------------------------

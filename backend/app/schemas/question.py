@@ -29,6 +29,7 @@ class QuestionOptionResponse(BaseModel):
     is_correct: bool | None = False
     order_index: int
     explanation: str | None = None
+    match_key: str | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
 
@@ -226,6 +227,7 @@ class QuestionDetailResponse(BaseModel):
     fill_blank_template: str | None = None
     correct_order_json: str | None = None
     case_study_context: str | None = None
+    computational_type: str | None = None
     is_active: bool
     version_number: int = Field(1, validation_alias="version")
     parent_question_id: uuid.UUID | None = None

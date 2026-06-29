@@ -151,6 +151,7 @@ class AIGenerationRepository:
         parsed_explanation: str | None = None,
         parse_error: str | None = None,
         target_section_id: uuid.UUID | None = None,
+        grounded_by_rag: bool = False,
     ) -> AIGeneratedQuestion:
         q = AIGeneratedQuestion(
             batch_id=batch_id,
@@ -164,6 +165,7 @@ class AIGenerationRepository:
             parsed_options_json=parsed_options_json,
             parsed_explanation=parsed_explanation,
             parse_error=parse_error,
+            grounded_by_rag=grounded_by_rag,
             review_status=AIQuestionDecision.PENDING,
         )
         self.db.add(q)

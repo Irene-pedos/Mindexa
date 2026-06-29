@@ -109,6 +109,22 @@ interface Question {
   is_required: boolean;
   bloom_level?: string;
 }
+const mapFrontendToBackendType = (type: string): string => {
+  if (type === "truefalse") return "true_false";
+  if (type === "shortanswer") return "short_answer";
+  if (type === "fillblank") return "fill_blank";
+  if (type === "casestudy") return "case_study";
+  return type;
+};
+
+const mapBackendToFrontendType = (type: string): string => {
+  const norm = (type || "").toLowerCase().replaceAll("_", "");
+  if (norm === "truefalse") return "truefalse";
+  if (norm === "shortanswer") return "shortanswer";
+  if (norm === "fillblank") return "fillblank";
+  if (norm === "casestudy" || norm === "casestudycontext" || norm === "case_study") return "casestudy";
+  return norm;
+};
 
 export default function AssessmentDetailsPage() {
   const params = useParams();
@@ -345,19 +361,7 @@ export default function AssessmentDetailsPage() {
     setAiDrawerOpen(false);
 
     try {
-      const typeMap: Record<string, string> = {
-        mcq: "mcq",
-        truefalse: "true_false",
-        shortanswer: "short_answer",
-        essay: "essay",
-        matching: "matching",
-        fillblank: "fill_blank",
-        computational: "computational",
-        ordering: "ordering",
-        casestudy: "case_study",
-      };
-      
-      const mappedType = typeMap[aiGenerationConfig.question_type] || "mcq";
+      const mappedType = mapFrontendToBackendType(aiGenerationConfig.question_type);
 
       const res = await aiGenerationApi.generateQuestions({
         subject: assessment.title || "Subject",
@@ -368,6 +372,7 @@ export default function AssessmentDetailsPage() {
         bloom_level: aiGenerationConfig.bloom_level as any,
         additional_context: aiGenerationConfig.additional_context,
         target_assessment_id: assessmentId,
+        workspace_id: (assessment as any).teaching_workspace_id || undefined,
       });
 
       setAiPollingBatchId(res.id);
@@ -394,19 +399,7 @@ export default function AssessmentDetailsPage() {
       });
       
       // Update assessment local questions list dynamically
-      const typeMap: Record<string, string> = {
-        mcq: "mcq",
-        true_false: "truefalse",
-        short_answer: "shortanswer",
-        essay: "essay",
-        matching: "matching",
-        fill_blank: "fillblank",
-        computational: "computational",
-        ordering: "ordering",
-        case_study: "casestudy",
-      };
-
-      const qType = typeMap[candidate.question_type] || "shortanswer";
+      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
       const promotedQId = res?.promoted_question?.id || candidate.id;
       const aq = res?.promoted_question?.assessment_question;
 
@@ -475,19 +468,7 @@ export default function AssessmentDetailsPage() {
         add_to_section_id: backendSectionId || undefined,
       });
 
-      const typeMap: Record<string, string> = {
-        mcq: "mcq",
-        true_false: "truefalse",
-        short_answer: "shortanswer",
-        essay: "essay",
-        matching: "matching",
-        fill_blank: "fillblank",
-        computational: "computational",
-        ordering: "ordering",
-        case_study: "casestudy",
-      };
-
-      const qType = typeMap[candidate.question_type] || "shortanswer";
+      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
       const promotedQId = res?.promoted_question?.id || candidate.id;
       const aq = res?.promoted_question?.assessment_question;
 
@@ -532,18 +513,6 @@ export default function AssessmentDetailsPage() {
   const handleAcceptAll = async () => {
     if (aiCandidates.length === 0) return;
     try {
-      const typeMap: Record<string, string> = {
-        mcq: "mcq",
-        true_false: "truefalse",
-        short_answer: "shortanswer",
-        essay: "essay",
-        matching: "matching",
-        fill_blank: "fillblank",
-        computational: "computational",
-        ordering: "ordering",
-        case_study: "casestudy",
-      };
-
       const results = await Promise.all(
         aiCandidates.map((c) => {
           const backendSectionId = c.target_section_id || (c as any)._sectionId || aiTargetSectionId;
@@ -570,7 +539,7 @@ export default function AssessmentDetailsPage() {
             id: promotedQId,
             sectionId: backendSectionId,
             text: c.parsed_question_text || "",
-            type: typeMap[c.question_type] || "shortanswer",
+            type: mapBackendToFrontendType(c.question_type) || "shortanswer",
             marks: 2,
             options: [],
             aiGenerated: true,

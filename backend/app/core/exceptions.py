@@ -381,11 +381,25 @@ class RateLimitError(MindexaError):
     """
     Raised when a client exceeds the configured rate limit for an endpoint.
     Maps to HTTP 429.
+
+    Providers may set ``retry_after`` (seconds) from the ``Retry-After``
+    response header so the gateway can wait exactly the right amount of time
+    instead of using blind exponential back-off.
     """
 
     status_code = 429
     default_message = "Too many requests. Please slow down."
     default_code = "rate_limit_exceeded"
+
+    def __init__(
+        self,
+        detail: str | None = None,
+        code: str | None = None,
+        retry_after: float | None = None,
+        **context: Any,
+    ) -> None:
+        super().__init__(detail=detail, code=code, **context)
+        self.retry_after: float | None = retry_after
 
 
 # ─────────────────────────────────────────────────────────────────────────────

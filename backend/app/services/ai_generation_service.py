@@ -183,6 +183,10 @@ class AIGenerationService:
                 "Students cannot review AI-generated questions."
             )
 
+        # Acquire lock on assessment first if adding to it, to serialize operations and prevent FK SHARE lock deadlocks
+        if data.add_to_assessment_id:
+            await self._assessment_repo.lock_assessment(data.add_to_assessment_id)
+
         ai_question = await self._repo.get_generated_question(ai_question_id)
         if not ai_question:
             raise NotFoundError("AI-generated question not found.")
@@ -420,8 +424,12 @@ class AIGenerationService:
                 for i, opt in enumerate(options):
                     m_key = None
                     m_val = None
-                    if is_matching or is_case_study:
+                    if opt.get("match_key") is not None:
+                        m_key = str(opt.get("match_key"))
+                    elif is_matching or is_case_study:
                         m_key = opt.get("text") or opt.get("content") or opt.get("option_text") or ""
+
+                    if is_matching or is_case_study:
                         m_val = opt.get("explanation") or opt.get("option_text_right") or ""
                     
                     # For case study sub-questions, order_index stores the marks value

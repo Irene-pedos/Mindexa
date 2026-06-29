@@ -210,7 +210,7 @@ class Settings(BaseSettings):
     # ─── AI / LLM ─────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
-    GROQ_DEFAULT_MODEL: str = "llama-3.1-8b-instant"
+    GROQ_DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     JINA_API_KEY: str = ""
@@ -220,7 +220,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: Literal["groq", "openai", "anthropic", "gemini"] = "groq"
     DEFAULT_EMBEDDING_PROVIDER: Literal["groq", "openai", "anthropic", "jina"] = "jina"
     DEFAULT_EMBEDDING_MODEL: str = "jina-embeddings-v3"
-    DEFAULT_LLM_MODEL: str = "llama-3.1-8b-instant"
+    DEFAULT_LLM_MODEL: str = "llama-3.3-70b-versatile"
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_DEFAULT_MODEL: str = "claude-3-5-haiku-latest"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0
@@ -230,7 +230,7 @@ class Settings(BaseSettings):
 
     # ─── Google Gemini ────────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
-    GEMINI_DEFAULT_MODEL: str = "gemini-1.5-flash"
+    GEMINI_DEFAULT_MODEL: str = "gemini-2.0-flash"
 
     # ─── Vector Store ─────────────────────────────────────────────────────────
     VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"

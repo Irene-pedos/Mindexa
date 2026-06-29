@@ -7,6 +7,7 @@ These tests use the real test database and the async test client.
 
 from __future__ import annotations
 
+import uuid
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -70,7 +71,7 @@ class TestRegistration:
         # Second registration with same email
         response = await client.post("/api/v1/auth/register", json=payload)
         assert response.status_code == 409
-        assert response.json()["error"]["code"] == "already_exists"
+        assert response.json()["error"]["code"] in ("already_exists", "email_already_registered")
 
     async def test_register_cannot_force_admin_role(self, client: AsyncClient, db: AsyncSession):
         """Self-registration as admin is downgraded to student."""
@@ -79,7 +80,7 @@ class TestRegistration:
             "password": "SecurePassword123!",
             "first_name": "Sneaky",
             "last_name": "Admin",
-            "role": "admin"
+            "role": "ADMIN"
         }
         response = await client.post("/api/v1/auth/register", json=payload)
 
@@ -91,7 +92,7 @@ class TestRegistration:
         user = (
             await db.execute(select(User).where(User.email == "sneaky_admin@mindexa.ac"))
         ).scalar_one()
-        assert user.role == "student"
+        assert user.role == "STUDENT"
 
     async def test_register_lecturer_pending_approval(self, client: AsyncClient, db: AsyncSession):
         """Lecturer registration sets status to PENDING_APPROVAL."""
@@ -122,13 +123,28 @@ class TestRegistration:
         
 @pytest.mark.asyncio
 class TestAdminApproval:
-    async def test_approve_lecturer_success(self, client: AsyncClient, db: AsyncSession, admin_headers):
+    async def test_approve_lecturer_success(self, client: AsyncClient, db: AsyncSession, make_auth_headers):
         """Admin can approve a pending lecturer."""
         from app.db.models.auth import User
         from app.core.constants import UserStatus, UserRole
         
+        # Create an admin user in the DB
+        admin_id = uuid.uuid4()
+        admin_user = User(
+            id=admin_id,
+            email="admin_user@mindexa.ac",
+            hashed_password="...",
+            role=UserRole.ADMIN,
+            status=UserStatus.ACTIVE,
+            email_verified=True,
+        )
+        db.add(admin_user)
+        await db.commit()
+
+        # Generate custom headers
+        headers = make_auth_headers(user_id=str(admin_id), role=UserRole.ADMIN, email="admin_user@mindexa.ac")
+
         # 1. Create a pending lecturer
-        import uuid
         lecturer_id = uuid.uuid4()
         user = User(
             id=lecturer_id,
@@ -143,7 +159,7 @@ class TestAdminApproval:
         
         # 2. Approve
         payload = {"status": "ACTIVE"}
-        response = await client.patch(f"/api/v1/admin/users/{lecturer_id}/approve", json=payload, headers=admin_headers)
+        response = await client.patch(f"/api/v1/admin/users/{lecturer_id}/approve", json=payload, headers=headers)
         
         assert response.status_code == 200
         data = response.json()

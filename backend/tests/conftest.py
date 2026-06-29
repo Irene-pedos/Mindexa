@@ -103,30 +103,39 @@ def event_loop():
     loop.close()
 
 
-@pytest_asyncio.fixture(scope="session")
-async def engine() -> AsyncGenerator[AsyncEngine, None]:
+@pytest.fixture(scope="session")
+def engine():
     """
     Create the async engine for the test database.
     """
-    # Use NullPool for tests to ensure each session gets a fresh connection
-    # and to avoid issues with connection state between tests.
+    import asyncio
     test_engine = create_async_engine(
         TEST_DATABASE_URL,
         echo=False,
         poolclass=NullPool,
     )
     yield test_engine
-    await test_engine.dispose()
+    
+    # Dispose of engine using a temporary event loop
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(test_engine.dispose())
+    loop.close()
 
 
-@pytest_asyncio.fixture(scope="session", autouse=True)
-async def setup_test_database(engine: AsyncEngine):
+@pytest.fixture(scope="session", autouse=True)
+def setup_test_database(engine: AsyncEngine):
     """
     Prepare the test database once per pytest session.
     """
-    async with engine.begin() as conn:
-        await conn.run_sync(_nuke_and_recreate_schema)
-        await conn.run_sync(_create_all_tables)
+    import asyncio
+    async def run_setup():
+        async with engine.begin() as conn:
+            await conn.run_sync(_nuke_and_recreate_schema)
+            await conn.run_sync(_create_all_tables)
+
+    loop = asyncio.new_event_loop()
+    loop.run_until_complete(run_setup())
+    loop.close()
     yield
 
 

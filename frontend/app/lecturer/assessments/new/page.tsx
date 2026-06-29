@@ -56,6 +56,7 @@ import {
   Calendar as CalendarIcon,
   Users,
   Upload,
+  BookOpen,
 } from "lucide-react";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -114,7 +115,6 @@ import {
   WorkspaceListItem,
   WorkspaceDetail,
 } from "@/lib/api/lecturer";
-import { AIGeneratorPanel } from "@/components/mindexa/assessment/ai-generator-panel";
 import { QuestionBankSelector } from "@/components/mindexa/assessment/question-bank-selector";
 import { QuestionBankItem } from "@/lib/api/question";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
@@ -165,12 +165,25 @@ type QuestionType =
 
 type ComputationalSubType = "decision" | "search" | "counting" | "optimization";
 
+const QUESTION_TYPE_LABELS: Record<string, string> = {
+  mcq: "Multiple Choice",
+  truefalse: "True / False",
+  shortanswer: "Short Answer",
+  essay: "Essay",
+  matching: "Matching",
+  ordering: "Ordering",
+  fillblank: "Fill-in-the-Blank",
+  computational: "Computational",
+  casestudy: "Case Study",
+};
+
 interface QuestionOption {
   id?: string;
   option_text: string;
   option_text_right?: string;
   is_correct: boolean;
   order_index: number;
+  match_key?: string;
 }
 
 interface BlueprintSection {
@@ -598,19 +611,34 @@ function QuestionCard({
   onRemoveOption: (idx: number) => void;
 }) {
   const [showMediaUpload, setShowMediaUpload] = useState(!!question.imageUrl);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 5 * 1024 * 1024) {
         toast.error("Image too large. Max 5MB.");
         return;
       }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        onUpdate({ imageUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+      setIsUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        const res = await apiClient("/questions/upload-image", {
+          method: "POST",
+          body: formData,
+        }) as any;
+        if (res && res.url) {
+          onUpdate({ imageUrl: res.url });
+          toast.success("Image uploaded successfully.");
+        } else {
+          toast.error("Failed to upload image.");
+        }
+      } catch (err: any) {
+        toast.error(err.message || "Failed to upload image.");
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -685,8 +713,8 @@ function QuestionCard({
               </SelectTrigger>
               <SelectContent>
                 {allowedTypes.map((t) => (
-                  <SelectItem key={t} value={t} className="capitalize">
-                    {t}
+                  <SelectItem key={t} value={t}>
+                    {QUESTION_TYPE_LABELS[t] || t}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -700,10 +728,11 @@ function QuestionCard({
               <Input
                 type="number"
                 className="w-16 h-8 text-center"
-                value={question.marks ?? 0}
-                onChange={(e) =>
-                  onUpdate({ marks: parseInt(e.target.value) || 0 })
-                }
+                value={question.marks === 0 ? "" : question.marks}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onUpdate({ marks: val === "" ? "" as any : parseInt(val) || 0 });
+                }}
               />
             </div>
             <div className="flex items-center gap-1 border-l pl-4">
@@ -718,6 +747,7 @@ function QuestionCard({
                     : "text-muted-foreground",
                 )}
                 title="Add Media / Diagram"
+                aria-label="Add Media / Diagram"
               >
                 <ImageIcon className="size-4" />
               </Button>
@@ -727,6 +757,7 @@ function QuestionCard({
                 onClick={onSaveToBank}
                 className="text-primary hover:bg-primary/5 h-8 w-8"
                 title="Save to Bank"
+                aria-label="Save to Bank"
               >
                 <Database className="size-4" />
               </Button>
@@ -736,6 +767,7 @@ function QuestionCard({
                 onClick={onDelete}
                 className="text-muted-foreground hover:text-destructive hover:bg-destructive/5 h-8 w-8"
                 title="Delete Question"
+                aria-label="Delete Question"
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -754,10 +786,17 @@ function QuestionCard({
               className="min-h-25 text-base"
             />
             {question.type === "fillblank" && (
-              <p className="text-[11px] text-primary font-medium mt-1">
-                Tip: Use <strong>[blank]</strong> to indicate where students
-                should type their answers.
-              </p>
+              <div className="space-y-1 mt-1">
+                <p className="text-[11px] text-primary font-medium">
+                  Tip: Use <strong>[blank]</strong> to indicate where students
+                  should type their answers.
+                </p>
+                {(!question.text || !question.text.includes("[blank]")) && (
+                  <p className="text-[11px] text-destructive font-semibold flex items-center gap-1">
+                    ⚠️ Missing &quot;[blank]&quot; placeholder in question text.
+                  </p>
+                )}
+              </div>
             )}
           </div>
 
@@ -949,14 +988,17 @@ function QuestionCard({
                       />
                       <div className="grid grid-cols-3 gap-2">
                         <div className="col-span-1">
-                          <Input
+                           <Input
                             type="number"
-                            value={opt.order_index || 0}
-                            onChange={(e) =>
-                              onUpdateOption(oIdx, {
-                                order_index: parseInt(e.target.value) || 0,
-                              })
-                            }
+                            value={opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5"}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const nextOptions = question.options.map((o, idx) =>
+                                idx === oIdx ? { ...o, match_key: val } : o
+                              );
+                              const nextMarks = nextOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+                              onUpdate({ options: nextOptions, marks: nextMarks });
+                            }}
                             placeholder="Marks"
                             className="h-8 text-xs text-center"
                           />
@@ -986,9 +1028,12 @@ function QuestionCard({
                       option_text: "",
                       option_text_right: "",
                       is_correct: true,
-                      order_index: 5, // default sub-question marks
+                      order_index: nextIdx,
+                      match_key: "5", // default sub-question marks
                     };
-                    onUpdate({ options: [...question.options, newOpt] });
+                    const nextOptions = [...question.options, newOpt];
+                    const nextMarks = nextOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+                    onUpdate({ options: nextOptions, marks: nextMarks });
                   }}
                   className="h-8 text-[11px] border-amber-300 text-amber-900 hover:bg-amber-50"
                 >
@@ -1035,6 +1080,23 @@ function QuestionCard({
                 </div>
               ))}
             </div>
+            {(() => {
+              const correctCount = question.options.filter((o) => o.is_correct).length;
+              return (
+                <div className="space-y-1">
+                  {correctCount === 0 && (
+                    <p className="text-[11px] text-destructive font-semibold">
+                      ⚠️ Warning: No options are marked as correct.
+                    </p>
+                  )}
+                  {correctCount > 1 && (
+                    <p className="text-[11px] text-amber-600 font-semibold">
+                      ⚠️ Warning: Multiple options are marked as correct.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
             {question.options.length < 8 && (
               <Button variant="outline" size="sm" onClick={onAddOption}>
                 <Plus className="size-3 mr-2" /> Add Option
@@ -1073,7 +1135,6 @@ function QuestionCard({
                     }
                     className="h-9"
                     placeholder={`Option ${oIdx + 1}`}
-                    disabled
                   />
                 </div>
               ))}
@@ -1103,6 +1164,19 @@ function QuestionCard({
                 <CheckCircle2 className="size-4 text-emerald-500" />
                 Correct Answers for Blanks (In Sequence)
               </Label>
+              {(() => {
+                const blankMatches = (question.text || "").match(/\[blank\]/g);
+                const expectedBlanksCount = blankMatches ? blankMatches.length : 0;
+                const blankTargetsCount = question.options.filter((o) => o.is_correct).length;
+                if (expectedBlanksCount !== blankTargetsCount) {
+                  return (
+                    <p className="text-[11px] text-amber-600 font-semibold">
+                      ⚠️ Warning: Question text has {expectedBlanksCount} &quot;[blank]&quot; placeholder(s), but you have defined {blankTargetsCount} blank target(s).
+                    </p>
+                  );
+                }
+                return null;
+              })()}
               <div className="space-y-2">
                 {question.options
                   .filter((o) => o.is_correct)
@@ -1437,11 +1511,16 @@ function ReviewQuestionCard({
               variant="secondary"
               className="h-5 text-[10px] uppercase font-bold"
             >
-              {question.type}
+              {QUESTION_TYPE_LABELS[question.type] || question.type}
             </Badge>
             <Badge variant="outline" className="h-5 text-[10px] font-medium">
               {question.marks} Marks
             </Badge>
+            {question.aiGenerated && (
+              <Badge variant="secondary" className="h-5 text-[10px] bg-purple-50 text-purple-700 border-purple-200 gap-1 font-bold">
+                <BrainCircuit className="size-3" /> AI Generated
+              </Badge>
+            )}
           </div>
 
           {/* Options Preview */}
@@ -1534,6 +1613,197 @@ function ReviewQuestionCard({
   );
 }
 
+const parseInstructions = (instructionStr: string | null | undefined) => {
+  const defaultPresets = [
+    "Fullscreen required",
+    "No tab switching",
+    "No external materials allowed",
+    "Time strictly enforced",
+  ];
+  if (!instructionStr) {
+    return { selectedInstructions: defaultPresets, customInstructions: "" };
+  }
+
+  const marker = "\n\nAdditional Instructions:\n";
+  if (instructionStr.includes(marker)) {
+    const parts = instructionStr.split(marker);
+    const selected = parts[0] ? parts[0].split("\n").filter(Boolean) : [];
+    const custom = parts[1] || "";
+    return { selectedInstructions: selected, customInstructions: custom };
+  }
+
+  const lines = instructionStr.split("\n");
+  const selected: string[] = [];
+  const customLines: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (defaultPresets.includes(trimmed)) {
+      selected.push(trimmed);
+    } else if (trimmed) {
+      customLines.push(line);
+    }
+  }
+  return {
+    selectedInstructions: selected,
+    customInstructions: customLines.join("\n"),
+  };
+};
+
+const parseOpenEndedExplanation = (type: string, explanation: string) => {
+  let rubric = "";
+  let wordLimit = 0;
+  let solutionSteps = "";
+  let tolerance = 0;
+  let modelAnswer = explanation || "";
+
+  if (!explanation) {
+    return { modelAnswer, rubric, wordLimit, solutionSteps, tolerance };
+  }
+
+  // Normalize newlines to \n to ease regex matching
+  const cleanExp = explanation.replaceAll("\r\n", "\n").trim();
+
+  if (type === "essay") {
+    const modelMatch = cleanExp.match(/(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|\n+Word Limit:|$)/i);
+    const rubricMatch = cleanExp.match(/\n+Rubric:\s*([\s\S]*?)(?=\n+Word Limit:|$)/i);
+    const wordLimitMatch = cleanExp.match(/\n+Word Limit:\s*(\d+)/i);
+
+    if (modelMatch) modelAnswer = modelMatch[1].trim();
+    if (rubricMatch) rubric = rubricMatch[1].trim();
+    if (wordLimitMatch) wordLimit = parseInt(wordLimitMatch[1]);
+  } else if (type === "shortanswer") {
+    const modelMatch = cleanExp.match(/(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|$)/i);
+    const rubricMatch = cleanExp.match(/\n+Rubric:\s*([\s\S]*?)$/i);
+
+    if (modelMatch) modelAnswer = modelMatch[1].trim();
+    if (rubricMatch) rubric = rubricMatch[1].trim();
+  } else if (type === "computational") {
+    const stepsMatch = cleanExp.match(/(?:Solution Steps:|^)\s*([\s\S]*?)(?=\n+Numerical Answer:|\n+Tolerance:|$)/i);
+    const answerMatch = cleanExp.match(/\n+Numerical Answer:\s*([\s\S]*?)(?=\n+Tolerance:|$)/i);
+    const toleranceMatch = cleanExp.match(/\n+Tolerance:\s*([\d.]+)/i);
+
+    if (stepsMatch) solutionSteps = stepsMatch[1].trim();
+    if (answerMatch) modelAnswer = answerMatch[1].trim();
+    if (toleranceMatch) tolerance = parseFloat(toleranceMatch[1]);
+  }
+
+  return { modelAnswer, rubric, wordLimit, solutionSteps, tolerance };
+};
+
+const mapFrontendToBackendType = (type: string): string => {
+  if (type === "truefalse") return "true_false";
+  if (type === "shortanswer") return "short_answer";
+  if (type === "fillblank") return "fill_blank";
+  if (type === "casestudy") return "case_study";
+  return type;
+};
+
+const mapBackendToFrontendType = (type: string): QuestionType => {
+  const norm = (type || "").toLowerCase().replaceAll("_", "");
+  if (norm === "truefalse") return "truefalse";
+  if (norm === "shortanswer") return "shortanswer";
+  if (norm === "fillblank") return "fillblank";
+  if (norm === "casestudy" || norm === "casestudycontext" || norm === "case_study") return "casestudy";
+  return norm as QuestionType;
+};
+
+const mapCandidateToQuestion = (
+  candidate: any,
+  targetSecId: string,
+  marksPerQuestion: number,
+  explanationOverride?: string,
+  questionTextOverride?: string,
+  optionsOverride?: any[]
+): Question => {
+  const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+  const text = questionTextOverride !== undefined ? questionTextOverride : (candidate.parsed_question_text || "");
+  const explanation = explanationOverride !== undefined ? explanationOverride : (candidate.parsed_explanation || candidate.explanation || "");
+
+  let rubric = "";
+  let wordLimit: number | undefined;
+  let solutionSteps = "";
+  let tolerance: number | undefined;
+  let caseStudyContext = "";
+  let mappedOptions = optionsOverride !== undefined
+    ? optionsOverride.map((o: any, idx: number) => ({
+        option_text: o.text || o.option_text || "",
+        option_text_right: o.option_text_right || o.explanation || "",
+        is_correct: o.is_correct,
+        order_index: qType === "casestudy" ? idx : (o.order_index !== undefined ? o.order_index : idx),
+        match_key: qType === "casestudy" ? String(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") : o.match_key,
+      }))
+    : ((candidate.options || candidate._options || []).map((o: any, idx: number) => ({
+        option_text: o.text || o.option_text || "",
+        option_text_right: o.option_text_right || o.explanation || "",
+        is_correct: o.is_correct,
+        order_index: qType === "casestudy" ? idx : (o.order_index !== undefined ? o.order_index : idx),
+        match_key: qType === "casestudy" ? String(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") : o.match_key,
+      })));
+
+  if (["essay", "shortanswer", "computational"].includes(qType) && explanation) {
+    const unpacked = parseOpenEndedExplanation(qType, explanation);
+    
+    const rubricValue = unpacked.rubric.toLowerCase();
+    let selectedRubric = "general_essay";
+    if (qType === "shortanswer") {
+      selectedRubric = "general_short";
+      if (rubricValue.includes("technical") || rubricValue.includes("definition")) {
+        selectedRubric = "technical_definition";
+      }
+    } else if (qType === "essay") {
+      if (rubricValue.includes("critical") || rubricValue.includes("analysis")) {
+        selectedRubric = "critical_thinking";
+      } else if (rubricValue.includes("scientific") || rubricValue.includes("research") || rubricValue.includes("paper") || rubricValue.includes("writing")) {
+        selectedRubric = "scientific_writing";
+      } else if (rubricValue.includes("technical") || rubricValue.includes("definition")) {
+        selectedRubric = "technical_definition";
+      }
+    }
+    
+    rubric = selectedRubric;
+    wordLimit = unpacked.wordLimit;
+    solutionSteps = unpacked.solutionSteps;
+    tolerance = unpacked.tolerance;
+    mappedOptions = [
+      {
+        option_text: unpacked.modelAnswer || explanation,
+        is_correct: true,
+        order_index: 0
+      }
+    ];
+  } else if (qType === "casestudy") {
+    caseStudyContext = text;
+    const shortText = explanation || "Analyze the following case scenario and answer the sub-questions:";
+    const computedMarks = mappedOptions.reduce((sum: number, o: QuestionOption) => sum + (parseInt(o.match_key || "5") || 0), 0);
+    return {
+      id: candidate.promoted_question_id || candidate.id,
+      sectionId: targetSecId,
+      text: shortText,
+      type: qType as any,
+      marks: computedMarks,
+      options: mappedOptions,
+      aiGenerated: true,
+      is_required: true,
+      caseStudyContext,
+    };
+  }
+
+  return {
+    id: candidate.promoted_question_id || candidate.id,
+    sectionId: targetSecId,
+    text,
+    type: qType as any,
+    marks: marksPerQuestion,
+    options: mappedOptions,
+    aiGenerated: true,
+    is_required: true,
+    rubric,
+    wordLimit,
+    solutionSteps,
+    tolerance,
+  };
+};
+
 // --- MAIN BUILDER ---
 
 const STEPS_DATA = [
@@ -1549,12 +1819,10 @@ export default function NewAssessmentBuilder() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const draftId = searchParams.get("draft");
-  // Track draft ID in a ref so autosave always uses the latest value
-  // even before React re-renders with the updated URL searchParam.
   const draftIdRef = useRef<string | null>(draftId);
-  useEffect(() => {
+  if (draftId !== draftIdRef.current) {
     draftIdRef.current = draftId;
-  }, [draftId]);
+  }
 
   const activeAutosavePromiseRef = useRef<Promise<any>>(Promise.resolve());
   const hasInitializedRef = useRef(false);
@@ -1579,7 +1847,24 @@ export default function NewAssessmentBuilder() {
   const [supervisorList, setSupervisorList] = useState<
     { id: string; name: string; role: "PRIMARY" | "ASSISTANT" | "OBSERVER" }[]
   >([]);
+  const [pendingRole, setPendingRole] = useState<"ASSISTANT" | "OBSERVER">("ASSISTANT");
   const [studentSearch, setStudentSearch] = useState("");
+
+  const filteredRoster = useMemo(() => {
+    const roster = selectedWorkspaceDetail?.roster || [];
+    if (!studentSearch) return roster;
+    const searchLower = studentSearch.toLowerCase();
+    return roster.filter((student) => {
+      return (
+        (student.name &&
+          student.name.toLowerCase().includes(searchLower)) ||
+        (student.email &&
+          student.email.toLowerCase().includes(searchLower)) ||
+        (student.student_id &&
+          student.student_id.toLowerCase().includes(searchLower))
+      );
+    });
+  }, [selectedWorkspaceDetail?.roster, studentSearch]);
 
   // Step 4 AI Generation configs
   const [aiDrawerOpen, setAiDrawerOpen] = useState(false);
@@ -1601,17 +1886,52 @@ export default function NewAssessmentBuilder() {
   const [aiBatchId, setAiBatchId] = useState<string | null>(null);
   const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
 
+  // Load and save AI config to/from sessionStorage
+  const loadSavedAiConfig = useCallback((targetSectionId: string, defaults: typeof aiGenerationConfig) => {
+    if (draftIdRef.current) {
+      const saved = sessionStorage.getItem(`aiGenerationConfig_${draftIdRef.current}_${targetSectionId}`);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return defaults;
+        }
+      }
+    }
+    return defaults;
+  }, []);
+
+  useEffect(() => {
+    if (draftIdRef.current && aiTargetSectionId) {
+      sessionStorage.setItem(
+        `aiGenerationConfig_${draftIdRef.current}_${aiTargetSectionId}`,
+        JSON.stringify(aiGenerationConfig)
+      );
+    }
+  }, [aiGenerationConfig, aiTargetSectionId]);
+
   // Step 6 validation & distribution report
   const [validationResult, setValidationResult] = useState<any>(null);
   const [distributionData, setDistributionData] = useState<any>(null);
-  const [lecturerConfirmed, setLecturerConfirmed] = useState(false);
+  const [lecturerConfirmed, setLecturerConfirmedState] = useState(false);
 
-  const questionSensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    }),
-  );
+  const setLecturerConfirmed = (val: boolean) => {
+    setLecturerConfirmedState(val);
+    if (draftIdRef.current) {
+      sessionStorage.setItem(`lecturerConfirmed_${draftIdRef.current}`, String(val));
+    }
+  };
+
+  useEffect(() => {
+    if (draftIdRef.current) {
+      const saved = sessionStorage.getItem(`lecturerConfirmed_${draftIdRef.current}`);
+      setLecturerConfirmedState(saved === "true");
+    } else {
+      setLecturerConfirmedState(false);
+    }
+  }, [activeStep]);
+
+
 
   const uniquePeriods = useMemo(() => {
     const seen = new Set();
@@ -1724,7 +2044,7 @@ export default function NewAssessmentBuilder() {
     lateSubmissionAllowed: false, // late_submission_allowed
     shuffleQuestions: true,
     shuffleOptions: true,
-    resultRelease: "manual" as "immediate" | "manual",
+    resultRelease: "manual" as "immediate" | "manual" | "scheduled",
     resultReleaseAt: undefined as Date | undefined,
     attempts: 1,
     passwordProtected: false,
@@ -1748,31 +2068,25 @@ export default function NewAssessmentBuilder() {
   const supervisorListRef = useRef(supervisorList);
   const loadWorkspaceDetailRef = useRef(loadWorkspaceDetail);
   const isReviewApplyingRef = useRef(isReviewApplying);
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Synchronously update all refs in the render phase to prevent stale state reads
+  metadataRef.current = metadata;
+  rulesRef.current = rules;
+  blueprintRef.current = blueprint;
+  questionsRef.current = questions;
+  activeStepRef.current = activeStep;
+  supervisorListRef.current = supervisorList;
+  loadWorkspaceDetailRef.current = loadWorkspaceDetail;
+  isReviewApplyingRef.current = isReviewApplying;
 
   useEffect(() => {
-    metadataRef.current = metadata;
-  }, [metadata]);
-  useEffect(() => {
-    rulesRef.current = rules;
-  }, [rules]);
-  useEffect(() => {
-    blueprintRef.current = blueprint;
-  }, [blueprint]);
-  useEffect(() => {
-    questionsRef.current = questions;
-  }, [questions]);
-  useEffect(() => {
-    activeStepRef.current = activeStep;
-  }, [activeStep]);
-  useEffect(() => {
-    supervisorListRef.current = supervisorList;
-  }, [supervisorList]);
-  useEffect(() => {
-    loadWorkspaceDetailRef.current = loadWorkspaceDetail;
-  }, [loadWorkspaceDetail]);
-  useEffect(() => {
-    isReviewApplyingRef.current = isReviewApplying;
-  }, [isReviewApplying]);
+    return () => {
+      if (pollTimeoutRef.current) {
+        clearTimeout(pollTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Derived
 
@@ -1893,6 +2207,7 @@ export default function NewAssessmentBuilder() {
             const data = await assessmentApi.getAssessmentById(draftId);
 
             // Populate metadata
+            const parsedInst = parseInstructions(data.instructions);
             setMetadata({
               title: data.title || "",
               description: data.description || "",
@@ -1954,8 +2269,8 @@ export default function NewAssessmentBuilder() {
                 : "11:00",
               durationMinutes: data.duration_minutes || 120,
               passing_marks: data.passing_marks || 70,
-              selectedInstructions: [],
-              customInstructions: "",
+              selectedInstructions: parsedInst.selectedInstructions,
+              customInstructions: parsedInst.customInstructions,
               max_group_size: data.max_group_size || 4,
               group_formation_mode: data.group_formation_mode || "self_enrol",
               group_assignment_mode: data.group_assignment_mode || "AUTOMATIC",
@@ -1970,27 +2285,42 @@ export default function NewAssessmentBuilder() {
               target_student_ids: data.target_student_ids || [],
             });
 
+            const initialTotal = data.total_marks || 0;
+            const initialPassing = data.passing_marks || 70;
+            const initialPct = initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
+            setPassingMarksPercent(initialPct);
+
             if (data.teaching_workspace_id) {
               loadWorkspaceDetailRef.current(data.teaching_workspace_id);
             }
 
             // Populate blueprint
             if (data.sections?.length > 0) {
+              const sortedSections = [...data.sections].sort(
+                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+              );
               setBlueprint(
-                data.sections.map((s: any) => ({
+                sortedSections.map((s: any) => ({
                   id: s.id,
                   section: s.title,
                   topics: s.description || "",
                   marks: s.allocated_marks || 0,
                   questions: s.question_count_target || 0,
-                  difficulty: s.allowed_question_types?.difficulty || "Medium",
-                  allowedTypes: s.allowed_question_types?.types || ["mcq"],
+                  difficulty: (() => {
+                    const diff = s.allowed_question_types?.difficulty || s.difficulty || "Medium";
+                    return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
+                  })(),
+                  allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map((t: string) =>
+                    t.toLowerCase().replaceAll("_", "")
+                  ),
                   aiPromptHint: s.ai_generation_prompt_hint || "",
                   difficultyDistribution:
                     s.difficulty_distribution || undefined,
                   bloomLevel:
                     s.allowed_question_types?.bloom_level ||
+                    s.allowed_question_types?.bloomLevel ||
                     s.bloom_level ||
+                    s.bloomLevel ||
                     "understand",
                 })),
               );
@@ -2041,28 +2371,54 @@ export default function NewAssessmentBuilder() {
 
             // Populate questions
             if (data.assessment_questions?.length > 0) {
+              const sortedQuestions = [...data.assessment_questions].sort(
+                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+              );
               setQuestions(
-                data.assessment_questions.map((aq: any) => ({
-                  id: aq.question.id,
-                  sectionId: aq.assessment_section_id,
-                  groupId: aq.group_id,
-                  text: aq.question.content,
-                  imageUrl: aq.question.image_url,
-                  type: aq.question.question_type
+                sortedQuestions.map((aq: any) => {
+                  const qType = aq.question.question_type
                     .toLowerCase()
-                    .replace("_", "") as QuestionType,
-                  marks: aq.marks_override || aq.question.marks,
-                  options:
-                    aq.question.options?.map((o: any) => ({
-                      id: o.id,
-                      option_text: o.content,
-                      option_text_right: o.match_value,
-                      is_correct: o.is_correct,
-                      order_index: o.order_index,
-                    })) || [],
-                  aiGenerated: aq.added_via === "ai_generated",
-                  is_required: aq.is_required ?? true,
-                })),
+                    .replaceAll("_", "") as QuestionType;
+                  const rawContent = aq.question.explanation || aq.question.options?.[0]?.content || "";
+                  const parsed = ["shortanswer", "essay", "computational"].includes(qType)
+                    ? parseOpenEndedExplanation(qType, rawContent)
+                    : null;
+                  return {
+                    id: aq.question.id,
+                    sectionId: aq.assessment_section_id,
+                    groupId: aq.group_id,
+                    text: aq.question.content,
+                    imageUrl: aq.question.image_url,
+                    type: qType,
+                    marks: aq.marks_override || aq.question.marks,
+                    options: parsed
+                      ? [
+                          {
+                            id: aq.question.options?.[0]?.id,
+                            option_text: parsed.modelAnswer,
+                            option_text_right: "",
+                            is_correct: true,
+                            order_index: 0,
+                          },
+                        ]
+                      : aq.question.options?.map((o: any) => ({
+                          id: o.id,
+                          option_text: o.option_text || o.content || "",
+                          option_text_right: o.option_text_right || o.match_value || "",
+                          is_correct: o.is_correct,
+                          order_index: o.order_index,
+                          match_key: o.match_key,
+                        })) || [],
+                    rubric: parsed?.rubric,
+                    wordLimit: parsed?.wordLimit,
+                    solutionSteps: parsed?.solutionSteps,
+                    tolerance: parsed?.tolerance,
+                    computationalType: aq.question.computational_type,
+                    caseStudyContext: aq.question.case_study_context,
+                    aiGenerated: aq.added_via === "ai_generated",
+                    is_required: aq.is_required ?? true,
+                  };
+                }),
               );
             }
 
@@ -2159,14 +2515,35 @@ export default function NewAssessmentBuilder() {
 
   // Logic: Result Release Mode (auto-suggest based on question mix)
   useEffect(() => {
+    if (rules.resultRelease === "scheduled") return;
     const hasOpen = questions.some((q) =>
       ["essay", "shortanswer", "computational", "casestudy"].includes(q.type),
     );
-    setRules((prev) => ({
-      ...prev,
-      resultRelease: hasOpen ? "manual" : "immediate",
-    }));
-  }, [questions]);
+    const suggested = hasOpen ? "manual" : "immediate";
+    if (rules.resultRelease !== suggested) {
+      setRules((prev) => ({
+        ...prev,
+        resultRelease: suggested,
+      }));
+    }
+  }, [questions, rules.resultRelease]);
+
+  // Unsaved changes beforeunload warning
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const hasPendingSave = debouncedAutosaveRef.current !== null;
+      const isSaving = autosaveStatus === "saving";
+      if (hasPendingSave || isSaving) {
+        e.preventDefault();
+        e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+        return e.returnValue;
+      }
+    };
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [autosaveStatus]);
 
   // Smart defaults: supervised → force fullscreen ON and AI OFF;
   // CAT/Summative mode → default AI to OFF regardless of toggle
@@ -2187,9 +2564,19 @@ export default function NewAssessmentBuilder() {
   }, [rules.supervised, metadata.mode]);
 
   // Handlers
+  const updateBlueprintAndAutosave = (nextBlueprint: BlueprintSection[], nextQuestions?: Question[]) => {
+    setBlueprint(nextBlueprint);
+    blueprintRef.current = nextBlueprint;
+    if (nextQuestions) {
+      setQuestions(nextQuestions);
+      questionsRef.current = nextQuestions;
+    }
+    triggerDebouncedAutosave(4, undefined, undefined, nextQuestions);
+  };
+
   const addSection = () => {
     const nextLetter = String.fromCharCode(65 + blueprint.length);
-    setBlueprint([
+    const nextBlueprint = [
       ...blueprint,
       {
         id: `sec-${Date.now()}`,
@@ -2197,11 +2584,12 @@ export default function NewAssessmentBuilder() {
         topics: "",
         marks: "" as any,
         questions: "" as any,
-        difficulty: "Medium",
-        allowedTypes: ["mcq"],
-        bloomLevel: "understand",
+        difficulty: "Medium" as any,
+        allowedTypes: ["mcq" as any],
+        bloomLevel: "understand" as any,
       },
-    ]);
+    ];
+    updateBlueprintAndAutosave(nextBlueprint);
   };
 
   const updateSection = <K extends keyof BlueprintSection>(
@@ -2209,15 +2597,15 @@ export default function NewAssessmentBuilder() {
     field: K,
     value: BlueprintSection[K],
   ) => {
-    setBlueprint(
-      blueprint.map((s) => (s.id === id ? { ...s, [field]: value } : s)),
-    );
+    const nextBlueprint = blueprint.map((s) => (s.id === id ? { ...s, [field]: value } : s));
+    updateBlueprintAndAutosave(nextBlueprint);
   };
 
   const removeSection = (id: string) => {
     if (blueprint.length === 1) return;
-    setBlueprint(blueprint.filter((s) => s.id !== id));
-    setQuestions(questions.filter((q) => q.sectionId !== id));
+    const nextBlueprint = blueprint.filter((s) => s.id !== id);
+    const nextQuestions = questions.filter((q) => q.sectionId !== id);
+    updateBlueprintAndAutosave(nextBlueprint, nextQuestions);
   };
 
   const addQuestion = (sectionId: string, groupId?: string) => {
@@ -2252,7 +2640,7 @@ export default function NewAssessmentBuilder() {
             : 2,
         options: initialOptions,
         aiGenerated: false,
-        is_required: false,
+        is_required: true,
       },
     ];
     updateQuestionsAndAutosave(nextQuestions);
@@ -2260,7 +2648,7 @@ export default function NewAssessmentBuilder() {
 
   const updateQuestionsAndAutosave = (nextQuestions: Question[]) => {
     setQuestions(nextQuestions);
-    runAutosave(5, undefined, undefined, nextQuestions);
+    triggerDebouncedAutosave(5, undefined, undefined, nextQuestions);
   };
 
   const updateQuestion = (id: string, updates: Partial<Question>) => {
@@ -2271,8 +2659,21 @@ export default function NewAssessmentBuilder() {
   };
 
   const removeQuestion = (id: string) => {
+    const questionToRestore = questions.find((q) => q.id === id);
+    if (!questionToRestore) return;
+
+    const originalQuestions = [...questions];
     const nextQuestions = questions.filter((q) => q.id !== id);
     updateQuestionsAndAutosave(nextQuestions);
+
+    toast("Question deleted", {
+      action: {
+        label: "Undo",
+        onClick: () => {
+          updateQuestionsAndAutosave(originalQuestions);
+        },
+      },
+    });
   };
 
   const updateOption = (
@@ -2284,68 +2685,59 @@ export default function NewAssessmentBuilder() {
       if (q.id !== qId) return q;
       const newOptions = [...q.options];
       newOptions[optIdx] = { ...newOptions[optIdx], ...updates };
-      return { ...q, options: newOptions };
+      let nextMarks = q.marks;
+      if (q.type === "casestudy") {
+        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+      }
+      return { ...q, options: newOptions, marks: nextMarks };
     });
     updateQuestionsAndAutosave(nextQuestions);
   };
 
   const addOption = (qId: string) => {
-    const nextQuestions = questions.map((q) =>
-      q.id === qId
-        ? {
-            ...q,
-            options: [
-              ...q.options,
-              {
-                option_text: `New Item`,
-                is_correct: false,
-                order_index: q.options.length,
-              },
-            ],
-          }
-        : q,
-    );
+    const nextQuestions = questions.map((q) => {
+      if (q.id !== qId) return q;
+      const newOptions = [
+        ...q.options,
+        {
+          option_text: `New Item`,
+          is_correct: q.type === "casestudy" ? true : false,
+          order_index: q.options.length,
+          match_key: q.type === "casestudy" ? "5" : undefined,
+        },
+      ];
+      let nextMarks = q.marks;
+      if (q.type === "casestudy") {
+        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+      }
+      return { ...q, options: newOptions, marks: nextMarks };
+    });
     updateQuestionsAndAutosave(nextQuestions);
   };
 
   const removeOption = (qId: string, optIdx: number) => {
-    const nextQuestions = questions.map((q) =>
-      q.id === qId
-        ? {
-            ...q,
-            options: q.options
-              .filter((_, i) => i !== optIdx)
-              .map((opt, i) => ({ ...opt, order_index: i })),
-          }
-        : q,
-    );
+    const nextQuestions = questions.map((q) => {
+      if (q.id !== qId) return q;
+      const newOptions = q.options
+        .filter((_, i) => i !== optIdx)
+        .map((opt, i) => ({ ...opt, order_index: i }));
+      let nextMarks = q.marks;
+      if (q.type === "casestudy") {
+        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+      }
+      return { ...q, options: newOptions, marks: nextMarks };
+    });
     updateQuestionsAndAutosave(nextQuestions);
   };
 
-  const handleQuestionDragEnd = (event: any, sectionId: string) => {
-    const { active, over } = event;
-    if (active && over && active.id !== over.id) {
-      const sectionQuestions = questions.filter(
-        (q) => q.sectionId === sectionId,
-      );
-      const oldIdx = sectionQuestions.findIndex((q) => q.id === active.id);
-      const newIdx = sectionQuestions.findIndex((q) => q.id === over.id);
 
-      const reorderedSection = arrayMove(sectionQuestions, oldIdx, newIdx);
-
-      const otherSectionQuestions = questions.filter(
-        (q) => q.sectionId !== sectionId,
-      );
-      const merged = [...otherSectionQuestions, ...reorderedSection];
-      updateQuestionsAndAutosave(merged);
-    }
-  };
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(
     null,
   );
   const [editingText, setEditingText] = useState("");
   const [editingExplanation, setEditingExplanation] = useState("");
+  const [editingOptions, setEditingOptions] = useState<any[]>([]);
 
   const buildBlueprintConstraints = (
     blueprintList: BlueprintSection[],
@@ -2378,7 +2770,7 @@ export default function NewAssessmentBuilder() {
         return;
       }
 
-      setTimeout(async () => {
+      pollTimeoutRef.current = setTimeout(async () => {
         try {
           const batch = await aiGenerationApi.getBatch(batchId);
           const status = batch.status?.toLowerCase();
@@ -2395,6 +2787,7 @@ export default function NewAssessmentBuilder() {
 
             const tagged = generatedQuestions.map((q) => ({
               ...q,
+              _options: q.options || q._options || [],
               _sectionId:
                 q.target_section_id ||
                 (targetSectionId === "all" ? undefined : targetSectionId),
@@ -2544,6 +2937,16 @@ export default function NewAssessmentBuilder() {
             setAiDrawerOpen(false);
             setAiReviewDrawerOpen(true);
 
+            if (status === "partial_failure") {
+              const totalReq = batch.total_requested || 0;
+              const totalGen = batch.total_generated || 0;
+              const totalFail = batch.total_failed || 0;
+              toast.warning(
+                `AI question generation partially succeeded: ${totalGen} generated, ${totalFail} failed out of ${totalReq} requested. You can review the successfully generated candidates and retry the remaining ones.`,
+                { duration: 8000 }
+              );
+            }
+
             if (targetSectionId === "all") {
               const generatedSectionIds = new Set(
                 validCandidatesList
@@ -2558,16 +2961,18 @@ export default function NewAssessmentBuilder() {
                 toast.warning(
                   `Generation partially completed. ${failedIds.length} out of ${blueprint.length} sections failed.`,
                 );
-              } else {
+              } else if (status !== "partial_failure") {
                 toast.success(
                   `AI generated ${validCandidatesList.length} valid question candidates!`,
                 );
               }
             } else {
               setAiFailedSectionIds([]);
-              toast.success(
-                `AI generated ${validCandidatesList.length} valid question candidates!`,
-              );
+              if (status !== "partial_failure") {
+                toast.success(
+                  `AI generated ${validCandidatesList.length} valid question candidates!`,
+                );
+              }
             }
           } else if (status === "failed") {
             setAiGenerating(false);
@@ -2592,34 +2997,58 @@ export default function NewAssessmentBuilder() {
     setAiGenerating(true);
     try {
       if (aiTargetSectionId === "all") {
-        const sectionsPayload = blueprint.map((sec) => {
-          const qType = sec.allowedTypes[0] || "mcq";
-          return {
-            section_id: sec.id,
-            topic: sec.topics || "General Topic",
-            question_type: mapFrontendToBackendType(qType) as any,
-            difficulty: sec.difficulty.toLowerCase() as any,
-            count: sec.questions || 3,
-            bloom_level: (sec.bloomLevel || "understand") as any,
-          };
+        const sectionsPayload: any[] = [];
+        // Use blueprintRef.current so we always read the latest synced state
+        // (ensureDraftId may have updated blueprint via setBlueprint before the
+        // component re-rendered, so the closure-captured `blueprint` could still
+        // have old temp IDs).
+        blueprintRef.current.forEach((sec) => {
+          const allowedTypes = sec.allowedTypes && sec.allowedTypes.length > 0 ? sec.allowedTypes : ["mcq"];
+          const totalQuestions = sec.questions || 3;
+          
+          const base = Math.floor(totalQuestions / allowedTypes.length);
+          let remainder = totalQuestions % allowedTypes.length;
+          
+          allowedTypes.forEach((qType) => {
+            const countForType = base + (remainder > 0 ? 1 : 0);
+            if (remainder > 0) remainder--;
+            
+            if (countForType > 0) {
+              sectionsPayload.push({
+                section_id: sec.id,
+                topic: sec.topics || "General Topic",
+                question_type: mapFrontendToBackendType(qType) as any,
+                difficulty: sec.difficulty.toLowerCase() as any,
+                count: countForType,
+                bloom_level: (sec.bloomLevel || "understand") as any,
+              });
+            }
+          });
         });
 
         const activeId = draftIdRef.current;
+        const firstSec = blueprintRef.current[0];
+        const firstType = firstSec?.allowedTypes?.[0] || "mcq";
+        const topLevelType = mapFrontendToBackendType(firstType);
+        const topLevelDifficulty = (firstSec?.difficulty || "medium").toLowerCase();
+        const totalCount = blueprintRef.current.reduce((sum, s) => sum + (s.questions || 3), 0);
+
         toast.info(
           "Submitting AI request to generate questions for all sections...",
         );
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
           topic: "Multiple Topics (Blueprint-aligned)",
-          question_type: "mcq",
-          difficulty: "medium",
-          count: 5,
+          question_type: topLevelType as any,
+          difficulty: topLevelDifficulty as any,
+          count: totalCount,
           additional_context: aiGenerationConfig.additional_context,
           target_assessment_id: activeId || undefined,
+          workspace_id: metadata.teaching_workspace_id || undefined,
           sections: sectionsPayload,
           blueprint_constraints: buildBlueprintConstraints(
-            blueprint,
-            questions,
+            blueprintRef.current,
+            questionsRef.current,
           ),
         });
 
@@ -2640,33 +3069,65 @@ export default function NewAssessmentBuilder() {
                   questions: aiGenerationConfig.count,
                   bloomLevel: aiGenerationConfig.bloom_level as any,
                   aiPromptHint: aiGenerationConfig.additional_context,
-                  allowedTypes: [aiGenerationConfig.question_type as any],
+                  allowedTypes: s.allowedTypes,
                 }
               : s,
           ),
         );
         setTimeout(() => runAutosave(4), 0);
 
-        const targetSection = blueprint.find((s) => s.id === aiTargetSectionId);
+        // Use blueprintRef.current for the same reason — may have been updated by ensureDraftId
+        const targetSection = blueprintRef.current.find((s) => s.id === aiTargetSectionId);
         const secTopic =
           aiGenerationConfig.topic || targetSection?.topics || "";
 
         const activeId = draftIdRef.current;
+
+        let sectionsPayload: any[] | undefined = undefined;
+        if (aiGenerationConfig.question_type === "mixed") {
+          const allowedTypes = targetSection && targetSection.allowedTypes && targetSection.allowedTypes.length > 0
+            ? targetSection.allowedTypes
+            : ["mcq"];
+          const totalQuestions = aiGenerationConfig.count;
+          
+          const base = Math.floor(totalQuestions / allowedTypes.length);
+          let remainder = totalQuestions % allowedTypes.length;
+          
+          sectionsPayload = [];
+          allowedTypes.forEach((qType) => {
+            const countForType = base + (remainder > 0 ? 1 : 0);
+            if (remainder > 0) remainder--;
+            
+            if (countForType > 0) {
+              sectionsPayload!.push({
+                section_id: aiTargetSectionId,
+                topic: secTopic,
+                question_type: mapFrontendToBackendType(qType) as any,
+                difficulty: aiGenerationConfig.difficulty as any,
+                count: countForType,
+                bloom_level: aiGenerationConfig.bloom_level as any,
+              });
+            }
+          });
+        }
+
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
           topic: secTopic,
-          question_type: mapFrontendToBackendType(
-            aiGenerationConfig.question_type,
-          ) as any,
+          question_type: aiGenerationConfig.question_type === "mixed"
+            ? "mcq"
+            : (mapFrontendToBackendType(aiGenerationConfig.question_type) as any),
           difficulty: aiGenerationConfig.difficulty as any,
           count: aiGenerationConfig.count,
           bloom_level: aiGenerationConfig.bloom_level as any,
           additional_context: aiGenerationConfig.additional_context,
           target_assessment_id: activeId || undefined,
           target_section_id: aiTargetSectionId,
+          workspace_id: metadata.teaching_workspace_id || undefined,
+          sections: sectionsPayload,
           blueprint_constraints: buildBlueprintConstraints(
-            blueprint,
-            questions,
+            blueprintRef.current,
+            questionsRef.current,
           ),
         });
 
@@ -2685,30 +3146,50 @@ export default function NewAssessmentBuilder() {
       const failedSections = blueprint.filter((sec) =>
         aiFailedSectionIds.includes(sec.id),
       );
-      const sectionsPayload = failedSections.map((sec) => {
-        const qType = sec.allowedTypes[0] || "mcq";
-        return {
-          section_id: sec.id,
-          topic: sec.topics || "General Topic",
-          question_type: mapFrontendToBackendType(qType) as any,
-          difficulty: sec.difficulty.toLowerCase() as any,
-          count: sec.questions || 3,
-          bloom_level: (sec.bloomLevel || "understand") as any,
-        };
+      const sectionsPayload: any[] = [];
+      failedSections.forEach((sec) => {
+        const allowedTypes = sec.allowedTypes && sec.allowedTypes.length > 0 ? sec.allowedTypes : ["mcq"];
+        const totalQuestions = sec.questions || 3;
+        
+        const base = Math.floor(totalQuestions / allowedTypes.length);
+        let remainder = totalQuestions % allowedTypes.length;
+        
+        allowedTypes.forEach((qType) => {
+          const countForType = base + (remainder > 0 ? 1 : 0);
+          if (remainder > 0) remainder--;
+          
+          if (countForType > 0) {
+            sectionsPayload.push({
+              section_id: sec.id,
+              topic: sec.topics || "General Topic",
+              question_type: mapFrontendToBackendType(qType) as any,
+              difficulty: sec.difficulty.toLowerCase() as any,
+              count: countForType,
+              bloom_level: (sec.bloomLevel || "understand") as any,
+            });
+          }
+        });
       });
 
       const activeId = draftIdRef.current;
+      const firstSec = failedSections[0] || blueprint[0];
+      const firstType = firstSec?.allowedTypes?.[0] || "mcq";
+      const topLevelType = mapFrontendToBackendType(firstType);
+      const topLevelDifficulty = (firstSec?.difficulty || "medium").toLowerCase();
+      const totalCount = failedSections.reduce((sum, s) => sum + (s.questions || 3), 0);
+
       toast.info(
         `Retrying question generation for ${failedSections.length} sections...`,
       );
       const res = await aiGenerationApi.generateQuestions({
         subject: metadata.title || "Subject",
         topic: "Multiple Topics (Blueprint-aligned)",
-        question_type: "mcq",
-        difficulty: "medium",
-        count: 5,
+        question_type: topLevelType as any,
+        difficulty: topLevelDifficulty as any,
+        count: totalCount,
         additional_context: aiGenerationConfig.additional_context,
         target_assessment_id: activeId || undefined,
+        workspace_id: metadata.teaching_workspace_id || undefined,
         sections: sectionsPayload,
         blueprint_constraints: buildBlueprintConstraints(blueprint, questions),
       });
@@ -2729,17 +3210,6 @@ export default function NewAssessmentBuilder() {
       setIsReviewApplying(true);
       isReviewApplyingRef.current = true;
       try {
-        const typeMap: Record<string, string> = {
-          mcq: "mcq",
-          true_false: "truefalse",
-          short_answer: "shortanswer",
-          essay: "essay",
-          matching: "matching",
-          fill_blank: "fillblank",
-          computational: "computational",
-          ordering: "ordering",
-          case_study: "casestudy",
-        };
         const activeId = draftIdRef.current;
         const targetSecId =
           (candidate as any)._sectionId ||
@@ -2781,30 +3251,26 @@ export default function NewAssessmentBuilder() {
           save_to_bank: saveToBank,
         });
 
-        const qType = typeMap[candidate.question_type] || "shortanswer";
+        const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
         const realId =
           res?.assessment_question?.id ||
           res?.promoted_question?.id ||
           candidate.id;
 
-        const newQ: Question = {
-          id: realId,
-          sectionId: targetSecId,
-          text: candidate.parsed_question_text || "",
-          type: qType as any,
-          marks: marksPerQuestion,
-          options:
-            candidate._options?.map((o: any, idx: number) => ({
-              option_text: o.text,
-              is_correct: o.is_correct,
-              order_index: idx,
-            })) || [],
-          aiGenerated: true,
-          is_required: true,
-        };
+        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
+        newQ.id = realId;
         const nextQuestions = [...questionsRef.current, newQ];
         setQuestions(nextQuestions);
-        setAiCandidates((prev) => prev.filter((c) => c.id !== candidateId));
+        setAiCandidates((prev) => {
+          const updated = prev.filter((c) => c.id !== candidateId);
+          if (updated.length === 0) {
+            setAiReviewDrawerOpen(false);
+            if (activeStep !== 6) {
+              setActiveStep(5);
+            }
+          }
+          return updated;
+        });
         toast.success("Question accepted and added!");
 
         isReviewApplyingRef.current = false;
@@ -2847,17 +3313,6 @@ export default function NewAssessmentBuilder() {
       setIsReviewApplying(true);
       isReviewApplyingRef.current = true;
       try {
-        const typeMap: Record<string, string> = {
-          mcq: "mcq",
-          true_false: "truefalse",
-          short_answer: "shortanswer",
-          essay: "essay",
-          matching: "matching",
-          fill_blank: "fillblank",
-          computational: "computational",
-          ordering: "ordering",
-          case_study: "casestudy",
-        };
         const activeId = draftIdRef.current;
         const targetSecId =
           (candidate as any)._sectionId ||
@@ -2895,35 +3350,32 @@ export default function NewAssessmentBuilder() {
           decision: "edited",
           modified_question_text: editingText,
           modified_explanation: editingExplanation,
+          modified_options_json: JSON.stringify(editingOptions),
           add_to_assessment_id: activeId || undefined,
           add_to_section_id: targetSecId || undefined,
           marks_if_added: marksPerQuestion,
           save_to_bank: saveToBank,
         });
-        const qType = typeMap[candidate.question_type] || "shortanswer";
+        const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
         const realId =
           res?.assessment_question?.id ||
           res?.promoted_question?.id ||
           candidate.id;
 
-        const newQ: Question = {
-          id: realId,
-          sectionId: targetSecId,
-          text: editingText,
-          type: qType as any,
-          marks: marksPerQuestion,
-          options:
-            candidate._options?.map((o: any, idx: number) => ({
-              option_text: o.text,
-              is_correct: o.is_correct,
-              order_index: idx,
-            })) || [],
-          aiGenerated: true,
-          is_required: true,
-        };
+        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion, editingExplanation, editingText, editingOptions);
+        newQ.id = realId;
         const nextQuestions = [...questionsRef.current, newQ];
         setQuestions(nextQuestions);
-        setAiCandidates((prev) => prev.filter((c) => c.id !== candidateId));
+        setAiCandidates((prev) => {
+          const updated = prev.filter((c) => c.id !== candidateId);
+          if (updated.length === 0) {
+            setAiReviewDrawerOpen(false);
+            if (activeStep !== 6) {
+              setActiveStep(5);
+            }
+          }
+          return updated;
+        });
         setEditingCandidateId(null);
         toast.success("Edited question accepted!");
 
@@ -2953,76 +3405,18 @@ export default function NewAssessmentBuilder() {
       setIsReviewApplying(true);
       isReviewApplyingRef.current = true;
       try {
-        const typeMap: Record<string, string> = {
-          mcq: "mcq",
-          true_false: "truefalse",
-          short_answer: "shortanswer",
-          essay: "essay",
-          matching: "matching",
-          fill_blank: "fillblank",
-          computational: "computational",
-          ordering: "ordering",
-          case_study: "casestudy",
-        };
-
-        const results = await Promise.all(
-          aiCandidates.map((c) => {
-            const targetSecId =
-              (c as any)._sectionId ||
-              (aiTargetSectionId === "all"
-                ? blueprint[0].id
-                : aiTargetSectionId);
-            // Calculate marks using current simulated questions Ref list in progress
-            const sectionObj = blueprint.find((s) => s.id === targetSecId);
-            let marksPerQuestion = 2;
-            if (sectionObj) {
-              const sectionQuestions = questionsRef.current.filter(
-                (q) => q.sectionId === targetSecId,
-              );
-              const allocatedMarks = sectionQuestions.reduce(
-                (sum, q) => sum + (q.marks || 0),
-                0,
-              );
-              const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
-              const targetQuestionCount =
-                parseInt(sectionObj.questions as any) || 1;
-              const remainingSectionMarks = Math.max(
-                0,
-                totalSectionMarks - allocatedMarks,
-              );
-              const remainingQuestionSlots = Math.max(
-                1,
-                targetQuestionCount - sectionQuestions.length,
-              );
-              marksPerQuestion = Math.max(
-                1,
-                Math.round(remainingSectionMarks / remainingQuestionSlots),
-              );
-            }
-
-            return aiGenerationApi.reviewQuestion(c.id, {
-              decision: "approved",
-              add_to_assessment_id: activeId || undefined,
-              add_to_section_id: targetSecId || undefined,
-              marks_if_added: marksPerQuestion,
-              save_to_bank: saveToBank,
-            });
-          }),
-        );
-
-        const simulatedQuestions = [...questionsRef.current];
-        const newQs = aiCandidates.map((c, index) => {
-          const res = results[index];
-          const realId =
-            res?.assessment_question?.id || res?.promoted_question?.id || c.id;
+        // Pre-calculate marks sequentially using a simulated list of questions in progress
+        const simulatedQuestionsForMarks = [...questionsRef.current];
+        const candidatesWithMarks = aiCandidates.map((c) => {
           const targetSecId =
             (c as any)._sectionId ||
-            (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+            (aiTargetSectionId === "all"
+              ? blueprint[0].id
+              : aiTargetSectionId);
           const sectionObj = blueprint.find((s) => s.id === targetSecId);
-
           let marksPerQuestion = 2;
           if (sectionObj) {
-            const sectionQuestions = simulatedQuestions.filter(
+            const sectionQuestions = simulatedQuestionsForMarks.filter(
               (q) => q.sectionId === targetSecId,
             );
             const allocatedMarks = sectionQuestions.reduce(
@@ -3046,21 +3440,44 @@ export default function NewAssessmentBuilder() {
             );
           }
 
-          const newQ: Question = {
-            id: realId,
+          // Push a temporary placeholder question to advance the state for subsequent calculations
+          simulatedQuestionsForMarks.push({
+            id: c.id,
             sectionId: targetSecId,
-            text: c.parsed_question_text || "",
-            type: (typeMap[c.question_type] || "shortanswer") as any,
             marks: marksPerQuestion,
-            options:
-              c._options?.map((o: any, idx: number) => ({
-                option_text: o.text,
-                is_correct: o.is_correct,
-                order_index: idx,
-              })) || [],
+            text: "",
+            type: "mcq",
+            options: [],
             aiGenerated: true,
-            is_required: true,
+          } as any);
+
+          return {
+            candidate: c,
+            targetSecId,
+            marksPerQuestion,
           };
+        });
+
+        const results = await Promise.all(
+          candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }) => {
+            return aiGenerationApi.reviewQuestion(candidate.id, {
+              decision: "approved",
+              add_to_assessment_id: activeId || undefined,
+              add_to_section_id: targetSecId || undefined,
+              marks_if_added: marksPerQuestion,
+              save_to_bank: saveToBank,
+            });
+          }),
+        );
+
+        const simulatedQuestions = [...questionsRef.current];
+        const newQs = candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }, index) => {
+          const res = results[index];
+          const realId =
+            res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
+
+          const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
+          newQ.id = realId;
           simulatedQuestions.push(newQ);
           return newQ;
         });
@@ -3068,6 +3485,9 @@ export default function NewAssessmentBuilder() {
         setQuestions(simulatedQuestions);
         setAiCandidates([]);
         setAiReviewDrawerOpen(false);
+        if (activeStep !== 6) {
+          setActiveStep(5);
+        }
         toast.success("All candidate questions accepted!");
 
         isReviewApplyingRef.current = false;
@@ -3112,22 +3532,10 @@ export default function NewAssessmentBuilder() {
     }
 
     try {
-      const typeMap: Record<string, string> = {
-        mcq: "mcq",
-        truefalse: "true_false",
-        shortanswer: "short_answer",
-        essay: "essay",
-        matching: "matching",
-        fillblank: "fill_blank",
-        computational: "computational",
-        ordering: "ordering",
-        casestudy: "case_study",
-      };
-
       await questionApi.createQuestion({
         content: q.text,
         image_url: q.imageUrl,
-        question_type: typeMap[q.type] || "short_answer",
+        question_type: mapFrontendToBackendType(q.type),
         difficulty: "medium",
         suggested_marks: Math.max(1, q.marks),
         options: q.options.map((opt) => ({
@@ -3149,11 +3557,27 @@ export default function NewAssessmentBuilder() {
     sectionId: string,
     groupId?: string,
   ) => {
+      // Check for duplicate content or ID
+      const isDuplicate = questionsRef.current.some(
+        (q) =>
+          q.id.includes(qBankSummary.id) ||
+          q.text.trim() === qBankSummary.content.trim()
+      );
+      if (isDuplicate) {
+        toast.error("This question already exists in the assessment.");
+        return;
+      }
+
     try {
       const qBank = await questionApi.getQuestion(qBankSummary.id);
       const mappedType = qBank.question_type
         .toLowerCase()
-        .replace("_", "") as QuestionType;
+        .replaceAll("_", "") as QuestionType;
+
+      const rawContent = qBank.explanation || qBank.options?.[0]?.option_text || (qBank.options?.[0] as any)?.content || "";
+      const parsed = ["shortanswer", "essay", "computational"].includes(mappedType)
+        ? parseOpenEndedExplanation(mappedType, rawContent)
+        : null;
 
       const nextQuestions = [
         ...questionsRef.current,
@@ -3164,14 +3588,31 @@ export default function NewAssessmentBuilder() {
           text: qBank.content,
           type: mappedType,
           marks: qBank.marks,
-          options: (qBank.options || []).map((opt) => ({
-            option_text: opt.option_text,
-            option_text_right: opt.option_text_right,
-            is_correct: opt.is_correct,
-            order_index: opt.order_index,
-          })),
+          options: parsed
+            ? [
+                {
+                  id: qBank.options?.[0]?.id,
+                  option_text: parsed.modelAnswer,
+                  option_text_right: "",
+                  is_correct: true,
+                  order_index: 0,
+                },
+              ]
+            : (qBank.options || []).map((opt: any, idx: number) => ({
+                option_text: opt.option_text || opt.content || "",
+                option_text_right: opt.option_text_right || opt.match_value || opt.matchValue || "",
+                is_correct: opt.is_correct,
+                order_index: opt.order_index !== undefined ? opt.order_index : idx,
+              })),
+          imageUrl: qBank.image_url,
+          caseStudyContext: (qBank as any).case_study_context || (qBank as any).caseStudyContext,
+          computationalType: (qBank as any).computational_type || (qBank as any).computationalType,
+          rubric: parsed?.rubric,
+          wordLimit: parsed?.wordLimit,
+          solutionSteps: parsed?.solutionSteps,
+          tolerance: parsed?.tolerance,
           aiGenerated: false,
-          is_required: false,
+          is_required: true,
         },
       ];
       updateQuestionsAndAutosave(nextQuestions);
@@ -3193,71 +3634,13 @@ export default function NewAssessmentBuilder() {
     }
   };
 
-  const mapFrontendToBackendType = (type: string): string => {
-    if (type === "truefalse") return "true_false";
-    if (type === "shortanswer") return "short_answer";
-    if (type === "fillblank") return "fill_blank";
-    if (type === "casestudy") return "case_study";
-    return type;
-  };
 
-  const prepareWizardPayload = (step: number) => {
-    return {
-      title: metadata.title || undefined,
-      description: metadata.description || undefined,
-      instructions:
-        metadata.selectedInstructions.join("\n") +
-        (metadata.customInstructions ? "\n" + metadata.customInstructions : ""),
-      assessment_type:
-        metadata.mode === "Groupwork"
-          ? "GROUP_WORK"
-          : metadata.mode.toUpperCase(),
-      grading_mode: metadata.grading_mode || "AUTOMATIC",
-      result_release_mode: metadata.result_release_mode || "MANUAL",
-      total_marks: metadata.total_marks
-        ? parseInt(metadata.total_marks as any)
-        : undefined,
-      passing_marks: metadata.passing_marks
-        ? parseInt(metadata.passing_marks as any)
-        : undefined,
-      duration_minutes: metadata.durationMinutes
-        ? parseInt(metadata.durationMinutes as any)
-        : undefined,
-      is_group_assessment: metadata.mode === "Groupwork",
-      max_group_size: metadata.max_group_size || undefined,
-      group_formation_mode: metadata.group_formation_mode || undefined,
-      group_assignment_mode: metadata.group_assignment_mode || undefined,
-      question_distribution_mode:
-        metadata.question_distribution_mode || undefined,
-      require_all_member_approval: metadata.require_all_member_approval,
-      require_all_member_participation:
-        metadata.require_all_member_participation,
-      appeal_window_days: metadata.appeal_window_days
-        ? parseInt(metadata.appeal_window_days as any)
-        : undefined,
-      max_attempts: rules.attempts
-        ? parseInt(rules.attempts as any)
-        : undefined,
-      is_password_protected: rules.passwordProtected,
-      fullscreen_required: rules.browserRestricted,
-      is_supervised: rules.supervised,
-      ai_assistance_allowed: rules.aiAllowed,
-      is_open_book: rules.openBook,
-      randomize_questions: rules.shuffleQuestions,
-      randomize_options: rules.shuffleOptions,
-      draft_step: step,
-      class_group_ids: metadata.class_group_ids || [],
-      supervisor_ids: supervisorList.map((s) => s.id),
-      audience_type: metadata.audience_type || "all",
-      target_student_ids: metadata.target_student_ids || [],
-    };
-  };
 
   const preparePayload = useCallback(
     (
       metadataOverride?: any,
       rulesOverride?: any,
-      draftStep?: number,
+      draftStep?: number | null,
       questionsOverride?: Question[],
     ) => {
       const activeMetadata = metadataOverride
@@ -3270,26 +3653,62 @@ export default function NewAssessmentBuilder() {
         questionsOverride !== undefined
           ? questionsOverride
           : questionsRef.current;
+
+      // 1. Generate UUIDs for temporary IDs and mutate refs in-place
+      blueprintRef.current.forEach((b) => {
+        if (b.id.startsWith("sec-")) {
+          const newId = crypto.randomUUID();
+          // Update any questions referencing this temporary section ID
+          activeQuestions.forEach((q) => {
+            if (q.sectionId === b.id) {
+              q.sectionId = newId;
+            }
+          });
+          b.id = newId;
+        }
+      });
+
+      activeQuestions.forEach((q) => {
+        if (q.id.startsWith("q-") && !q.id.startsWith("q-bank-")) {
+          q.id = crypto.randomUUID();
+        }
+      });
+
       const payload = {
         id: draftIdRef.current || undefined,
-        draft_step: draftStep !== undefined ? draftStep : activeStepRef.current,
+        draft_step: draftStep === null ? undefined : (draftStep !== undefined ? draftStep : activeStepRef.current),
         metadata: {
-          ...activeMetadata,
+          title: activeMetadata.title || "Untitled Assessment",
+          description: activeMetadata.description || "",
+          mode: activeMetadata.mode || "CAT",
           assessment_type:
             activeMetadata.mode === "Groupwork"
               ? "GROUP_WORK"
               : activeMetadata.mode.toUpperCase(),
-          academic_year: activeMetadata.academic_year,
-          maxGroupSize: activeMetadata.max_group_size,
-          groupFormation: activeMetadata.group_formation_mode,
-          groupAssignmentMode: activeMetadata.group_assignment_mode,
-          questionDistributionMode: activeMetadata.question_distribution_mode,
-          appealWindowDays: activeMetadata.appeal_window_days,
+          institution_id: activeMetadata.institution_id || undefined,
+          course_id: activeMetadata.course_id || undefined,
           department_ids: activeMetadata.department_ids || [],
           option_ids: activeMetadata.option_ids || [],
           class_group_ids: activeMetadata.class_group_ids || [],
+          teaching_workspace_id: activeMetadata.teaching_workspace_id || undefined,
+          subject_id: activeMetadata.subject_id || undefined,
           audience_type: activeMetadata.audience_type || "all",
           target_student_ids: activeMetadata.target_student_ids || [],
+          date: activeMetadata.date || undefined,
+          startTime: activeMetadata.startTime || undefined,
+          endTime: activeMetadata.endTime || undefined,
+          windowStart: activeMetadata.windowStart || undefined,
+          windowEnd: activeMetadata.windowEnd || undefined,
+          durationMinutes: activeMetadata.durationMinutes ? parseInt(activeMetadata.durationMinutes as any) : 0,
+          passing_marks: activeMetadata.passing_marks ? parseInt(activeMetadata.passing_marks as any) : 0,
+          selectedInstructions: activeMetadata.selectedInstructions || [],
+          customInstructions: activeMetadata.customInstructions || "",
+          maxGroupSize: activeMetadata.max_group_size || undefined,
+          groupFormation: activeMetadata.group_formation_mode || undefined,
+          groupAssignmentMode: activeMetadata.group_assignment_mode || undefined,
+          questionDistributionMode: activeMetadata.question_distribution_mode || undefined,
+          appealWindowDays: activeMetadata.appeal_window_days ? parseInt(activeMetadata.appeal_window_days as any) : 0,
+          academic_year: activeMetadata.academic_year || undefined,
         },
         blueprint: blueprintRef.current.map((b) => ({
           id: b.id,
@@ -3304,21 +3723,22 @@ export default function NewAssessmentBuilder() {
           bloomLevel: b.bloomLevel,
         })),
         questions: activeQuestions.map((q) => {
-          let finalOptions = q.options.map((opt) => ({
+          let finalOptions: QuestionOption[] = (q.options || []).map((opt) => ({
             option_text: opt.option_text,
             option_text_right: opt.option_text_right,
             is_correct: opt.is_correct,
             order_index: opt.order_index,
+            match_key: opt.match_key,
           }));
 
           if (["shortanswer", "essay", "computational"].includes(q.type)) {
-            let combinedText = q.options[0]?.option_text || "";
+            let combinedText = q.options?.[0]?.option_text || "";
             if (q.type === "essay") {
-              combinedText = `Model Answer: ${q.options[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}\n\nWord Limit: ${q.wordLimit || 0} words`;
+              combinedText = `Model Answer: ${q.options?.[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}\n\nWord Limit: ${q.wordLimit || 0} words`;
             } else if (q.type === "shortanswer") {
-              combinedText = `Model Answer: ${q.options[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}`;
+              combinedText = `Model Answer: ${q.options?.[0]?.option_text || ""}\n\nRubric: ${q.rubric || ""}`;
             } else if (q.type === "computational") {
-              combinedText = `Solution Steps: ${q.solutionSteps || ""}\n\nNumerical Answer: ${q.options[0]?.option_text || ""}\n\nTolerance: ${q.tolerance || 0}`;
+              combinedText = `Solution Steps: ${q.solutionSteps || ""}\n\nNumerical Answer: ${q.options?.[0]?.option_text || ""}\n\nTolerance: ${q.tolerance || 0}`;
             }
             finalOptions = [
               {
@@ -3334,6 +3754,7 @@ export default function NewAssessmentBuilder() {
               option_text_right: opt.option_text_right || "",
               is_correct: true,
               order_index: opt.order_index,
+              match_key: opt.match_key,
             }));
           }
 
@@ -3455,14 +3876,18 @@ export default function NewAssessmentBuilder() {
           toast.error("Scheduled Date is required");
           return false;
         }
-        if (!metadata.startTime) {
-          toast.error("Access Start is required");
-          return false;
+        const isStrict = metadata.mode === "CAT" || metadata.mode === "Summative" || metadata.mode === "Groupwork";
+        if (isStrict) {
+          if (!metadata.startTime) {
+            toast.error("Access Start is required");
+            return false;
+          }
+          if (!metadata.endTime) {
+            toast.error("Access End is required");
+            return false;
+          }
         }
-        if (!metadata.endTime) {
-          toast.error("Access End is required");
-          return false;
-        }
+
         if (
           !metadata.durationMinutes ||
           parseInt(metadata.durationMinutes as any) <= 0
@@ -3470,11 +3895,14 @@ export default function NewAssessmentBuilder() {
           toast.error("Valid duration is required");
           return false;
         }
-        if (parseInt(metadata.durationMinutes as any) > windowDuration) {
-          toast.error(
-            `Duration (${metadata.durationMinutes}m) cannot exceed the time window (${windowDuration}m) between start and end time.`,
-          );
-          return false;
+
+        if (metadata.startTime && metadata.endTime) {
+          if (parseInt(metadata.durationMinutes as any) > windowDuration) {
+            toast.error(
+              `Duration (${metadata.durationMinutes}m) cannot exceed the time window (${windowDuration}m) between start and end time.`,
+            );
+            return false;
+          }
         }
       }
 
@@ -3536,12 +3964,115 @@ export default function NewAssessmentBuilder() {
           );
           return false;
         }
+        // Empty text and Fill-in-the-blank placeholder validation
+        for (let i = 0; i < questions.length; i++) {
+          const q = questions[i];
+          if (!q.text || q.text.trim().length === 0) {
+            toast.error(
+              `Question #${i + 1} has empty text. All questions must have content.`,
+            );
+            return false;
+          }
+          if (q.type === "fillblank") {
+            const content = q.text || "";
+            if (!content.includes("[blank]")) {
+              toast.error(
+                `Fill-in-the-blank question #${i + 1} is missing the '[blank]' placeholder in its text.`,
+              );
+              return false;
+            }
+          }
+        }
       }
 
       return true;
     },
-    [activeStep, blueprint, currentMarks, metadata, windowDuration],
+    [activeStep, blueprint, currentMarks, metadata, windowDuration, questions],
   );
+
+  const syncDraftResponse = useCallback((res: any) => {
+    if (!res) return;
+    if (res.sections?.length > 0) {
+      const sortedSections = [...res.sections].sort(
+        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+      );
+      setBlueprint(
+        sortedSections.map((s: any) => ({
+          id: s.id,
+          section: s.title,
+          topics: s.description || "",
+          marks: s.allocated_marks || 0,
+          questions: s.question_count_target || 0,
+          difficulty: (() => {
+            const diff = s.allowed_question_types?.difficulty || s.difficulty || "Medium";
+            return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
+          })(),
+          allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map((t: string) =>
+            t.toLowerCase().replaceAll("_", "")
+          ),
+          aiPromptHint: s.ai_generation_prompt_hint || "",
+          difficultyDistribution: s.difficulty_distribution || undefined,
+          bloomLevel:
+            s.allowed_question_types?.bloom_level ||
+            s.allowed_question_types?.bloomLevel ||
+            s.bloom_level ||
+            s.bloomLevel ||
+            "understand",
+        }))
+      );
+    }
+
+    if (res.assessment_questions?.length > 0) {
+      const sortedQuestions = [...res.assessment_questions].sort(
+        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+      );
+      setQuestions(
+        sortedQuestions.map((aq: any) => {
+          const type = aq.question.question_type.toLowerCase().replaceAll("_", "") as QuestionType;
+          const optionsRaw = aq.question.options || [];
+          const unpacked = parseOpenEndedExplanation(type, optionsRaw[0]?.content || aq.question.explanation || "");
+          return {
+            id: aq.question.id,
+            sectionId: aq.assessment_section_id,
+            groupId: aq.group_id,
+            text: aq.question.content,
+            imageUrl: aq.question.image_url,
+            type: type,
+            marks: aq.marks_override || aq.question.marks,
+            options: ["essay", "shortanswer", "computational"].includes(type)
+              ? [{
+                  id: optionsRaw[0]?.id,
+                  option_text: unpacked.modelAnswer || aq.question.explanation || "",
+                  option_text_right: "",
+                  is_correct: true,
+                  order_index: 0,
+                }]
+              : optionsRaw.map((o: any, idx: number) => ({
+                  id: o.id,
+                  option_text: o.content,
+                  option_text_right: o.match_value,
+                  is_correct: o.is_correct,
+                  order_index: o.order_index,
+                  match_key: o.match_key,
+                })),
+            rubric: unpacked.rubric,
+            wordLimit: unpacked.wordLimit,
+            solutionSteps: unpacked.solutionSteps,
+            tolerance: unpacked.tolerance,
+            computationalType: aq.question.computational_type,
+            caseStudyContext: aq.question.case_study_context,
+            aiGenerated: aq.added_via === "ai_generated" || aq.question.ai_generated,
+            is_required: aq.is_required ?? true,
+          };
+        })
+      );
+    }
+
+    const initialTotal = res.total_marks || 0;
+    const initialPassing = res.passing_marks || 70;
+    const initialPct = initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
+    setPassingMarksPercent(initialPct);
+  }, []);
 
   const debouncedAutosaveRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -3553,12 +4084,17 @@ export default function NewAssessmentBuilder() {
       questionsOverride?: Question[],
     ) => {
       if (isReviewApplyingRef.current) return Promise.resolve();
-      if (debouncedAutosaveRef.current) {
-        clearTimeout(debouncedAutosaveRef.current);
-      }
       const executeAutosave = async () => {
         // Use the ref so we always get the latest draftId even before React re-renders
         const currentId = draftIdRef.current;
+        const activeMetadata = metadataOverride
+          ? { ...metadataRef.current, ...metadataOverride }
+          : metadataRef.current;
+
+        if (!currentId && !activeMetadata.teaching_workspace_id) {
+          return;
+        }
+
         setAutosaveStatus("saving");
         try {
           const payload = preparePayload(
@@ -3567,11 +4103,15 @@ export default function NewAssessmentBuilder() {
             step,
             questionsOverride,
           );
-          const res = (await apiClient("/assessments/draft", {
-            method: "POST",
-            body: JSON.stringify(payload),
-          })) as any;
+          const res = (await apiClient(
+            currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
+            {
+              method: currentId ? "PUT" : "POST",
+              body: JSON.stringify(payload),
+            }
+          )) as any;
           setAutosaveStatus("saved");
+          syncDraftResponse(res);
           const returnedId = res.id || res.assessment_id;
           if (returnedId && returnedId !== currentId) {
             // Update ref immediately so subsequent autosaves update this draft
@@ -3592,7 +4132,7 @@ export default function NewAssessmentBuilder() {
         });
       return activeAutosavePromiseRef.current;
     },
-    [router, preparePayload],
+    [router, preparePayload, syncDraftResponse],
   );
 
   const handleNextStep = useCallback(
@@ -3603,7 +4143,12 @@ export default function NewAssessmentBuilder() {
         toast.warning(
           `Navigating backward to step ${targetStep}. Your draft is autosaved.`,
         );
-        await runAutosave(activeStep);
+        // Fire autosave but don't block navigation on it — always navigate backward
+        try {
+          await runAutosave(targetStep);
+        } catch {
+          // Autosave failure should not block backward navigation
+        }
         setActiveStep(targetStep);
         return;
       }
@@ -3612,7 +4157,7 @@ export default function NewAssessmentBuilder() {
         return;
       }
 
-      await runAutosave(activeStep);
+      await runAutosave(targetStep);
 
       if (targetStep === 6) {
         triggerStep6Load();
@@ -3632,12 +4177,13 @@ export default function NewAssessmentBuilder() {
       step: number,
       metadataOverride?: Partial<typeof metadata>,
       rulesOverride?: Partial<typeof rules>,
+      questionsOverride?: Question[],
     ) => {
       if (debouncedAutosaveRef.current) {
         clearTimeout(debouncedAutosaveRef.current);
       }
       debouncedAutosaveRef.current = setTimeout(() => {
-        runAutosaveRef.current(step, metadataOverride, rulesOverride);
+        runAutosaveRef.current(step, metadataOverride, rulesOverride, questionsOverride);
       }, 2000);
     },
     [],
@@ -3666,35 +4212,31 @@ export default function NewAssessmentBuilder() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeStep, editingCandidateId, handleNextStep]);
 
-  const handleSaveDraft = async (): Promise<string | null> => {
+  const handleSaveDraft = async (): Promise<any | null> => {
     setIsSavingDraft(true);
     setFieldErrors({});
     try {
-      if (draftIdRef.current) {
-        // Update existing draft
-        await apiClient(
-          `/assessments/${draftIdRef.current}/wizard/${activeStep}`,
-          {
-            method: "POST",
-            body: JSON.stringify(prepareWizardPayload(activeStep)),
-          },
-        );
-        toast.success("Draft saved.");
-        return draftIdRef.current;
+      if (!metadata.teaching_workspace_id) {
+        toast.error("Please select a teaching workspace before saving the draft.");
+        return null;
       }
-      // Only create new if no draft yet
-      const res = (await apiClient("/assessments/draft", {
-        method: "POST",
-        body: JSON.stringify(preparePayload(undefined, undefined, activeStep)),
-      })) as any;
+      const currentId = draftIdRef.current;
+      const res = (await apiClient(
+        currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
+        {
+          method: currentId ? "PUT" : "POST",
+          body: JSON.stringify(preparePayload(undefined, undefined, activeStep)),
+        }
+      )) as any;
       toast.success("Draft saved successfully.");
+      syncDraftResponse(res);
       const returnedId = res.id || res.assessment_id;
       if (returnedId) {
         draftIdRef.current = returnedId;
         loadedDraftIdRef.current = returnedId;
         router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
       }
-      return returnedId || null;
+      return res;
     } catch (err: any) {
       mapApiErrors(err);
       return null;
@@ -3703,11 +4245,53 @@ export default function NewAssessmentBuilder() {
     }
   };
 
-  const ensureDraftId = async (): Promise<string | null> => {
-    if (draftIdRef.current) return draftIdRef.current;
+  const ensureDraftId = async (): Promise<{ id: string; sections?: any[] } | null> => {
+    const hasTempIds = blueprint.some((s) => s.id.startsWith("sec-"));
+
+    // Fast path: draft exists and all sections already have real UUIDs
+    if (draftIdRef.current && !hasTempIds) {
+      return {
+        id: draftIdRef.current,
+        sections: blueprint.map((s) => ({ id: s.id })),
+      };
+    }
+
     toast.info("Saving draft first to enable AI features...");
-    const savedId = await handleSaveDraft();
-    return savedId;
+
+    // Use the bulk /draft endpoint (same as runAutosave) so that sections are
+    // persisted and returned with real database UUIDs. The wizard step endpoint
+    // does NOT save sections, so we must NOT use handleSaveDraft() here.
+    try {
+      setIsSavingDraft(true);
+      const payload = preparePayload(undefined, undefined, activeStep);
+      const currentId = draftIdRef.current;
+      const res = (await apiClient(
+        currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
+        {
+          method: currentId ? "PUT" : "POST",
+          body: JSON.stringify(payload),
+        }
+      )) as any;
+
+      syncDraftResponse(res);
+
+      const returnedId = res.id || res.assessment_id;
+      if (returnedId && returnedId !== draftIdRef.current) {
+        draftIdRef.current = returnedId;
+        loadedDraftIdRef.current = returnedId;
+        router.replace(`/lecturer/assessments/new?draft=${returnedId}`);
+      }
+
+      return {
+        id: returnedId,
+        sections: res.sections || [],
+      };
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save draft before AI generation.");
+      return null;
+    } finally {
+      setIsSavingDraft(false);
+    }
   };
 
   const handlePublish = async () => {
@@ -3717,18 +4301,12 @@ export default function NewAssessmentBuilder() {
       );
       return;
     }
-    if (questions.length !== totalQuestions) {
-      toast.error(
-        `Question count mismatch. Expected ${totalQuestions}, but got ${questions.length}.`,
-      );
-      return;
-    }
     setIsPublishing(true);
     setFieldErrors({});
     try {
       const result = (await apiClient("/assessments/publish", {
         method: "POST",
-        body: JSON.stringify(preparePayload()),
+        body: JSON.stringify(preparePayload(undefined, undefined, null)),
       })) as any;
       if (result.validation_passed) {
         toast.success("Assessment Published!");
@@ -3806,6 +4384,7 @@ export default function NewAssessmentBuilder() {
                     </Label>
                     <Input
                       id="title"
+                      required
                       value={metadata.title}
                       onChange={(e) => {
                         setMetadata({ ...metadata, title: e.target.value });
@@ -3896,7 +4475,7 @@ export default function NewAssessmentBuilder() {
                       value={metadata.mode}
                       onValueChange={(v: any) => {
                         setMetadata({ ...metadata, mode: v });
-                        setTimeout(() => runAutosave(1), 0);
+                        triggerDebouncedAutosave(1);
                       }}
                     >
                       <SelectTrigger
@@ -3988,6 +4567,7 @@ export default function NewAssessmentBuilder() {
                     <Input
                       type="time"
                       id="startTime"
+                      required
                       value={metadata.startTime}
                       onChange={(e) => {
                         const now = new Date();
@@ -4034,6 +4614,7 @@ export default function NewAssessmentBuilder() {
                     <Input
                       type="time"
                       id="endTime"
+                      required
                       value={metadata.endTime}
                       onChange={(e) => {
                         setMetadata({ ...metadata, endTime: e.target.value });
@@ -4064,6 +4645,7 @@ export default function NewAssessmentBuilder() {
                     <Input
                       type="number"
                       id="durationMinutes"
+                      required
                       value={metadata.durationMinutes}
                       onChange={(e) => {
                         setMetadata({
@@ -4188,7 +4770,7 @@ export default function NewAssessmentBuilder() {
                             checked={(rules as any)[item.key]}
                             onCheckedChange={(v) => {
                               setRules({ ...rules, [item.key]: v });
-                              setTimeout(() => runAutosave(2), 0);
+                              triggerDebouncedAutosave(2);
                             }}
                           />
                         </div>
@@ -4201,7 +4783,8 @@ export default function NewAssessmentBuilder() {
                         value={metadata.result_release_mode}
                         onValueChange={(v: any) => {
                           setMetadata({ ...metadata, result_release_mode: v });
-                          setTimeout(() => runAutosave(2), 0);
+                          setRules({ ...rules, resultRelease: v.toLowerCase() as any });
+                          triggerDebouncedAutosave(2);
                         }}
                       >
                         <SelectTrigger className="h-9" id="resultRelease">
@@ -4243,7 +4826,7 @@ export default function NewAssessmentBuilder() {
                             checked={rules.shuffleQuestions}
                             onCheckedChange={(v) => {
                               setRules({ ...rules, shuffleQuestions: v });
-                              setTimeout(() => runAutosave(2), 0);
+                              triggerDebouncedAutosave(2);
                             }}
                           />
                         </div>
@@ -4264,7 +4847,7 @@ export default function NewAssessmentBuilder() {
                             checked={rules.shuffleOptions}
                             onCheckedChange={(v) => {
                               setRules({ ...rules, shuffleOptions: v });
-                              setTimeout(() => runAutosave(2), 0);
+                              triggerDebouncedAutosave(2);
                             }}
                           />
                         </div>
@@ -4285,7 +4868,7 @@ export default function NewAssessmentBuilder() {
                             checked={rules.passwordProtected}
                             onCheckedChange={(v) => {
                               setRules({ ...rules, passwordProtected: v });
-                              setTimeout(() => runAutosave(2), 0);
+                              triggerDebouncedAutosave(2);
                             }}
                           />
                         </div>
@@ -4389,7 +4972,7 @@ export default function NewAssessmentBuilder() {
                     config={metadata as any}
                     onConfigChange={(updates) => {
                       setMetadata((prev) => ({ ...prev, ...updates }));
-                      setTimeout(() => runAutosave(2), 0);
+                      triggerDebouncedAutosave(2);
                     }}
                   />
                 )}
@@ -4429,7 +5012,7 @@ export default function NewAssessmentBuilder() {
                                     ? [...current, instr]
                                     : current.filter((i) => i !== instr),
                                 });
-                                setTimeout(() => runAutosave(2), 0);
+                                triggerDebouncedAutosave(2);
                               }}
                             />
                             <label
@@ -4482,18 +5065,6 @@ export default function NewAssessmentBuilder() {
         );
       case 3: {
         const roster = selectedWorkspaceDetail?.roster || [];
-        const filteredRoster = roster.filter((student) => {
-          if (!studentSearch) return true;
-          const searchLower = studentSearch.toLowerCase();
-          return (
-            (student.name &&
-              student.name.toLowerCase().includes(searchLower)) ||
-            (student.email &&
-              student.email.toLowerCase().includes(searchLower)) ||
-            (student.student_id &&
-              student.student_id.toLowerCase().includes(searchLower))
-          );
-        });
 
         return (
           <div className="space-y-6">
@@ -4531,7 +5102,7 @@ export default function NewAssessmentBuilder() {
                         val === "all" ? [] : metadata.target_student_ids || [],
                     };
                     setMetadata(updated);
-                    setTimeout(() => runAutosave(3, updated), 0);
+                    triggerDebouncedAutosave(3, updated);
                   }}
                   className="grid grid-cols-1 md:grid-cols-2 gap-4"
                 >
@@ -4608,7 +5179,7 @@ export default function NewAssessmentBuilder() {
                               target_student_ids: allIds,
                             };
                             setMetadata(updated);
-                            setTimeout(() => runAutosave(3, updated), 0);
+                            triggerDebouncedAutosave(3, updated);
                           }}
                         >
                           Select All
@@ -4624,7 +5195,7 @@ export default function NewAssessmentBuilder() {
                               target_student_ids: [],
                             };
                             setMetadata(updated);
-                            setTimeout(() => runAutosave(3, updated), 0);
+                            triggerDebouncedAutosave(3, updated);
                           }}
                         >
                           Deselect All
@@ -4666,10 +5237,7 @@ export default function NewAssessmentBuilder() {
                                         target_student_ids: updatedIds,
                                       };
                                       setMetadata(updated);
-                                      setTimeout(
-                                        () => runAutosave(3, updated),
-                                        0,
-                                      );
+                                      triggerDebouncedAutosave(3, updated);
                                     }}
                                   />
                                   <label
@@ -4740,25 +5308,28 @@ export default function NewAssessmentBuilder() {
               <div className="flex gap-2">
                 <Button
                   onClick={async () => {
-                    const activeId = await ensureDraftId();
-                    if (!activeId) {
-                      toast.error(
-                        "Please fill in required metadata fields and save the assessment draft before generating questions.",
-                      );
+                    if (aiCandidates.length > 0) {
+                      toast.warning("Please review or clear your current candidate questions before generating new ones.");
+                      setAiReviewDrawerOpen(true);
                       return;
                     }
-                    setAiTargetSectionId("all");
-                    setAiGenerationConfig({
+
+                    const activeResult = await ensureDraftId();
+                    if (!activeResult) return;
+
+                    const defaults = {
                       topic: metadata.title || "",
                       question_type: "mcq",
                       difficulty: "medium",
-                      count: 5,
                       bloom_level: "understand",
+                      count: 5,
                       additional_context: "",
                       easyPercent: 30,
                       mediumPercent: 40,
                       hardPercent: 30,
-                    });
+                    };
+                    setAiTargetSectionId("all");
+                    setAiGenerationConfig(loadSavedAiConfig("all", defaults));
                     setAiDrawerOpen(true);
                   }}
                   variant="outline"
@@ -4807,17 +5378,23 @@ export default function NewAssessmentBuilder() {
                         variant="outline"
                         size="sm"
                         onClick={async () => {
-                          const activeId = await ensureDraftId();
-                          if (!activeId) {
-                            toast.error(
-                              "Please fill in required metadata fields and save the assessment draft before generating questions.",
-                            );
+                          if (aiCandidates.length > 0) {
+                            toast.warning("Please review or clear your current candidate questions before generating new ones.");
+                            setAiReviewDrawerOpen(true);
                             return;
                           }
-                          setAiTargetSectionId(sec.id);
-                          setAiGenerationConfig({
+
+                          const sectionIndex = blueprint.findIndex((s) => s.id === sec.id);
+                          const activeResult = await ensureDraftId();
+                          if (!activeResult) return;
+
+                          let realSectionId = sec.id;
+                          if (activeResult.sections && activeResult.sections[sectionIndex]) {
+                            realSectionId = activeResult.sections[sectionIndex].id;
+                          }
+                           const defaults = {
                             topic: sec.topics || metadata.title || "",
-                            question_type: sec.allowedTypes[0] || "mcq",
+                            question_type: sec.allowedTypes.length > 1 ? "mixed" : (sec.allowedTypes[0] || "mcq"),
                             difficulty: sec.difficulty.toLowerCase(),
                             count: sec.questions || 3,
                             bloom_level: sec.bloomLevel || "understand",
@@ -4825,7 +5402,9 @@ export default function NewAssessmentBuilder() {
                             easyPercent: 30,
                             mediumPercent: 40,
                             hardPercent: 30,
-                          });
+                          };
+                          setAiTargetSectionId(realSectionId);
+                          setAiGenerationConfig(loadSavedAiConfig(realSectionId, defaults));
                           setAiDrawerOpen(true);
                         }}
                         className="h-7 text-xs"
@@ -4867,12 +5446,13 @@ export default function NewAssessmentBuilder() {
                           <Input
                             type="number"
                             id={`marks-${sec.id}`}
-                            value={sec.marks}
+                            placeholder="e.g. 20"
+                            value={sec.marks === 0 ? "" : sec.marks}
                             onChange={(e) => {
                               updateSection(
                                 sec.id,
                                 "marks",
-                                parseInt(e.target.value) || 0,
+                                e.target.value === "" ? "" as any : parseInt(e.target.value) || 0,
                               );
                               triggerDebouncedAutosave(4);
                             }}
@@ -4886,12 +5466,13 @@ export default function NewAssessmentBuilder() {
                           <Input
                             type="number"
                             id={`questions-${sec.id}`}
-                            value={sec.questions}
+                            placeholder="e.g. 5"
+                            value={sec.questions === 0 ? "" : sec.questions}
                             onChange={(e) => {
                               updateSection(
                                 sec.id,
                                 "questions",
-                                parseInt(e.target.value) || 0,
+                                e.target.value === "" ? "" as any : parseInt(e.target.value) || 0,
                               );
                               triggerDebouncedAutosave(4);
                             }}
@@ -4909,7 +5490,8 @@ export default function NewAssessmentBuilder() {
                           onValueChange={(v: any) => {
                             if (v.length > 0) {
                               updateSection(sec.id, "allowedTypes", v);
-                              setTimeout(() => runAutosave(4), 0);
+                            } else {
+                              updateSection(sec.id, "allowedTypes", [...sec.allowedTypes]);
                             }
                           }}
                           className="flex flex-wrap gap-1.5 justify-start"
@@ -5384,7 +5966,7 @@ export default function NewAssessmentBuilder() {
                                               : s,
                                         );
                                         setSupervisorList(updatedList);
-                                        setTimeout(() => runAutosave(6), 0);
+                                        triggerDebouncedAutosave(6);
                                       }}
                                     >
                                       <SelectTrigger className="h-7 text-[10px] w-28">
@@ -5408,7 +5990,7 @@ export default function NewAssessmentBuilder() {
                                             (s) => s.id !== sup.id,
                                           ),
                                         );
-                                        setTimeout(() => runAutosave(6), 0);
+                                        triggerDebouncedAutosave(6);
                                       }}
                                       className="h-7 w-7 text-destructive hover:bg-destructive/5"
                                     >
@@ -5451,11 +6033,11 @@ export default function NewAssessmentBuilder() {
                                     {
                                       id: lect.id,
                                       name,
-                                      role: "ASSISTANT" as const,
+                                      role: pendingRole,
                                     },
                                   ];
                                   setSupervisorList(updatedList);
-                                  setTimeout(() => runAutosave(6), 0);
+                                  triggerDebouncedAutosave(6);
                                 }
                               }}
                             >
@@ -5484,9 +6066,29 @@ export default function NewAssessmentBuilder() {
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="flex items-end justify-start text-[10px] text-muted-foreground pb-2">
-                            Select a colleague to assign them as an assistant or
-                            observer.
+                          <div className="space-y-1">
+                            <Label htmlFor="step6-add-role" className="text-xs">
+                              Assign Role
+                            </Label>
+                            <Select
+                              value={pendingRole}
+                              onValueChange={(val: any) => setPendingRole(val)}
+                            >
+                              <SelectTrigger
+                                id="step6-add-role"
+                                className="h-8 text-xs"
+                              >
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="ASSISTANT">
+                                  Assistant Supervisor
+                                </SelectItem>
+                                <SelectItem value="OBSERVER">
+                                  Observer
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
                         </div>
                       </div>
@@ -5554,11 +6156,7 @@ export default function NewAssessmentBuilder() {
                                     [item.key]: v,
                                   };
                                   setRules(updatedRules);
-                                  setTimeout(
-                                    () =>
-                                      runAutosave(6, undefined, updatedRules),
-                                    0,
-                                  );
+                                  triggerDebouncedAutosave(6, undefined, updatedRules);
                                 }}
                               />
                             </div>
@@ -5598,7 +6196,7 @@ export default function NewAssessmentBuilder() {
               </div>
 
               <div className="space-y-6">
-                <Card className="shadow-none border sticky top-20">
+                <Card className="shadow-none border md:sticky md:top-20">
                   <CardHeader className="py-4 border-b">
                     <CardTitle className="text-xs uppercase font-bold tracking-wider">
                       Checks Summary
@@ -5614,7 +6212,7 @@ export default function NewAssessmentBuilder() {
                           className={cn(
                             "font-bold",
                             questions.length !== totalQuestions
-                              ? "text-destructive"
+                              ? "text-amber-500"
                               : "text-emerald-600",
                           )}
                         >
@@ -6118,18 +6716,35 @@ export default function NewAssessmentBuilder() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="mcq">
-                          Multiple Choice (MCQ)
-                        </SelectItem>
-                        <SelectItem value="truefalse">True / False</SelectItem>
-                        <SelectItem value="shortanswer">
-                          Short Answer
-                        </SelectItem>
-                        <SelectItem value="essay">Essay</SelectItem>
-                        <SelectItem value="matching">Matching Pairs</SelectItem>
-                        <SelectItem value="fillblank">
-                          Fill-in-the-Blank
-                        </SelectItem>
+                        {(() => {
+                          const allTypes = [
+                            { value: "mcq", label: "Multiple Choice (MCQ)" },
+                            { value: "truefalse", label: "True / False" },
+                            { value: "shortanswer", label: "Short Answer" },
+                            { value: "essay", label: "Essay" },
+                            { value: "matching", label: "Matching Pairs" },
+                            { value: "fillblank", label: "Fill-in-the-Blank" },
+                            { value: "computational", label: "Computational" },
+                            { value: "ordering", label: "Ordering" },
+                            { value: "casestudy", label: "Case Study" },
+                          ];
+                          const activeSec = blueprint.find((b) => b.id === aiTargetSectionId);
+                          let visibleTypes = activeSec && activeSec.allowedTypes?.length > 0
+                            ? allTypes.filter((t) => (activeSec.allowedTypes as string[]).includes(t.value))
+                            : allTypes;
+
+                          if (activeSec && activeSec.allowedTypes && activeSec.allowedTypes.length > 1) {
+                            visibleTypes = [
+                              { value: "mixed", label: "Mixed (All Selected Formats)" },
+                              ...visibleTypes,
+                            ];
+                          }
+                          return visibleTypes.map((t) => (
+                            <SelectItem key={t.value} value={t.value}>
+                              {t.label}
+                            </SelectItem>
+                          ));
+                        })()}
                       </SelectContent>
                     </Select>
                   </div>
@@ -6255,19 +6870,43 @@ export default function NewAssessmentBuilder() {
         </DialogContent>
       </Dialog>
 
-      {/* AI REVIEW CANDIDATES DIALOG */}
-      <Dialog open={aiReviewDrawerOpen} onOpenChange={setAiReviewDrawerOpen}>
-        <DialogContent className="sm:max-w-212.5 md:max-w-225 w-full p-6 flex flex-col max-h-[90vh]">
-          <DialogHeader className="border-b pb-4 shrink-0">
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+      {/* AI REVIEW CANDIDATES SHEET */}
+      <Sheet
+        open={aiReviewDrawerOpen}
+        onOpenChange={(open) => {
+          setAiReviewDrawerOpen(open);
+          if (!open && questionsRef.current.length > 0 && activeStep !== 6) {
+            setActiveStep(5);
+          }
+        }}
+      >
+        <SheetContent side="right" className="w-full sm:max-w-2xl md:max-w-3xl p-6 flex flex-col h-full overflow-hidden">
+          <SheetHeader className="border-b pb-4 shrink-0">
+            <SheetTitle className="flex items-center gap-2 text-lg font-bold">
               <CheckCircle2 className="size-5 text-emerald-500" /> Review AI
               Question Candidates
-            </DialogTitle>
-            <DialogDescription>
+            </SheetTitle>
+            <SheetDescription>
               Accept, edit, or reject the AI generated candidate questions
               below.
-            </DialogDescription>
-          </DialogHeader>
+            </SheetDescription>
+            {/* Source legend */}
+            <div className="flex items-center gap-3 pt-1 flex-wrap">
+              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Source:</span>
+              <div className="flex items-center gap-1.5">
+                <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 pointer-events-none">
+                  <BookOpen className="size-2.5" /> Lecture Material
+                </Badge>
+                <span className="text-[10px] text-muted-foreground">grounded in your uploaded course materials</span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50 pointer-events-none">
+                  <BrainCircuit className="size-2.5" /> AI Knowledge
+                </Badge>
+                <span className="text-[10px] text-muted-foreground">no matching lecture material found — review carefully</span>
+              </div>
+            </div>
+          </SheetHeader>
 
           {aiFailedSectionIds.length > 0 && (
             <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3 shrink-0 my-2">
@@ -6320,7 +6959,7 @@ export default function NewAssessmentBuilder() {
                 >
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <Badge
                           variant="outline"
                           className="text-[10px] font-bold uppercase"
@@ -6333,6 +6972,18 @@ export default function NewAssessmentBuilder() {
                         >
                           {cand.difficulty}
                         </Badge>
+                        {/* RAG source badge — tells the lecturer how the question was grounded */}
+                        {cand.grounded_by_rag ? (
+                          <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
+                            <BookOpen className="size-2.5" />
+                            Lecture Material
+                          </Badge>
+                        ) : (
+                          <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50">
+                            <BrainCircuit className="size-2.5" />
+                            AI Knowledge
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex gap-1">
                         <Button
@@ -6343,7 +6994,7 @@ export default function NewAssessmentBuilder() {
                         >
                           <Check className="size-4" />
                         </Button>
-                        <Button
+                         <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => {
@@ -6351,6 +7002,15 @@ export default function NewAssessmentBuilder() {
                             setEditingText(cand.parsed_question_text || "");
                             setEditingExplanation(
                               cand.parsed_explanation || "",
+                            );
+                            setEditingOptions(
+                              (cand.options || cand._options || []).map((o: any) => ({
+                                option_text: o.text || o.option_text || "",
+                                option_text_right: o.option_text_right || o.explanation || "",
+                                is_correct: o.is_correct ?? false,
+                                order_index: o.order_index ?? 0,
+                                match_key: o.match_key,
+                              }))
                             );
                           }}
                           className="h-8 w-8 text-primary hover:bg-primary/5"
@@ -6391,6 +7051,104 @@ export default function NewAssessmentBuilder() {
                             }
                           />
                         </div>
+
+                        {editingOptions.length > 0 && (
+                          <div className="space-y-2.5 pt-2 border-t border-dashed">
+                            <Label className="text-xs font-semibold">
+                              Edit Options / Choices
+                            </Label>
+                            <div className="space-y-2">
+                              {editingOptions.map((opt, oIdx) => {
+                                const qType = mapBackendToFrontendType(cand.question_type);
+                                return (
+                                  <div key={oIdx} className="flex gap-2 items-center">
+                                    {qType === "matching" ? (
+                                      <>
+                                        <Input
+                                          value={opt.option_text || ""}
+                                          onChange={(e) => {
+                                            const newOpts = [...editingOptions];
+                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            setEditingOptions(newOpts);
+                                          }}
+                                          placeholder="Left value..."
+                                          className="h-8 text-xs flex-1"
+                                        />
+                                        <span className="text-xs text-muted-foreground">➔</span>
+                                        <Input
+                                          value={opt.option_text_right || ""}
+                                          onChange={(e) => {
+                                            const newOpts = [...editingOptions];
+                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text_right: e.target.value };
+                                            setEditingOptions(newOpts);
+                                          }}
+                                          placeholder="Right value..."
+                                          className="h-8 text-xs flex-1"
+                                        />
+                                      </>
+                                    ) : qType === "casestudy" ? (
+                                      <>
+                                        <Input
+                                          value={opt.option_text || ""}
+                                          onChange={(e) => {
+                                            const newOpts = [...editingOptions];
+                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            setEditingOptions(newOpts);
+                                          }}
+                                          placeholder="Sub-question text..."
+                                          className="h-8 text-xs flex-1"
+                                        />
+                                        <Input
+                                          type="number"
+                                          value={opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5"}
+                                          onChange={(e) => {
+                                            const newOpts = [...editingOptions];
+                                            newOpts[oIdx] = { ...newOpts[oIdx], match_key: e.target.value };
+                                            setEditingOptions(newOpts);
+                                          }}
+                                          placeholder="Marks"
+                                          className="h-8 text-xs w-16 text-center"
+                                        />
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Checkbox
+                                          checked={opt.is_correct}
+                                          onCheckedChange={(checked) => {
+                                            const newOpts = [...editingOptions];
+                                            if (qType === "truefalse" || qType === "mcq") {
+                                              if (checked) {
+                                                newOpts.forEach((o, idx) => {
+                                                  o.is_correct = idx === oIdx;
+                                                });
+                                              } else {
+                                                newOpts[oIdx].is_correct = false;
+                                              }
+                                            } else {
+                                              newOpts[oIdx].is_correct = !!checked;
+                                            }
+                                            setEditingOptions(newOpts);
+                                          }}
+                                        />
+                                        <Input
+                                          value={opt.option_text || ""}
+                                          onChange={(e) => {
+                                            const newOpts = [...editingOptions];
+                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            setEditingOptions(newOpts);
+                                          }}
+                                          placeholder="Option text..."
+                                          className="h-8 text-xs flex-1"
+                                        />
+                                      </>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="flex justify-end gap-2">
                           <Button
                             variant="ghost"
@@ -6412,9 +7170,11 @@ export default function NewAssessmentBuilder() {
                         <p className="text-sm font-semibold">
                           {cand.parsed_question_text}
                         </p>
-                        {cand._options && cand._options.length > 0 && (
-                          <div className="grid grid-cols-2 gap-2 pt-2">
-                            {cand._options.map((opt: any, oIdx: number) => (
+                        {(() => {
+                          const opts = cand.options || cand._options || [];
+                          return opts.length > 0 && (
+                            <div className="grid grid-cols-2 gap-2 pt-2">
+                              {opts.map((opt: any, oIdx: number) => (
                               <div
                                 key={oIdx}
                                 className={cn(
@@ -6424,14 +7184,31 @@ export default function NewAssessmentBuilder() {
                                     : "bg-muted/10 border-border",
                                 )}
                               >
-                                <span>{opt.text}</span>
+                                <span>
+                                  {(() => {
+                                    const textVal = opt.text || opt.option_text || "";
+                                    const rightVal = opt.explanation || opt.option_text_right || "";
+                                    const marksVal = opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5";
+                                    const normType = (cand.question_type || "").toLowerCase().replaceAll("_", "");
+                                    
+                                    if (normType === "matching") {
+                                      return `${textVal} ➔ ${rightVal}`;
+                                    }
+                                    if (normType === "casestudy") {
+                                      const guidance = rightVal ? ` — Guidance: ${rightVal}` : "";
+                                      return `${textVal} (${marksVal} Marks)${guidance}`;
+                                    }
+                                    return textVal;
+                                  })()}
+                                </span>
                                 {opt.is_correct && (
                                   <Check className="size-3 text-emerald-600" />
                                 )}
                               </div>
                             ))}
                           </div>
-                        )}
+                          );
+                        })()}
                         {cand.parsed_explanation && (
                           <div className="text-[11px] text-muted-foreground bg-muted/10 p-2 rounded border border-dashed mt-2">
                             <strong>Explanation:</strong>{" "}
@@ -6498,8 +7275,8 @@ export default function NewAssessmentBuilder() {
               </Button>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }

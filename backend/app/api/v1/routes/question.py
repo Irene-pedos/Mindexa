@@ -14,10 +14,12 @@ Endpoints:
     GET  /questions/tags         — List all available tags
 """
 
-import uuid
-
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, status, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.config import settings
+import os
+import shutil
+import uuid
 
 from app.db.models.auth import User
 from app.db.models.question import Question
@@ -277,3 +279,32 @@ def _to_detail_response(question: Question) -> QuestionDetailResponse:
         options=options,
         tags=tags,
     )
+
+
+@router.post(
+    "/upload-image",
+    summary="Upload question image",
+    description="Uploads an image file for use in questions, returns the public URL.",
+)
+async def upload_question_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(require_lecturer_or_admin),
+) -> dict:
+    ext = os.path.splitext(file.filename)[1].lower()
+    if ext not in [".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"]:
+        from app.core.exceptions import ValidationError
+        raise ValidationError("Only image files are allowed.", code="INVALID_IMAGE_TYPE")
+
+    # Ensure uploads directory exists
+    upload_dir = os.path.join(settings.UPLOAD_DIR, "questions")
+    os.makedirs(upload_dir, exist_ok=True)
+
+    filename = f"{uuid.uuid4()}{ext}"
+    file_path = os.path.join(upload_dir, filename)
+
+    # Write file to disk
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    return {"url": f"/uploads/questions/{filename}"}
+

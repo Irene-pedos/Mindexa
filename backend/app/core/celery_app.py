@@ -48,20 +48,30 @@ def create_celery() -> Celery:
         "mindexa",
         broker=settings.CELERY_BROKER_URL,
         backend=settings.CELERY_RESULT_BACKEND,
-        include=["app.workers.tasks"],
+        include=[
+            "app.workers.tasks",
+            "app.workers.tasks.grading",
+            "app.workers.tasks.document_processing",
+        ],
     )
 
-    # ── Serialization ─────────────────────────────────────────────────────────
+    # ── Serialization & Worker Behavior ───────────────────────────────────────
     app.conf.update(
         task_serializer="json",
         result_serializer="json",
         accept_content=["json"],
+        event_serializer="json",
         timezone="UTC",
         enable_utc=True,
+        result_expires=86400,
+        result_persistent=False,
+        task_track_started=True,
+        task_max_retries=3,
+        task_default_retry_delay=60,
+        worker_send_task_events=True,
+        task_send_sent_event=True,
+        worker_max_tasks_per_child=200,
     )
-
-    # ── Result TTL ────────────────────────────────────────────────────────────
-    app.conf.result_expires = 3600  # 1 hour
 
     # ── Task execution ────────────────────────────────────────────────────────
     app.conf.task_always_eager = settings.CELERY_TASK_ALWAYS_EAGER
@@ -81,12 +91,16 @@ def create_celery() -> Celery:
     grading_exchange = Exchange("grading", type="direct")
     email_exchange = Exchange("email", type="direct")
     cleanup_exchange = Exchange("cleanup", type="direct")
+    high_priority_exchange = Exchange("high_priority", type="direct")
+    rag_exchange = Exchange("rag", type="direct")
 
     app.conf.task_queues = [
         Queue("default", default_exchange, routing_key="default"),
         Queue("grading", grading_exchange, routing_key="grading"),
         Queue("email", email_exchange, routing_key="email"),
         Queue("cleanup", cleanup_exchange, routing_key="cleanup"),
+        Queue("high_priority", high_priority_exchange, routing_key="high_priority"),
+        Queue("rag", rag_exchange, routing_key="rag"),
     ]
     app.conf.update(
         task_default_queue="default",
@@ -96,11 +110,15 @@ def create_celery() -> Celery:
 
     # ── Task routing ──────────────────────────────────────────────────────────
     app.conf.task_routes = {
-        "app.workers.tasks.send_email_notification": {"queue": "email"},
+        "tasks.process_uploaded_document": {"queue": "rag"},
+        "app.workers.tasks.grading.trigger_grading_for_attempt": {"queue": "grading"},
         "app.workers.tasks.process_ai_grading_job": {"queue": "grading"},
-        "app.workers.tasks.auto_submit_expired_attempts": {"queue": "cleanup"},
-        "app.workers.tasks.cleanup_expired_tokens": {"queue": "cleanup"},
+        "app.workers.tasks.send_email_notification": {"queue": "email"},
         "app.workers.tasks.purge_old_logs": {"queue": "cleanup"},
+        "app.workers.tasks.cleanup_expired_tokens": {"queue": "cleanup"},
+        "app.workers.tasks.auto_submit_expired_attempts": {"queue": "cleanup"},
+        "app.workers.tasks.process_ai_generation_batch": {"queue": "default"},
+        "app.workers.tasks.grading_reminder": {"queue": "cleanup"},
     }
 
     # ── Beat schedule (periodic tasks) ────────────────────────────────────────
@@ -108,19 +126,25 @@ def create_celery() -> Celery:
         # Check for expired attempts every 5 minutes
         "auto-submit-expired-attempts": {
             "task": "app.workers.tasks.auto_submit_expired_attempts",
-            "schedule": 300,   # seconds
+            "schedule": 300.0,   # seconds
             "options": {"queue": "cleanup"},
         },
         # Clean up expired refresh/verification tokens every 30 minutes
         "cleanup-expired-tokens": {
             "task": "app.workers.tasks.cleanup_expired_tokens",
-            "schedule": 1800,  # seconds
+            "schedule": 1800.0,  # seconds
             "options": {"queue": "cleanup"},
         },
         # Purge old security event logs daily at 02:00 UTC
         "purge-old-logs": {
             "task": "app.workers.tasks.purge_old_logs",
             "schedule": crontab(hour=2, minute=0),
+            "options": {"queue": "cleanup"},
+        },
+        # Grading reminder every 12 hours
+        "grading-reminder": {
+            "task": "app.workers.tasks.grading_reminder",
+            "schedule": 43200.0,  # seconds
             "options": {"queue": "cleanup"},
         },
     }

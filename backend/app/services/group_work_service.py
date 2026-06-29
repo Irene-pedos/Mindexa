@@ -798,6 +798,8 @@ class GroupWorkService:
             status=AssessmentStatus.DRAFT,
             subject_id=assessment.subject_id,
             course_id=assessment.course_id,
+            teaching_workspace_id=assessment.teaching_workspace_id,
+            academic_year=assessment.academic_year,
             created_by_id=current_user.id,
             reassessment_of_id=assessment.id,
             is_group_assessment=True,

@@ -4,7 +4,7 @@ import httpx
 
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
 
-from .base_provider import AICompletionRequest, AICompletionResponse, BaseProvider
+from .base_provider import AICompletionRequest, AICompletionResponse, AIEmbeddingRequest, AIEmbeddingResponse, BaseProvider
 
 
 class GroqProvider(BaseProvider):
@@ -50,9 +50,14 @@ class GroqProvider(BaseProvider):
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:500]
             if exc.response.status_code == 429:
+                # Groq always returns a `retry-after` header with the exact
+                # seconds to wait.  Forward it so the gateway's backoff logic
+                # can use the precise value instead of guessing.
+                retry_after = exc.response.headers.get("retry-after", "")
                 raise RateLimitError(
                     f"Groq rate limit exceeded: {detail}",
                     code="AI_PROVIDER_RATE_LIMITED",
+                    retry_after=float(retry_after) if retry_after else None,
                 ) from exc
             raise ServiceUnavailableError(
                 f"Groq request failed with status {exc.response.status_code}: {detail}"

@@ -31,12 +31,46 @@ class TestGroupAppeals:
         db.add(lecturer)
         await db.flush()
         
-        from app.db.models.academic import TeachingWorkspace
-        workspace = TeachingWorkspace(
+        from app.db.models.academic import TeachingWorkspace, TeachingAssignment, Institution, Department, Course, ClassSection, AcademicPeriod
+        from datetime import date
+
+        inst = Institution(name="Test Inst", code=f"TI_{uuid.uuid4().hex[:4]}")
+        db.add(inst)
+        await db.flush()
+
+        dept = Department(institution_id=inst.id, name="Test Dept", code=f"TD_{uuid.uuid4().hex[:4]}")
+        db.add(dept)
+        await db.flush()
+
+        period = AcademicPeriod(institution_id=inst.id, name="Semester 1", code=f"S1_{uuid.uuid4().hex[:4]}", start_date=date(2026, 1, 1), end_date=date(2026, 6, 1))
+        db.add(period)
+        await db.flush()
+
+        course = Course(institution_id=inst.id, department_id=dept.id, academic_period_id=period.id, name="Test Course", code=f"TC_{uuid.uuid4().hex[:4]}", academic_year="2026")
+        db.add(course)
+        await db.flush()
+
+        section = ClassSection(institution_id=inst.id, course_id=course.id, name="Section A", code=f"SA_{uuid.uuid4().hex[:4]}")
+        db.add(section)
+        await db.flush()
+
+        assignment = TeachingAssignment(
             lecturer_id=lecturer.id,
-            class_section_id=uuid.uuid4(),
-            academic_period_id=uuid.uuid4(),
-            course_id=uuid.uuid4(),
+            institution_id=inst.id,
+            department_id=dept.id,
+            course_id=course.id,
+            class_section_id=section.id,
+            academic_period_id=period.id,
+            academic_year="2026"
+        )
+        db.add(assignment)
+        await db.flush()
+
+        workspace = TeachingWorkspace(
+            teaching_assignment_id=assignment.id,
+            course_id=course.id,
+            class_section_id=section.id,
+            academic_period_id=period.id,
             title="Test Appeals Workspace"
         )
         db.add(workspace)
@@ -48,6 +82,8 @@ class TestGroupAppeals:
             status=AssessmentStatus.PUBLISHED,
             created_by_id=lecturer.id,
             teaching_workspace_id=workspace.id,
+            course_id=course.id,
+            academic_year="2026",
             is_group_assessment=True,
             passing_marks=50
         )

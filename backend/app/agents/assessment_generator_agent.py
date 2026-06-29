@@ -65,8 +65,8 @@ class AssessmentGeneratorAgent(BaseAgent):
         Returns (questions, full_prompt).
         """
         prompt_template = self._get_prompt()
-
-        type_instructions = self._get_type_instructions(question_type)
+        is_rag = bool(course_material_context and course_material_context.strip())
+        type_instructions = self._get_type_instructions(question_type, is_rag)
 
         # Format context blocks — use clear "None provided" fallbacks so the AI
         # knows what's missing rather than hallucinating phantom content.
@@ -106,6 +106,39 @@ class AssessmentGeneratorAgent(BaseAgent):
 
         marks_str = str(marks_per_question) if marks_per_question else "Not specified"
 
+        if not is_rag:
+            prompt_template = (
+                prompt_template
+                .replace(
+                    "You MUST ground every question in the course material excerpts provided below.",
+                    "Since no course material has been uploaded, you MUST generate questions using your general academic and subject knowledge."
+                )
+                .replace(
+                    "Do NOT invent facts. If the course material does not cover a sub-topic sufficiently, say so in your explanation.",
+                    "Ensure all questions and answers are factually correct and accurate based on standard academic consensus."
+                )
+                .replace(
+                    "- Every question MUST be directly traceable to the course material above.",
+                    "- Every question must be academically accurate and aligned with standard curriculum standards."
+                )
+                .replace(
+                    "- Factually correct — never contradict the course material.",
+                    "- Factually correct according to standard academic consensus."
+                )
+                .replace(
+                    "Generate the questions now. Base them on the course material context provided.",
+                    "Generate the questions now. Base them on your general knowledge for the specified subject and topic."
+                )
+                .replace(
+                    '"source_reference": "<which part of the course material this question draws from>"',
+                    '"source_reference": "Set this to \'AI Knowledge\'"'
+                )
+                .replace(
+                    "grounded in the course material.",
+                    "grounded in the specified topic."
+                )
+            )
+
         system_content = (
             prompt_template
             .replace("{{question_type}}", question_type)
@@ -133,8 +166,12 @@ class AssessmentGeneratorAgent(BaseAgent):
                         f"Generate exactly {count} {question_type} question(s) for the course "
                         f"'{subject or 'General'}', topic '{topic or 'General'}', at {difficulty} "
                         f"difficulty, Bloom's level: {bloom_level or 'Understand'}. "
-                        f"Ground every question in the course material context provided. "
-                        f"Return ONLY a valid JSON array."
+                        + (
+                            "Ground every question in the course material context provided. "
+                            if is_rag else
+                            "Generate questions using your general academic and subject knowledge. "
+                        )
+                        + "Return ONLY a valid JSON array."
                     ),
                 ),
             ],
@@ -191,6 +228,9 @@ class AssessmentGeneratorAgent(BaseAgent):
             normalized_items = self._coerce_payload_to_question_items(data)
             return [GeneratedQuestion.model_validate(item) for item in normalized_items]
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
+            import structlog
+            logger = structlog.get_logger(__name__)
+            logger.error("Failed parsing generated questions", raw_content=content, error=str(exc))
             raise ValidationError(
                 f"The AI returned an invalid response: {str(exc)}",
                 code="AI_OUTPUT_VALIDATION_FAILED",
@@ -281,17 +321,25 @@ class AssessmentGeneratorAgent(BaseAgent):
             "source_reference": item.get("source_reference") or item.get("source"),
         }
 
-    def _get_type_instructions(self, question_type: str) -> str:
+    def _get_type_instructions(self, question_type: str, is_rag: bool = True) -> str:
         """Get specific guidance for each question type."""
         instructions = {
             "mcq": (
                 "Provide exactly 4 options. Mark exactly 1 as is_correct=true. "
                 "Distractors must be plausible but clearly wrong. "
-                "Each distractor should address a common misconception drawn from the course material."
+                + (
+                    "Each distractor should address a common misconception drawn from the course material."
+                    if is_rag else
+                    "Each distractor should address a common misconception related to this topic."
+                )
             ),
             "true_false": (
                 "Provide exactly 2 options: True and False. Mark the correct one. "
-                "The statement must be directly verifiable from the course material."
+                + (
+                    "The statement must be directly verifiable from the course material."
+                    if is_rag else
+                    "The statement must be factually correct and verifiable."
+                )
             ),
             "short_answer": (
                 "Set options to []. "
@@ -306,12 +354,21 @@ class AssessmentGeneratorAgent(BaseAgent):
             "matching": (
                 "Provide matching pairs. In each option: 'text' is the left-side item, "
                 "'explanation' is the correct right-side match. All 'is_correct' should be true. "
-                "Provide at least 4 pairs. All terms must come from the course material."
+                "Provide at least 4 pairs. "
+                + (
+                    "All terms must come from the course material."
+                    if is_rag else
+                    "All terms must be relevant to the topic."
+                )
             ),
             "fill_blank": (
                 "Use '___' in the question text for each blank. "
                 "Each option is a correct answer for one blank (in order). All options should have is_correct: true. "
-                "Blanks must target key terms, definitions, or values from the course material."
+                + (
+                    "Blanks must target key terms, definitions, or values from the course material."
+                    if is_rag else
+                    "Blanks must target key terms, definitions, or values related to this topic."
+                )
             ),
             "case_study": (
                 "Write a realistic, detailed scenario (150-250 words) in the question stem. "
@@ -329,7 +386,11 @@ class AssessmentGeneratorAgent(BaseAgent):
             "ordering": (
                 "Provide items in their CORRECT sequence in the options array. "
                 "All ordering options should have is_correct: true. "
-                "Items must represent a meaningful process or sequence from the course material."
+                + (
+                    "Items must represent a meaningful process or sequence from the course material."
+                    if is_rag else
+                    "Items must represent a meaningful process or sequence related to this topic."
+                )
             ),
             "practical": (
                 "Set options to []. "

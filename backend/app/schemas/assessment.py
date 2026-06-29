@@ -282,6 +282,9 @@ class AssessmentGeneralUpdate(BaseModel):
     integrity_monitoring_enabled: bool | None = None
     randomize_questions: bool | None = Field(default=None, alias="randomise_questions")
     randomize_options: bool | None = Field(default=None, alias="randomise_options")
+    late_submission_allowed: bool | None = None
+    late_penalty_percent: float | None = Field(default=None, ge=0, le=100)
+    grace_period_minutes: int | None = Field(default=None, ge=0, le=60)
 
     draft_step: int | None = Field(default=None, ge=1, le=6)
 
@@ -507,6 +510,7 @@ class BulkAssessmentOption(BaseModel):
     is_correct: bool | None = False
     order_index: int | None = 0
     option_text_right: str | None = None
+    match_key: str | None = None
 
 
 class BulkAssessmentQuestion(BaseModel):
@@ -596,6 +600,7 @@ class BulkAssessmentRules(BaseModel):
     accessPassword: str | None = None
     latePenaltyPercent: float | str | None = 0
     gracePeriodMinutes: int | str | None = 0
+    lateSubmissionAllowed: bool | None = False
     autosaveToken: str | uuid.UUID | None = None
     requireAllMemberApproval: bool | None = False
     requireAllMemberParticipation: bool | None = False
