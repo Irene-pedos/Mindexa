@@ -28,4 +28,6 @@ export const gradingApi = {
     apiClient(`/grading/assessment/${assessmentId}/class/${classId}/ai-summary`),
   getAssessmentAnalytics: (assessmentId: string) => 
     apiClient(`/grading/assessment/${assessmentId}/analytics`),
+  verifyAttemptGrades: (attemptId: string) => 
+    apiClient(`/grading/attempt/${attemptId}/verify`),
 };

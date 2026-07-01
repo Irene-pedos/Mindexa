@@ -533,6 +533,14 @@ class GradingService:
             else:
                 decision = AIGradeDecision.MODIFIED
 
+        # Determine feedback author basis
+        feedback_author_basis = "LECTURER"
+        if existing.ai_feedback_draft:
+            if feedback == existing.ai_feedback_draft:
+                feedback_author_basis = "AI"
+            elif feedback and len(feedback.strip()) > 0:
+                feedback_author_basis = "AI_EDITED"
+
         # 1. Update/Create the grade
         await self.grading_repo.finalize_grade(
             grade_id=existing.id,
@@ -543,6 +551,7 @@ class GradingService:
             lecturer_override=lecturer_override,
             grading_mode=grading_mode,
             is_final=is_final,
+            feedback_author_basis=feedback_author_basis,
         )
 
         if internal_notes is not None:

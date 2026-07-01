@@ -242,6 +242,10 @@ class ResultBreakdown(BaseModel, table=True):
         nullable=True,
         description="Grading mode used: auto | ai_assisted | manual",
     )
+    feedback_author_basis: str | None = Field(
+        default="LECTURER",
+        nullable=True,
+    )
     was_skipped: bool = Field(
         default=False,
         nullable=False,

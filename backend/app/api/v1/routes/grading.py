@@ -41,6 +41,8 @@ from app.schemas.grading import (
     ModerationStatsResponse,
     QueueItemAssignRequest,
     SubmissionGradeResponse,
+    VerifyMarksResponse,
+    AIGradeFeedbackRequest,
 )
 from app.services.grading_service import GradingService
 
@@ -258,6 +260,27 @@ async def confirm_ai_grade(
 
 
 @router.post(
+    "/feedback-ai",
+    summary="Lecturer submits accuracy feedback for an AI suggestion",
+)
+async def submit_ai_feedback(
+    body: AIGradeFeedbackRequest,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    import structlog
+    logger = structlog.get_logger("mindexa.grading")
+    logger.info(
+        "ai_grading_feedback_captured",
+        submission_grade_id=str(body.submission_grade_id),
+        is_accurate=body.is_accurate,
+        comments=body.comments,
+        lecturer_id=str(current_user.id),
+    )
+    return {"status": "success", "message": "AI accuracy feedback recorded"}
+
+
+@router.post(
     "/response/{response_id}/draft-feedback",
     response_model=SubmissionGradeResponse,
     summary="Generate an AI feedback draft for a response",
@@ -311,14 +334,18 @@ async def get_grade_for_response(
     # Map extra fields from the joined data
     resp_obj = SubmissionGradeResponse.model_validate(grade)
     
+    has_rubric = False
     if grade.student_response:
         resp_obj.student_answer = grade.student_response.answer_text
         if grade.student_response.question:
             q = grade.student_response.question
             resp_obj.question_text = q.content
+            if q.rubric_id is not None:
+                has_rubric = True
             if q.rubric:
                 resp_obj.rubric = q.rubric
                 
+    resp_obj.ai_grading_basis = "RUBRIC" if has_rubric else "GENERAL_KNOWLEDGE"
     return resp_obj
 
 
@@ -361,6 +388,66 @@ async def get_attempt_grading_summary(
         ai_suggested_count=ai_count,
         manual_count=manual_count,
         is_fully_graded=len(final_grades) == total_responses,
+    )
+
+
+@router.get(
+    "/attempt/{attempt_id}/verify",
+    response_model=VerifyMarksResponse,
+    summary="Verify all grades for an attempt, highlighting ungraded or bulk-accepted unreviewed AI grades",
+)
+async def verify_attempt_grades(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> VerifyMarksResponse:
+    from app.db.models.attempt import SubmissionGrade
+    from app.db.models.ai import AIGradeReview
+    from app.db.enums import AIGradeDecision
+    from sqlalchemy import select
+
+    # 1. Fetch all manual/open-ended grades for the attempt
+    stmt = (
+        select(SubmissionGrade)
+        .where(
+            SubmissionGrade.attempt_id == attempt_id,
+            SubmissionGrade.is_deleted.is_(False),
+            SubmissionGrade.grading_mode != "AUTO",
+        )
+    )
+    res = await db.execute(stmt)
+    manual_grades = res.scalars().all()
+
+    ungraded_count = 0
+    unreviewed_bulk_count = 0
+    errors = []
+
+    for grade in manual_grades:
+        if not grade.is_final:
+            ungraded_count += 1
+            errors.append(f"Question node {grade.question_id} is not graded yet.")
+        else:
+            # Check if this grade was accepted in bulk (AIGradeReview with ACCEPTED and review_duration_seconds is None)
+            review_stmt = (
+                select(AIGradeReview)
+                .where(
+                    AIGradeReview.submission_grade_id == grade.id,
+                    AIGradeReview.grading_decision == AIGradeDecision.ACCEPTED,
+                    AIGradeReview.review_duration_seconds.is_(None),
+                )
+            )
+            review_res = await db.execute(review_stmt)
+            unreviewed_bulk = review_res.scalars().first()
+            if unreviewed_bulk:
+                unreviewed_bulk_count += 1
+                errors.append(f"Question node {grade.question_id} was bulk-accepted via AI without human individual review.")
+
+    valid = (ungraded_count == 0 and unreviewed_bulk_count == 0)
+    return VerifyMarksResponse(
+        valid=valid,
+        ungraded_count=ungraded_count,
+        unreviewed_bulk_count=unreviewed_bulk_count,
+        errors=errors,
     )
 
 

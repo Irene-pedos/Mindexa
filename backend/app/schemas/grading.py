@@ -148,10 +148,17 @@ class SubmissionGradeResponse(BaseModel):
     ai_suggested_score: float | None
     ai_rationale: str | None
     ai_confidence: float | None
+    ai_feedback_draft: str | None = None
+    ai_feedback_strengths: list[str] | None = None
+    ai_feedback_improvements: list[str] | None = None
+    ai_feedback_suggestions: list[str] | None = None
     lecturer_override: bool
     feedback: str | None
+    feedback_author_basis: str = "LECTURER"
     rubric_scores: list[dict[str, Any]] | None
     is_final: bool
+    ai_grading_basis: str | None = None
+    is_individually_reviewed: bool = False
     graded_at: datetime | None
     created_by_id: uuid.UUID | None
     updated_by_id: uuid.UUID | None
@@ -190,6 +197,10 @@ class GradingQueueItemResponse(BaseModel):
     ai_pre_graded: bool
     ai_suggested_score: float | None = None
     ai_confidence: float | None = None
+    ai_grading_basis: str | None = None
+    max_score: float | None = None
+    institution_name: str | None = None
+    workspace_title: str | None = None
     
     # Risk & Timing
     integrity_risk_score: float | None = None
@@ -333,3 +344,16 @@ class ClassAiSummaryResponse(BaseModel):
     common_mistakes: list[str]
     students_needing_attention: list[dict[str, Any]] # student_id, name, reason
     ai_generated_at: datetime
+
+
+class VerifyMarksResponse(BaseModel):
+    valid: bool
+    ungraded_count: int
+    unreviewed_bulk_count: int
+    errors: list[str] = []
+
+
+class AIGradeFeedbackRequest(BaseModel):
+    submission_grade_id: uuid.UUID
+    is_accurate: bool
+    comments: str | None = None

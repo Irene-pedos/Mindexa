@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -36,7 +37,20 @@ import {
   WifiOff,
   Loader2,
   Upload,
+  BookOpen,
+  Info,
+  Menu,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+  SheetClose,
+} from "@/components/ui/sheet";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
@@ -55,6 +69,8 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
+  DialogClose,
 } from "@/components/ui/dialog";
 
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -117,6 +133,11 @@ export interface AssessmentQuestion {
   caseStudyContext?: string;
   min_words?: number;
   max_words?: number;
+  is_required?: boolean;
+  grading_mode?: string;
+  allowed_file_types?: string[];
+  max_file_size?: number;
+  image_alt_text?: string;
 }
 
 export interface AssessmentMeta {
@@ -134,6 +155,9 @@ export interface AssessmentMeta {
   is_open_book?: boolean;
   max_attempts?: number;
   end_date?: string;
+  result_release_mode?: string;
+  sections?: any[];
+  instructions?: string;
 }
 
 export interface SavedSubmission {
@@ -574,6 +598,7 @@ function DroppableMatchTarget({
   onRemove,
   optionsPool,
   onSelect,
+  isDragging,
 }: {
   premiseId: string;
   premiseText: string;
@@ -581,6 +606,7 @@ function DroppableMatchTarget({
   onRemove: () => void;
   optionsPool: string[];
   onSelect: (val: string) => void;
+  isDragging?: boolean;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `target-${premiseId}`,
@@ -622,9 +648,12 @@ function DroppableMatchTarget({
               onSelect(val);
             }
           }}
-          className="bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8"
+          className={cn(
+            "bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8",
+            isDragging && "pointer-events-none"
+          )}
         >
-          <option value="" className="text-muted-foreground">Select match...</option>
+          <option value="" className="text-muted-foreground">Select or Drop match...</option>
           {optionsPool.map((opt, i) => (
             <option key={i} value={opt} className="text-foreground bg-background">
               {opt}
@@ -654,6 +683,7 @@ function MatchingDnd({ q, currentVal, setAnswers }: {
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
   const matchingAnswers = currentVal || {};
+  const [isDragging, setIsDragging] = useState(false);
 
   const premises = useMemo(() => {
     return (q.options || []).filter((o: QuestionOption) => o.text || o.option_text);
@@ -707,7 +737,12 @@ function MatchingDnd({ q, currentVal, setAnswers }: {
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      onDragEnd={handleDragEnd}
+      onDragStart={() => setIsDragging(true)}
+      onDragEnd={(e) => {
+        setIsDragging(false);
+        handleDragEnd(e);
+      }}
+      onDragCancel={() => setIsDragging(false)}
     >
       <div className="space-y-4">
         <div className="grid gap-2">
@@ -719,6 +754,7 @@ function MatchingDnd({ q, currentVal, setAnswers }: {
               matchedValue={matchingAnswers[p.id]}
               onRemove={() => removeMatch(p.id)}
               optionsPool={responses.map((r) => r.text)}
+              isDragging={isDragging}
               onSelect={(val) => {
                 setAnswers((prev: Answers) => ({
                   ...prev,
@@ -791,12 +827,14 @@ function DroppableBlank({
   onRemove,
   optionsPool,
   onSelect,
+  isDragging,
 }: {
   index: number;
   value?: string;
   onRemove: () => void;
   optionsPool: string[];
   onSelect: (val: string) => void;
+  isDragging?: boolean;
 }) {
   const { isOver, setNodeRef } = useDroppable({
     id: `blank-${index}`,
@@ -824,9 +862,12 @@ function DroppableBlank({
             onSelect(val);
           }
         }}
-        className="bg-transparent border-none text-xs font-semibold text-primary focus:outline-none cursor-pointer w-full text-center"
+        className={cn(
+          "bg-transparent border-none text-xs font-semibold text-primary focus:outline-none cursor-pointer w-full text-center",
+          isDragging && "pointer-events-none"
+        )}
       >
-        <option value="" className="text-muted-foreground/60">Select...</option>
+        <option value="" className="text-muted-foreground/60">Select or Drop...</option>
         {optionsPool.map((opt, i) => (
           <option key={i} value={opt} className="text-foreground bg-background">
             {opt}
@@ -845,6 +886,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
   const rawText = q.text || q.content || "";
   const parts = rawText.split("[blank]");
   const blankAnswers = currentVal || {};
+  const [isDragging, setIsDragging] = useState(false);
 
   const pool = useMemo(() => {
     return (q.options || []).map((o: QuestionOption, i: number) => ({
@@ -888,7 +930,12 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
     <DndContext
       sensors={sensors}
       collisionDetection={closestCenter}
-      onDragEnd={handleDragEnd}
+      onDragStart={() => setIsDragging(true)}
+      onDragEnd={(e) => {
+        setIsDragging(false);
+        handleDragEnd(e);
+      }}
+      onDragCancel={() => setIsDragging(false)}
     >
       <div className="space-y-6">
         <div className="p-6 rounded-lg border border-border/60 bg-white leading-[2.5] text-[15px] font-medium text-foreground/80">
@@ -901,6 +948,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
                   value={blankAnswers[i]}
                   onRemove={() => removeAnswer(i)}
                   optionsPool={pool.map(p => p.text)}
+                  isDragging={isDragging}
                   onSelect={(val) => {
                     setAnswers((prev: Answers) => ({
                       ...prev,
@@ -1074,10 +1122,32 @@ function OrderingQuestion({ q, currentVal, setAnswers }: {
   );
 }
 
+const LECTURER_REVIEW_TYPES = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational", "computationalreasoning"];
+
+const formatTime = (seconds: number): string => {
+  if (seconds >= 3600) {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  }
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+};
+
 export default function TakeAssessmentPage() {
   const params = useParams();
   const router = useRouter();
   const assessmentId = params.id as string;
+
+  const requiresLecturerReview = useCallback((q: AssessmentQuestion): boolean => {
+    if (!q) return false;
+    if (q.grading_mode === "AUTO") return false;
+    if (q.grading_mode === "MANUAL") return true;
+    const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+    return LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
+  }, []);
 
   const [stage, setStage] = useState<Stage>("intro");
   const [assessment, setAssessment] = useState<AssessmentMeta | null>(null);
@@ -1090,7 +1160,6 @@ export default function TakeAssessmentPage() {
   const [submitting, setSubmitting] = useState(false);
 
   const [warnings, setWarnings] = useState(0);
-  const [showWarningModal, setShowWarningModal] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [terminationReason, setTerminationReason] = useState<string | null>(
     null,
@@ -1118,6 +1187,9 @@ export default function TakeAssessmentPage() {
   const [submittedAttempt, setSubmittedAttempt] = useState<any>(null);
   const [isPollingScore, setIsPollingScore] = useState(false);
 
+  const [pendingAttemptStartData, setPendingAttemptStartData] = useState<any>(null);
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
+
   const timeSpentRef = useRef<Record<string, number>>({});
   const lastSavedValuesRef = useRef<Record<string, any>>({});
   const isNavigatingRef = useRef(false);
@@ -1125,6 +1197,59 @@ export default function TakeAssessmentPage() {
   const processedWarningIds = useRef<Set<string>>(new Set());
   const saveAnswerRef = useRef<((questionId: string, qType: string, answerVal: AnswerValue, changeType: "autosave" | "manual_save") => Promise<void>) | null>(null);
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const warningPauseStartRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (warningModalOpen) {
+      warningPauseStartRef.current = Date.now();
+    } else if (warningPauseStartRef.current !== null) {
+      const pauseDuration = Date.now() - warningPauseStartRef.current;
+      warningPauseStartRef.current = null;
+      if (expiresAt && pauseDuration > 1000) {
+        setExpiresAt((prev) => {
+          if (!prev) return null;
+          const currentExpiry = new Date(prev).getTime();
+          return new Date(currentExpiry + pauseDuration).toISOString();
+        });
+        toast.info(`Timer extended by ${Math.round(pauseDuration / 1000)} seconds to account for warning review.`);
+      }
+    }
+  }, [warningModalOpen, expiresAt]);
+
+  const [viewingSectionIntro, setViewingSectionIntro] = useState<string | null>(null);
+  const [instructionsExpanded, setInstructionsExpanded] = useState(true);
+  const prevQuestionRef = useRef<AssessmentQuestion | null>(null);
+
+  const isQuestionAnswered = useCallback((q: AssessmentQuestion, val: any): boolean => {
+    if (val === undefined || val === null) return false;
+    const answerType = getAnswerType(q.type || q.question_type || "");
+
+    if (answerType === "TEXT") {
+      return typeof val === "string" && val.trim() !== "";
+    }
+    if (answerType === "SINGLE_OPTION") {
+      return typeof val === "string" && val !== "";
+    }
+    if (answerType === "MULTI_OPTION" || answerType === "ORDERED_LIST") {
+      return Array.isArray(val) && val.length > 0;
+    }
+    if (answerType === "MATCH_PAIRS") {
+      return typeof val === "object" && Object.keys(val).length > 0;
+    }
+    if (answerType === "FILL_BLANKS") {
+      if (typeof val !== "object" || Object.keys(val).length === 0) return false;
+      return Object.values(val).some(v => typeof v === "string" && v.trim() !== "");
+    }
+    if (answerType === "FILE") {
+      if (typeof val === "object") {
+        return !!val.file_url;
+      }
+      return typeof val === "string" && val.trim() !== "";
+    }
+    return false;
+  }, []);
 
   const currentQ = questions[currentQuestionIndex];
   const isHighSecurity = useMemo(
@@ -1144,7 +1269,6 @@ export default function TakeAssessmentPage() {
     const map: Record<string, AnswerType> = {
       mcq: "SINGLE_OPTION",
       truefalse: "SINGLE_OPTION",
-      true_final: "SINGLE_OPTION",
       true_false: "SINGLE_OPTION",
       singleoption: "SINGLE_OPTION",
       matching: "MATCH_PAIRS",
@@ -1155,10 +1279,10 @@ export default function TakeAssessmentPage() {
       multiplechoice: "SINGLE_OPTION",
       multiple_choice: "SINGLE_OPTION",
       multichoice: "SINGLE_OPTION",
-      multiselect: "SINGLE_OPTION",
-      multicorrect: "SINGLE_OPTION",
-      multi_correct: "SINGLE_OPTION",
-      checkbox: "SINGLE_OPTION",
+      multiselect: "MULTI_OPTION",
+      multicorrect: "MULTI_OPTION",
+      multi_correct: "MULTI_OPTION",
+      checkbox: "MULTI_OPTION",
       shortanswer: "TEXT",
       short_answer: "TEXT",
       essay: "TEXT",
@@ -1192,19 +1316,25 @@ export default function TakeAssessmentPage() {
   const startPollingScore = useCallback(async (attId: string, token: string) => {
     setIsPollingScore(true);
     let attempts = 0;
-    const interval = setInterval(async () => {
+    if (pollingIntervalRef.current) {
+      clearInterval(pollingIntervalRef.current);
+    }
+    pollingIntervalRef.current = setInterval(async () => {
       try {
         const detail = await attemptApi.getAttemptDetail(attId, token);
         setSubmittedAttempt(detail);
-        if (detail.total_score !== null || attempts >= 10) {
-          clearInterval(interval);
+        if ((detail.total_score !== null && detail.total_score !== undefined) || attempts >= 20) {
+          if (pollingIntervalRef.current) {
+            clearInterval(pollingIntervalRef.current);
+            pollingIntervalRef.current = null;
+          }
           setIsPollingScore(false);
         }
       } catch (err) {
         console.error("Error polling attempt score:", err);
       }
       attempts++;
-    }, 1000);
+    }, 3000);
   }, []);
 
   const handleIntegrityEvent = useCallback(
@@ -1261,11 +1391,13 @@ export default function TakeAssessmentPage() {
       qType: string,
       answerVal: AnswerValue,
       changeType: "autosave" | "manual_save" = "autosave",
+      isSkippedOverride?: boolean,
     ) => {
       if (!attemptId || !attemptToken) return;
 
       const answerType = getAnswerType(qType);
       const timeOnQuestion = timeSpentRef.current[questionId] || 0;
+      const isSkipped = isSkippedOverride !== undefined ? isSkippedOverride : !!skippedQuestions[questionId];
 
       const payload: any = {
         attempt_id: attemptId,
@@ -1274,6 +1406,7 @@ export default function TakeAssessmentPage() {
         answer_type: answerType,
         change_type: changeType,
         time_spent_seconds: timeOnQuestion,
+        is_skipped: isSkipped,
       };
 
       if (answerType === "TEXT") {
@@ -1331,10 +1464,15 @@ export default function TakeAssessmentPage() {
         console.error("Save failed, queueing locally", err);
         setSaveStatus((prev) => ({ ...prev, [questionId]: "failed" }));
         queueLocalSave(questionId, qType, answerVal);
+        toast.warning("Network connection issue. Answer saved locally.", {
+          id: `save-fail-${questionId}`,
+        });
       }
     },
-    [attemptId, attemptToken, queueLocalSave],
+    [attemptId, attemptToken, queueLocalSave, skippedQuestions],
   );
+
+  saveAnswerRef.current = saveAnswer;
 
 
 
@@ -1344,8 +1482,15 @@ export default function TakeAssessmentPage() {
       const subRes = await submissionApi.getSubmissionsForAttempt(attId);
       const savedAnswers: Record<string, any> = {};
       subRes.submissions?.forEach((s: any) => {
-        if (s.answer_type === "SINGLE_OPTION")
-          savedAnswers[s.question_id] = s.selected_option_ids?.[0];
+        if (s.answer_type === "MULTI_OPTION") {
+          savedAnswers[s.question_id] = s.selected_option_ids || [];
+        } else if (s.answer_type === "SINGLE_OPTION") {
+          const q = questions.find((x) => x.id === s.question_id);
+          const isMulti = q && getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+          savedAnswers[s.question_id] = isMulti
+            ? (s.selected_option_ids || [])
+            : (s.selected_option_ids?.[0] || "");
+        }
         else if (s.answer_type === "MATCH_PAIRS")
           savedAnswers[s.question_id] = s.match_pairs_json || {};
         else if (s.answer_type === "FILL_BLANKS")
@@ -1354,16 +1499,42 @@ export default function TakeAssessmentPage() {
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
         else if (s.answer_type === "FILE")
           savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
-        else savedAnswers[s.question_id] = s.answer_text;
+        else {
+          const q = questions.find((x) => x.id === s.question_id);
+          const isCaseStudy = q && (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
+          if (isCaseStudy && typeof s.answer_text === "string" && s.answer_text.trim().startsWith("{")) {
+            try {
+              savedAnswers[s.question_id] = JSON.parse(s.answer_text);
+            } catch {
+              savedAnswers[s.question_id] = s.answer_text;
+            }
+          } else {
+            savedAnswers[s.question_id] = s.answer_text;
+          }
+        }
+      });
+      // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
+      questions.forEach((q) => {
+        if (getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" && !savedAnswers[q.id]) {
+          savedAnswers[q.id] = q.options?.map((o) => o.id) || [];
+        }
       });
       setAnswers(savedAnswers);
-      lastSavedValuesRef.current = savedAnswers;
+      lastSavedValuesRef.current = { ...savedAnswers };
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to sync submissions";
       console.error(message, err);
       toast.warning("Could not load previously saved answers. Starting fresh.");
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1602,6 +1773,18 @@ export default function TakeAssessmentPage() {
     return () => clearInterval(interval);
   }, [stage, currentQ]);
 
+  // Section Boundary Transition Detection
+  useEffect(() => {
+    if (stage !== "taking" || !currentQ) return;
+    const prevQ = prevQuestionRef.current;
+    prevQuestionRef.current = currentQ;
+
+    // Detect section boundary crossing
+    if (prevQ && prevQ.assessment_section_id !== currentQ.assessment_section_id) {
+      setViewingSectionIntro(currentQ.assessment_section_id || "default");
+    }
+  }, [currentQuestionIndex, stage, currentQ]);
+
   // Debounced Autosave
   useEffect(() => {
     if (stage !== "taking" || !currentQ) return;
@@ -1613,6 +1796,14 @@ export default function TakeAssessmentPage() {
     ) {
       return;
     }
+
+    // Auto-unskip if student answers a question
+    setSkippedQuestions((prev) => {
+      if (prev[currentQ.id]) {
+        return { ...prev, [currentQ.id]: false };
+      }
+      return prev;
+    });
 
     const controller = new AbortController();
 
@@ -1680,12 +1871,18 @@ export default function TakeAssessmentPage() {
             JSON.stringify(currentAnswer) !==
               JSON.stringify(lastSavedValuesRef.current[qId])
           ) {
-            await saveAnswer(qId, qType, currentAnswer, "manual_save");
-            lastSavedValuesRef.current[qId] = currentAnswer;
+            try {
+              await saveAnswer(qId, qType, currentAnswer, "manual_save");
+              lastSavedValuesRef.current[qId] = currentAnswer;
+            } catch (saveErr) {
+              console.error("Navigation save error:", saveErr);
+            }
           }
         }
 
         setCurrentQuestionIndex(newIndex);
+      } catch (err) {
+        console.error("Navigation error:", err);
       } finally {
         isNavigatingRef.current = false;
       }
@@ -1730,9 +1927,24 @@ export default function TakeAssessmentPage() {
     if (assessment?.is_password_protected) setStage("password");
     else setStage("readiness");
   };
-  const handlePasswordSubmit = (e: React.FormEvent) => {
+  const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (passwordInput) setStage("readiness");
+    if (!passwordInput) return;
+    setIsVerifyingPassword(true);
+    setPasswordError(null);
+    try {
+      const data = await attemptApi.startAttempt({
+        assessment_id: assessmentId,
+        password: passwordInput,
+      });
+      setPendingAttemptStartData(data);
+      setStage("readiness");
+    } catch (err: any) {
+      console.error(err);
+      setPasswordError(err.message || "Invalid password. Please try again.");
+    } finally {
+      setIsVerifyingPassword(false);
+    }
   };
 
   const handleReadinessConfirm = async () => {
@@ -1742,10 +1954,13 @@ export default function TakeAssessmentPage() {
     readinessAbortControllerRef.current = controller;
 
     try {
-      const data = await attemptApi.startAttempt({
-        assessment_id: assessmentId,
-        password: passwordInput || undefined,
-      });
+      let data = pendingAttemptStartData;
+      if (!data) {
+        data = await attemptApi.startAttempt({
+          assessment_id: assessmentId,
+          password: passwordInput || undefined,
+        });
+      }
       if (controller.signal.aborted) return;
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
@@ -1763,8 +1978,15 @@ export default function TakeAssessmentPage() {
         const subRes = await submissionApi.getSubmissionsForAttempt(data.id);
         if (controller.signal.aborted) return;
         subRes.submissions?.forEach((s: any) => {
-          if (s.answer_type === "SINGLE_OPTION")
-            savedAnswers[s.question_id] = s.selected_option_ids?.[0];
+          if (s.answer_type === "MULTI_OPTION") {
+            savedAnswers[s.question_id] = s.selected_option_ids || [];
+          } else if (s.answer_type === "SINGLE_OPTION") {
+            const q = (attemptData.questions || []).find((x: any) => x.id === s.question_id);
+            const isMulti = q && getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+            savedAnswers[s.question_id] = isMulti
+              ? (s.selected_option_ids || [])
+              : (s.selected_option_ids?.[0] || "");
+          }
           else if (s.answer_type === "MATCH_PAIRS")
             savedAnswers[s.question_id] = s.match_pairs_json || {};
           else if (s.answer_type === "FILL_BLANKS")
@@ -1773,10 +1995,28 @@ export default function TakeAssessmentPage() {
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
           else if (s.answer_type === "FILE")
             savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
-          else savedAnswers[s.question_id] = s.answer_text;
+          else {
+            const q = (attemptData.questions || []).find((x: any) => x.id === s.question_id);
+            const isCaseStudy = q && (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
+            if (isCaseStudy && typeof s.answer_text === "string" && s.answer_text.trim().startsWith("{")) {
+              try {
+                savedAnswers[s.question_id] = JSON.parse(s.answer_text);
+              } catch {
+                savedAnswers[s.question_id] = s.answer_text;
+              }
+            } else {
+              savedAnswers[s.question_id] = s.answer_text;
+            }
+          }
+        });
+        // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
+        (attemptData.questions || []).forEach((q: any) => {
+          if (getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" && !savedAnswers[q.id]) {
+            savedAnswers[q.id] = q.options?.map((o: any) => o.id) || [];
+          }
         });
         setAnswers(savedAnswers);
-        lastSavedValuesRef.current = savedAnswers;
+        lastSavedValuesRef.current = { ...savedAnswers };
       } catch (e: unknown) {
         console.error(e);
       }
@@ -1794,11 +2034,7 @@ export default function TakeAssessmentPage() {
     }
   };
 
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
-  };
+
 
   const getAssessmentTypeLabel = (type: string) => {
     if (!type) return "";
@@ -1822,11 +2058,15 @@ export default function TakeAssessmentPage() {
     }));
   }, [questions]);
 
+  const answeredCount = useMemo(() => {
+    return questions.filter((q) => isQuestionAnswered(q, answers[q.id])).length;
+  }, [questions, answers, isQuestionAnswered]);
+
   const progress = useMemo(
     () => questions.length > 0
-      ? (Object.keys(answers).length / questions.length) * 100
+      ? (answeredCount / questions.length) * 100
       : 0,
-    [answers, questions.length]
+    [answeredCount, questions.length]
   );
 
   const renderQuestion = (q: AssessmentQuestion): React.ReactNode => {
@@ -1843,9 +2083,7 @@ export default function TakeAssessmentPage() {
       type === "multiplechoice" ||
       type === "multiple_choice" ||
       type === "multichoice" ||
-      type === "singleoption" ||
-      type === "multiselect" ||
-      type === "multicorrect"
+      type === "singleoption"
     ) {
       return (
         <RadioGroup
@@ -1879,6 +2117,59 @@ export default function TakeAssessmentPage() {
             );
           })}
         </RadioGroup>
+      );
+    }
+
+    // ─── A2. MULTI SELECT / CHECKBOX QUESTIONS ───
+    if (getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION") {
+      const selectedIds = Array.isArray(currentVal)
+        ? currentVal
+        : typeof currentVal === "string" && currentVal
+        ? [currentVal]
+        : [];
+
+      return (
+        <div className="grid gap-3">
+          {q.options?.map((opt: QuestionOption) => {
+            const isSelected = selectedIds.includes(opt.id);
+            return (
+              <div
+                key={opt.id}
+                onClick={() => {
+                  const nextIds = isSelected
+                    ? selectedIds.filter((id) => id !== opt.id)
+                    : [...selectedIds, opt.id];
+                  setAnswers((prev) => ({ ...prev, [q.id]: nextIds }));
+                }}
+                className={cn(
+                  "flex items-center space-x-3 p-3.5 rounded-xl border transition-all cursor-pointer",
+                  isSelected
+                    ? "bg-primary/[0.03] border-primary/25 shadow-sm font-semibold"
+                    : "hover:bg-muted/5 border-muted/70",
+                )}
+              >
+                <Checkbox
+                  checked={isSelected}
+                  id={opt.id}
+                  className="size-4"
+                  onClick={(e) => e.stopPropagation()}
+                  onCheckedChange={(checked) => {
+                    const nextIds = checked
+                      ? [...selectedIds, opt.id]
+                      : selectedIds.filter((id) => id !== opt.id);
+                    setAnswers((prev) => ({ ...prev, [q.id]: nextIds }));
+                  }}
+                />
+                <Label
+                  htmlFor={opt.id}
+                  className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
+                >
+                  {opt.text || opt.option_text || "Option"}
+                </Label>
+              </div>
+            );
+          })}
+        </div>
       );
     }
 
@@ -1963,9 +2254,15 @@ export default function TakeAssessmentPage() {
             value={textVal}
             onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
           />
-          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-            <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
-          </div>
+          {requiresLecturerReview(q) ? (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+            </div>
+          )}
         </div>
       );
     }
@@ -1974,20 +2271,49 @@ export default function TakeAssessmentPage() {
     if (type === "essay") {
       const textVal = typeof currentVal === "string" ? currentVal : "";
       const wordCount = textVal.trim().split(/\s+/).filter(Boolean).length;
+      
+      const minWords = q.min_words;
+      const maxWords = q.max_words;
+      
+      const isTooShort = minWords !== undefined && minWords !== null && minWords > 0 && wordCount < minWords;
+      const isTooLong = maxWords !== undefined && maxWords !== null && maxWords > 0 && wordCount > maxWords;
+      const isOutRange = isTooShort || isTooLong;
+
+      let wordLabel = `${wordCount} words`;
+      if (maxWords && minWords) {
+        wordLabel = `${wordCount} / ${maxWords} words (min: ${minWords})`;
+      } else if (maxWords) {
+        wordLabel = `${wordCount} / ${maxWords} words`;
+      } else if (minWords) {
+        wordLabel = `${wordCount} words (min: ${minWords})`;
+      }
+
       return (
         <div className="space-y-4">
           <textarea
-            className="w-full min-h-[250px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+            className={cn(
+              "w-full min-h-[250px] p-4 rounded-xl border bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
+              isOutRange ? "border-red-500/50 focus:border-red-500" : "border-muted/70"
+            )}
             placeholder="Write your detailed essay here..."
             value={textVal}
             onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
           />
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
-            </div>
-            <span className="text-xs font-semibold text-muted-foreground/75 tabular-nums">
-              {wordCount} words
+            {requiresLecturerReview(q) ? (
+              <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+                <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
+                <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              </div>
+            )}
+            <span className={cn(
+              "text-xs font-semibold tabular-nums",
+              isOutRange ? "text-red-500 font-bold" : "text-muted-foreground/75"
+            )}>
+              {wordLabel}
             </span>
           </div>
         </div>
@@ -1996,132 +2322,208 @@ export default function TakeAssessmentPage() {
 
     // ─── G. CASE STUDY ───
     if (type === "casestudy" || type === "case_study") {
-      const textVal = typeof currentVal === "string" ? currentVal : "";
+      const answersObj = typeof currentVal === "object" && currentVal !== null
+        ? currentVal
+        : {};
+
       return (
-        <div className="space-y-4">
+        <div className="space-y-6">
           {q.caseStudyContext && (
             <div className="p-4 rounded-xl border border-amber-500/15 bg-amber-500/[0.02] text-sm leading-relaxed italic text-foreground/80">
               <span className="block font-bold text-xs uppercase text-amber-600 mb-1.5 tracking-wider">Case Study Context Reference</span>
               {q.caseStudyContext}
             </div>
           )}
-          <textarea
-            className="w-full min-h-[180px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
-            placeholder="Write your analysis and response here..."
-            value={textVal}
-            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
-          />
-          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-            <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
-          </div>
+          {q.options && q.options.length > 0 ? (
+            <div className="space-y-6">
+              {q.options.map((opt: any, idx: number) => {
+                const marksVal = opt.match_key || opt.match_value || opt.order_index || 0;
+                const subAnswer = answersObj[opt.id] || "";
+                return (
+                  <div key={opt.id} className="space-y-2 p-4 rounded-xl border border-muted/50 bg-background/50">
+                    <div className="flex items-start justify-between gap-4">
+                      <h4 className="text-sm font-semibold text-foreground/90 leading-relaxed">
+                        {idx + 1}. {opt.text || opt.option_text || "Sub-question"}
+                      </h4>
+                      <Badge variant="secondary" className="text-[10px] shrink-0 font-bold uppercase tracking-wider bg-muted/60">
+                        {marksVal} Marks
+                      </Badge>
+                    </div>
+                    <textarea
+                      className="w-full min-h-[100px] p-3 rounded-lg border border-muted bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+                      placeholder="Write your response to this sub-question..."
+                      value={subAnswer}
+                      onChange={(e) => {
+                        const newVal = {
+                          ...answersObj,
+                          [opt.id]: e.target.value,
+                        };
+                        setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+                      }}
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            // Fallback to monolithic textarea if no sub-questions options exist
+            <div className="space-y-4">
+              <textarea
+                className="w-full min-h-[180px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
+                placeholder="Write your analysis and response here..."
+                value={typeof currentVal === "string" ? currentVal : ""}
+                onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+              />
+            </div>
+          )}
+          {requiresLecturerReview(q) ? (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+              <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+            </div>
+          )}
         </div>
       );
     }
 
-    // ─── H. PRACTICAL ───
+    // ─── H. PRACTICAL & COMPUTATIONAL ───
     if (type === "practical" || type === "computational" || type === "computationalreasoning") {
+      const isPractical = type === "practical";
       const fileVal = typeof currentVal === "object" && currentVal !== null ? (currentVal as any) : { file_url: "", filename: "", answer_text: typeof currentVal === "string" ? currentVal : "" };
       const fileUrl = fileVal.file_url || "";
       const filename = fileVal.filename || "";
       const answerText = fileVal.answer_text || "";
 
+      const allowedFileTypes = q.allowed_file_types || ["pdf", "docx", "zip", "jpg", "png"];
+      const maxFileSize = q.max_file_size || 10;
+
       return (
         <div className="space-y-4">
           <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.01] space-y-1">
-            <p className="text-xs font-semibold uppercase tracking-wider text-primary/60">Instructions & Required Deliverables</p>
+            <p className="text-xs font-semibold uppercase tracking-wider text-primary/60">
+              {isPractical ? "Instructions & Required Deliverables" : "Instructions & Calculation Steps"}
+            </p>
             <p className="text-sm text-foreground/80 leading-relaxed font-medium">
-              Please upload the required deliverable files and add your response comments below.
+              {isPractical
+                ? "Please upload the required deliverable files and add your response comments below."
+                : "Show your step-by-step calculations and formulas in the editor below. You can optionally upload supporting files (scans, spreadsheets) if needed."}
             </p>
           </div>
 
-          {type === "practical" && (
-            <div className="space-y-2">
-              <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">Deliverable File</Label>
-              {fileUrl ? (
-                <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] shadow-sm">
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <FileText className="size-5 text-emerald-600 shrink-0" />
-                    <div className="min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">{filename || "uploaded_file"}</p>
-                      <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-primary hover:underline">
-                        Download Uploaded File
-                      </a>
-                    </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+              {isPractical ? "Deliverable File" : "Supporting File / Scan (Optional)"}
+            </Label>
+            {fileUrl ? (
+              <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] shadow-sm">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <FileText className="size-5 text-emerald-600 shrink-0" />
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">{filename || "uploaded_file"}</p>
+                    <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-primary hover:underline">
+                      Download Uploaded File
+                    </a>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-destructive hover:bg-destructive/10 rounded-lg"
-                    onClick={() => {
-                      const newVal = { ...fileVal, file_url: "", filename: "" };
-                      setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
-                    }}
-                  >
-                    <X className="size-4" />
-                  </Button>
                 </div>
-              ) : (
-                <div
-                  className={cn(
-                    "border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-muted/5",
-                    isUploadingFile ? "opacity-60 pointer-events-none" : "border-muted-foreground/25"
-                  )}
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8 text-destructive hover:bg-destructive/10 rounded-lg"
                   onClick={() => {
-                    const input = document.createElement("input");
-                    input.type = "file";
-                    input.onchange = async (e) => {
-                      const file = (e.target as HTMLInputElement).files?.[0];
-                      if (!file) return;
-                      setIsUploadingFile(true);
-                      try {
-                        const formData = new FormData();
-                        formData.append("file", file);
-                        formData.append("subject_tag", "practical-assessment");
-                        const res = await studentApi.uploadPersonalResource(formData);
-                        const downloadUrl = `/resources/student-resources/download/${res.id}`;
-                        const newVal = {
-                          ...fileVal,
-                          file_url: downloadUrl,
-                          filename: file.name,
-                        };
-                        setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
-                        toast.success("Deliverable file uploaded successfully.");
-                      } catch (err) {
-                        console.error("Upload failed", err);
-                        toast.error("File upload failed.");
-                      } finally {
-                        setIsUploadingFile(false);
-                      }
-                    };
-                    input.click();
+                    const newVal = { ...fileVal, file_url: "", filename: "" };
+                    setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
                   }}
                 >
-                  {isUploadingFile ? (
-                    <Loader2 className="size-8 text-primary animate-spin" />
-                  ) : (
-                    <Upload className="size-8 text-muted-foreground/60" />
-                  )}
-                  <div className="text-center">
-                    <p className="text-xs font-semibold text-foreground/80">
-                      {isUploadingFile ? "Uploading..." : "Click to select and upload deliverable file"}
-                    </p>
-                    <p className="text-[10px] text-muted-foreground/60 mt-0.5">Supports PDF, DOCX, ZIP, JPG, PNG up to 10MB</p>
-                  </div>
+                  <X className="size-4" />
+                </Button>
+              </div>
+            ) : (
+              <div
+                className={cn(
+                  "border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-muted/5",
+                  isUploadingFile ? "opacity-60 pointer-events-none" : "border-muted-foreground/25"
+                )}
+                onClick={() => fileInputRef.current?.click()}
+              >
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  className="hidden"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+
+                    // Size validation
+                    if (file.size > maxFileSize * 1024 * 1024) {
+                      toast.error(`File size exceeds maximum allowed size of ${maxFileSize}MB.`);
+                      return;
+                    }
+
+                    // Format validation
+                    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+                    if (!allowedFileTypes.includes(ext)) {
+                      toast.error(`File format .${ext} is not allowed. Allowed: ${allowedFileTypes.join(", ").toUpperCase()}`);
+                      return;
+                    }
+
+                    setIsUploadingFile(true);
+                    try {
+                      const formData = new FormData();
+                      formData.append("file", file);
+                      formData.append("attempt_id", attemptId || "");
+                      formData.append("question_id", q.id);
+                      formData.append("access_token", attemptToken || "");
+                      
+                      const res = await submissionApi.uploadSubmissionFile(formData);
+                      const downloadUrl = res.file_url;
+                      const newVal = {
+                        ...fileVal,
+                        file_url: downloadUrl,
+                        filename: file.name,
+                      };
+                      setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+                      toast.success("File uploaded successfully.");
+                    } catch (err: any) {
+                      console.error("Upload failed", err);
+                      toast.error(err.message || "File upload failed.");
+                    } finally {
+                      setIsUploadingFile(false);
+                      if (fileInputRef.current) {
+                        fileInputRef.current.value = "";
+                      }
+                    }
+                  }}
+                />
+                {isUploadingFile ? (
+                  <Loader2 className="size-8 text-primary animate-spin" />
+                ) : (
+                  <Upload className="size-8 text-muted-foreground/60" />
+                )}
+                <div className="text-center">
+                  <p className="text-xs font-semibold text-foreground/80">
+                    {isUploadingFile ? "Uploading..." : isPractical ? "Click to select and upload deliverable file" : "Click to select and upload supporting file"}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground/60 mt-0.5">
+                    Supports {allowedFileTypes.map(t => t.toUpperCase()).join(", ")} up to {maxFileSize}MB
+                  </p>
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
 
           <div className="space-y-2">
             <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-              {type === "practical" ? "Comments & Supporting Notes" : "Your Reasoning / Calculations"}
+              {isPractical ? "Comments & Supporting Notes" : "Your Reasoning / Calculations"}
             </Label>
             <textarea
               className={cn(
                 "w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
-                (type === "computational" || type === "computationalreasoning") && "font-mono"
+                !isPractical && "font-mono"
               )}
-              placeholder={type === "practical" ? "Write your explanation or notes here..." : "Show your formulas and calculations here..."}
+              placeholder={isPractical ? "Write your explanation or notes here..." : "Show your formulas and calculations here..."}
               value={answerText}
               onChange={(e) => {
                 const newVal = { ...fileVal, answer_text: e.target.value };
@@ -2130,9 +2532,15 @@ export default function TakeAssessmentPage() {
             />
           </div>
 
-          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-            <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
-          </div>
+          {requiresLecturerReview(q) ? (
+            <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
+              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+            </div>
+          )}
         </div>
       );
     }
@@ -2161,9 +2569,28 @@ export default function TakeAssessmentPage() {
 
   if (loading)
     return (
-      <div className="min-h-screen bg-background flex flex-col p-8 items-center justify-center animate-pulse">
-        <Skeleton className="h-10 w-64 rounded-lg" />
-        <Skeleton className="h-48 w-full max-w-lg rounded-xl mt-4" />
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6 space-y-6">
+        <div className="flex flex-col items-center space-y-3 max-w-md w-full text-center">
+          <Loader2 className="size-7 text-primary animate-spin" />
+          <h3 className="font-bold text-sm text-foreground">
+            {assessment?.title ? `Loading "${assessment.title}"...` : "Preparing Assessment Session"}
+          </h3>
+          <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
+            Initializing secure environment protocols and syncing your evaluation configuration.
+          </p>
+        </div>
+        <div className="w-full max-w-md border border-border/50 rounded-xl p-5 space-y-4 bg-muted/[0.01] animate-pulse">
+          <div className="flex justify-between items-center">
+            <Skeleton className="h-4 w-24 rounded" />
+            <Skeleton className="h-6 w-16 rounded-full" />
+          </div>
+          <Skeleton className="h-5 w-3/4 rounded" />
+          <div className="space-y-2 pt-2">
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+            <Skeleton className="h-10 w-full rounded-lg" />
+          </div>
+        </div>
       </div>
     );
 
@@ -2215,11 +2642,26 @@ export default function TakeAssessmentPage() {
     const totalMax = questions.reduce((acc, q) => acc + (q.marks || 0), 0);
     const hasOpenQuestions = openQuestions.length > 0;
 
-    const displayAutoGradedScore = submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
-      ? `${submittedAttempt.total_score} / ${autoGradedMax} Marks`
-      : isPollingScore
-        ? "Calculating..."
-        : `${autoGradedMax} Marks`;
+    const pendingQuestions = questions
+      .map((q, idx) => ({ q, num: idx + 1 }))
+      .filter(({ q }) => {
+        const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+        const isManual = LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
+        const wasAnswered = isQuestionAnswered(q, answers[q.id]);
+        return isManual && wasAnswered;
+      });
+
+    const displayAutoGradedScore = !hasOpenQuestions
+      ? (submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
+          ? `${submittedAttempt.total_score} / ${totalMax} Marks`
+          : isPollingScore
+            ? "Calculating..."
+            : `— / ${totalMax} Marks`)
+      : (submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
+          ? "Instant feedback computed"
+          : isPollingScore
+            ? "Calculating..."
+            : "Grading complete");
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -2277,7 +2719,7 @@ export default function TakeAssessmentPage() {
                   <div className="size-6 bg-amber-500/10 rounded-full flex items-center justify-center shrink-0 border border-amber-500/20">
                     <Clock className="size-3.5 text-amber-600" />
                   </div>
-                  <div className="flex-1 space-y-1">
+                  <div className="flex-1 space-y-2">
                     <div className="flex items-center justify-between">
                       <h3 className="font-bold text-sm text-foreground">Lecturer Review Section</h3>
                       <Badge variant="outline" className="text-[10px] font-bold text-amber-600 bg-amber-500/5 border-amber-500/15 animate-pulse">
@@ -2287,7 +2729,21 @@ export default function TakeAssessmentPage() {
                     <p className="text-xs text-muted-foreground leading-relaxed">
                       This assessment contains open-ended questions (e.g. Essay, Short Answer, Practical deliverables) which require manual review and score assignment by your lecturer.
                     </p>
-                    <p className="text-sm font-semibold text-foreground pt-1.5 flex items-center gap-1.5">
+                    {pendingQuestions.length > 0 && (
+                      <div className="space-y-1.5 pt-1">
+                        <p className="text-[11px] font-semibold text-amber-800">
+                          Pending Questions:
+                        </p>
+                        <div className="flex flex-wrap gap-1">
+                          {pendingQuestions.map(({ num }) => (
+                            <Badge key={num} variant="outline" className="border-amber-500/20 bg-amber-500/5 text-amber-700 font-medium text-[10px] px-1.5 py-0">
+                              Question {num}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                    <p className="text-sm font-semibold text-foreground pt-1 flex items-center gap-1.5">
                       Pending Marks: <span className="text-amber-600 font-bold tabular-nums">{openMax} Marks (Pending Review)</span>
                     </p>
                   </div>
@@ -2303,7 +2759,13 @@ export default function TakeAssessmentPage() {
                     Estimated Total Score
                   </p>
                   <p className="text-lg font-bold text-foreground">
-                    Estimated total not yet available
+                    {submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null ? (
+                      <span className="text-emerald-600 font-extrabold text-2xl tabular-nums">
+                        {submittedAttempt.total_score} / {totalMax} <span className="text-xs text-muted-foreground font-normal">(graded so far)</span>
+                      </span>
+                    ) : (
+                      "Estimated total not yet available"
+                    )}
                   </p>
                   <p className="text-[10px] text-muted-foreground max-w-sm">
                     Your final assessment score will be calculated and released once all pending responses are graded by your lecturer.
@@ -2317,7 +2779,9 @@ export default function TakeAssessmentPage() {
                   <p className="text-3xl font-extrabold text-emerald-600 tabular-nums">
                     {submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
                       ? `${submittedAttempt.total_score} / ${totalMax}`
-                      : `${totalMax}`}
+                      : isPollingScore
+                        ? "Calculating..."
+                        : "Score Pending Release"}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
                     This assessment contained only auto-graded questions. Your results have been finalized.
@@ -2326,17 +2790,42 @@ export default function TakeAssessmentPage() {
               )}
             </div>
 
-            <Button
-              onClick={() => router.push("/student/dashboard")}
-              className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
-            >
-              Return to Student Dashboard
-            </Button>
+            <div className="flex flex-col gap-3 w-full">
+              {assessment?.result_release_mode?.toUpperCase() === "IMMEDIATE" && attemptId && (
+                <Button
+                  onClick={() => router.push(`/student/results/${attemptId}`)}
+                  className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-emerald-600 hover:bg-emerald-700 text-white transition-all animate-pulse"
+                >
+                  View Result Detail
+                </Button>
+              )}
+              
+              <Button
+                onClick={() => router.push(`/student/assessments/${assessmentId}/results`)}
+                className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
+              >
+                View Assessment Submission & Review
+              </Button>
+
+              <Button
+                variant="outline"
+                onClick={() => router.push("/student/dashboard")}
+                className="w-full h-11 text-xs font-bold rounded-xl border border-border text-foreground hover:bg-muted/10 transition-all"
+              >
+                Return to Student Dashboard
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
     );
   }
+
+  const unansweredRequired = questions.filter((q) => q.is_required && !isQuestionAnswered(q, answers[q.id]));
+  const unansweredOptional = questions.filter((q) => !q.is_required && !isQuestionAnswered(q, answers[q.id]) && !skippedQuestions[q.id]);
+  const unansweredRequiredNums = unansweredRequired.map((q) => questions.findIndex((x) => x.id === q.id) + 1);
+  const unansweredOptionalNums = unansweredOptional.map((q) => questions.findIndex((x) => x.id === q.id) + 1);
+  const firstUnansweredIndex = questions.findIndex((q) => !isQuestionAnswered(q, answers[q.id]) && (q.is_required || !skippedQuestions[q.id]));
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans">
@@ -2365,10 +2854,20 @@ export default function TakeAssessmentPage() {
             {isHighSecurity ? "Terminate" : "Exit"}
           </Button>
           <Separator orientation="vertical" className="h-5" />
-          <div className="min-w-0">
+          <div className="min-w-0 flex items-center gap-2">
             <div className="font-semibold text-sm truncate max-w-[240px] text-foreground/95">
               {assessment?.title}
             </div>
+            {assessment?.is_open_book !== undefined && stage === "taking" && (
+              <Badge variant="outline" className={cn(
+                "text-[10px] py-0 font-bold uppercase tracking-wider h-5 px-2 shrink-0 select-none",
+                assessment.is_open_book 
+                  ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600"
+                  : "border-muted-foreground/20 bg-muted/5 text-muted-foreground"
+              )}>
+                {assessment.is_open_book ? "Open Book" : "Closed Book"}
+              </Badge>
+            )}
           </div>
         </div>
 
@@ -2402,7 +2901,7 @@ export default function TakeAssessmentPage() {
             className="h-8 text-xs font-medium px-4 rounded-lg shadow-sm transition-all"
             disabled={stage !== "taking"}
           >
-            Finalize
+            Finalize Attempt
           </Button>
         </div>
       </div>
@@ -2420,34 +2919,59 @@ export default function TakeAssessmentPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="p-6 space-y-6">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="p-4 border border-border/60 rounded-xl bg-muted/5">
-                  <p className="text-xs text-muted-foreground/80 font-medium mb-1">
+              {assessment.end_date && (
+                <div className="p-4 rounded-xl border border-amber-500/20 bg-amber-500/[0.03] flex items-start gap-3">
+                  <Clock className="size-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 text-left">
+                    <h4 className="font-bold text-xs uppercase tracking-wider text-amber-800">
+                      Assessment Submission Window
+                    </h4>
+                    <p className="text-sm font-semibold text-amber-900 leading-tight">
+                      This exam closes at:{" "}
+                      {new Date(assessment.end_date).toLocaleTimeString(undefined, {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}{" "}
+                      ({new Date(assessment.end_date).toLocaleDateString(undefined, {
+                        month: "short",
+                        day: "numeric",
+                      })})
+                    </p>
+                    <p className="text-[10px] text-amber-700/80 leading-normal">
+                      Ensure you submit your answers before this time. No additional time will be granted.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="p-3.5 border border-border/60 rounded-xl bg-muted/5 text-left">
+                  <p className="text-[10px] text-muted-foreground/80 font-bold uppercase tracking-wider mb-1">
                     Duration
                   </p>
-                  <p className="text-xl font-semibold tabular-nums text-foreground">
+                  <p className="text-sm md:text-base font-bold tabular-nums text-foreground">
                     {assessment.duration_minutes || 90} Mins
                   </p>
                 </div>
-                <div className="p-4 border border-border/60 rounded-xl bg-muted/5">
-                  <p className="text-xs text-muted-foreground/80 font-medium mb-1">
+                <div className="p-3.5 border border-border/60 rounded-xl bg-muted/5 text-left">
+                  <p className="text-[10px] text-muted-foreground/80 font-bold uppercase tracking-wider mb-1">
                     Total Marks
                   </p>
-                  <p className="text-xl font-semibold tabular-nums text-foreground">
-                    {assessment.total_marks || 100} Points
+                  <p className="text-sm md:text-base font-bold tabular-nums text-foreground">
+                    {assessment.total_marks || 100} Marks
                   </p>
                 </div>
-                {assessment.end_date && (
-                  <div className="p-4 border border-border/60 rounded-xl bg-muted/5 col-span-2">
-                    <p className="text-xs text-muted-foreground/80 font-medium mb-1">Closes At</p>
-                    <p className="text-sm font-semibold text-foreground">
-                      {new Date(assessment.end_date).toLocaleString(undefined, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                )}
+                <div className="p-3.5 border border-border/60 rounded-xl bg-muted/5 text-left">
+                  <p className="text-[10px] text-muted-foreground/80 font-bold uppercase tracking-wider mb-1">
+                    Reference
+                  </p>
+                  <p className={cn(
+                    "text-sm md:text-base font-bold truncate",
+                    assessment.is_open_book ? "text-emerald-600" : "text-muted-foreground/80"
+                  )}>
+                    {assessment.is_open_book ? "Open Book" : "Closed Book"}
+                  </p>
+                </div>
               </div>
               {(assessment.max_attempts || 1) > 1 && (
                 <div className="flex items-center justify-between p-3 rounded-lg border border-border/40 bg-muted/5 text-xs font-medium">
@@ -2455,6 +2979,44 @@ export default function TakeAssessmentPage() {
                   <span className="font-semibold text-foreground">
                     {attemptNumber} of {assessment.max_attempts}
                   </span>
+                </div>
+              )}
+              {assessment.instructions && (
+                <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.01] text-left space-y-2">
+                  <h4 className="font-bold text-xs uppercase tracking-wider text-primary/80">
+                    General Instructions
+                  </h4>
+                  <p className="text-xs text-foreground/80 leading-relaxed whitespace-pre-line">
+                    {assessment.instructions}
+                  </p>
+                </div>
+              )}
+              {assessment.sections && assessment.sections.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Assessment Structure & Outline
+                  </h3>
+                  <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
+                    {assessment.sections
+                      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                      .map((sec, sIdx) => (
+                        <div key={sec.id || sIdx} className="p-3 border border-border/50 rounded-lg bg-muted/[0.01]">
+                          <div className="flex items-center justify-between font-semibold text-xs text-foreground mb-1">
+                            <span>
+                              Section {String.fromCharCode(65 + sIdx)}: {sec.title}
+                            </span>
+                            <Badge variant="secondary" className="text-[10px] py-0 font-bold bg-muted/60 text-muted-foreground">
+                              {sec.allocated_marks ?? 0} Marks
+                            </Badge>
+                          </div>
+                          {sec.instructions && (
+                            <p className="text-[10px] text-muted-foreground/90 leading-relaxed italic">
+                              {sec.instructions}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                  </div>
                 </div>
               )}
               <div className="space-y-4">
@@ -2514,15 +3076,17 @@ export default function TakeAssessmentPage() {
                     setPasswordError(null);
                   }}
                   autoFocus
+                  autoComplete="new-password"
                 />
                 {passwordError && (
                   <p className="text-xs text-destructive font-medium text-center">{passwordError}</p>
                 )}
-                <Button
+                 <Button
                   type="submit"
+                  disabled={isVerifyingPassword}
                   className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
                 >
-                  Authorize Access
+                  {isVerifyingPassword ? "Authorizing..." : "Authorize Access"}
                 </Button>
               </form>
             </CardContent>
@@ -2531,7 +3095,7 @@ export default function TakeAssessmentPage() {
       )}
 
       {stage === "readiness" && (() => {
-        const readinessItems = [
+        const readinessItems = ([
           assessment?.fullscreen_required && {
             text: "You must remain in full-screen mode throughout this assessment.",
             icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
@@ -2556,7 +3120,7 @@ export default function TakeAssessmentPage() {
             text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
             icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
           },
-        ].filter(Boolean);
+        ].filter(Boolean) as { text: string; icon: React.ReactNode }[]);
 
         return (
           <div className="flex-1 flex items-center justify-center p-4">
@@ -2568,7 +3132,7 @@ export default function TakeAssessmentPage() {
               </CardHeader>
               <CardContent className="p-6 space-y-6">
                 <div className="space-y-2">
-                  {readinessItems.map((item: any, i: number) => (
+                  {readinessItems.map((item, i) => (
                     <div
                       key={i}
                       className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
@@ -2601,8 +3165,11 @@ export default function TakeAssessmentPage() {
                     disabled={!readinessChecked}
                     className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
                   >
-                    Commit & Begin Assessment
+                    Start Timer & Begin Assessment
                   </Button>
+                  <p className="text-[10px] text-muted-foreground text-center font-medium">
+                    Note: The assessment countdown timer begins immediately.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -2633,7 +3200,7 @@ export default function TakeAssessmentPage() {
                 <div className="flex items-center justify-between px-0.5">
                   <div className="flex-1 max-w-[200px] space-y-1.5">
                     <div className="flex justify-between text-xs font-medium text-muted-foreground/80">
-                      <span>Sync Progress</span>
+                      <span>Progress ({answeredCount} of {questions.length} answered)</span>
                       <span>{Math.round(progress)}%</span>
                     </div>
                     <Progress
@@ -2642,6 +3209,131 @@ export default function TakeAssessmentPage() {
                     />
                   </div>
                   <div className="flex items-center gap-3">
+                    {/* Mobile Navigation Trigger */}
+                    <div className="md:hidden">
+                      <Sheet>
+                        <SheetTrigger asChild>
+                          <Button variant="outline" size="xs" className="h-7 text-[11px] font-semibold gap-1 rounded-lg border-border hover:bg-muted/50">
+                            <Menu className="size-3.5" /> Navigate
+                          </Button>
+                        </SheetTrigger>
+                        <SheetContent side="bottom" className="h-[75vh] rounded-t-2xl p-6 bg-background flex flex-col border-t">
+                          <SheetHeader className="text-left pb-2">
+                            <SheetTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground/60">
+                              Assessment Matrix
+                            </SheetTitle>
+                            <SheetDescription className="text-xs text-muted-foreground">
+                              Select a question to jump directly to it.
+                            </SheetDescription>
+                          </SheetHeader>
+                          <div className="flex-1 overflow-y-auto space-y-5 pr-1 py-4">
+                            {sectionGroups.map(({ sectionId, questions: sectionQuestions, title: sectionTitle }) => {
+                              return (
+                                <div key={sectionId || "gen"} className="space-y-2">
+                                  <div className="text-xs font-semibold text-muted-foreground/75 truncate text-left">
+                                    {sectionTitle}
+                                  </div>
+                                  <div className="grid grid-cols-5 gap-2">
+                                    {sectionQuestions.map((q) => {
+                                      const idx = questions.findIndex((gq) => gq.id === q.id);
+                                      const isAnswered = isQuestionAnswered(q, answers[q.id]);
+                                      const isCurrent = idx === currentQuestionIndex;
+                                      const isFlagged = flaggedQuestions[q.id];
+                                      const isSkipped = skippedQuestions[q.id];
+
+                                      let statusColor =
+                                        "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
+                                      if (isAnswered) {
+                                        if (isFlagged) {
+                                          statusColor =
+                                            "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                                        } else if (isSkipped) {
+                                          statusColor =
+                                            "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                                        } else {
+                                          statusColor =
+                                            "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                                        }
+                                      } else {
+                                        if (isFlagged) {
+                                          statusColor =
+                                            "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                                        } else if (isSkipped) {
+                                          statusColor =
+                                            "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                                        }
+                                      }
+
+                                      const buttonAriaLabel = `Go to question ${idx + 1}${
+                                        isCurrent ? ", current question" : ""
+                                      }${
+                                        isAnswered
+                                          ? isFlagged
+                                            ? ", answered, flagged for review"
+                                            : isSkipped
+                                              ? ", answered, marked as skipped"
+                                              : ", answered"
+                                          : isFlagged
+                                            ? ", unanswered, flagged for review"
+                                            : isSkipped
+                                              ? ", unanswered, marked as skipped"
+                                              : ", unanswered"
+                                      }`;
+
+                                      return (
+                                        <SheetClose key={q.id} asChild>
+                                          <button
+                                            onClick={() => navigateToQuestion(idx)}
+                                            aria-label={buttonAriaLabel}
+                                            className={cn(
+                                              "h-9 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
+                                              isCurrent
+                                                ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
+                                                : statusColor,
+                                            )}
+                                          >
+                                            {(idx + 1).toString().padStart(2, "0")}
+                                          </button>
+                                        </SheetClose>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          {assessment?.instructions && (
+                            <div className="pt-4 border-t border-dashed">
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button variant="outline" size="sm" className="w-full text-xs font-semibold gap-1.5 rounded-lg">
+                                    <Info className="size-3.5" /> General Instructions
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="sm:max-w-md p-6 border-none shadow-xl rounded-xl bg-background text-left">
+                                  <DialogHeader>
+                                    <DialogTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground/60">
+                                      General Instructions
+                                    </DialogTitle>
+                                  </DialogHeader>
+                                  <div className="my-4 p-4 rounded-xl border border-border bg-muted/5 text-xs text-foreground/85 leading-relaxed max-h-[250px] overflow-y-auto whitespace-pre-line">
+                                    {assessment.instructions}
+                                  </div>
+                                  <div className="flex justify-end">
+                                    <DialogClose asChild>
+                                      <Button type="button" variant="secondary" className="h-9 px-4 text-xs font-semibold rounded-lg">
+                                        Close
+                                      </Button>
+                                    </DialogClose>
+                                  </div>
+                                </DialogContent>
+                              </Dialog>
+                            </div>
+                          )}
+                        </SheetContent>
+                      </Sheet>
+                    </div>
+
                     {saveStatus[currentQ?.id] === "saving" && (
                       <span className="text-xs text-muted-foreground animate-pulse">
                         Saving...
@@ -2649,7 +3341,7 @@ export default function TakeAssessmentPage() {
                     )}
                     {saveStatus[currentQ?.id] === "saved" && (
                       <span className="text-xs text-emerald-600 font-medium">
-                        Saved
+                        Saved {lastSaved && `at ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
                       </span>
                     )}
                     {saveStatus[currentQ?.id] === "failed" && (
@@ -2661,146 +3353,230 @@ export default function TakeAssessmentPage() {
                       variant="outline"
                       className="h-6 px-2.5 text-xs font-medium rounded-full bg-emerald-500/10 text-emerald-600 border-emerald-500/20 shadow-none"
                     >
-                      {currentQ?.marks || 0} Points
+                      {currentQ?.marks || 0} Marks
                     </Badge>
                   </div>
                 </div>
 
-                <Card className="shadow-none border border-border/50 rounded-xl overflow-hidden bg-background">
-                  <CardHeader className="py-3 px-6 border-b bg-muted/[0.02] flex flex-row items-center justify-between">
-                    <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground/60">
-                      {currentQ?.section_title || "General Section"}
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (currentQ) {
-                            setFlaggedQuestions((prev) => ({
-                              ...prev,
-                              [currentQ.id]: !prev[currentQ.id],
-                            }));
-                          }
-                        }}
-                        className={cn(
-                          "h-7 px-2 text-xs gap-1 hover:bg-muted/50 rounded-lg transition-colors",
-                          flaggedQuestions[currentQ?.id]
-                            ? "text-amber-600 bg-amber-500/10"
-                            : "text-muted-foreground/60",
-                        )}
-                      >
-                        <Bookmark className="size-3.5" />
-                        {flaggedQuestions[currentQ?.id]
-                          ? "Flagged"
-                          : "Flag for review"}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          if (currentQ) {
-                            setSkippedQuestions((prev) => ({
-                              ...prev,
-                              [currentQ.id]: !prev[currentQ.id],
-                            }));
-                          }
-                        }}
-                        className={cn(
-                          "h-7 px-2 text-xs gap-1 hover:bg-muted/50 rounded-lg transition-colors",
-                          skippedQuestions[currentQ?.id]
-                            ? "text-destructive bg-destructive/10"
-                            : "text-muted-foreground/60",
-                        )}
-                      >
-                        <AlertTriangle className="size-3.5" />
-                        {skippedQuestions[currentQ?.id]
-                          ? "Skipped"
-                          : "Mark as Skipped"}
-                      </Button>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="p-6 md:p-10">
-                    {/* Show section instructions when entering a new section */}
-                    {currentQ?.section_instructions && (
-                      <div className="mb-6 p-4 rounded-lg border border-primary/10 bg-primary/[0.02]">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-primary/60 mb-1.5">
-                          Section Instructions
-                        </p>
-                        <p className="text-sm text-foreground/75 leading-relaxed">
-                          {currentQ.section_instructions}
-                        </p>
+                {viewingSectionIntro === currentQ?.assessment_section_id ? (
+                  <Card className="shadow-none border border-border/50 rounded-xl overflow-hidden bg-background">
+                    <CardContent className="p-8 md:p-12 flex flex-col items-center justify-center text-center space-y-6 max-w-2xl mx-auto my-6">
+                      <div className="size-16 bg-primary/10 rounded-2xl flex items-center justify-center text-primary">
+                        <BookOpen className="size-8" />
                       </div>
-                    )}
-                    <div className="space-y-4 mb-8">
-                      <div className="flex items-start gap-3.5">
-                        <span className="size-7 bg-muted/60 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0">
-                          {currentQuestionIndex + 1}
-                        </span>
-                        <h2 className="text-lg font-medium leading-relaxed text-foreground/90">
-                          {currentQ?.text || currentQ?.content}
+                      <div className="space-y-2">
+                        <Badge variant="outline" className="text-xs font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20">
+                          New Section
+                        </Badge>
+                        <h2 className="text-2xl font-bold tracking-tight text-foreground">
+                          {currentQ?.section_title || "General Section"}
                         </h2>
+                        <div className="flex justify-center gap-6 text-xs text-muted-foreground uppercase font-bold mt-2">
+                          <span>{questions.filter(x => x.assessment_section_id === currentQ?.assessment_section_id).length} Questions</span>
+                          <span>•</span>
+                          <span>{questions.filter(x => x.assessment_section_id === currentQ?.assessment_section_id).reduce((sum, x) => sum + (x.marks || 0), 0)} Marks</span>
+                        </div>
                       </div>
-                      {currentQ?.imageUrl && (
-                        <div className="ml-10.5 p-1 border border-border/40 rounded-xl bg-muted/5 inline-block">
-                          <img
-                            src={currentQ.imageUrl}
-                            alt="Context"
-                            className="max-h-[240px] rounded-lg object-contain"
-                          />
+                      {currentQ?.section_instructions && (
+                        <div className="w-full p-4 rounded-xl border border-primary/10 bg-primary/[0.02] text-sm text-foreground/80 leading-relaxed text-left">
+                          <span className="block font-bold text-xs uppercase text-primary/60 mb-2 tracking-wider">Section Instructions</span>
+                          {currentQ.section_instructions}
                         </div>
                       )}
-                    </div>
-                    <div className="ml-10.5 min-h-[120px]">
-                      <QuestionErrorBoundary questionId={currentQ?.id || ""}>
-                        {renderQuestion(currentQ)}
-                      </QuestionErrorBoundary>
-                    </div>
-                  </CardContent>
-                  <CardFooter className="bg-muted/5 p-4 flex justify-between border-t border-border/40">
-                    <Button
-                      variant="ghost"
-                      onClick={() =>
-                        navigateToQuestion(
-                          Math.max(0, currentQuestionIndex - 1),
-                        )
-                      }
-                      disabled={currentQuestionIndex === 0}
-                      className="h-9 px-4 font-medium text-xs text-muted-foreground hover:bg-muted/50 rounded-lg transition-colors"
-                    >
-                      Prev
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={async () => {
-                        if (currentQuestionIndex < questions.length - 1) {
-                          await navigateToQuestion(currentQuestionIndex + 1);
-                        } else {
-                          // Save current question before final submission modal
-                          if (currentQ) {
-                            const currentAnswer = answers[currentQ.id];
-                            if (currentAnswer !== undefined) {
-                              await saveAnswer(
-                                currentQ.id,
-                                currentQ.type,
-                                currentAnswer,
-                                "manual_save",
-                              );
-                              lastSavedValuesRef.current[currentQ.id] =
-                                currentAnswer;
+                      <Button
+                        size="lg"
+                        className="w-full sm:w-auto h-11 px-8 rounded-xl font-semibold shadow-sm"
+                        onClick={() => setViewingSectionIntro(null)}
+                      >
+                        Begin Section <ChevronRight className="ml-2 size-4" />
+                      </Button>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card className="shadow-none border border-border/50 rounded-xl overflow-hidden bg-background">
+                    <CardHeader className="py-4 px-6 border-b bg-muted/20 flex flex-row items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <BookOpen className="size-4 text-primary shrink-0" />
+                        <span className="text-sm font-bold tracking-tight text-foreground/95">
+                          {currentQ?.section_title || "General Section"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            if (currentQ) {
+                              setFlaggedQuestions((prev) => ({
+                                ...prev,
+                                [currentQ.id]: !prev[currentQ.id],
+                              }));
                             }
+                          }}
+                          className={cn(
+                            "h-7 px-2.5 text-xs gap-1 hover:bg-muted/50 rounded-lg transition-colors font-medium",
+                            flaggedQuestions[currentQ?.id]
+                              ? "text-amber-600 bg-amber-500/10 font-bold"
+                              : "text-muted-foreground/80",
+                          )}
+                        >
+                          <Bookmark className="size-3.5" />
+                          {flaggedQuestions[currentQ?.id] ? "Flagged" : "Flag for review"}
+                        </Button>
+                        {!currentQ?.is_required && (
+                          <>
+                            <Separator orientation="vertical" className="h-4 bg-border/60 mx-1" />
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                if (currentQ) {
+                                  const nextSkippedVal = !skippedQuestions[currentQ.id];
+                                  setSkippedQuestions((prev) => ({
+                                    ...prev,
+                                    [currentQ.id]: nextSkippedVal,
+                                  }));
+                                  saveAnswer(currentQ.id, currentQ.type, answers[currentQ.id], "manual_save", nextSkippedVal);
+                                }
+                              }}
+                              className={cn(
+                                "h-7 px-2.5 text-xs gap-1 rounded-lg transition-all font-medium",
+                                skippedQuestions[currentQ?.id]
+                                  ? "text-white bg-destructive hover:bg-destructive/90 shadow-sm font-semibold"
+                                  : "text-destructive border border-dashed border-destructive/20 bg-destructive/[0.01] hover:bg-destructive/5 hover:text-destructive-foreground",
+                              )}
+                            >
+                              <AlertTriangle className="size-3.5" />
+                              {skippedQuestions[currentQ?.id] ? "Skipped" : "Mark as Skipped"}
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardHeader>
+                    <CardContent className="p-6 md:p-10">
+                      {/* Show section instructions when entering a new section */}
+                      {currentQ?.section_instructions && (() => {
+                        const firstQOfSection = questions.find(x => x.assessment_section_id === currentQ.assessment_section_id);
+                        const isFirstQ = firstQOfSection?.id === currentQ.id;
+                        if (!isFirstQ) return null;
+
+                        return (
+                          <Collapsible open={instructionsExpanded} onOpenChange={setInstructionsExpanded} className="mb-6">
+                            <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.02] space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-widest text-primary/60">
+                                  Section Instructions
+                                </span>
+                                <CollapsibleTrigger asChild>
+                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md">
+                                    <ChevronDown className={cn("size-4 transition-transform", instructionsExpanded ? "rotate-180" : "")} />
+                                  </Button>
+                                </CollapsibleTrigger>
+                              </div>
+                              <CollapsibleContent className="text-sm text-foreground/75 leading-relaxed space-y-3">
+                                <p>{currentQ.section_instructions}</p>
+                                <div className="flex justify-end pt-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setInstructionsExpanded(false)}
+                                    className="h-7 text-[10px] font-bold uppercase tracking-wider text-primary border-primary/20 hover:bg-primary/5 rounded-md"
+                                  >
+                                    Acknowledge and Continue
+                                  </Button>
+                                </div>
+                              </CollapsibleContent>
+                            </div>
+                          </Collapsible>
+                        );
+                      })()}
+                      <div className="space-y-4 mb-8">
+                        <div className="flex items-start gap-3.5">
+                          <span className="size-7 bg-muted/60 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0 mt-1">
+                            {currentQuestionIndex + 1}
+                          </span>
+                          <div className="space-y-1.5 flex-1 text-left">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
+                                Question {currentQuestionIndex + 1}
+                              </span>
+                              <Badge variant="secondary" className="text-[9px] h-4.5 py-0 px-1.5 font-bold uppercase tracking-wider bg-muted/80 text-muted-foreground">
+                                {currentQ?.marks || 0} Marks
+                              </Badge>
+                            </div>
+                            <h2 className="text-lg font-medium leading-relaxed text-foreground/90">
+                              {currentQ?.text || currentQ?.content}
+                            </h2>
+                          </div>
+                        </div>
+                        {currentQ?.imageUrl && (
+                          <div className="ml-10.5 p-1 border border-border/40 rounded-xl bg-muted/5 inline-block relative max-w-full overflow-hidden">
+                            <Image
+                              src={currentQ.imageUrl}
+                              alt={currentQ.image_alt_text || "Question illustration context"}
+                              width={480}
+                              height={270}
+                              className="max-h-[240px] rounded-lg object-contain w-auto h-auto"
+                              priority={currentQuestionIndex === 0}
+                            />
+                          </div>
+                        )}
+                      </div>
+                      <div className="ml-10.5 min-h-[120px]">
+                        <QuestionErrorBoundary questionId={currentQ?.id || ""}>
+                          {renderQuestion(currentQ)}
+                        </QuestionErrorBoundary>
+                      </div>
+                    </CardContent>
+                    <CardFooter className="bg-muted/5 p-4 flex justify-between border-t border-border/40">
+                      {currentQuestionIndex > 0 ? (
+                        <Button
+                          variant="ghost"
+                          onClick={() =>
+                            navigateToQuestion(
+                              Math.max(0, currentQuestionIndex - 1),
+                            )
                           }
-                          setShowSubmitConfirm(true);
-                        }
-                      }}
-                      className="h-9 px-6 font-semibold text-xs rounded-lg shadow-none"
-                    >
-                      {currentQuestionIndex === questions.length - 1
-                        ? "Finalize Attempt"
-                        : "Next Question"}
-                    </Button>
-                  </CardFooter>
-                </Card>
+                          disabled={currentQuestionIndex === 0}
+                          className="h-9 px-4 font-medium text-xs text-muted-foreground hover:bg-muted/50 rounded-lg transition-colors"
+                        >
+                          Prev
+                        </Button>
+                      ) : (
+                        <div />
+                      )}
+                      <Button
+                        size="sm"
+                        onClick={async () => {
+                          if (currentQuestionIndex < questions.length - 1) {
+                            await navigateToQuestion(currentQuestionIndex + 1);
+                          } else {
+                            // Save current question before final submission modal
+                            if (currentQ) {
+                              const currentAnswer = answers[currentQ.id];
+                              if (currentAnswer !== undefined) {
+                                await saveAnswer(
+                                  currentQ.id,
+                                  currentQ.type,
+                                  currentAnswer,
+                                  "manual_save",
+                                );
+                                lastSavedValuesRef.current[currentQ.id] =
+                                  currentAnswer;
+                              }
+                            }
+                            setShowSubmitConfirm(true);
+                          }
+                        }}
+                        className="h-9 px-6 font-semibold text-xs rounded-lg shadow-none"
+                      >
+                        {currentQuestionIndex === questions.length - 1
+                          ? "Finalize Attempt"
+                          : "Next Question"}
+                      </Button>
+                    </CardFooter>
+                  </Card>
+                )}
               </div>
             )}
           </div>
@@ -2819,7 +3595,7 @@ export default function TakeAssessmentPage() {
                     <div className="grid grid-cols-4 gap-2">
                       {sectionQuestions.map((q) => {
                         const idx = questions.findIndex((gq) => gq.id === q.id);
-                        const isAnswered = !!answers[q.id];
+                        const isAnswered = isQuestionAnswered(q, answers[q.id]);
                         const isCurrent = idx === currentQuestionIndex;
                         const isFlagged = flaggedQuestions[q.id];
                         const isSkipped = skippedQuestions[q.id];
@@ -2847,10 +3623,27 @@ export default function TakeAssessmentPage() {
                           }
                         }
 
+                        const buttonAriaLabel = `Go to question ${idx + 1}${
+                          isCurrent ? ", current question" : ""
+                        }${
+                          isAnswered
+                            ? isFlagged
+                              ? ", answered, flagged for review"
+                              : isSkipped
+                                ? ", answered, marked as skipped"
+                                : ", answered"
+                            : isFlagged
+                              ? ", unanswered, flagged for review"
+                              : isSkipped
+                                ? ", unanswered, marked as skipped"
+                                : ", unanswered"
+                        }`;
+
                         return (
                           <button
                             key={q.id}
                             onClick={() => navigateToQuestion(idx)}
+                            aria-label={buttonAriaLabel}
                             className={cn(
                               "h-8 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
                               isCurrent
@@ -2867,7 +3660,37 @@ export default function TakeAssessmentPage() {
                 );
               })}
             </div>
-            <div className="mt-auto pt-4 border-t border-dashed border-border/40">
+            <div className="mt-auto space-y-3 pt-4 border-t border-dashed border-border/40">
+              {assessment?.instructions && (
+                <Dialog>
+                  <DialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="w-full text-xs font-semibold gap-1.5 border-border hover:bg-muted/50 rounded-lg">
+                      <Info className="size-3.5" /> General Instructions
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent className="sm:max-w-md p-6 border-none shadow-xl rounded-xl bg-background text-left">
+                    <DialogHeader>
+                      <DialogTitle className="text-lg font-semibold tracking-tight text-foreground">
+                        General Instructions
+                      </DialogTitle>
+                      <DialogDescription className="text-xs text-muted-foreground mt-1">
+                        Instructions set for this evaluation session.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <div className="my-4 p-4 rounded-xl border border-border bg-muted/5 text-xs text-foreground/85 leading-relaxed max-h-[300px] overflow-y-auto whitespace-pre-line">
+                      {assessment.instructions}
+                    </div>
+                    <div className="flex justify-end">
+                      <DialogClose asChild>
+                        <Button type="button" variant="secondary" className="h-9 px-4 text-xs font-semibold rounded-lg">
+                          Close
+                        </Button>
+                      </DialogClose>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              )}
+
               <div className={cn(
                 "flex items-center gap-2 font-medium text-xs",
                 isOnline ? "text-muted-foreground/50" : "text-amber-600"
@@ -2885,12 +3708,15 @@ export default function TakeAssessmentPage() {
         </div>
       )}
 
-      <Dialog open={warningModalOpen} onOpenChange={undefined}>
-        <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background">
+      <Dialog open={warningModalOpen} onOpenChange={() => {}}>
+        <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background" role="alertdialog">
           <AlertTriangle className="size-10 text-destructive mx-auto mb-3" />
           <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
             Integrity Protocols Alert
           </DialogTitle>
+          <DialogDescription className="text-xs text-muted-foreground mt-1">
+            An integrity warning has been flagged on your session. You must acknowledge this notice to return to the exam.
+          </DialogDescription>
           <p className="text-sm text-muted-foreground py-4 leading-relaxed">
             {currentWarning?.message || "Academic integrity warning issued."}
             {currentWarning?.warning_level === "WARNING_2" && (
@@ -2913,12 +3739,15 @@ export default function TakeAssessmentPage() {
                     warning_id: currentWarning.id,
                     access_token: attemptToken!,
                   });
+                  setWarningModalOpen(false);
+                  setCurrentWarning(null);
                 } catch (e) {
-                  toast.error("Failed to acknowledge warning.");
+                  toast.error("Failed to acknowledge warning. Please try again.");
                 }
+              } else {
+                setWarningModalOpen(false);
+                setCurrentWarning(null);
               }
-              setWarningModalOpen(false);
-              setCurrentWarning(null);
             }}
             className="w-full h-10 text-xs font-semibold rounded-lg shadow-none bg-destructive hover:bg-destructive/90 text-destructive-foreground"
           >
@@ -2950,7 +3779,7 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-emerald-50/20 border border-emerald-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-emerald-600">Answered</span>
                 <span className="text-base font-bold text-emerald-600 mt-1">
-                  {questions.filter((q) => !!answers[q.id]).length}
+                  {questions.filter((q) => isQuestionAnswered(q, answers[q.id])).length}
                 </span>
               </div>
               <div className="p-3 bg-amber-50/20 border border-amber-500/10 rounded-lg flex flex-col justify-between">
@@ -2962,28 +3791,30 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-red-50/20 border border-red-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-red-600">Skipped Explicitly</span>
                 <span className="text-base font-bold text-red-600 mt-1">
-                  {questions.filter((q) => skippedQuestions[q.id]).length}
+                  {questions.filter((q) => skippedQuestions[q.id] && !isQuestionAnswered(q, answers[q.id])).length}
                 </span>
               </div>
             </div>
 
-            {questions.length -
-              questions.filter((q) => !!answers[q.id]).length >
-              0 && (
+            {unansweredRequired.length > 0 && (
+              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-left">
+                <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-red-700 leading-relaxed">
+                  <span className="font-semibold block">Required Action Required</span>
+                  You have {unansweredRequired.length} unanswered required {unansweredRequired.length === 1 ? "question" : "questions"} that must be answered before submission.
+                  <span className="block mt-1 font-bold">Questions: {unansweredRequiredNums.join(", ")}</span>
+                </div>
+              </div>
+            )}
+
+            {unansweredOptional.length > 0 && (
               <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/15 flex items-start gap-2.5 text-left">
                 <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
-                <span className="text-xs text-destructive font-medium leading-relaxed">
-                  Warning: You have{" "}
-                  {questions.length -
-                    questions.filter((q) => !!answers[q.id]).length}{" "}
-                  unanswered{" "}
-                  {questions.length -
-                    questions.filter((q) => !!answers[q.id]).length ===
-                  1
-                    ? "question"
-                    : "questions"}
-                  .
-                </span>
+                <div className="text-xs text-destructive leading-relaxed">
+                  <span className="font-semibold block">Unanswered Optional Questions</span>
+                  You have {unansweredOptional.length} unanswered optional {unansweredOptional.length === 1 ? "question" : "questions"}.
+                  <span className="block mt-1 font-bold text-destructive/80">Questions: {unansweredOptionalNums.join(", ")}</span>
+                </div>
               </div>
             )}
 
@@ -2993,21 +3824,35 @@ export default function TakeAssessmentPage() {
             </p>
           </div>
 
-          <div className="flex gap-3">
-            <Button
-              variant="outline"
-              className="flex-1 h-10 text-xs font-medium rounded-lg"
-              onClick={() => setShowSubmitConfirm(false)}
-            >
-              Review answers
-            </Button>
-            <Button
-              className="flex-1 h-10 text-xs font-semibold rounded-lg shadow-none bg-primary hover:bg-primary/90 text-primary-foreground"
-              onClick={submitAssessment}
-              disabled={submitting}
-            >
-              Confirm submission
-            </Button>
+          <div className="space-y-2">
+            {firstUnansweredIndex !== -1 && (
+              <Button
+                variant="outline"
+                className="w-full h-10 text-xs font-semibold border-primary/20 hover:bg-primary/5 text-primary rounded-lg flex items-center justify-center gap-1.5"
+                onClick={() => {
+                  navigateToQuestion(firstUnansweredIndex);
+                  setShowSubmitConfirm(false);
+                }}
+              >
+                <ArrowRight className="size-3.5" /> Jump to First Unanswered (Question {firstUnansweredIndex + 1})
+              </Button>
+            )}
+            <div className="flex gap-3">
+              <Button
+                variant="outline"
+                className="flex-1 h-10 text-xs font-medium rounded-lg"
+                onClick={() => setShowSubmitConfirm(false)}
+              >
+                Cancel & Review
+              </Button>
+              <Button
+                className="flex-1 h-10 text-xs font-semibold rounded-lg shadow-none bg-primary hover:bg-primary/90 text-primary-foreground"
+                onClick={submitAssessment}
+                disabled={submitting || unansweredRequired.length > 0}
+              >
+                Confirm Submission
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

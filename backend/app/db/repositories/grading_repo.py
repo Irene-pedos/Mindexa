@@ -209,6 +209,7 @@ class GradingRepository:
         lecturer_override: bool = False,
         grading_mode: str | None = None,
         is_final: bool = True,
+        feedback_author_basis: str | None = None,
     ) -> None:
         values = {
             "score": score,
@@ -223,6 +224,8 @@ class GradingRepository:
             values["rubric_scores"] = rubric_scores
         if grading_mode is not None:
             values["grading_mode"] = grading_mode
+        if feedback_author_basis is not None:
+            values["feedback_author_basis"] = feedback_author_basis
         await self.db.execute(
             update(SubmissionGrade)
             .where(SubmissionGrade.id == grade_id)
@@ -299,7 +302,7 @@ class GradingRepository:
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[dict[str, Any]], int]:
-        from app.db.models.academic import ClassSection, StudentEnrollment
+        from app.db.models.academic import ClassSection, StudentEnrollment, Course, Institution
         from app.db.models.attempt import (AssessmentAttempt, StudentResponse,
                                            SubmissionGrade)
         from app.db.models.question import Question
@@ -343,16 +346,22 @@ class GradingRepository:
                 ClassSection.name.label("class_section_name"),
                 Question.question_type.label("question_type"),
                 Question.content.label("question_title"),
+                Question.rubric_id.label("rubric_id"),
+                Question.marks.label("max_score"),
                 SubmissionGrade.ai_suggested_score.label("ai_suggested_score"),
                 SubmissionGrade.ai_confidence.label("ai_confidence"),
                 AssessmentAttempt.integrity_risk_score.label("integrity_risk_score"),
                 AssessmentAttempt.is_flagged.label("is_flagged"),
                 AssessmentAttempt.submitted_at.label("submitted_at"),
                 func.concat(AssignedToProfile.first_name, ' ', AssignedToProfile.last_name).label("assigned_to_name"),
+                Institution.name.label("institution_name"),
+                Course.name.label("workspace_title"),
             )
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
             .join(Assessment, GradingQueueItem.assessment_id == Assessment.id)
+            .join(Course, Assessment.course_id == Course.id)
+            .join(Institution, Course.institution_id == Institution.id)
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             # Link to SubmissionGrade for AI info
@@ -423,6 +432,10 @@ class GradingRepository:
                 "question_title": row.question_title,
                 "ai_suggested_score": row.ai_suggested_score,
                 "ai_confidence": row.ai_confidence,
+                "ai_grading_basis": "RUBRIC" if row.rubric_id is not None else "GENERAL_KNOWLEDGE",
+                "max_score": row.max_score,
+                "institution_name": row.institution_name,
+                "workspace_title": row.workspace_title,
                 "integrity_risk_score": row.integrity_risk_score,
                 "is_flagged": row.is_flagged,
                 "submitted_at": row.submitted_at,

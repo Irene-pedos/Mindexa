@@ -32,6 +32,7 @@ interface QuestionBreakdown {
   max_score: number;
   is_correct: boolean | null;
   feedback: string | null;
+  feedback_author_basis?: string | null;
   grading_mode: string | null;
   was_skipped: boolean;
   question_text: string;
@@ -253,9 +254,20 @@ function QuestionCard({
 
           {item.feedback && (
             <div className="border-t pt-3 mt-3">
-              <p className="text-[10px] font-medium text-muted-foreground mb-1">
-                Explanation
-              </p>
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[10px] font-medium text-muted-foreground">
+                  Explanation
+                </p>
+                {item.feedback_author_basis && (
+                  <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80">
+                    {item.feedback_author_basis === "AI"
+                      ? "AI Drafted"
+                      : item.feedback_author_basis === "AI_EDITED"
+                      ? "AI Drafted (Edited by Human)"
+                      : "Human Written"}
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-muted-foreground">{item.feedback}</p>
             </div>
           )}
@@ -303,11 +315,22 @@ function QuestionCard({
 
               {item.feedback && (
                 <div className="bg-blue-50 border-l-2 border-blue-400 p-3 rounded">
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <MessageCircle className="size-3 text-blue-600" />
-                    <p className="text-[10px] font-medium text-blue-700">
-                      Lecturer feedback
-                    </p>
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="flex items-center gap-1.5">
+                      <MessageCircle className="size-3 text-blue-600" />
+                      <p className="text-[10px] font-medium text-blue-700">
+                        Lecturer feedback
+                      </p>
+                    </div>
+                    {item.feedback_author_basis && (
+                      <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-blue-100/50 text-blue-700">
+                        {item.feedback_author_basis === "AI"
+                          ? "AI Drafted"
+                          : item.feedback_author_basis === "AI_EDITED"
+                          ? "AI Drafted (Edited by Human)"
+                          : "Human Written"}
+                      </span>
+                    )}
                   </div>
                   <p className="text-xs text-blue-900">{item.feedback}</p>
                 </div>

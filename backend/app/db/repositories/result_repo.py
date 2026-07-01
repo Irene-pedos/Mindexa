@@ -276,6 +276,7 @@ class ResultRepository:
                 is_correct=bd.get("is_correct"),
                 feedback=bd.get("feedback"),
                 grading_mode=bd.get("grading_mode"),
+                feedback_author_basis=bd.get("feedback_author_basis", "LECTURER"),
                 was_skipped=bd.get("was_skipped", False),
             )
             self.db.add(row)

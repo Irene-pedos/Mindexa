@@ -34,6 +34,19 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { FileCodeIcon, XIcon } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
+
 
 export default function StudentWorkspaceDetailPage() {
   const params = useParams();
@@ -220,34 +233,33 @@ export default function StudentWorkspaceDetailPage() {
             </CardHeader>
             <CardContent className="p-0">
               {materials.length > 0 ? (
-                <div className="divide-y border-t">
+                <AttachmentGroup className="flex-col gap-2 p-4 border-t">
                   {materials.map((m) => (
-                    <div key={m.id} className="flex items-center justify-between p-4 hover:bg-muted/50 transition-colors group">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="bg-primary/5 p-2 rounded-lg text-primary">
-                          <FileText className="size-5" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium text-foreground truncate">{m.display_name || m.original_filename}</div>
-                          <div className="flex items-center gap-2 mt-0.5 text-xs text-muted-foreground">
-                            <Badge variant="outline" className="text-[9px] uppercase px-1 h-4">{m.file_extension?.replace(".", "") || "FILE"}</Badge>
-                            <span>{(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB</span>
-                            <span>• Version {m.version}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2 ml-4">
-                        <Button variant="ghost" size="icon" onClick={() => handleView(m)}>
+                    <Attachment
+                      key={m.id}
+                      className="w-full justify-between hover:bg-accent/10 transition-all"
+                    >
+                      <AttachmentMedia>
+                        <FileCodeIcon className="size-5 text-primary" />
+                      </AttachmentMedia>
+                      <AttachmentContent>
+                        <AttachmentTitle>{m.display_name || m.original_filename}</AttachmentTitle>
+                        <AttachmentDescription>
+                          {m.file_extension?.replace(".", "").toUpperCase() || "FILE"} · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB · Version {m.version}
+                        </AttachmentDescription>
+                      </AttachmentContent>
+                      <AttachmentActions>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => handleView(m)}>
                           <Eye className="size-4" />
                         </Button>
-                        <Button variant="outline" size="sm" onClick={() => handleDownload(m)} disabled={downloadingId === m.id}>
-                          {downloadingId === m.id ? <Loader2 className="size-4 animate-spin" /> : <Download className="size-4 mr-2" />}
+                        <Button variant="outline" size="sm" className="h-8 text-xs font-semibold rounded-lg" onClick={() => handleDownload(m)} disabled={downloadingId === m.id}>
+                          {downloadingId === m.id ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5 mr-2" />}
                           {downloadingId === m.id ? "Downloading..." : "Download"}
                         </Button>
-                      </div>
-                    </div>
+                      </AttachmentActions>
+                    </Attachment>
                   ))}
-                </div>
+                </AttachmentGroup>
               ) : (
                 <div className="py-16 text-center border-t">
                   <FileText className="size-12 text-muted-foreground mx-auto mb-4 opacity-20" />

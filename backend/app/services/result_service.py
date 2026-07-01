@@ -212,6 +212,7 @@ class ResultService:
                 ),
                 "feedback": grade.feedback if grade else None,
                 "grading_mode": grade.grading_mode if grade else None,
+                "feedback_author_basis": grade.feedback_author_basis if grade else "LECTURER",
                 "was_skipped": response.is_skipped if response else False,
             })
 

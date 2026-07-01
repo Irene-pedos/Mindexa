@@ -274,6 +274,7 @@ async def get_attempt(
                     "order_index": aq.order_index,
                     "assessment_section_id": str(aq.assessment_section_id) if aq.assessment_section_id else None,
                     "section_title": section_map.get(aq.assessment_section_id) if aq.assessment_section_id else "General",
+                    "grading_mode": q.grading_mode.value if hasattr(q.grading_mode, 'value') else q.grading_mode,
                     "options": [
                         {
                             "id": str(opt.id),

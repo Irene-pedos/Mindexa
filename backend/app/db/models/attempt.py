@@ -1380,6 +1380,7 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         nullable=True,
     )
     lecturer_override: bool = Field(default=False, nullable=False)
+    feedback_author_basis: str = Field(default="LECTURER", nullable=False)
 
     # ── Feedback ──────────────────────────────────────────────────────────────
 

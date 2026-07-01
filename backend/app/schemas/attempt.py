@@ -85,6 +85,7 @@ class AttemptQuestionResponse(BaseModel):
     assessment_section_id: Optional[uuid.UUID] = None
     section_title: Optional[str] = None
     options: Optional[List[AttemptQuestionOption]] = None
+    grading_mode: Optional[str] = None
 
     model_config = {
         "from_attributes": True,

@@ -71,6 +71,14 @@ import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-edito
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import { ModerationPanel } from "@/components/mindexa/grading/moderation-panel";
 import { ResultReleasePanel } from "@/components/mindexa/grading/result-release-panel";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
 
@@ -90,6 +98,8 @@ interface GradingQueueItem {
   student_answer: string | null;
   ai_suggested_score: number | null;
   ai_confidence: number | null;
+  ai_grading_basis?: string | null;
+  max_score?: number;
   ai_feedback_draft: string | null;
   score: number | null;
   feedback: string | null;
@@ -124,6 +134,7 @@ interface AttemptQuestion {
   text?: string;
   content?: string;
   marks: number;
+  grading_mode?: string;
   caseStudyContext?: string;
   rubric?: any;
 }
@@ -149,7 +160,13 @@ interface SubmissionRecord {
   score: number | null;
   override_score: number | null;
   ai_suggested_score: number | null;
+  ai_grading_basis?: string | null;
   ai_feedback_draft: string | null;
+  ai_rationale?: string | null;
+  ai_confidence?: number | null;
+  ai_feedback_strengths?: string[] | null;
+  ai_feedback_improvements?: string[] | null;
+  ai_feedback_suggestions?: string[] | null;
   feedback: string | null;
   is_final: boolean;
 }
@@ -238,6 +255,15 @@ interface AnalyticsData {
   ai_narrative: string | null;
 }
 
+export function isQuestionAutoGraded(q?: { type: string; question_type?: string; grading_mode?: string }) {
+  if (!q) return false;
+  if (q.grading_mode) {
+    return q.grading_mode.toUpperCase() === "AUTO";
+  }
+  const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+  return ["mcq", "truefalse", "true_definition", "true_false", "matching", "fillblank", "fillblanks", "ordering"].includes(t);
+}
+
 export default function LecturerGradingQueue() {
   const [data, setData] = useState<GradingQueueItem[]>([]);
   const [total, setTotal] = useState(0);
@@ -245,6 +271,7 @@ export default function LecturerGradingQueue() {
 
   // Filters State
   const [assessmentId, setAssessmentId] = useState<string>("all");
+  const [releaseAssessmentId, setReleaseAssessmentId] = useState<string>("all");
   const [classSectionId, setClassSectionId] = useState<string>("all");
   const [questionType, setQuestionType] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
@@ -305,7 +332,7 @@ export default function LecturerGradingQueue() {
       [responseId]: { ...getBatchItem(responseId), [field]: value },
     }));
 
-  const handleAcceptAllAi = async () => {
+  const handleAcceptAllAi = () => {
     // 1. Filter items that are ready for AI confirmation
     const aiReadyItems = filteredData.filter(item => 
       item.status === "AI_SUGGESTED" && (item.ai_confidence || 0) >= confidenceThreshold / 100
@@ -316,8 +343,13 @@ export default function LecturerGradingQueue() {
       return;
     }
 
-    // 2. Deduplicate by response_id to avoid redundant requests
-    const uniqueResponseIds = Array.from(new Set(aiReadyItems.map(item => item.response_id)));
+    setAcceptAllPreviewItems(aiReadyItems);
+    setShowAcceptAllPreview(true);
+  };
+
+  const commitAcceptAllAi = async () => {
+    setShowAcceptAllPreview(false);
+    const uniqueResponseIds = Array.from(new Set(acceptAllPreviewItems.map(item => item.response_id)));
 
     setIsSaving(true);
     try {
@@ -403,6 +435,12 @@ export default function LecturerGradingQueue() {
   const [reviewStartedAt, setReviewStartedAt] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [showAiPanel, setShowAiPanel] = useState(true);
+  const [showAcceptAllPreview, setShowAcceptAllPreview] = useState(false);
+  const [acceptAllPreviewItems, setAcceptAllPreviewItems] = useState<GradingQueueItem[]>([]);
+  const [showBatchReviewModal, setShowBatchReviewModal] = useState(false);
+  const [batchReviewItem, setBatchReviewItem] = useState<GradingQueueItem | null>(null);
+  const [batchReviewDetails, setBatchReviewDetails] = useState<any | null>(null);
+  const [batchReviewLoading, setBatchReviewLoading] = useState(false);
 
   // Reassessment options form state
   const [allowReassessment, setAllowReassessment] = useState(false);
@@ -437,7 +475,6 @@ export default function LecturerGradingQueue() {
   }, [selectedClass, selectedAssessment, status, questionType, sortBy, debouncedSearch]);
 
   const fetchSubmissions = useCallback(async () => {
-    if (!selectedClass && !selectedAssessment) return;
     setLoading(true);
     try {
       const params: Record<string, string | number | boolean> = { 
@@ -513,12 +550,14 @@ export default function LecturerGradingQueue() {
   useEffect(() => {
     const controller = new AbortController();
     if (activeTab === "individuals") {
-      if (selectedClass) fetchSubmissions();
-      else if (selectedAssessment) fetchClassStats(selectedAssessment.id);
+      fetchSubmissions();
+      if (selectedAssessment && !selectedClass) {
+        fetchClassStats(selectedAssessment.id);
+      }
     }
-    if (activeTab === "release" && assessmentId !== "all") runReleaseValidation(assessmentId);
+    if (activeTab === "release" && releaseAssessmentId !== "all") runReleaseValidation(releaseAssessmentId);
     return () => controller.abort();
-  }, [activeTab, fetchSubmissions, assessmentId, runReleaseValidation, selectedClass, selectedAssessment]);
+  }, [activeTab, fetchSubmissions, releaseAssessmentId, runReleaseValidation, selectedClass, selectedAssessment]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -542,8 +581,36 @@ export default function LecturerGradingQueue() {
       setQuestions([]);
       setModerationQuestionId(null);
     }
-    return () => controller.abort();
+    return () => {
+      controller.abort();
+    };
   }, [moderationAssessmentId, fetchQuestions]);
+
+  useEffect(() => {
+    let active = true;
+    if (batchReviewItem) {
+      setBatchReviewLoading(true);
+      aiGradingApi.getGradeDetails(batchReviewItem.response_id)
+        .then(data => {
+          if (active) {
+            setBatchReviewDetails(data);
+          }
+        })
+        .catch(err => {
+          console.error("Failed to load AI details in batch mode", err);
+        })
+        .finally(() => {
+          if (active) {
+            setBatchReviewLoading(false);
+          }
+        });
+    } else {
+      setBatchReviewDetails(null);
+    }
+    return () => {
+      active = false;
+    };
+  }, [batchReviewItem]);
 
   const fetchMetadata = async () => {
     try {
@@ -590,6 +657,9 @@ export default function LecturerGradingQueue() {
       if (activeSub) {
         fetchResponseLogs(activeSub.id);
         const detail = await gradingApi.getGradeDetail(activeSub.id);
+        setActiveSubmissions((prev: SubmissionRecord[]) =>
+          prev.map((s) => (s.id === activeSub.id ? { ...s, ...detail } : s))
+        );
         setOverrideScore(detail.score?.toString() || detail.ai_suggested_score?.toString() || "");
         setFinalFeedback(detail.feedback || "");
         setRubricScores(detail.rubric_scores || []);
@@ -621,6 +691,9 @@ export default function LecturerGradingQueue() {
       fetchResponseLogs(submission.id);
       try {
         const detail = await gradingApi.getGradeDetail(submission.id);
+        setActiveSubmissions((prev: SubmissionRecord[]) =>
+          prev.map((s) => (s.id === submission.id ? { ...s, ...detail } : s))
+        );
         setOverrideScore(detail.score?.toString() || detail.ai_suggested_score?.toString() || "");
         setFinalFeedback(detail.feedback || "");
         setRubricScores(detail.rubric_scores || []);
@@ -668,7 +741,15 @@ export default function LecturerGradingQueue() {
       };
       if (!acceptAi) {
         const parsedScore = parseFloat(overrideScore);
-        if (Number.isFinite(parsedScore)) payload.override_score = parsedScore;
+        if (Number.isFinite(parsedScore)) {
+          const maxMarks = currentQuestion?.marks || 10;
+          if (parsedScore < 0 || parsedScore > maxMarks) {
+            toast.error(`Score must be between 0 and ${maxMarks} points`);
+            setIsSaving(false);
+            return;
+          }
+          payload.override_score = parsedScore;
+        }
         payload.feedback = finalFeedback;
       }
 
@@ -683,8 +764,7 @@ export default function LecturerGradingQueue() {
         // Auto-navigate to next pending manual question
         const nextPendingIdx = activeAttempt.questions.findIndex((q: AttemptQuestion, idx: number) => {
           if (idx <= activeQuestionIndex) return false;
-          const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-          const isManual = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational"].includes(t);
+          const isManual = !isQuestionAutoGraded(q);
           if (!isManual) return false;
           const sub = subRes.submissions?.find((s: SubmissionRecord) => s.question_id === q.id);
           return !sub || !sub.is_final;
@@ -708,7 +788,11 @@ export default function LecturerGradingQueue() {
   const handleRubricChange = (scores: RubricScore[]) => {
     setRubricScores(scores);
     const total = scores.reduce((acc, curr) => acc + curr.score, 0);
-    setOverrideScore(total.toString());
+    const totalStr = total.toString();
+    if (overrideScore && overrideScore !== totalStr) {
+      toast.info(`Score updated to ${totalStr} based on rubric criteria selection.`);
+    }
+    setOverrideScore(totalStr);
   };
 
   // Reassessment Grants
@@ -765,6 +849,12 @@ export default function LecturerGradingQueue() {
     const parsedScore = parseFloat(scoreStr);
     if (isNaN(parsedScore)) {
       toast.error("Please enter a valid score");
+      return;
+    }
+    const item = data.find(i => i.response_id === responseId);
+    const maxMarks = item?.max_score || 10;
+    if (parsedScore < 0 || parsedScore > maxMarks) {
+      toast.error(`Score must be between 0 and ${maxMarks} points`);
       return;
     }
     try {
@@ -889,8 +979,7 @@ export default function LecturerGradingQueue() {
   if (activeAttempt) {
     const currentQuestion = activeAttempt.questions?.[activeQuestionIndex];
     const currentSubmission = activeSubmissions.find((s) => s.question_id === currentQuestion?.id);
-    const qType = (currentQuestion?.type || currentQuestion?.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-    const isAutoGraded = ["mcq", "truefalse", "true_false", "matching", "fillblank", "fillblanks", "ordering"].includes(qType);
+    const isAutoGraded = isQuestionAutoGraded(currentQuestion);
 
     return (
       <div className="min-h-screen bg-background flex flex-col font-sans text-foreground">
@@ -940,18 +1029,21 @@ export default function LecturerGradingQueue() {
               size="sm"
               className="h-9 text-xs font-semibold border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 rounded-lg shadow-sm"
               onClick={async () => {
-                const openQs = activeAttempt.questions.filter((q: AttemptQuestion) => {
-                  const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-                  return ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational"].includes(t);
-                });
-                const ungraded = openQs.filter((q: AttemptQuestion) => {
-                  const sub = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
-                  return !sub || !sub.is_final;
-                });
-                if (ungraded.length > 0) {
-                  toast.error(`Cannot finalize. ${ungraded.length} manually graded questions are not finalized yet.`);
-                } else {
-                  toast.success("All validations passed! Ready for release.");
+                if (!activeAttempt) return;
+                try {
+                  const check = await gradingApi.verifyAttemptGrades(activeAttempt.id);
+                  if (!check.valid) {
+                    if (check.ungraded_count > 0) {
+                      toast.error(`Cannot finalize. ${check.ungraded_count} manually graded questions are not finalized yet.`);
+                    }
+                    if (check.unreviewed_bulk_count > 0) {
+                      toast.warning(`Warning: ${check.unreviewed_bulk_count} grades were bulk-accepted via AI suggestion without individual review. Please review these submissions individually before release.`);
+                    }
+                  } else {
+                    toast.success("All validations passed! Ready for release.");
+                  }
+                } catch (err) {
+                  toast.error("Failed to execute verification checks.");
                 }
               }}
             >
@@ -970,8 +1062,7 @@ export default function LecturerGradingQueue() {
             <div className="flex-1 overflow-y-auto space-y-2 pr-1">
               {activeAttempt.questions?.map((q: AttemptQuestion, idx: number) => {
                 const sub = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
-                const qTypeStr = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-                const isAuto = ["mcq", "truefalse", "true_false", "matching", "fillblank", "fillblanks", "ordering"].includes(qTypeStr);
+                const isAuto = isQuestionAutoGraded(q);
 
                 let statusBadge = (
                   <Badge variant="outline" className="text-[9px] font-bold py-0 h-4 uppercase tracking-wider bg-amber-500/5 text-amber-600 border-amber-500/15">
@@ -1365,7 +1456,10 @@ export default function LecturerGradingQueue() {
                     queueItemId={selectedStudent?.id}
                     responseId={currentSubmission.id}
                     maxScore={currentQuestion?.marks || 10}
-                    onSuggestionApplied={(score) => setOverrideScore(score.toString())}
+                    onSuggestionApplied={(score) => {
+                      setOverrideScore(score.toString());
+                      toast.success("Suggested score applied to form — click 'Confirm Evaluation' below to save.");
+                    }}
                   />
 
                   <AIFeedbackEditor
@@ -1397,7 +1491,7 @@ export default function LecturerGradingQueue() {
                         if (currentSubmission.ai_feedback_draft) {
                           setFinalFeedback(currentSubmission.ai_feedback_draft);
                         }
-                        toast.success("AI suggested score & feedback applied.");
+                        toast.success("AI suggested score & feedback applied to form — click 'Confirm Evaluation' below to save.");
                       }}
                     >
                       Accept AI
@@ -1458,6 +1552,43 @@ export default function LecturerGradingQueue() {
                       value={finalFeedback}
                       onChange={(e) => setFinalFeedback(e.target.value)}
                     />
+                    
+                    {currentSubmission && currentSubmission.ai_feedback_draft && (
+                      <div className="space-y-2 pt-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-semibold text-muted-foreground">Draft Origin:</span>
+                          {finalFeedback === currentSubmission.ai_feedback_draft ? (
+                            <Badge variant="outline" className="text-[10px] font-bold uppercase bg-emerald-500/10 border-emerald-500/20 text-emerald-700">
+                              AI-Authored (Verbatim)
+                            </Badge>
+                          ) : finalFeedback ? (
+                            <Badge variant="outline" className="text-[10px] font-bold uppercase bg-amber-500/10 border-amber-500/20 text-amber-700">
+                              AI-Authored (Edited)
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[10px] font-bold uppercase bg-blue-500/10 border-blue-500/20 text-blue-700">
+                              Lecturer-Authored (Clear)
+                            </Badge>
+                          )}
+                        </div>
+                        
+                        {finalFeedback && finalFeedback !== currentSubmission.ai_feedback_draft && (
+                          <div className="text-[11px] p-2.5 rounded-lg border bg-muted/20 space-y-1">
+                            <span className="font-bold text-muted-foreground uppercase text-[9px] block">Lecturer Additions Highlight</span>
+                            <p className="leading-relaxed text-foreground/80">
+                              {finalFeedback.split(" ").map((word, i) => {
+                                const isNew = !currentSubmission.ai_feedback_draft?.split(" ").includes(word);
+                                return (
+                                  <span key={i} className={isNew ? "bg-emerald-100 text-emerald-800 px-0.5 rounded" : ""}>
+                                    {word}{" "}
+                                  </span>
+                                );
+                              })}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   <div className="flex flex-col gap-3">
@@ -2098,11 +2229,22 @@ export default function LecturerGradingQueue() {
                             </TableCell>
                             <TableCell className="py-2">
                               {item.status === "AI_SUGGESTED" ? (
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className="text-[9px] font-bold bg-blue-500/5 text-blue-600 border-blue-500/10">
-                                    AI SUGGESTED
-                                  </Badge>
-                                  <span className="text-[10px] font-bold text-blue-600/70">{Math.round((item.ai_confidence || 0) * 100)}% Confidence</span>
+                                <div className="flex flex-col gap-1 items-start">
+                                  <div className="flex items-center gap-2">
+                                    <Badge variant="outline" className="text-[9px] font-bold bg-blue-500/5 text-blue-600 border-blue-500/10">
+                                      AI SUGGESTED
+                                    </Badge>
+                                    <span className="text-[10px] font-bold text-blue-600/70">{Math.round((item.ai_confidence || 0) * 100)}% Confidence</span>
+                                  </div>
+                                  {item.ai_grading_basis === "RUBRIC" ? (
+                                    <Badge variant="outline" className="text-[8px] font-bold bg-emerald-500/10 border-emerald-500/20 text-emerald-700 shadow-none uppercase">
+                                      Rubric-Based
+                                    </Badge>
+                                  ) : (
+                                    <Badge variant="outline" className="text-[8px] font-bold bg-amber-500/10 border-amber-500/20 text-amber-700 shadow-none uppercase">
+                                      General Knowledge
+                                    </Badge>
+                                  )}
                                 </div>
                               ) : (
                                 <span className="text-[10px] font-bold text-muted-foreground/40 italic">Not Assisted</span>
@@ -2221,7 +2363,17 @@ export default function LecturerGradingQueue() {
                           {item.ai_suggested_score !== null && (
                             <div className="p-2.5 bg-primary/5 rounded-lg border border-primary/10 flex justify-between items-center text-xs">
                               <span className="font-semibold text-primary">AI Suggestion: {item.ai_suggested_score} pts (Confidence: {Math.round((item.ai_confidence || 0) * 100)}%)</span>
-                              <Button size="sm" variant="outline" className="h-7 text-[10px]" onClick={() => handleBatchApplyAi(item.response_id, item.ai_suggested_score!)}>Use Suggestion</Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 text-[10px] font-bold border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 transition-colors"
+                                onClick={() => {
+                                  setBatchReviewItem(item);
+                                  setShowBatchReviewModal(true);
+                                }}
+                              >
+                                Review Suggestion
+                              </Button>
                             </div>
                           )}
 
@@ -2333,7 +2485,7 @@ export default function LecturerGradingQueue() {
               <Label className="text-xs font-semibold text-muted-foreground/80">
                 Select Release Assessment Context
               </Label>
-              <Select value={assessmentId} onValueChange={setAssessmentId}>
+              <Select value={releaseAssessmentId} onValueChange={setReleaseAssessmentId}>
                 <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
                   <SelectValue placeholder="Choose assessment..." />
                 </SelectTrigger>
@@ -2347,7 +2499,7 @@ export default function LecturerGradingQueue() {
               </Select>
             </CardHeader>
             <CardContent className="p-5 space-y-6">
-              {assessmentId === "all" ? (
+              {releaseAssessmentId === "all" ? (
                 <div className="py-20 text-center text-sm font-medium text-muted-foreground">
                   <p className="italic">Awaiting release context selection.</p>
                 </div>
@@ -2414,7 +2566,7 @@ export default function LecturerGradingQueue() {
 
                       <div className="flex items-end">
                         <Button
-                          onClick={() => handleSaveReleasePolicy(assessmentId)}
+                          onClick={() => handleSaveReleasePolicy(releaseAssessmentId)}
                           className="w-full h-9 text-xs font-semibold rounded-lg"
                         >
                           Save Release Policy
@@ -2433,7 +2585,7 @@ export default function LecturerGradingQueue() {
                       </div>
                       <Button
                         className="h-9 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
-                        onClick={() => handleTriggerImmediateRelease(assessmentId)}
+                        onClick={() => handleTriggerImmediateRelease(releaseAssessmentId)}
                         disabled={isSaving}
                       >
                         {isSaving ? <Loader2 className="size-4 animate-spin" /> : <><Unlock className="size-3.5 mr-1.5" /> Release Results Now</>}
@@ -2447,7 +2599,7 @@ export default function LecturerGradingQueue() {
                     </div>
                   )}
 
-                  <ResultReleasePanel assessmentId={assessmentId} />
+                  <ResultReleasePanel assessmentId={releaseAssessmentId} />
                 </div>
               )}
             </CardContent>
@@ -2586,6 +2738,205 @@ export default function LecturerGradingQueue() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Bulk AI Grades Accept Preview Dialog */}
+      <Dialog open={showAcceptAllPreview} onOpenChange={setShowAcceptAllPreview}>
+        <DialogContent className="max-w-4xl max-h-[85vh] flex flex-col p-6 rounded-xl border border-border shadow-2xl bg-background">
+          <DialogHeader className="pb-2 border-b border-border/40">
+            <div className="flex items-center gap-2 text-primary">
+              <BrainCircuit className="size-5" />
+              <DialogTitle className="text-lg font-bold">Review & Approve AI Suggested Grades</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground/80 mt-1">
+              You are bulk-approving AI suggested scores. In accordance with the institutional Human-in-the-Loop policy, please review the rationale and scores before finalizing.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-4">
+            <div className="border border-border/60 rounded-xl overflow-hidden bg-muted/5">
+              <Table>
+                <TableHeader className="bg-muted/30">
+                  <TableRow className="border-border/30 h-10">
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider pl-4">Student</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider">Question</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-center">Score</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-center">Confidence / Basis</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider pr-4">AI Suggested Rationale</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {acceptAllPreviewItems.map((item) => (
+                    <TableRow key={item.id} className="border-border/10 hover:bg-muted/10 h-12">
+                      <TableCell className="text-xs font-bold pl-4 text-foreground truncate max-w-[150px]">
+                        {item.student_name}
+                      </TableCell>
+                      <TableCell className="text-xs font-medium text-muted-foreground truncate max-w-[180px]">
+                        {item.question_title || "Open-ended Question"}
+                      </TableCell>
+                      <TableCell className="text-xs font-bold text-center text-primary tabular-nums">
+                        {item.ai_suggested_score} pts
+                      </TableCell>
+                      <TableCell className="text-center">
+                        <div className="flex flex-col items-center gap-1 justify-center">
+                          <span className="text-[10px] font-semibold text-muted-foreground/80">
+                            {Math.round((item.ai_confidence || 0) * 100)}%
+                          </span>
+                          {item.ai_grading_basis === "RUBRIC" ? (
+                            <Badge variant="outline" className="text-[8px] py-0 font-bold bg-emerald-500/10 border-emerald-500/20 text-emerald-700 uppercase">
+                              Rubric
+                            </Badge>
+                          ) : (
+                            <Badge variant="outline" className="text-[8px] py-0 font-bold bg-amber-500/10 border-amber-500/20 text-amber-700 uppercase">
+                              General
+                            </Badge>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground/90 pr-4 leading-relaxed max-w-[280px]">
+                        <p className="line-clamp-2 hover:line-clamp-none transition-all cursor-pointer bg-muted/20 hover:bg-muted/50 p-1.5 rounded-lg border border-border/40" title="Click to expand rationale">
+                          {item.ai_feedback_draft || item.feedback || "No rationale provided."}
+                        </p>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <DialogFooter className="pt-3 border-t border-border/40 flex justify-end gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAcceptAllPreview(false)}
+              className="text-xs rounded-xl h-9"
+            >
+              Cancel & Edit Individually
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={commitAcceptAllAi}
+              className="text-xs rounded-xl h-9 bg-primary hover:bg-primary/95 text-primary-foreground font-semibold"
+            >
+              Confirm & Finalize {acceptAllPreviewItems.length} Grades
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Single Batch AI Grade Review Modal */}
+      <Dialog open={showBatchReviewModal} onOpenChange={setShowBatchReviewModal}>
+        <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-6 rounded-xl border border-border shadow-2xl bg-background">
+          <DialogHeader className="pb-2 border-b border-border/40">
+            <div className="flex items-center gap-2 text-primary">
+              <BrainCircuit className="size-5" />
+              <DialogTitle className="text-lg font-bold">Review AI Suggestion</DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground/80 mt-1">
+              Verify the student response and AI feedback draft details below before finalizing this grade.
+            </DialogDescription>
+          </DialogHeader>
+
+          {batchReviewLoading ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-12 space-y-3">
+              <Loader2 className="size-6 text-primary animate-spin" />
+              <p className="text-xs text-muted-foreground">Retrieving grading details & rubric alignment...</p>
+            </div>
+          ) : batchReviewItem ? (
+            <div className="flex-1 overflow-y-auto my-4 pr-1 space-y-4 text-left">
+              {/* Student Metadata */}
+              <div className="grid grid-cols-2 gap-3 text-xs bg-muted/20 p-3 rounded-lg border border-border/40">
+                <div>
+                  <span className="font-semibold text-muted-foreground block mb-0.5">Student</span>
+                  <span className="font-bold text-foreground">{batchReviewItem.student_name}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-muted-foreground block mb-0.5">Suggested Score</span>
+                  <span className="font-bold text-primary">{batchReviewItem.ai_suggested_score} pts</span>
+                </div>
+              </div>
+
+              {/* Full Response Text */}
+              <div className="space-y-1.5">
+                <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Student Response</span>
+                <div className="text-xs p-3 bg-muted/10 border border-border/60 rounded-xl whitespace-pre-wrap leading-relaxed max-h-[150px] overflow-y-auto font-mono">
+                  {batchReviewItem.student_answer || <span className="italic text-muted-foreground">No response.</span>}
+                </div>
+              </div>
+
+              {/* AI Details / Rubric / Basis */}
+              <div className="space-y-3 border-t border-border/30 pt-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">AI Grading Basis</span>
+                  {batchReviewDetails?.ai_grading_basis === "RUBRIC" ? (
+                    <Badge variant="outline" className="text-[10px] font-bold uppercase bg-emerald-500/10 border-emerald-500/20 text-emerald-700 shadow-none">
+                      Rubric-Based AI Grading
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[10px] font-bold uppercase bg-amber-500/10 border-amber-500/20 text-amber-700 shadow-none">
+                      General Knowledge AI Grading
+                    </Badge>
+                  )}
+                </div>
+
+                <div className="space-y-1.5">
+                  <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">AI Grading Rationale & Feedback Draft</span>
+                  <div className="text-xs p-3 bg-primary/[0.02] border border-primary/10 rounded-xl leading-relaxed">
+                    {batchReviewDetails?.ai_feedback_draft || batchReviewDetails?.ai_rationale || "No rationale or feedback draft available."}
+                  </div>
+                </div>
+
+                {batchReviewDetails?.rubric_scores && batchReviewDetails.rubric_scores.length > 0 && (
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Rubric Criterion Breakdown</span>
+                    <div className="space-y-2">
+                      {batchReviewDetails.rubric_scores.map((note: any, idx: number) => (
+                        <div key={idx} className="bg-background rounded-lg border border-border/40 p-2.5 text-xs">
+                          <div className="flex justify-between font-bold mb-1">
+                            <span>{note.criterion}</span>
+                            <span className="text-primary">{note.marks_awarded} pts</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-normal">{note.notes}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 flex items-center justify-center py-6 text-sm text-muted-foreground">
+              No response data selected.
+            </div>
+          )}
+
+          <DialogFooter className="pt-3 border-t border-border/40 flex justify-end gap-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowBatchReviewModal(false)}
+              className="text-xs rounded-xl h-9"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              disabled={batchReviewLoading || !batchReviewItem}
+              onClick={() => {
+                if (batchReviewItem) {
+                  handleBatchApplyAi(batchReviewItem.response_id, batchReviewItem.ai_suggested_score!);
+                  setShowBatchReviewModal(false);
+                }
+              }}
+              className="text-xs rounded-xl h-9 bg-primary hover:bg-primary/95 text-primary-foreground font-semibold"
+            >
+              Confirm & Save Grade
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

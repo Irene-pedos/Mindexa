@@ -72,6 +72,7 @@ class ResultBreakdownItem(BaseModel):
     is_correct: bool | None
     feedback: str | None
     grading_mode: str | None
+    feedback_author_basis: str | None = None
     was_skipped: bool
 
     # UI fields for the student (populated by result_service)

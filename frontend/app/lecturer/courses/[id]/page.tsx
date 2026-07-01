@@ -69,6 +69,19 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { FileCodeIcon, XIcon } from "lucide-react";
+import { Spinner } from "@/components/ui/spinner";
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentGroup,
+  AttachmentMedia,
+  AttachmentTitle,
+} from "@/components/ui/attachment";
+
 
 export default function LecturerWorkspaceDetail() {
   const params = useParams();
@@ -501,17 +514,28 @@ export default function LecturerWorkspaceDetail() {
             </CardHeader>
             <CardContent className="p-0">
               <ScrollArea className="h-64">
-                {materials.length === 0 ? (
+                {materials.length === 0 && !uploading ? (
                   <div className="flex flex-col items-center justify-center py-12 px-4 space-y-2 text-muted-foreground">
                     <FileText className="size-6 opacity-20" />
                     <p className="text-xs font-medium italic">No files uploaded.</p>
                   </div>
                 ) : (
-                  <div className="divide-y divide-border/20">
+                  <AttachmentGroup className="flex-col gap-2 p-4">
+                    {uploading && (
+                      <Attachment state="uploading" className="w-full">
+                        <AttachmentMedia>
+                          <Spinner />
+                        </AttachmentMedia>
+                        <AttachmentContent>
+                          <AttachmentTitle>Uploading material...</AttachmentTitle>
+                          <AttachmentDescription>Please wait · Processing file</AttachmentDescription>
+                        </AttachmentContent>
+                      </Attachment>
+                    )}
                     {materials.map((m) => (
-                      <div
+                      <Attachment
                         key={m.id}
-                        className="flex items-center justify-between p-3 px-4 hover:bg-primary/[0.03] transition-colors group cursor-pointer"
+                        className="w-full justify-between hover:bg-accent/10 transition-all cursor-pointer"
                         onClick={async () => {
                           try {
                             await lecturerApi.downloadMaterial(m.id, m.original_filename);
@@ -521,46 +545,30 @@ export default function LecturerWorkspaceDetail() {
                           }
                         }}
                       >
-                        <div className="flex items-center gap-3 truncate">
-                          <div className="bg-primary/5 p-1.5 rounded-lg text-primary border border-primary/10">
-                            <FileText className="size-4" />
-                          </div>
-                          <div className="truncate">
-                            <p className="text-xs font-bold truncate text-foreground group-hover:text-primary transition-colors">
-                              {m.display_name || m.original_filename}
-                            </p>
-                            <p className="text-[10px] font-medium text-muted-foreground/70 mt-0.5 tracking-tight flex items-center gap-1.5">
-                              <span>{m.file_extension.replace(".", "").toUpperCase()}</span>
-                              <span>•</span>
-                              <span>{(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB</span>
-                              {!m.is_student_visible && (
-                                <>
-                                  <span>•</span>
-                                  <span className="text-amber-600 bg-amber-50 px-1 rounded-sm border border-amber-200">Hidden</span>
-                                </>
-                              )}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-primary hover:bg-primary/10">
-                            <Download className="size-3.5" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="icon" 
-                            className="h-6 w-6 text-destructive hover:bg-destructive/10"
+                        <AttachmentMedia>
+                          <FileCodeIcon className="size-4 text-primary" />
+                        </AttachmentMedia>
+                        <AttachmentContent>
+                          <AttachmentTitle>{m.display_name || m.original_filename}</AttachmentTitle>
+                          <AttachmentDescription>
+                            {m.file_extension.replace(".", "").toUpperCase()} · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB
+                            {!m.is_student_visible && " · Hidden"}
+                          </AttachmentDescription>
+                        </AttachmentContent>
+                        <AttachmentActions onClick={(e) => e.stopPropagation()}>
+                          <AttachmentAction
+                            aria-label="Remove material"
                             onClick={(e) => {
                               e.stopPropagation();
                               setDeleteMaterialId(m.id);
                             }}
                           >
-                            <Trash2 className="size-3.5" />
-                          </Button>
-                        </div>
-                      </div>
+                            <XIcon className="size-4 text-destructive" />
+                          </AttachmentAction>
+                        </AttachmentActions>
+                      </Attachment>
                     ))}
-                  </div>
+                  </AttachmentGroup>
                 )}
               </ScrollArea>
             </CardContent>

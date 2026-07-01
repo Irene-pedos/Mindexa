@@ -2379,7 +2379,7 @@ export default function NewAssessmentBuilder() {
                   const qType = aq.question.question_type
                     .toLowerCase()
                     .replaceAll("_", "") as QuestionType;
-                  const rawContent = aq.question.explanation || aq.question.options?.[0]?.content || "";
+                  const rawContent = aq.question.explanation || aq.question.options?.[0]?.option_text || aq.question.options?.[0]?.content || "";
                   const parsed = ["shortanswer", "essay", "computational"].includes(qType)
                     ? parseOpenEndedExplanation(qType, rawContent)
                     : null;
@@ -3206,91 +3206,90 @@ export default function NewAssessmentBuilder() {
     const candidate = aiCandidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
+    setIsReviewApplying(true);
+    isReviewApplyingRef.current = true;
+    let nextQuestions: Question[] = [];
+
     const action = async () => {
-      setIsReviewApplying(true);
-      isReviewApplyingRef.current = true;
-      try {
-        const activeId = draftIdRef.current;
-        const targetSecId =
-          (candidate as any)._sectionId ||
-          (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+      const activeId = draftIdRef.current;
+      const targetSecId =
+        (candidate as any)._sectionId ||
+        (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
 
-        // Calculate marks per question using questionsRef.current to avoid stale closures
-        const sectionObj = blueprint.find((s) => s.id === targetSecId);
-        let marksPerQuestion = 2;
-        if (sectionObj) {
-          const sectionQuestions = questionsRef.current.filter(
-            (q) => q.sectionId === targetSecId,
-          );
-          const allocatedMarks = sectionQuestions.reduce(
-            (sum, q) => sum + (q.marks || 0),
-            0,
-          );
-          const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
-          const targetQuestionCount =
-            parseInt(sectionObj.questions as any) || 1;
-          const remainingSectionMarks = Math.max(
-            0,
-            totalSectionMarks - allocatedMarks,
-          );
-          const remainingQuestionSlots = Math.max(
-            1,
-            targetQuestionCount - sectionQuestions.length,
-          );
-          marksPerQuestion = Math.max(
-            1,
-            Math.round(remainingSectionMarks / remainingQuestionSlots),
-          );
-        }
-
-        const res = await aiGenerationApi.reviewQuestion(candidateId, {
-          decision: "approved",
-          add_to_assessment_id: activeId || undefined,
-          add_to_section_id: targetSecId || undefined,
-          marks_if_added: marksPerQuestion,
-          save_to_bank: saveToBank,
-        });
-
-        const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
-        const realId =
-          res?.assessment_question?.id ||
-          res?.promoted_question?.id ||
-          candidate.id;
-
-        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
-        newQ.id = realId;
-        const nextQuestions = [...questionsRef.current, newQ];
-        setQuestions(nextQuestions);
-        setAiCandidates((prev) => {
-          const updated = prev.filter((c) => c.id !== candidateId);
-          if (updated.length === 0) {
-            setAiReviewDrawerOpen(false);
-            if (activeStep !== 6) {
-              setActiveStep(5);
-            }
-          }
-          return updated;
-        });
-        toast.success("Question accepted and added!");
-
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        await runAutosave(5, undefined, undefined, nextQuestions);
-      } catch (err) {
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        toast.error("Failed to accept AI question.");
-        throw err;
+      // Calculate marks per question using questionsRef.current to avoid stale closures
+      const sectionObj = blueprint.find((s) => s.id === targetSecId);
+      let marksPerQuestion = 2;
+      if (sectionObj) {
+        const sectionQuestions = questionsRef.current.filter(
+          (q) => q.sectionId === targetSecId,
+        );
+        const allocatedMarks = sectionQuestions.reduce(
+          (sum, q) => sum + (q.marks || 0),
+          0,
+        );
+        const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
+        const targetQuestionCount =
+          parseInt(sectionObj.questions as any) || 1;
+        const remainingSectionMarks = Math.max(
+          0,
+          totalSectionMarks - allocatedMarks,
+        );
+        const remainingQuestionSlots = Math.max(
+          1,
+          targetQuestionCount - sectionQuestions.length,
+        );
+        marksPerQuestion = Math.max(
+          1,
+          Math.round(remainingSectionMarks / remainingQuestionSlots),
+        );
       }
-    };
 
-    activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-      .then(action)
-      .catch((err) => {
-        console.error("Error in accept candidate queue execution:", err);
+      const res = await aiGenerationApi.reviewQuestion(candidateId, {
+        decision: "approved",
+        add_to_assessment_id: activeId || undefined,
+        add_to_section_id: targetSecId || undefined,
+        marks_if_added: marksPerQuestion,
+        save_to_bank: saveToBank,
       });
 
-    await activeAutosavePromiseRef.current;
+      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+      const realId =
+        res?.assessment_question?.id ||
+        res?.promoted_question?.id ||
+        candidate.id;
+
+      const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
+      newQ.id = realId;
+      nextQuestions = [...questionsRef.current, newQ];
+      setQuestions(nextQuestions);
+      setAiCandidates((prev) => {
+        const updated = prev.filter((c) => c.id !== candidateId);
+        if (updated.length === 0) {
+          setAiReviewDrawerOpen(false);
+          if (activeStep !== 6) {
+            setActiveStep(5);
+          }
+        }
+        return updated;
+      });
+      toast.success("Question accepted and added!");
+    };
+
+    try {
+      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
+        .then(action);
+      await activeAutosavePromiseRef.current;
+    } catch (err) {
+      toast.error("Failed to accept AI question.");
+      console.error("Error in accept candidate queue execution:", err);
+    } finally {
+      isReviewApplyingRef.current = false;
+      setIsReviewApplying(false);
+    }
+
+    if (nextQuestions.length > 0) {
+      await runAutosave(5, undefined, undefined, nextQuestions);
+    }
   };
 
   const handleRejectCandidate = async (candidateId: string) => {
@@ -3309,20 +3308,113 @@ export default function NewAssessmentBuilder() {
     const candidate = aiCandidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
-    const action = async () => {
-      setIsReviewApplying(true);
-      isReviewApplyingRef.current = true;
-      try {
-        const activeId = draftIdRef.current;
-        const targetSecId =
-          (candidate as any)._sectionId ||
-          (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+    setIsReviewApplying(true);
+    isReviewApplyingRef.current = true;
+    let nextQuestions: Question[] = [];
 
-        // Calculate marks per question using questionsRef.current to avoid stale closures
+    const action = async () => {
+      const activeId = draftIdRef.current;
+      const targetSecId =
+        (candidate as any)._sectionId ||
+        (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+
+      // Calculate marks per question using questionsRef.current to avoid stale closures
+      const sectionObj = blueprint.find((s) => s.id === targetSecId);
+      let marksPerQuestion = 2;
+      if (sectionObj) {
+        const sectionQuestions = questionsRef.current.filter(
+          (q) => q.sectionId === targetSecId,
+        );
+        const allocatedMarks = sectionQuestions.reduce(
+          (sum, q) => sum + (q.marks || 0),
+          0,
+        );
+        const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
+        const targetQuestionCount =
+          parseInt(sectionObj.questions as any) || 1;
+        const remainingSectionMarks = Math.max(
+          0,
+          totalSectionMarks - allocatedMarks,
+        );
+        const remainingQuestionSlots = Math.max(
+          1,
+          targetQuestionCount - sectionQuestions.length,
+        );
+        marksPerQuestion = Math.max(
+          1,
+          Math.round(remainingSectionMarks / remainingQuestionSlots),
+        );
+      }
+
+      const res = await aiGenerationApi.reviewQuestion(candidateId, {
+        decision: "edited",
+        modified_question_text: editingText,
+        modified_explanation: editingExplanation,
+        modified_options_json: JSON.stringify(editingOptions),
+        add_to_assessment_id: activeId || undefined,
+        add_to_section_id: targetSecId || undefined,
+        marks_if_added: marksPerQuestion,
+        save_to_bank: saveToBank,
+      });
+      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+      const realId =
+        res?.assessment_question?.id ||
+        res?.promoted_question?.id ||
+        candidate.id;
+
+      const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion, editingExplanation, editingText, editingOptions);
+      newQ.id = realId;
+      nextQuestions = [...questionsRef.current, newQ];
+      setQuestions(nextQuestions);
+      setAiCandidates((prev) => {
+        const updated = prev.filter((c) => c.id !== candidateId);
+        if (updated.length === 0) {
+          setAiReviewDrawerOpen(false);
+          if (activeStep !== 6) {
+            setActiveStep(5);
+          }
+        }
+        return updated;
+      });
+      setEditingCandidateId(null);
+      toast.success("Edited question accepted!");
+    };
+
+    try {
+      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
+        .then(action);
+      await activeAutosavePromiseRef.current;
+    } catch (err) {
+      toast.error("Failed to save edited question.");
+      console.error("Error in save edited candidate queue execution:", err);
+    } finally {
+      isReviewApplyingRef.current = false;
+      setIsReviewApplying(false);
+    }
+
+    if (nextQuestions.length > 0) {
+      await runAutosave(5, undefined, undefined, nextQuestions);
+    }
+  };
+
+  const handleAcceptAllCandidates = async () => {
+    setIsReviewApplying(true);
+    isReviewApplyingRef.current = true;
+    let finalQuestionsList: Question[] = [];
+
+    const action = async () => {
+      const activeId = draftIdRef.current;
+      const simulatedQuestionsForMarks = [...questionsRef.current];
+      const candidatesWithMarks = aiCandidates.map((c) => {
+        const targetSecId =
+          (c as any)._sectionId ||
+          (aiTargetSectionId === "all"
+            ? blueprint[0].id
+            : aiTargetSectionId);
         const sectionObj = blueprint.find((s) => s.id === targetSecId);
         let marksPerQuestion = 2;
         if (sectionObj) {
-          const sectionQuestions = questionsRef.current.filter(
+          const sectionQuestions = simulatedQuestionsForMarks.filter(
             (q) => q.sectionId === targetSecId,
           );
           const allocatedMarks = sectionQuestions.reduce(
@@ -3346,168 +3438,71 @@ export default function NewAssessmentBuilder() {
           );
         }
 
-        const res = await aiGenerationApi.reviewQuestion(candidateId, {
-          decision: "edited",
-          modified_question_text: editingText,
-          modified_explanation: editingExplanation,
-          modified_options_json: JSON.stringify(editingOptions),
-          add_to_assessment_id: activeId || undefined,
-          add_to_section_id: targetSecId || undefined,
-          marks_if_added: marksPerQuestion,
-          save_to_bank: saveToBank,
-        });
-        const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+        simulatedQuestionsForMarks.push({
+          id: c.id,
+          sectionId: targetSecId,
+          marks: marksPerQuestion,
+          text: "",
+          type: "mcq",
+          options: [],
+          aiGenerated: true,
+        } as any);
+
+        return {
+          candidate: c,
+          targetSecId,
+          marksPerQuestion,
+        };
+      });
+
+      const results = await Promise.all(
+        candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }) => {
+          return aiGenerationApi.reviewQuestion(candidate.id, {
+            decision: "approved",
+            add_to_assessment_id: activeId || undefined,
+            add_to_section_id: targetSecId || undefined,
+            marks_if_added: marksPerQuestion,
+            save_to_bank: saveToBank,
+          });
+        }),
+      );
+
+      const simulatedQuestions = [...questionsRef.current];
+      candidatesWithMarks.forEach(({ candidate, targetSecId, marksPerQuestion }, index) => {
+        const res = results[index];
         const realId =
-          res?.assessment_question?.id ||
-          res?.promoted_question?.id ||
-          candidate.id;
+          res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
 
-        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion, editingExplanation, editingText, editingOptions);
+        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
         newQ.id = realId;
-        const nextQuestions = [...questionsRef.current, newQ];
-        setQuestions(nextQuestions);
-        setAiCandidates((prev) => {
-          const updated = prev.filter((c) => c.id !== candidateId);
-          if (updated.length === 0) {
-            setAiReviewDrawerOpen(false);
-            if (activeStep !== 6) {
-              setActiveStep(5);
-            }
-          }
-          return updated;
-        });
-        setEditingCandidateId(null);
-        toast.success("Edited question accepted!");
-
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        await runAutosave(5, undefined, undefined, nextQuestions);
-      } catch (err) {
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        toast.error("Failed to save edited question.");
-        throw err;
-      }
-    };
-
-    activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-      .then(action)
-      .catch((err) => {
-        console.error("Error in save edited candidate queue execution:", err);
+        simulatedQuestions.push(newQ);
       });
 
-    await activeAutosavePromiseRef.current;
-  };
-
-  const handleAcceptAllCandidates = async () => {
-    const action = async () => {
-      const activeId = draftIdRef.current;
-      setIsReviewApplying(true);
-      isReviewApplyingRef.current = true;
-      try {
-        // Pre-calculate marks sequentially using a simulated list of questions in progress
-        const simulatedQuestionsForMarks = [...questionsRef.current];
-        const candidatesWithMarks = aiCandidates.map((c) => {
-          const targetSecId =
-            (c as any)._sectionId ||
-            (aiTargetSectionId === "all"
-              ? blueprint[0].id
-              : aiTargetSectionId);
-          const sectionObj = blueprint.find((s) => s.id === targetSecId);
-          let marksPerQuestion = 2;
-          if (sectionObj) {
-            const sectionQuestions = simulatedQuestionsForMarks.filter(
-              (q) => q.sectionId === targetSecId,
-            );
-            const allocatedMarks = sectionQuestions.reduce(
-              (sum, q) => sum + (q.marks || 0),
-              0,
-            );
-            const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
-            const targetQuestionCount =
-              parseInt(sectionObj.questions as any) || 1;
-            const remainingSectionMarks = Math.max(
-              0,
-              totalSectionMarks - allocatedMarks,
-            );
-            const remainingQuestionSlots = Math.max(
-              1,
-              targetQuestionCount - sectionQuestions.length,
-            );
-            marksPerQuestion = Math.max(
-              1,
-              Math.round(remainingSectionMarks / remainingQuestionSlots),
-            );
-          }
-
-          // Push a temporary placeholder question to advance the state for subsequent calculations
-          simulatedQuestionsForMarks.push({
-            id: c.id,
-            sectionId: targetSecId,
-            marks: marksPerQuestion,
-            text: "",
-            type: "mcq",
-            options: [],
-            aiGenerated: true,
-          } as any);
-
-          return {
-            candidate: c,
-            targetSecId,
-            marksPerQuestion,
-          };
-        });
-
-        const results = await Promise.all(
-          candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }) => {
-            return aiGenerationApi.reviewQuestion(candidate.id, {
-              decision: "approved",
-              add_to_assessment_id: activeId || undefined,
-              add_to_section_id: targetSecId || undefined,
-              marks_if_added: marksPerQuestion,
-              save_to_bank: saveToBank,
-            });
-          }),
-        );
-
-        const simulatedQuestions = [...questionsRef.current];
-        const newQs = candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }, index) => {
-          const res = results[index];
-          const realId =
-            res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
-
-          const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
-          newQ.id = realId;
-          simulatedQuestions.push(newQ);
-          return newQ;
-        });
-
-        setQuestions(simulatedQuestions);
-        setAiCandidates([]);
-        setAiReviewDrawerOpen(false);
-        if (activeStep !== 6) {
-          setActiveStep(5);
-        }
-        toast.success("All candidate questions accepted!");
-
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        await runAutosave(5, undefined, undefined, simulatedQuestions);
-      } catch (err) {
-        isReviewApplyingRef.current = false;
-        setIsReviewApplying(false);
-        toast.error("Failed to accept all questions.");
-        throw err;
+      finalQuestionsList = simulatedQuestions;
+      setQuestions(simulatedQuestions);
+      setAiCandidates([]);
+      setAiReviewDrawerOpen(false);
+      if (activeStep !== 6) {
+        setActiveStep(5);
       }
+      toast.success("All candidate questions accepted!");
     };
 
-    activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-      .then(action)
-      .catch((err) => {
-        console.error("Error in accept all candidates queue execution:", err);
-      });
+    try {
+      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
+        .then(action);
+      await activeAutosavePromiseRef.current;
+    } catch (err) {
+      toast.error("Failed to accept all questions.");
+      console.error("Error in accept all candidates queue execution:", err);
+    } finally {
+      isReviewApplyingRef.current = false;
+      setIsReviewApplying(false);
+    }
 
-    await activeAutosavePromiseRef.current;
+    if (finalQuestionsList.length > 0) {
+      await runAutosave(5, undefined, undefined, finalQuestionsList);
+    }
   };
 
   const handleRejectAllCandidates = async () => {
@@ -4030,7 +4025,10 @@ export default function NewAssessmentBuilder() {
         sortedQuestions.map((aq: any) => {
           const type = aq.question.question_type.toLowerCase().replaceAll("_", "") as QuestionType;
           const optionsRaw = aq.question.options || [];
-          const unpacked = parseOpenEndedExplanation(type, optionsRaw[0]?.content || aq.question.explanation || "");
+          const unpacked = parseOpenEndedExplanation(
+            type,
+            optionsRaw[0]?.option_text || optionsRaw[0]?.content || aq.question.explanation || ""
+          );
           return {
             id: aq.question.id,
             sectionId: aq.assessment_section_id,
@@ -4049,8 +4047,8 @@ export default function NewAssessmentBuilder() {
                 }]
               : optionsRaw.map((o: any, idx: number) => ({
                   id: o.id,
-                  option_text: o.content,
-                  option_text_right: o.match_value,
+                  option_text: o.option_text || o.content || "",
+                  option_text_right: o.option_text_right || o.match_value || "",
                   is_correct: o.is_correct,
                   order_index: o.order_index,
                   match_key: o.match_key,

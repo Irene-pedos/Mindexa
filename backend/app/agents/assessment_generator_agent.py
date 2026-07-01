@@ -195,6 +195,8 @@ class AssessmentGeneratorAgent(BaseAgent):
 
     def _parse_generated_questions(self, content: str) -> list[GeneratedQuestion]:
         """Parse and normalize common AI response payload variants."""
+        import structlog
+        logger = structlog.get_logger(__name__)
         try:
             content_str = content.strip()
             match = re.search(r"```json\s*(.*?)\s*```", content_str, re.DOTALL)
@@ -224,12 +226,29 @@ class AssessmentGeneratorAgent(BaseAgent):
                 else:
                     clean_content = content_str
 
-            data = json.loads(clean_content, strict=False)
+            import json_repair
+            data = json_repair.loads(clean_content)
+            if data is None:
+                # Fall back to standard json loads to let normal exception raise if completely empty/unrepairable
+                data = json.loads(clean_content, strict=False)
+
             normalized_items = self._coerce_payload_to_question_items(data)
-            return [GeneratedQuestion.model_validate(item) for item in normalized_items]
+            
+            questions = []
+            for item in normalized_items:
+                try:
+                    questions.append(GeneratedQuestion.model_validate(item))
+                except Exception as exc:
+                    logger.warning("Skipped invalid generated question item", item=item, error=str(exc))
+
+            if not questions:
+                raise ValidationError(
+                    "No valid questions could be parsed or validated from the AI response.",
+                    code="AI_OUTPUT_VALIDATION_FAILED"
+                )
+
+            return questions
         except (json.JSONDecodeError, ValueError, TypeError) as exc:
-            import structlog
-            logger = structlog.get_logger(__name__)
             logger.error("Failed parsing generated questions", raw_content=content, error=str(exc))
             raise ValidationError(
                 f"The AI returned an invalid response: {str(exc)}",

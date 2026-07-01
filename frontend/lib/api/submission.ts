@@ -6,4 +6,5 @@ export const submissionApi = {
   getSubmissionsForAttempt: (attemptId: string) => apiClient(`/submissions/attempt/${attemptId}`),
   getGroupSubmissions: (groupId: string) => apiClient(`/submissions/group/${groupId}`),
   getSubmissionLogs: (submissionId: string) => apiClient(`/submissions/logs/${submissionId}`),
+  uploadSubmissionFile: (formData: FormData) => apiClient(`/submissions/upload`, { method: "POST", body: formData }),
 };

@@ -27,6 +27,7 @@ export interface GradeReviewDetails {
   ai_confidence: number | null;
   rubric_scores: RubricAlignmentNote[] | null;
   is_final: boolean;
+  ai_grading_basis?: string | null;
   ai_feedback_draft?: string | null;
   ai_feedback_strengths?: string[] | null;
   ai_feedback_improvements?: string[] | null;
@@ -56,6 +57,12 @@ export const aiGradingApi = {
   async requestAIFeedbackDraft(responseId: string): Promise<any> {
     return apiClient(`/grading/response/${responseId}/draft-feedback`, {
         method: "POST",
+    });
+  },
+  async submitAIFeedback(gradeId: string, isAccurate: boolean, comments?: string): Promise<any> {
+    return apiClient(`/grading/feedback-ai`, {
+      method: "POST",
+      body: JSON.stringify({ submission_grade_id: gradeId, is_accurate: isAccurate, comments }),
     });
   },
 };
