@@ -236,6 +236,9 @@ class GroupWorkspaceResponse(BaseModel):
     can_request_approval: bool = False
     can_submit: bool = False
     appeal: GroupAppealResponse | None = None
+    total_score: float | None = None
+    feedback: str | None = None
+    member_overrides: dict[str, float] | None = None
 
 
 class SaveGroupAnswerRequest(BaseModel):
@@ -283,6 +286,7 @@ class GroupSubmissionGradeRequest(BaseModel):
     total_score: float = Field(..., ge=0)
     max_score: float = Field(..., gt=0)
     feedback: str | None = Field(default=None, max_length=5000)
+    member_overrides: dict[str, float] | None = None
 
     @model_validator(mode="after")
     def score_cannot_exceed_max(self) -> "GroupSubmissionGradeRequest":

@@ -302,7 +302,8 @@ class GradingRepository:
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[dict[str, Any]], int]:
-        from app.db.models.academic import ClassSection, StudentEnrollment, Course, Institution
+        from app.db.models.academic import (ClassSection, Course, Institution,
+                                            StudentEnrollment)
         from app.db.models.attempt import (AssessmentAttempt, StudentResponse,
                                            SubmissionGrade)
         from app.db.models.question import Question
@@ -395,6 +396,8 @@ class GradingRepository:
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
             .join(Assessment, GradingQueueItem.assessment_id == Assessment.id)
+            .join(Course, Assessment.course_id == Course.id)
+            .join(Institution, Course.institution_id == Institution.id)
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             .outerjoin(StudentEnrollment, and_(

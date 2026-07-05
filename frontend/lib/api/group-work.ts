@@ -66,6 +66,10 @@ export const groupWorkApi = {
       method: "POST",
     }),
 
+  // LECTURER: WORKSPACE
+  getSubmissionWorkspace: (submissionId: string) =>
+    apiClient(`/group-work/submissions/${submissionId}/workspace`),
+
   // STUDENT: WORKSPACE
   getWorkspace: (assessmentId: string) =>
     apiClient(`/group-work/assessments/${assessmentId}/workspace`),
@@ -119,7 +123,7 @@ export const groupWorkApi = {
     }),
 
   // LECTURER: GRADING & RESULTS
-  gradeSubmission: (assessmentId: string, submissionId: string, data: { total_score: number; max_score: number; feedback?: string }) =>
+  gradeSubmission: (assessmentId: string, submissionId: string, data: { total_score: number; max_score: number; feedback?: string; member_overrides?: Record<string, number> }) =>
     apiClient(`/group-work/submissions/${submissionId}/grade?assessment_id=${assessmentId}`, {
       method: "POST",
       body: JSON.stringify(data),

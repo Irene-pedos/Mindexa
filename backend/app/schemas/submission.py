@@ -125,6 +125,8 @@ class SubmissionLogEntry(BaseModel):
     previous_value: dict[str, Any] | None
     new_value: dict[str, Any] | None
     created_at: datetime
+    created_by_id: uuid.UUID | None = None
+    created_by_name: str | None = None
 
 
 class AttemptSubmissionsResponse(BaseModel):

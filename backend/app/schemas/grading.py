@@ -246,6 +246,7 @@ class GroupSubmissionSummary(BaseModel):
     assessment_id: uuid.UUID
     assessment_title: str
     member_count: int
+    approved_member_count: int = 0
     status: str
     score: float | None = None
     max_score: float | None = None
@@ -300,6 +301,11 @@ class ModerateGradeRequest(BaseModel):
     internal_notes: str | None = None
 
 
+class SuggestChangesRequest(BaseModel):
+    """Body for POST /grading/response/{response_id}/suggest-changes."""
+    feedback: str = Field(..., min_length=1)
+
+
 class AIReviewSuggestionResponse(BaseModel):
     status: str
     item_id: uuid.UUID
@@ -344,6 +350,11 @@ class ClassAiSummaryResponse(BaseModel):
     common_mistakes: list[str]
     students_needing_attention: list[dict[str, Any]] # student_id, name, reason
     ai_generated_at: datetime
+    total_ai_graded: int = 0
+    pending_ai_grading: int = 0
+    total_ai_tokens: int = 0
+    total_ai_cost: float = 0.0
+    estimated_remaining_seconds: int = 0
 
 
 class VerifyMarksResponse(BaseModel):

@@ -6,16 +6,16 @@ Service for computing assessment performance aggregates and generating AI insigh
 
 import uuid
 from typing import Any, List
-from sqlalchemy import select, func, and_, or_, exists, not_
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agents.analytics_agent import AnalyticsAgent, AnalyticsAgentOutput
 from app.core.ai.gateway import AIGateway
 from app.core.ai.provider_factory import get_ai_provider
-from app.db.models.result import AssessmentResult, ResultBreakdown
+from app.core.exceptions import NotFoundError
 from app.db.models.assessment import Assessment
 from app.db.models.question import Question
-from app.core.exceptions import NotFoundError
+from app.db.models.result import AssessmentResult, ResultBreakdown
+from sqlalchemy import and_, exists, func, not_, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AnalyticsService:
@@ -62,10 +62,10 @@ class AnalyticsService:
             func.min(AssessmentResult.percentage),
             func.sum(AssessmentResult.is_passing.cast(func.Integer))
         ).where(AssessmentResult.assessment_id == assessment_id)
-        
+
         res = await self.db.execute(stmt)
         cohort_size, avg_score, max_score, min_score, pass_count = res.fetchone() or (0, 0, 0, 0, 0)
-        
+
         pass_rate = (pass_count / cohort_size * 100) if cohort_size > 0 else 0.0
 
         # Grade distribution
@@ -73,7 +73,7 @@ class AnalyticsService:
             AssessmentResult.letter_grade,
             func.count(AssessmentResult.id)
         ).where(AssessmentResult.assessment_id == assessment_id).group_by(AssessmentResult.letter_grade)
-        
+
         grade_res = await self.db.execute(grade_stmt)
         grade_distribution = {str(row[0]): row[1] for row in grade_res.fetchall()}
 
@@ -81,14 +81,20 @@ class AnalyticsService:
         # Find questions where average score < 50%
         q_stmt = select(
             ResultBreakdown.question_id,
-            func.avg(ResultBreakdown.score / ResultBreakdown.max_score * 100).label("avg_pct")
+            func.coalesce(
+                func.avg(ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100),
+                0,
+            ).label("avg_pct")
         ).where(ResultBreakdown.attempt_id.in_(
             select(AssessmentResult.attempt_id).where(AssessmentResult.assessment_id == assessment_id)
-        )).group_by(ResultBreakdown.question_id).having(func.avg(ResultBreakdown.score / ResultBreakdown.max_score * 100) < 50)
-        
+        )).group_by(ResultBreakdown.question_id).having(func.coalesce(
+            func.avg(ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100),
+            0,
+        ) < 50)
+
         q_res = await self.db.execute(q_stmt)
         hard_questions_ids = [row[0] for row in q_res.fetchall()]
-        
+
         hard_questions_text = []
         if hard_questions_ids:
             # Fetch first 50 chars of question content for context
@@ -98,7 +104,7 @@ class AnalyticsService:
 
         # Placeholder for topic analysis (assuming topics are tagged on questions)
         # In a real system, we'd join with Question.topic
-        
+
         return {
             "cohort_size": cohort_size,
             "average_score": avg_score or 0.0,

@@ -12,6 +12,16 @@ export const gradingApi = {
     const queryString = searchParams.toString();
     return apiClient(`/grading/queue${queryString ? `?${queryString}` : ""}`);
   },
+  getGroupGradingQueue: (params: Record<string, any> = {}) => {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== "") {
+        searchParams.append(key, value.toString());
+      }
+    });
+    const queryString = searchParams.toString();
+    return apiClient(`/grading/group-queue${queryString ? `?${queryString}` : ""}`);
+  },
   getGradeDetail: (responseId: string) => apiClient(`/grading/response/${responseId}`),
   saveGrade: (responseId: string, data: Record<string, unknown>) => apiClient(`/grading/confirm-ai`, { 
     method: "POST", 
@@ -30,4 +40,9 @@ export const gradingApi = {
     apiClient(`/grading/assessment/${assessmentId}/analytics`),
   verifyAttemptGrades: (attemptId: string) => 
     apiClient(`/grading/attempt/${attemptId}/verify`),
+  suggestChanges: (responseId: string, feedback: string) => 
+    apiClient(`/grading/response/${responseId}/suggest-changes`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    }),
 };

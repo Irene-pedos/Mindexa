@@ -100,6 +100,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
+import { groupWorkApi } from "@/lib/api/group-work";
 import { authApi } from "@/lib/api/auth";
 import { academicApi } from "@/lib/api/academic";
 import { aiGenerationApi } from "@/lib/api/ai-generation";
@@ -151,6 +152,11 @@ type AssessmentMode =
   | "CAT"
   | "Summative"
   | "Groupwork";
+
+type GroupFormationMode = "SELF_ENROL" | "LECTURER_ASSIGNED" | "AUTO_BALANCED";
+type QuestionDistributionMode = "SHARED" | "PER_GROUP";
+type GroupSubmissionMode = "SINGLE_LEADER" | "ALL_MEMBERS" | "MAJORITY_VOTE";
+
 type Difficulty = "Easy" | "Medium" | "Hard";
 type QuestionType =
   | "mcq"
@@ -208,6 +214,7 @@ interface BlueprintSection {
     | "analyze"
     | "evaluate"
     | "create";
+  per_group?: boolean;
 }
 
 interface Question {
@@ -232,7 +239,9 @@ interface Question {
 }
 
 interface GroupMember {
-  id: string;
+  id: string; // unique ID for React keys and DnD component tracking
+  student_id?: string; // explicit student system ID
+  member_record_id?: string; // backend group member record ID
   name: string;
   email: string;
   is_leader?: boolean;
@@ -624,10 +633,10 @@ function QuestionCard({
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const res = await apiClient("/questions/upload-image", {
+        const res = (await apiClient("/questions/upload-image", {
           method: "POST",
           body: formData,
-        }) as any;
+        })) as any;
         if (res && res.url) {
           onUpdate({ imageUrl: res.url });
           toast.success("Image uploaded successfully.");
@@ -731,7 +740,9 @@ function QuestionCard({
                 value={question.marks === 0 ? "" : question.marks}
                 onChange={(e) => {
                   const val = e.target.value;
-                  onUpdate({ marks: val === "" ? "" as any : parseInt(val) || 0 });
+                  onUpdate({
+                    marks: val === "" ? ("" as any) : parseInt(val) || 0,
+                  });
                 }}
               />
             </div>
@@ -988,16 +999,35 @@ function QuestionCard({
                       />
                       <div className="grid grid-cols-3 gap-2">
                         <div className="col-span-1">
-                           <Input
+                          <Input
                             type="number"
-                            value={opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5"}
+                            value={
+                              opt.match_key !== undefined &&
+                              opt.match_key !== null
+                                ? opt.match_key
+                                : "5"
+                            }
                             onChange={(e) => {
                               const val = e.target.value;
-                              const nextOptions = question.options.map((o, idx) =>
-                                idx === oIdx ? { ...o, match_key: val } : o
+                              const nextOptions = question.options.map(
+                                (o, idx) =>
+                                  idx === oIdx ? { ...o, match_key: val } : o,
                               );
-                              const nextMarks = nextOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
-                              onUpdate({ options: nextOptions, marks: nextMarks });
+                              const nextMarks = nextOptions.reduce(
+                                (sum, o) =>
+                                  sum +
+                                  (parseInt(
+                                    o.match_key !== undefined &&
+                                      o.match_key !== null
+                                      ? o.match_key
+                                      : "5",
+                                  ) || 0),
+                                0,
+                              );
+                              onUpdate({
+                                options: nextOptions,
+                                marks: nextMarks,
+                              });
                             }}
                             placeholder="Marks"
                             className="h-8 text-xs text-center"
@@ -1032,7 +1062,16 @@ function QuestionCard({
                       match_key: "5", // default sub-question marks
                     };
                     const nextOptions = [...question.options, newOpt];
-                    const nextMarks = nextOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+                    const nextMarks = nextOptions.reduce(
+                      (sum, o) =>
+                        sum +
+                        (parseInt(
+                          o.match_key !== undefined && o.match_key !== null
+                            ? o.match_key
+                            : "5",
+                        ) || 0),
+                      0,
+                    );
                     onUpdate({ options: nextOptions, marks: nextMarks });
                   }}
                   className="h-8 text-[11px] border-amber-300 text-amber-900 hover:bg-amber-50"
@@ -1081,7 +1120,9 @@ function QuestionCard({
               ))}
             </div>
             {(() => {
-              const correctCount = question.options.filter((o) => o.is_correct).length;
+              const correctCount = question.options.filter(
+                (o) => o.is_correct,
+              ).length;
               return (
                 <div className="space-y-1">
                   {correctCount === 0 && (
@@ -1166,12 +1207,18 @@ function QuestionCard({
               </Label>
               {(() => {
                 const blankMatches = (question.text || "").match(/\[blank\]/g);
-                const expectedBlanksCount = blankMatches ? blankMatches.length : 0;
-                const blankTargetsCount = question.options.filter((o) => o.is_correct).length;
+                const expectedBlanksCount = blankMatches
+                  ? blankMatches.length
+                  : 0;
+                const blankTargetsCount = question.options.filter(
+                  (o) => o.is_correct,
+                ).length;
                 if (expectedBlanksCount !== blankTargetsCount) {
                   return (
                     <p className="text-[11px] text-amber-600 font-semibold">
-                      ⚠️ Warning: Question text has {expectedBlanksCount} &quot;[blank]&quot; placeholder(s), but you have defined {blankTargetsCount} blank target(s).
+                      ⚠️ Warning: Question text has {expectedBlanksCount}{" "}
+                      &quot;[blank]&quot; placeholder(s), but you have defined{" "}
+                      {blankTargetsCount} blank target(s).
                     </p>
                   );
                 }
@@ -1517,7 +1564,10 @@ function ReviewQuestionCard({
               {question.marks} Marks
             </Badge>
             {question.aiGenerated && (
-              <Badge variant="secondary" className="h-5 text-[10px] bg-purple-50 text-purple-700 border-purple-200 gap-1 font-bold">
+              <Badge
+                variant="secondary"
+                className="h-5 text-[10px] bg-purple-50 text-purple-700 border-purple-200 gap-1 font-bold"
+              >
                 <BrainCircuit className="size-3" /> AI Generated
               </Badge>
             )}
@@ -1664,22 +1714,32 @@ const parseOpenEndedExplanation = (type: string, explanation: string) => {
   const cleanExp = explanation.replaceAll("\r\n", "\n").trim();
 
   if (type === "essay") {
-    const modelMatch = cleanExp.match(/(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|\n+Word Limit:|$)/i);
-    const rubricMatch = cleanExp.match(/\n+Rubric:\s*([\s\S]*?)(?=\n+Word Limit:|$)/i);
+    const modelMatch = cleanExp.match(
+      /(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|\n+Word Limit:|$)/i,
+    );
+    const rubricMatch = cleanExp.match(
+      /\n+Rubric:\s*([\s\S]*?)(?=\n+Word Limit:|$)/i,
+    );
     const wordLimitMatch = cleanExp.match(/\n+Word Limit:\s*(\d+)/i);
 
     if (modelMatch) modelAnswer = modelMatch[1].trim();
     if (rubricMatch) rubric = rubricMatch[1].trim();
     if (wordLimitMatch) wordLimit = parseInt(wordLimitMatch[1]);
   } else if (type === "shortanswer") {
-    const modelMatch = cleanExp.match(/(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|$)/i);
+    const modelMatch = cleanExp.match(
+      /(?:Model Answer:|^)\s*([\s\S]*?)(?=\n+Rubric:|$)/i,
+    );
     const rubricMatch = cleanExp.match(/\n+Rubric:\s*([\s\S]*?)$/i);
 
     if (modelMatch) modelAnswer = modelMatch[1].trim();
     if (rubricMatch) rubric = rubricMatch[1].trim();
   } else if (type === "computational") {
-    const stepsMatch = cleanExp.match(/(?:Solution Steps:|^)\s*([\s\S]*?)(?=\n+Numerical Answer:|\n+Tolerance:|$)/i);
-    const answerMatch = cleanExp.match(/\n+Numerical Answer:\s*([\s\S]*?)(?=\n+Tolerance:|$)/i);
+    const stepsMatch = cleanExp.match(
+      /(?:Solution Steps:|^)\s*([\s\S]*?)(?=\n+Numerical Answer:|\n+Tolerance:|$)/i,
+    );
+    const answerMatch = cleanExp.match(
+      /\n+Numerical Answer:\s*([\s\S]*?)(?=\n+Tolerance:|$)/i,
+    );
     const toleranceMatch = cleanExp.match(/\n+Tolerance:\s*([\d.]+)/i);
 
     if (stepsMatch) solutionSteps = stepsMatch[1].trim();
@@ -1703,7 +1763,12 @@ const mapBackendToFrontendType = (type: string): QuestionType => {
   if (norm === "truefalse") return "truefalse";
   if (norm === "shortanswer") return "shortanswer";
   if (norm === "fillblank") return "fillblank";
-  if (norm === "casestudy" || norm === "casestudycontext" || norm === "case_study") return "casestudy";
+  if (
+    norm === "casestudy" ||
+    norm === "casestudycontext" ||
+    norm === "case_study"
+  )
+    return "casestudy";
   return norm as QuestionType;
 };
 
@@ -1713,53 +1778,104 @@ const mapCandidateToQuestion = (
   marksPerQuestion: number,
   explanationOverride?: string,
   questionTextOverride?: string,
-  optionsOverride?: any[]
+  optionsOverride?: any[],
 ): Question => {
-  const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
-  const text = questionTextOverride !== undefined ? questionTextOverride : (candidate.parsed_question_text || "");
-  const explanation = explanationOverride !== undefined ? explanationOverride : (candidate.parsed_explanation || candidate.explanation || "");
+  const qType =
+    mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+  const text =
+    questionTextOverride !== undefined
+      ? questionTextOverride
+      : candidate.parsed_question_text || "";
+  const explanation =
+    explanationOverride !== undefined
+      ? explanationOverride
+      : candidate.parsed_explanation || candidate.explanation || "";
 
   let rubric = "";
   let wordLimit: number | undefined;
   let solutionSteps = "";
   let tolerance: number | undefined;
   let caseStudyContext = "";
-  let mappedOptions = optionsOverride !== undefined
-    ? optionsOverride.map((o: any, idx: number) => ({
-        option_text: o.text || o.option_text || "",
-        option_text_right: o.option_text_right || o.explanation || "",
-        is_correct: o.is_correct,
-        order_index: qType === "casestudy" ? idx : (o.order_index !== undefined ? o.order_index : idx),
-        match_key: qType === "casestudy" ? String(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") : o.match_key,
-      }))
-    : ((candidate.options || candidate._options || []).map((o: any, idx: number) => ({
-        option_text: o.text || o.option_text || "",
-        option_text_right: o.option_text_right || o.explanation || "",
-        is_correct: o.is_correct,
-        order_index: qType === "casestudy" ? idx : (o.order_index !== undefined ? o.order_index : idx),
-        match_key: qType === "casestudy" ? String(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") : o.match_key,
-      })));
+  let mappedOptions =
+    optionsOverride !== undefined
+      ? optionsOverride.map((o: any, idx: number) => ({
+          option_text: o.text || o.option_text || "",
+          option_text_right: o.option_text_right || o.explanation || "",
+          is_correct: o.is_correct,
+          order_index:
+            qType === "casestudy"
+              ? idx
+              : o.order_index !== undefined
+                ? o.order_index
+                : idx,
+          match_key:
+            qType === "casestudy"
+              ? String(
+                  o.match_key !== undefined && o.match_key !== null
+                    ? o.match_key
+                    : "5",
+                )
+              : o.match_key,
+        }))
+      : (candidate.options || candidate._options || []).map(
+          (o: any, idx: number) => ({
+            option_text: o.text || o.option_text || "",
+            option_text_right: o.option_text_right || o.explanation || "",
+            is_correct: o.is_correct,
+            order_index:
+              qType === "casestudy"
+                ? idx
+                : o.order_index !== undefined
+                  ? o.order_index
+                  : idx,
+            match_key:
+              qType === "casestudy"
+                ? String(
+                    o.match_key !== undefined && o.match_key !== null
+                      ? o.match_key
+                      : "5",
+                  )
+                : o.match_key,
+          }),
+        );
 
-  if (["essay", "shortanswer", "computational"].includes(qType) && explanation) {
+  if (
+    ["essay", "shortanswer", "computational"].includes(qType) &&
+    explanation
+  ) {
     const unpacked = parseOpenEndedExplanation(qType, explanation);
-    
+
     const rubricValue = unpacked.rubric.toLowerCase();
     let selectedRubric = "general_essay";
     if (qType === "shortanswer") {
       selectedRubric = "general_short";
-      if (rubricValue.includes("technical") || rubricValue.includes("definition")) {
+      if (
+        rubricValue.includes("technical") ||
+        rubricValue.includes("definition")
+      ) {
         selectedRubric = "technical_definition";
       }
     } else if (qType === "essay") {
-      if (rubricValue.includes("critical") || rubricValue.includes("analysis")) {
+      if (
+        rubricValue.includes("critical") ||
+        rubricValue.includes("analysis")
+      ) {
         selectedRubric = "critical_thinking";
-      } else if (rubricValue.includes("scientific") || rubricValue.includes("research") || rubricValue.includes("paper") || rubricValue.includes("writing")) {
+      } else if (
+        rubricValue.includes("scientific") ||
+        rubricValue.includes("research") ||
+        rubricValue.includes("paper") ||
+        rubricValue.includes("writing")
+      ) {
         selectedRubric = "scientific_writing";
-      } else if (rubricValue.includes("technical") || rubricValue.includes("definition")) {
+      } else if (
+        rubricValue.includes("technical") ||
+        rubricValue.includes("definition")
+      ) {
         selectedRubric = "technical_definition";
       }
     }
-    
+
     rubric = selectedRubric;
     wordLimit = unpacked.wordLimit;
     solutionSteps = unpacked.solutionSteps;
@@ -1768,13 +1884,19 @@ const mapCandidateToQuestion = (
       {
         option_text: unpacked.modelAnswer || explanation,
         is_correct: true,
-        order_index: 0
-      }
+        order_index: 0,
+      },
     ];
   } else if (qType === "casestudy") {
     caseStudyContext = text;
-    const shortText = explanation || "Analyze the following case scenario and answer the sub-questions:";
-    const computedMarks = mappedOptions.reduce((sum: number, o: QuestionOption) => sum + (parseInt(o.match_key || "5") || 0), 0);
+    const shortText =
+      explanation ||
+      "Analyze the following case scenario and answer the sub-questions:";
+    const computedMarks = mappedOptions.reduce(
+      (sum: number, o: QuestionOption) =>
+        sum + (parseInt(o.match_key || "5") || 0),
+      0,
+    );
     return {
       id: candidate.promoted_question_id || candidate.id,
       sectionId: targetSecId,
@@ -1847,8 +1969,13 @@ export default function NewAssessmentBuilder() {
   const [supervisorList, setSupervisorList] = useState<
     { id: string; name: string; role: "PRIMARY" | "ASSISTANT" | "OBSERVER" }[]
   >([]);
-  const [pendingRole, setPendingRole] = useState<"ASSISTANT" | "OBSERVER">("ASSISTANT");
+  const [pendingRole, setPendingRole] = useState<"ASSISTANT" | "OBSERVER">(
+    "ASSISTANT",
+  );
   const [studentSearch, setStudentSearch] = useState("");
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<Record<string, string>>({});
+  const [step5ViewMode, setStep5ViewMode] = useState<"standard" | "per_group">("standard");
+  const [isWorkspaceDetailOpen, setIsWorkspaceDetailOpen] = useState(false);
 
   const filteredRoster = useMemo(() => {
     const roster = selectedWorkspaceDetail?.roster || [];
@@ -1856,10 +1983,8 @@ export default function NewAssessmentBuilder() {
     const searchLower = studentSearch.toLowerCase();
     return roster.filter((student) => {
       return (
-        (student.name &&
-          student.name.toLowerCase().includes(searchLower)) ||
-        (student.email &&
-          student.email.toLowerCase().includes(searchLower)) ||
+        (student.name && student.name.toLowerCase().includes(searchLower)) ||
+        (student.email && student.email.toLowerCase().includes(searchLower)) ||
         (student.student_id &&
           student.student_id.toLowerCase().includes(searchLower))
       );
@@ -1887,25 +2012,30 @@ export default function NewAssessmentBuilder() {
   const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
 
   // Load and save AI config to/from sessionStorage
-  const loadSavedAiConfig = useCallback((targetSectionId: string, defaults: typeof aiGenerationConfig) => {
-    if (draftIdRef.current) {
-      const saved = sessionStorage.getItem(`aiGenerationConfig_${draftIdRef.current}_${targetSectionId}`);
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch {
-          return defaults;
+  const loadSavedAiConfig = useCallback(
+    (targetSectionId: string, defaults: typeof aiGenerationConfig) => {
+      if (draftIdRef.current) {
+        const saved = sessionStorage.getItem(
+          `aiGenerationConfig_${draftIdRef.current}_${targetSectionId}`,
+        );
+        if (saved) {
+          try {
+            return JSON.parse(saved);
+          } catch {
+            return defaults;
+          }
         }
       }
-    }
-    return defaults;
-  }, []);
+      return defaults;
+    },
+    [],
+  );
 
   useEffect(() => {
     if (draftIdRef.current && aiTargetSectionId) {
       sessionStorage.setItem(
         `aiGenerationConfig_${draftIdRef.current}_${aiTargetSectionId}`,
-        JSON.stringify(aiGenerationConfig)
+        JSON.stringify(aiGenerationConfig),
       );
     }
   }, [aiGenerationConfig, aiTargetSectionId]);
@@ -1918,20 +2048,23 @@ export default function NewAssessmentBuilder() {
   const setLecturerConfirmed = (val: boolean) => {
     setLecturerConfirmedState(val);
     if (draftIdRef.current) {
-      sessionStorage.setItem(`lecturerConfirmed_${draftIdRef.current}`, String(val));
+      sessionStorage.setItem(
+        `lecturerConfirmed_${draftIdRef.current}`,
+        String(val),
+      );
     }
   };
 
   useEffect(() => {
     if (draftIdRef.current) {
-      const saved = sessionStorage.getItem(`lecturerConfirmed_${draftIdRef.current}`);
+      const saved = sessionStorage.getItem(
+        `lecturerConfirmed_${draftIdRef.current}`,
+      );
       setLecturerConfirmedState(saved === "true");
     } else {
       setLecturerConfirmedState(false);
     }
   }, [activeStep]);
-
-
 
   const uniquePeriods = useMemo(() => {
     const seen = new Set();
@@ -1974,10 +2107,15 @@ export default function NewAssessmentBuilder() {
     customInstructions: "",
     max_group_size: 4,
     group_formation_mode: "self_enrol",
-    group_assignment_mode: "AUTOMATIC" as "AUTOMATIC" | "MANUAL",
+    group_assignment_mode: "MANUAL" as "AUTOMATIC" | "MANUAL",
     question_distribution_mode: "SHARED" as "SHARED" | "PER_GROUP",
     require_all_member_approval: true,
     require_all_member_participation: true,
+    submission_mode: "SINGLE_LEADER" as "SINGLE_LEADER" | "ALL_MEMBERS" | "MAJORITY_VOTE",
+    peer_evaluation_enabled: false,
+    peer_evaluation_deadline: "" as any,
+    peer_evaluation_weight_percent: "" as any,
+    individual_weighting_enabled: false,
     appeal_window_days: 7,
     audience_type: "all" as "all" | "selected",
     target_student_ids: [] as string[],
@@ -2007,6 +2145,10 @@ export default function NewAssessmentBuilder() {
   }, []);
 
   const [groups, setGroups] = useState<Group[]>([]);
+  const [isGeneratingAutoGroups, setIsGeneratingAutoGroups] = useState(false);
+  const [autoGroupsPreview, setAutoGroupsPreview] = useState<Group[] | null>(
+    null,
+  );
   const [institutions, setInstitutions] = useState<InstitutionResponse[]>([]);
   const [availableDepartments, setAvailableDepartments] = useState<
     DepartmentResponse[]
@@ -2157,6 +2299,34 @@ export default function NewAssessmentBuilder() {
     });
   }, [totalMarks, passingMarksPercent]);
 
+  useEffect(() => {
+    async function fetchGroups() {
+      const assessmentId = draftIdRef.current;
+      if (!assessmentId || !selectedWorkspaceDetail || !metadata.is_group_assessment) return;
+      try {
+        const roster = selectedWorkspaceDetail.roster || [];
+        const fetched = await groupWorkApi.getGroups(assessmentId);
+        const mappedGroups = fetched.map((sg: any) => ({
+          id: sg.id,
+          name: sg.name,
+          members: (sg.members || []).map((m: any) => {
+            const studentInfo = roster.find((r: any) => (r.id || r.student_id) === m.student_id);
+            return {
+              id: m.student_id,
+              name: m.name || studentInfo?.name || "Student",
+              email: studentInfo?.email || "",
+              is_leader: !!m.is_leader
+            };
+          })
+        }));
+        setGroups(mappedGroups);
+      } catch (err) {
+        console.error("Failed to load existing groups:", err);
+      }
+    }
+    fetchGroups();
+  }, [selectedWorkspaceDetail, metadata.is_group_assessment]);
+
   // Init Data
   useEffect(() => {
     if (hasInitializedRef.current && draftId === loadedDraftIdRef.current) {
@@ -2280,6 +2450,11 @@ export default function NewAssessmentBuilder() {
                 data.require_all_member_approval || false,
               require_all_member_participation:
                 data.require_all_member_participation || false,
+              submission_mode: data.submission_mode || "SINGLE_LEADER",
+              peer_evaluation_enabled: data.peer_evaluation_enabled || false,
+              peer_evaluation_deadline: data.peer_evaluation_deadline || "",
+              peer_evaluation_weight_percent: data.peer_evaluation_weight_percent || "",
+              individual_weighting_enabled: data.individual_weighting_enabled || false,
               appeal_window_days: data.appeal_window_days || 7,
               audience_type: data.audience_type || "all",
               target_student_ids: data.target_student_ids || [],
@@ -2287,7 +2462,10 @@ export default function NewAssessmentBuilder() {
 
             const initialTotal = data.total_marks || 0;
             const initialPassing = data.passing_marks || 70;
-            const initialPct = initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
+            const initialPct =
+              initialTotal > 0
+                ? Math.round((initialPassing * 100) / initialTotal)
+                : 70;
             setPassingMarksPercent(initialPct);
 
             if (data.teaching_workspace_id) {
@@ -2297,7 +2475,7 @@ export default function NewAssessmentBuilder() {
             // Populate blueprint
             if (data.sections?.length > 0) {
               const sortedSections = [...data.sections].sort(
-                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
               );
               setBlueprint(
                 sortedSections.map((s: any) => ({
@@ -2307,12 +2485,17 @@ export default function NewAssessmentBuilder() {
                   marks: s.allocated_marks || 0,
                   questions: s.question_count_target || 0,
                   difficulty: (() => {
-                    const diff = s.allowed_question_types?.difficulty || s.difficulty || "Medium";
-                    return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
+                    const diff =
+                      s.allowed_question_types?.difficulty ||
+                      s.difficulty ||
+                      "Medium";
+                    return (
+                      diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase()
+                    );
                   })(),
-                  allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map((t: string) =>
-                    t.toLowerCase().replaceAll("_", "")
-                  ),
+                  allowedTypes: (
+                    s.allowed_question_types?.types || ["mcq"]
+                  ).map((t: string) => t.toLowerCase().replaceAll("_", "")),
                   aiPromptHint: s.ai_generation_prompt_hint || "",
                   difficultyDistribution:
                     s.difficulty_distribution || undefined,
@@ -2322,6 +2505,7 @@ export default function NewAssessmentBuilder() {
                     s.bloom_level ||
                     s.bloomLevel ||
                     "understand",
+                  per_group: s.allowed_question_types?.per_group || false,
                 })),
               );
             }
@@ -2372,15 +2556,23 @@ export default function NewAssessmentBuilder() {
             // Populate questions
             if (data.assessment_questions?.length > 0) {
               const sortedQuestions = [...data.assessment_questions].sort(
-                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+                (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
               );
               setQuestions(
                 sortedQuestions.map((aq: any) => {
                   const qType = aq.question.question_type
                     .toLowerCase()
                     .replaceAll("_", "") as QuestionType;
-                  const rawContent = aq.question.explanation || aq.question.options?.[0]?.option_text || aq.question.options?.[0]?.content || "";
-                  const parsed = ["shortanswer", "essay", "computational"].includes(qType)
+                  const rawContent =
+                    aq.question.explanation ||
+                    aq.question.options?.[0]?.option_text ||
+                    aq.question.options?.[0]?.content ||
+                    "";
+                  const parsed = [
+                    "shortanswer",
+                    "essay",
+                    "computational",
+                  ].includes(qType)
                     ? parseOpenEndedExplanation(qType, rawContent)
                     : null;
                   return {
@@ -2404,7 +2596,8 @@ export default function NewAssessmentBuilder() {
                       : aq.question.options?.map((o: any) => ({
                           id: o.id,
                           option_text: o.option_text || o.content || "",
-                          option_text_right: o.option_text_right || o.match_value || "",
+                          option_text_right:
+                            o.option_text_right || o.match_value || "",
                           is_correct: o.is_correct,
                           order_index: o.order_index,
                           match_key: o.match_key,
@@ -2535,7 +2728,8 @@ export default function NewAssessmentBuilder() {
       const isSaving = autosaveStatus === "saving";
       if (hasPendingSave || isSaving) {
         e.preventDefault();
-        e.returnValue = "You have unsaved changes. Are you sure you want to leave?";
+        e.returnValue =
+          "You have unsaved changes. Are you sure you want to leave?";
         return e.returnValue;
       }
     };
@@ -2547,10 +2741,23 @@ export default function NewAssessmentBuilder() {
 
   // Smart defaults: supervised → force fullscreen ON and AI OFF;
   // CAT/Summative mode → default AI to OFF regardless of toggle
+  // Groupwork mode → relax proctoring defaults for take-home group work
   useEffect(() => {
     setRules((prev) => {
       const isHighStakes =
         metadata.mode === "CAT" || metadata.mode === "Summative";
+      const isGroupWork = metadata.mode === "Groupwork";
+      if (isGroupWork) {
+        return {
+          ...prev,
+          aiAllowed: prev.supervised ? false : prev.aiAllowed,
+          browserRestricted: prev.supervised ? prev.browserRestricted : false,
+          integrityMonitoring: prev.supervised ? prev.integrityMonitoring : false,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          attempts: 1,
+        };
+      }
       return {
         ...prev,
         aiAllowed: prev.supervised
@@ -2564,7 +2771,10 @@ export default function NewAssessmentBuilder() {
   }, [rules.supervised, metadata.mode]);
 
   // Handlers
-  const updateBlueprintAndAutosave = (nextBlueprint: BlueprintSection[], nextQuestions?: Question[]) => {
+  const updateBlueprintAndAutosave = (
+    nextBlueprint: BlueprintSection[],
+    nextQuestions?: Question[],
+  ) => {
     setBlueprint(nextBlueprint);
     blueprintRef.current = nextBlueprint;
     if (nextQuestions) {
@@ -2597,7 +2807,9 @@ export default function NewAssessmentBuilder() {
     field: K,
     value: BlueprintSection[K],
   ) => {
-    const nextBlueprint = blueprint.map((s) => (s.id === id ? { ...s, [field]: value } : s));
+    const nextBlueprint = blueprint.map((s) =>
+      s.id === id ? { ...s, [field]: value } : s,
+    );
     updateBlueprintAndAutosave(nextBlueprint);
   };
 
@@ -2687,7 +2899,16 @@ export default function NewAssessmentBuilder() {
       newOptions[optIdx] = { ...newOptions[optIdx], ...updates };
       let nextMarks = q.marks;
       if (q.type === "casestudy") {
-        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+        nextMarks = newOptions.reduce(
+          (sum, o) =>
+            sum +
+            (parseInt(
+              o.match_key !== undefined && o.match_key !== null
+                ? o.match_key
+                : "5",
+            ) || 0),
+          0,
+        );
       }
       return { ...q, options: newOptions, marks: nextMarks };
     });
@@ -2708,7 +2929,16 @@ export default function NewAssessmentBuilder() {
       ];
       let nextMarks = q.marks;
       if (q.type === "casestudy") {
-        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+        nextMarks = newOptions.reduce(
+          (sum, o) =>
+            sum +
+            (parseInt(
+              o.match_key !== undefined && o.match_key !== null
+                ? o.match_key
+                : "5",
+            ) || 0),
+          0,
+        );
       }
       return { ...q, options: newOptions, marks: nextMarks };
     });
@@ -2723,14 +2953,21 @@ export default function NewAssessmentBuilder() {
         .map((opt, i) => ({ ...opt, order_index: i }));
       let nextMarks = q.marks;
       if (q.type === "casestudy") {
-        nextMarks = newOptions.reduce((sum, o) => sum + (parseInt(o.match_key !== undefined && o.match_key !== null ? o.match_key : "5") || 0), 0);
+        nextMarks = newOptions.reduce(
+          (sum, o) =>
+            sum +
+            (parseInt(
+              o.match_key !== undefined && o.match_key !== null
+                ? o.match_key
+                : "5",
+            ) || 0),
+          0,
+        );
       }
       return { ...q, options: newOptions, marks: nextMarks };
     });
     updateQuestionsAndAutosave(nextQuestions);
   };
-
-
 
   const [editingCandidateId, setEditingCandidateId] = useState<string | null>(
     null,
@@ -2943,7 +3180,7 @@ export default function NewAssessmentBuilder() {
               const totalFail = batch.total_failed || 0;
               toast.warning(
                 `AI question generation partially succeeded: ${totalGen} generated, ${totalFail} failed out of ${totalReq} requested. You can review the successfully generated candidates and retry the remaining ones.`,
-                { duration: 8000 }
+                { duration: 8000 },
               );
             }
 
@@ -3003,16 +3240,19 @@ export default function NewAssessmentBuilder() {
         // component re-rendered, so the closure-captured `blueprint` could still
         // have old temp IDs).
         blueprintRef.current.forEach((sec) => {
-          const allowedTypes = sec.allowedTypes && sec.allowedTypes.length > 0 ? sec.allowedTypes : ["mcq"];
+          const allowedTypes =
+            sec.allowedTypes && sec.allowedTypes.length > 0
+              ? sec.allowedTypes
+              : ["mcq"];
           const totalQuestions = sec.questions || 3;
-          
+
           const base = Math.floor(totalQuestions / allowedTypes.length);
           let remainder = totalQuestions % allowedTypes.length;
-          
+
           allowedTypes.forEach((qType) => {
             const countForType = base + (remainder > 0 ? 1 : 0);
             if (remainder > 0) remainder--;
-            
+
             if (countForType > 0) {
               sectionsPayload.push({
                 section_id: sec.id,
@@ -3030,8 +3270,13 @@ export default function NewAssessmentBuilder() {
         const firstSec = blueprintRef.current[0];
         const firstType = firstSec?.allowedTypes?.[0] || "mcq";
         const topLevelType = mapFrontendToBackendType(firstType);
-        const topLevelDifficulty = (firstSec?.difficulty || "medium").toLowerCase();
-        const totalCount = blueprintRef.current.reduce((sum, s) => sum + (s.questions || 3), 0);
+        const topLevelDifficulty = (
+          firstSec?.difficulty || "medium"
+        ).toLowerCase();
+        const totalCount = blueprintRef.current.reduce(
+          (sum, s) => sum + (s.questions || 3),
+          0,
+        );
 
         toast.info(
           "Submitting AI request to generate questions for all sections...",
@@ -3077,7 +3322,9 @@ export default function NewAssessmentBuilder() {
         setTimeout(() => runAutosave(4), 0);
 
         // Use blueprintRef.current for the same reason — may have been updated by ensureDraftId
-        const targetSection = blueprintRef.current.find((s) => s.id === aiTargetSectionId);
+        const targetSection = blueprintRef.current.find(
+          (s) => s.id === aiTargetSectionId,
+        );
         const secTopic =
           aiGenerationConfig.topic || targetSection?.topics || "";
 
@@ -3085,19 +3332,22 @@ export default function NewAssessmentBuilder() {
 
         let sectionsPayload: any[] | undefined = undefined;
         if (aiGenerationConfig.question_type === "mixed") {
-          const allowedTypes = targetSection && targetSection.allowedTypes && targetSection.allowedTypes.length > 0
-            ? targetSection.allowedTypes
-            : ["mcq"];
+          const allowedTypes =
+            targetSection &&
+            targetSection.allowedTypes &&
+            targetSection.allowedTypes.length > 0
+              ? targetSection.allowedTypes
+              : ["mcq"];
           const totalQuestions = aiGenerationConfig.count;
-          
+
           const base = Math.floor(totalQuestions / allowedTypes.length);
           let remainder = totalQuestions % allowedTypes.length;
-          
+
           sectionsPayload = [];
           allowedTypes.forEach((qType) => {
             const countForType = base + (remainder > 0 ? 1 : 0);
             if (remainder > 0) remainder--;
-            
+
             if (countForType > 0) {
               sectionsPayload!.push({
                 section_id: aiTargetSectionId,
@@ -3114,9 +3364,12 @@ export default function NewAssessmentBuilder() {
         const res = await aiGenerationApi.generateQuestions({
           subject: metadata.title || "Subject",
           topic: secTopic,
-          question_type: aiGenerationConfig.question_type === "mixed"
-            ? "mcq"
-            : (mapFrontendToBackendType(aiGenerationConfig.question_type) as any),
+          question_type:
+            aiGenerationConfig.question_type === "mixed"
+              ? "mcq"
+              : (mapFrontendToBackendType(
+                  aiGenerationConfig.question_type,
+                ) as any),
           difficulty: aiGenerationConfig.difficulty as any,
           count: aiGenerationConfig.count,
           bloom_level: aiGenerationConfig.bloom_level as any,
@@ -3148,16 +3401,19 @@ export default function NewAssessmentBuilder() {
       );
       const sectionsPayload: any[] = [];
       failedSections.forEach((sec) => {
-        const allowedTypes = sec.allowedTypes && sec.allowedTypes.length > 0 ? sec.allowedTypes : ["mcq"];
+        const allowedTypes =
+          sec.allowedTypes && sec.allowedTypes.length > 0
+            ? sec.allowedTypes
+            : ["mcq"];
         const totalQuestions = sec.questions || 3;
-        
+
         const base = Math.floor(totalQuestions / allowedTypes.length);
         let remainder = totalQuestions % allowedTypes.length;
-        
+
         allowedTypes.forEach((qType) => {
           const countForType = base + (remainder > 0 ? 1 : 0);
           if (remainder > 0) remainder--;
-          
+
           if (countForType > 0) {
             sectionsPayload.push({
               section_id: sec.id,
@@ -3175,8 +3431,13 @@ export default function NewAssessmentBuilder() {
       const firstSec = failedSections[0] || blueprint[0];
       const firstType = firstSec?.allowedTypes?.[0] || "mcq";
       const topLevelType = mapFrontendToBackendType(firstType);
-      const topLevelDifficulty = (firstSec?.difficulty || "medium").toLowerCase();
-      const totalCount = failedSections.reduce((sum, s) => sum + (s.questions || 3), 0);
+      const topLevelDifficulty = (
+        firstSec?.difficulty || "medium"
+      ).toLowerCase();
+      const totalCount = failedSections.reduce(
+        (sum, s) => sum + (s.questions || 3),
+        0,
+      );
 
       toast.info(
         `Retrying question generation for ${failedSections.length} sections...`,
@@ -3228,8 +3489,7 @@ export default function NewAssessmentBuilder() {
           0,
         );
         const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
-        const targetQuestionCount =
-          parseInt(sectionObj.questions as any) || 1;
+        const targetQuestionCount = parseInt(sectionObj.questions as any) || 1;
         const remainingSectionMarks = Math.max(
           0,
           totalSectionMarks - allocatedMarks,
@@ -3252,15 +3512,21 @@ export default function NewAssessmentBuilder() {
         save_to_bank: saveToBank,
       });
 
-      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+      const qType =
+        mapBackendToFrontendType(candidate.question_type) || "shortanswer";
       const realId =
         res?.assessment_question?.id ||
         res?.promoted_question?.id ||
         candidate.id;
 
-      const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
+      const newQ = mapCandidateToQuestion(
+        candidate,
+        targetSecId,
+        marksPerQuestion,
+      );
       newQ.id = realId;
       nextQuestions = [...questionsRef.current, newQ];
+      questionsRef.current = nextQuestions;
       setQuestions(nextQuestions);
       setAiCandidates((prev) => {
         const updated = prev.filter((c) => c.id !== candidateId);
@@ -3276,8 +3542,8 @@ export default function NewAssessmentBuilder() {
     };
 
     try {
-      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-        .then(action);
+      activeAutosavePromiseRef.current =
+        activeAutosavePromiseRef.current.then(action);
       await activeAutosavePromiseRef.current;
     } catch (err) {
       toast.error("Failed to accept AI question.");
@@ -3330,8 +3596,7 @@ export default function NewAssessmentBuilder() {
           0,
         );
         const totalSectionMarks = parseInt(sectionObj.marks as any) || 0;
-        const targetQuestionCount =
-          parseInt(sectionObj.questions as any) || 1;
+        const targetQuestionCount = parseInt(sectionObj.questions as any) || 1;
         const remainingSectionMarks = Math.max(
           0,
           totalSectionMarks - allocatedMarks,
@@ -3356,15 +3621,24 @@ export default function NewAssessmentBuilder() {
         marks_if_added: marksPerQuestion,
         save_to_bank: saveToBank,
       });
-      const qType = mapBackendToFrontendType(candidate.question_type) || "shortanswer";
+      const qType =
+        mapBackendToFrontendType(candidate.question_type) || "shortanswer";
       const realId =
         res?.assessment_question?.id ||
         res?.promoted_question?.id ||
         candidate.id;
 
-      const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion, editingExplanation, editingText, editingOptions);
+      const newQ = mapCandidateToQuestion(
+        candidate,
+        targetSecId,
+        marksPerQuestion,
+        editingExplanation,
+        editingText,
+        editingOptions,
+      );
       newQ.id = realId;
       nextQuestions = [...questionsRef.current, newQ];
+      questionsRef.current = nextQuestions;
       setQuestions(nextQuestions);
       setAiCandidates((prev) => {
         const updated = prev.filter((c) => c.id !== candidateId);
@@ -3381,8 +3655,8 @@ export default function NewAssessmentBuilder() {
     };
 
     try {
-      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-        .then(action);
+      activeAutosavePromiseRef.current =
+        activeAutosavePromiseRef.current.then(action);
       await activeAutosavePromiseRef.current;
     } catch (err) {
       toast.error("Failed to save edited question.");
@@ -3408,9 +3682,7 @@ export default function NewAssessmentBuilder() {
       const candidatesWithMarks = aiCandidates.map((c) => {
         const targetSecId =
           (c as any)._sectionId ||
-          (aiTargetSectionId === "all"
-            ? blueprint[0].id
-            : aiTargetSectionId);
+          (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
         const sectionObj = blueprint.find((s) => s.id === targetSecId);
         let marksPerQuestion = 2;
         if (sectionObj) {
@@ -3455,42 +3727,73 @@ export default function NewAssessmentBuilder() {
         };
       });
 
-      const results = await Promise.all(
-        candidatesWithMarks.map(({ candidate, targetSecId, marksPerQuestion }) => {
-          return aiGenerationApi.reviewQuestion(candidate.id, {
-            decision: "approved",
-            add_to_assessment_id: activeId || undefined,
-            add_to_section_id: targetSecId || undefined,
-            marks_if_added: marksPerQuestion,
-            save_to_bank: saveToBank,
-          });
-        }),
+      const results = await Promise.allSettled(
+        candidatesWithMarks.map(
+          ({ candidate, targetSecId, marksPerQuestion }) => {
+            return aiGenerationApi.reviewQuestion(candidate.id, {
+              decision: "approved",
+              add_to_assessment_id: activeId || undefined,
+              add_to_section_id: targetSecId || undefined,
+              marks_if_added: marksPerQuestion,
+              save_to_bank: saveToBank,
+            });
+          },
+        ),
       );
 
       const simulatedQuestions = [...questionsRef.current];
-      candidatesWithMarks.forEach(({ candidate, targetSecId, marksPerQuestion }, index) => {
-        const res = results[index];
-        const realId =
-          res?.assessment_question?.id || res?.promoted_question?.id || candidate.id;
+      const successfulCandidates: any[] = [];
+      candidatesWithMarks.forEach(
+        ({ candidate, targetSecId, marksPerQuestion }, index) => {
+          const result = results[index];
+          if (result.status === "fulfilled") {
+            const res = (result as PromiseFulfilledResult<any>).value;
+            const realId =
+              res?.assessment_question?.id ||
+              res?.promoted_question?.id ||
+              candidate.id;
 
-        const newQ = mapCandidateToQuestion(candidate, targetSecId, marksPerQuestion);
-        newQ.id = realId;
-        simulatedQuestions.push(newQ);
-      });
+            const newQ = mapCandidateToQuestion(
+              candidate,
+              targetSecId,
+              marksPerQuestion,
+            );
+            newQ.id = realId;
+            simulatedQuestions.push(newQ);
+            successfulCandidates.push({ candidate, targetSecId, marksPerQuestion });
+          }
+        },
+      );
 
       finalQuestionsList = simulatedQuestions;
       setQuestions(simulatedQuestions);
-      setAiCandidates([]);
-      setAiReviewDrawerOpen(false);
-      if (activeStep !== 6) {
-        setActiveStep(5);
+      questionsRef.current = simulatedQuestions;
+      setAiCandidates((prev) =>
+        prev.filter((c) =>
+          successfulCandidates.some((success) => success.candidate.id === c.id),
+        ),
+      );
+      if (successfulCandidates.length > 0) {
+        if (successfulCandidates.length === aiCandidates.length) {
+          setAiReviewDrawerOpen(false);
+          if (activeStep !== 6) {
+            setActiveStep(5);
+          }
+        }
+        toast.success(
+          `${successfulCandidates.length} candidate question(s) accepted!`,
+        );
       }
-      toast.success("All candidate questions accepted!");
+      if (successfulCandidates.length < candidatesWithMarks.length) {
+        toast.error(
+          "Some questions failed to accept. Please retry remaining candidates.",
+        );
+      }
     };
 
     try {
-      activeAutosavePromiseRef.current = activeAutosavePromiseRef.current
-        .then(action);
+      activeAutosavePromiseRef.current =
+        activeAutosavePromiseRef.current.then(action);
       await activeAutosavePromiseRef.current;
     } catch (err) {
       toast.error("Failed to accept all questions.");
@@ -3552,16 +3855,16 @@ export default function NewAssessmentBuilder() {
     sectionId: string,
     groupId?: string,
   ) => {
-      // Check for duplicate content or ID
-      const isDuplicate = questionsRef.current.some(
-        (q) =>
-          q.id.includes(qBankSummary.id) ||
-          q.text.trim() === qBankSummary.content.trim()
-      );
-      if (isDuplicate) {
-        toast.error("This question already exists in the assessment.");
-        return;
-      }
+    // Check for duplicate content or ID
+    const isDuplicate = questionsRef.current.some(
+      (q) =>
+        q.id.includes(qBankSummary.id) ||
+        q.text.trim() === qBankSummary.content.trim(),
+    );
+    if (isDuplicate) {
+      toast.error("This question already exists in the assessment.");
+      return;
+    }
 
     try {
       const qBank = await questionApi.getQuestion(qBankSummary.id);
@@ -3569,8 +3872,14 @@ export default function NewAssessmentBuilder() {
         .toLowerCase()
         .replaceAll("_", "") as QuestionType;
 
-      const rawContent = qBank.explanation || qBank.options?.[0]?.option_text || (qBank.options?.[0] as any)?.content || "";
-      const parsed = ["shortanswer", "essay", "computational"].includes(mappedType)
+      const rawContent =
+        qBank.explanation ||
+        qBank.options?.[0]?.option_text ||
+        (qBank.options?.[0] as any)?.content ||
+        "";
+      const parsed = ["shortanswer", "essay", "computational"].includes(
+        mappedType,
+      )
         ? parseOpenEndedExplanation(mappedType, rawContent)
         : null;
 
@@ -3595,13 +3904,22 @@ export default function NewAssessmentBuilder() {
               ]
             : (qBank.options || []).map((opt: any, idx: number) => ({
                 option_text: opt.option_text || opt.content || "",
-                option_text_right: opt.option_text_right || opt.match_value || opt.matchValue || "",
+                option_text_right:
+                  opt.option_text_right ||
+                  opt.match_value ||
+                  opt.matchValue ||
+                  "",
                 is_correct: opt.is_correct,
-                order_index: opt.order_index !== undefined ? opt.order_index : idx,
+                order_index:
+                  opt.order_index !== undefined ? opt.order_index : idx,
               })),
           imageUrl: qBank.image_url,
-          caseStudyContext: (qBank as any).case_study_context || (qBank as any).caseStudyContext,
-          computationalType: (qBank as any).computational_type || (qBank as any).computationalType,
+          caseStudyContext:
+            (qBank as any).case_study_context ||
+            (qBank as any).caseStudyContext,
+          computationalType:
+            (qBank as any).computational_type ||
+            (qBank as any).computationalType,
           rubric: parsed?.rubric,
           wordLimit: parsed?.wordLimit,
           solutionSteps: parsed?.solutionSteps,
@@ -3628,8 +3946,6 @@ export default function NewAssessmentBuilder() {
       return timeStr;
     }
   };
-
-
 
   const preparePayload = useCallback(
     (
@@ -3671,7 +3987,21 @@ export default function NewAssessmentBuilder() {
 
       const payload = {
         id: draftIdRef.current || undefined,
-        draft_step: draftStep === null ? undefined : (draftStep !== undefined ? draftStep : activeStepRef.current),
+        draft_step:
+          draftStep === null
+            ? undefined
+            : draftStep !== undefined
+              ? draftStep
+              : activeStepRef.current,
+        groups: activeMetadata.mode === "Groupwork"
+          ? groups.map((g) => ({
+              name: g.name,
+              members: g.members.map((mem) => ({
+                student_id: mem.student_id || mem.id,
+                is_leader: !!mem.is_leader
+              }))
+            }))
+          : undefined,
         metadata: {
           title: activeMetadata.title || "Untitled Assessment",
           description: activeMetadata.description || "",
@@ -3685,7 +4015,8 @@ export default function NewAssessmentBuilder() {
           department_ids: activeMetadata.department_ids || [],
           option_ids: activeMetadata.option_ids || [],
           class_group_ids: activeMetadata.class_group_ids || [],
-          teaching_workspace_id: activeMetadata.teaching_workspace_id || undefined,
+          teaching_workspace_id:
+            activeMetadata.teaching_workspace_id || undefined,
           subject_id: activeMetadata.subject_id || undefined,
           audience_type: activeMetadata.audience_type || "all",
           target_student_ids: activeMetadata.target_student_ids || [],
@@ -3694,15 +4025,37 @@ export default function NewAssessmentBuilder() {
           endTime: activeMetadata.endTime || undefined,
           windowStart: activeMetadata.windowStart || undefined,
           windowEnd: activeMetadata.windowEnd || undefined,
-          durationMinutes: activeMetadata.durationMinutes ? parseInt(activeMetadata.durationMinutes as any) : 0,
-          passing_marks: activeMetadata.passing_marks ? parseInt(activeMetadata.passing_marks as any) : 0,
+          durationMinutes: activeMetadata.durationMinutes
+            ? parseInt(activeMetadata.durationMinutes as any)
+            : 0,
+          passing_marks: activeMetadata.passing_marks
+            ? parseInt(activeMetadata.passing_marks as any)
+            : 0,
           selectedInstructions: activeMetadata.selectedInstructions || [],
           customInstructions: activeMetadata.customInstructions || "",
           maxGroupSize: activeMetadata.max_group_size || undefined,
-          groupFormation: activeMetadata.group_formation_mode || undefined,
-          groupAssignmentMode: activeMetadata.group_assignment_mode || undefined,
-          questionDistributionMode: activeMetadata.question_distribution_mode || undefined,
-          appealWindowDays: activeMetadata.appeal_window_days ? parseInt(activeMetadata.appeal_window_days as any) : 0,
+          groupFormation: (() => {
+            const fm = activeMetadata.group_formation_mode;
+            if (fm === "self_enrol") return "SELF_ENROL";
+            if (fm === "random" || fm === "similar_performance" || fm === "diverse_performance") return "AUTO_BALANCED";
+            return "LECTURER_ASSIGNED";
+          })(),
+          groupAssignmentMode:
+            activeMetadata.group_assignment_mode || undefined,
+          questionDistributionMode:
+            activeMetadata.question_distribution_mode || undefined,
+          appealWindowDays: activeMetadata.appeal_window_days
+            ? parseInt(activeMetadata.appeal_window_days as any)
+            : 0,
+          submissionMode: activeMetadata.submission_mode || "SINGLE_LEADER",
+          peerEvaluationEnabled: activeMetadata.peer_evaluation_enabled || false,
+          peerEvaluationDeadline: (activeMetadata.peer_evaluation_enabled && activeMetadata.peer_evaluation_deadline)
+            ? new Date(activeMetadata.peer_evaluation_deadline).toISOString()
+            : null,
+          peerEvaluationWeightPercent: (activeMetadata.peer_evaluation_enabled && activeMetadata.peer_evaluation_weight_percent)
+            ? parseInt(activeMetadata.peer_evaluation_weight_percent as any)
+            : null,
+          individualWeightingEnabled: activeMetadata.individual_weighting_enabled || false,
           academic_year: activeMetadata.academic_year || undefined,
         },
         blueprint: blueprintRef.current.map((b) => ({
@@ -3716,6 +4069,7 @@ export default function NewAssessmentBuilder() {
           aiPromptHint: b.aiPromptHint,
           difficultyDistribution: b.difficultyDistribution,
           bloomLevel: b.bloomLevel,
+          per_group: b.per_group || false,
         })),
         questions: activeQuestions.map((q) => {
           let finalOptions: QuestionOption[] = (q.options || []).map((opt) => ({
@@ -3807,7 +4161,7 @@ export default function NewAssessmentBuilder() {
 
       return payload;
     },
-    [],
+    [groups],
   );
 
   const mapApiErrors = (err: any) => {
@@ -3871,7 +4225,10 @@ export default function NewAssessmentBuilder() {
           toast.error("Scheduled Date is required");
           return false;
         }
-        const isStrict = metadata.mode === "CAT" || metadata.mode === "Summative" || metadata.mode === "Groupwork";
+        const isStrict =
+          metadata.mode === "CAT" ||
+          metadata.mode === "Summative" ||
+          metadata.mode === "Groupwork";
         if (isStrict) {
           if (!metadata.startTime) {
             toast.error("Access Start is required");
@@ -3989,7 +4346,7 @@ export default function NewAssessmentBuilder() {
     if (!res) return;
     if (res.sections?.length > 0) {
       const sortedSections = [...res.sections].sort(
-        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
       );
       setBlueprint(
         sortedSections.map((s: any) => ({
@@ -3999,11 +4356,12 @@ export default function NewAssessmentBuilder() {
           marks: s.allocated_marks || 0,
           questions: s.question_count_target || 0,
           difficulty: (() => {
-            const diff = s.allowed_question_types?.difficulty || s.difficulty || "Medium";
+            const diff =
+              s.allowed_question_types?.difficulty || s.difficulty || "Medium";
             return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
           })(),
-          allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map((t: string) =>
-            t.toLowerCase().replaceAll("_", "")
+          allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map(
+            (t: string) => t.toLowerCase().replaceAll("_", ""),
           ),
           aiPromptHint: s.ai_generation_prompt_hint || "",
           difficultyDistribution: s.difficulty_distribution || undefined,
@@ -4013,21 +4371,26 @@ export default function NewAssessmentBuilder() {
             s.bloom_level ||
             s.bloomLevel ||
             "understand",
-        }))
+        })),
       );
     }
 
     if (res.assessment_questions?.length > 0) {
       const sortedQuestions = [...res.assessment_questions].sort(
-        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0)
+        (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
       );
       setQuestions(
         sortedQuestions.map((aq: any) => {
-          const type = aq.question.question_type.toLowerCase().replaceAll("_", "") as QuestionType;
+          const type = aq.question.question_type
+            .toLowerCase()
+            .replaceAll("_", "") as QuestionType;
           const optionsRaw = aq.question.options || [];
           const unpacked = parseOpenEndedExplanation(
             type,
-            optionsRaw[0]?.option_text || optionsRaw[0]?.content || aq.question.explanation || ""
+            optionsRaw[0]?.option_text ||
+              optionsRaw[0]?.content ||
+              aq.question.explanation ||
+              "",
           );
           return {
             id: aq.question.id,
@@ -4038,13 +4401,16 @@ export default function NewAssessmentBuilder() {
             type: type,
             marks: aq.marks_override || aq.question.marks,
             options: ["essay", "shortanswer", "computational"].includes(type)
-              ? [{
-                  id: optionsRaw[0]?.id,
-                  option_text: unpacked.modelAnswer || aq.question.explanation || "",
-                  option_text_right: "",
-                  is_correct: true,
-                  order_index: 0,
-                }]
+              ? [
+                  {
+                    id: optionsRaw[0]?.id,
+                    option_text:
+                      unpacked.modelAnswer || aq.question.explanation || "",
+                    option_text_right: "",
+                    is_correct: true,
+                    order_index: 0,
+                  },
+                ]
               : optionsRaw.map((o: any, idx: number) => ({
                   id: o.id,
                   option_text: o.option_text || o.content || "",
@@ -4059,16 +4425,18 @@ export default function NewAssessmentBuilder() {
             tolerance: unpacked.tolerance,
             computationalType: aq.question.computational_type,
             caseStudyContext: aq.question.case_study_context,
-            aiGenerated: aq.added_via === "ai_generated" || aq.question.ai_generated,
+            aiGenerated:
+              aq.added_via === "ai_generated" || aq.question.ai_generated,
             is_required: aq.is_required ?? true,
           };
-        })
+        }),
       );
     }
 
     const initialTotal = res.total_marks || 0;
     const initialPassing = res.passing_marks || 70;
-    const initialPct = initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
+    const initialPct =
+      initialTotal > 0 ? Math.round((initialPassing * 100) / initialTotal) : 70;
     setPassingMarksPercent(initialPct);
   }, []);
 
@@ -4102,11 +4470,13 @@ export default function NewAssessmentBuilder() {
             questionsOverride,
           );
           const res = (await apiClient(
-            currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
+            currentId
+              ? `/assessments/draft/${currentId}`
+              : "/assessments/draft",
             {
               method: currentId ? "PUT" : "POST",
               body: JSON.stringify(payload),
-            }
+            },
           )) as any;
           setAutosaveStatus("saved");
           syncDraftResponse(res);
@@ -4181,7 +4551,12 @@ export default function NewAssessmentBuilder() {
         clearTimeout(debouncedAutosaveRef.current);
       }
       debouncedAutosaveRef.current = setTimeout(() => {
-        runAutosaveRef.current(step, metadataOverride, rulesOverride, questionsOverride);
+        runAutosaveRef.current(
+          step,
+          metadataOverride,
+          rulesOverride,
+          questionsOverride,
+        );
       }, 2000);
     },
     [],
@@ -4215,7 +4590,9 @@ export default function NewAssessmentBuilder() {
     setFieldErrors({});
     try {
       if (!metadata.teaching_workspace_id) {
-        toast.error("Please select a teaching workspace before saving the draft.");
+        toast.error(
+          "Please select a teaching workspace before saving the draft.",
+        );
         return null;
       }
       const currentId = draftIdRef.current;
@@ -4223,8 +4600,10 @@ export default function NewAssessmentBuilder() {
         currentId ? `/assessments/draft/${currentId}` : "/assessments/draft",
         {
           method: currentId ? "PUT" : "POST",
-          body: JSON.stringify(preparePayload(undefined, undefined, activeStep)),
-        }
+          body: JSON.stringify(
+            preparePayload(undefined, undefined, activeStep),
+          ),
+        },
       )) as any;
       toast.success("Draft saved successfully.");
       syncDraftResponse(res);
@@ -4243,7 +4622,10 @@ export default function NewAssessmentBuilder() {
     }
   };
 
-  const ensureDraftId = async (): Promise<{ id: string; sections?: any[] } | null> => {
+  const ensureDraftId = async (): Promise<{
+    id: string;
+    sections?: any[];
+  } | null> => {
     const hasTempIds = blueprint.some((s) => s.id.startsWith("sec-"));
 
     // Fast path: draft exists and all sections already have real UUIDs
@@ -4268,7 +4650,7 @@ export default function NewAssessmentBuilder() {
         {
           method: currentId ? "PUT" : "POST",
           body: JSON.stringify(payload),
-        }
+        },
       )) as any;
 
       syncDraftResponse(res);
@@ -4361,6 +4743,55 @@ export default function NewAssessmentBuilder() {
         </div>
       </div>
     );
+
+  const handleTriggerAutoGrouping = async () => {
+    const assessmentId = draftIdRef.current;
+    if (!assessmentId) {
+      toast.error(
+        "Assessment draft has not been saved yet. Please complete Step 1 first.",
+      );
+      return;
+    }
+    setIsGeneratingAutoGroups(true);
+    try {
+      const res = await groupWorkApi.autoGenerateGroups(assessmentId, {
+        max_group_size: metadata.max_group_size || 4,
+        allow_smaller_final_group: true,
+        naming_pattern: "Group {index}",
+      });
+      const roster = selectedWorkspaceDetail?.roster || [];
+      const mappedGroups: Group[] = res.map((sg: any) => ({
+        id: sg.id,
+        name: sg.name,
+        members: (sg.members || []).map((m: any) => {
+          const studentInfo = roster.find(
+            (r) => (r.id || r.student_id) === m.student_id,
+          );
+          return {
+            id: m.student_id,
+            name: m.name || studentInfo?.name || "Student",
+            email: studentInfo?.email || "",
+            is_leader: !!m.is_leader,
+          };
+        }),
+      }));
+      setAutoGroupsPreview(mappedGroups);
+      toast.success("Groups auto-generated successfully! Check preview below.");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to auto-generate groups.");
+    } finally {
+      setIsGeneratingAutoGroups(false);
+    }
+  };
+
+  const handleConfirmAutoGrouping = () => {
+    if (autoGroupsPreview) {
+      setGroups(autoGroupsPreview);
+      setAutoGroupsPreview(null);
+      toast.success("Auto-grouping layout confirmed and applied!");
+    }
+  };
 
   const renderStepContent = (stepNum: number) => {
     switch (stepNum) {
@@ -4472,8 +4903,14 @@ export default function NewAssessmentBuilder() {
                     <Select
                       value={metadata.mode}
                       onValueChange={(v: any) => {
-                        setMetadata({ ...metadata, mode: v });
-                        triggerDebouncedAutosave(1);
+                        const isGroup = v === "Groupwork";
+                        const updated = {
+                          ...metadata,
+                          mode: v,
+                          is_group_assessment: isGroup,
+                        };
+                        setMetadata(updated);
+                        triggerDebouncedAutosave(1, updated);
                       }}
                     >
                       <SelectTrigger
@@ -4496,7 +4933,7 @@ export default function NewAssessmentBuilder() {
                           "Groupwork",
                         ].map((m) => (
                           <SelectItem key={m} value={m}>
-                            {m}
+                            {m === "Groupwork" ? "Group Work" : m}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -4607,7 +5044,7 @@ export default function NewAssessmentBuilder() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="endTime">
-                      End Time <span className="text-red-500">*</span>
+                      {metadata.mode === "Groupwork" ? "Group Submission Deadline" : "End Time"} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       type="time"
@@ -4690,6 +5127,206 @@ export default function NewAssessmentBuilder() {
               </CardContent>
             </Card>
 
+            {metadata.mode === "Groupwork" && (
+              <Card className="shadow-none border mt-6 animate-in fade-in slide-in-from-top-2 duration-200">
+                <CardHeader className="py-4 border-b">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Users className="size-4 text-primary" /> Compact Group Work Settings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="max-group-size-st1">Max Group Size</Label>
+                      <Input
+                        id="max-group-size-st1"
+                        type="number"
+                        min={2}
+                        max={10}
+                        value={metadata.max_group_size || 4}
+                        onChange={(e) => {
+                          const updated = {
+                            ...metadata,
+                            max_group_size: parseInt(e.target.value) || 4,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="formation-mode-st1">Formation Mode</Label>
+                      <Select
+                        value={metadata.group_formation_mode || "random"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            group_formation_mode: val,
+                            group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="formation-mode-st1">
+                          <SelectValue placeholder="Select formation mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="random">Random Split</SelectItem>
+                          <SelectItem value="similar_performance">Similar Academic Performance</SelectItem>
+                          <SelectItem value="diverse_performance">Diverse Academic Performance</SelectItem>
+                          <SelectItem value="self_enrol">Self Enrollment</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="assignment-mode-st1">Assignment Mode</Label>
+                      <Select
+                        value={metadata.group_assignment_mode || "AUTOMATIC"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            group_assignment_mode: val as any,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="assignment-mode-st1">
+                          <SelectValue placeholder="Select assignment mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="AUTOMATIC">Automatic</SelectItem>
+                          <SelectItem value="MANUAL">Manual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed">
+                    <div className="space-y-2">
+                      <Label htmlFor="submission-mode-st1">Submission Mode</Label>
+                      <Select
+                        value={metadata.submission_mode || "SINGLE_LEADER"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            submission_mode: val as any,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="submission-mode-st1">
+                          <SelectValue placeholder="Select submission mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SINGLE_LEADER">Single Leader Submits on Behalf of Group</SelectItem>
+                          <SelectItem value="ALL_MEMBERS">All Members Submit Individually (Aggregated)</SelectItem>
+                          <SelectItem value="MAJORITY_VOTE">Majority Vote (Multiple submissions, consensus needed)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground">
+                        Defines which team member can trigger the group submission workflow.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col justify-center space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="indiv-weighting-st1"
+                          checked={metadata.individual_weighting_enabled || false}
+                          onCheckedChange={(checked) => {
+                            const updated = {
+                              ...metadata,
+                              individual_weighting_enabled: checked,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="indiv-weighting-st1" className="cursor-pointer">Enable Individual Contribution Weighting</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Adjust final student marks by an individual contribution factor.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="peer-eval-st1"
+                          checked={metadata.peer_evaluation_enabled || false}
+                          onCheckedChange={(checked) => {
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_enabled: checked,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="peer-eval-st1" className="cursor-pointer">Enable Intra-Group Peer Evaluation</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Allow group members to grade each other&apos;s performance.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {metadata.peer_evaluation_enabled && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="space-y-2">
+                        <Label htmlFor="peer-eval-weight-st1">Peer Score Weight (%)</Label>
+                        <Input
+                          id="peer-eval-weight-st1"
+                          type="number"
+                          min={1}
+                          max={100}
+                          placeholder="e.g. 20"
+                          value={metadata.peer_evaluation_weight_percent || ""}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? "" : parseInt(e.target.value) || 0;
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_weight_percent: val as any,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Percentage of final mark determined by the average peer rating.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="peer-eval-deadline-st1">Peer Evaluation Deadline</Label>
+                        <Input
+                          id="peer-eval-deadline-st1"
+                          type="datetime-local"
+                          value={metadata.peer_evaluation_deadline || ""}
+                          onChange={(e) => {
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_deadline: e.target.value,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground text-destructive font-medium">
+                          Note: The peer review deadline is separate and must occur AFTER the general group submission deadline.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <div className="flex justify-end mt-8">
               <Button
                 size="lg"
@@ -4715,6 +5352,18 @@ export default function NewAssessmentBuilder() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-5 space-y-6">
+                    {metadata.mode === "Groupwork" && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3.5 flex items-start gap-3">
+                        <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Group Work Assessment — Security rules relaxed by default</p>
+                          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                            Safe Browser, Integrity Monitoring, and question shuffling have been disabled as group work is typically a take-home deliverable.
+                            Review and adjust these settings if your delivery context requires stricter controls (e.g. an in-class group presentation).
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-4">
                       {[
                         {
@@ -4781,7 +5430,10 @@ export default function NewAssessmentBuilder() {
                         value={metadata.result_release_mode}
                         onValueChange={(v: any) => {
                           setMetadata({ ...metadata, result_release_mode: v });
-                          setRules({ ...rules, resultRelease: v.toLowerCase() as any });
+                          setRules({
+                            ...rules,
+                            resultRelease: v.toLowerCase() as any,
+                          });
                           triggerDebouncedAutosave(2);
                         }}
                       >
@@ -4807,6 +5459,7 @@ export default function NewAssessmentBuilder() {
                         Additional Configuration
                       </Label>
                       <div className="space-y-4">
+                        {metadata.mode !== "Groupwork" && (
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
                             <Label
@@ -4828,6 +5481,8 @@ export default function NewAssessmentBuilder() {
                             }}
                           />
                         </div>
+                        )}
+                        {metadata.mode !== "Groupwork" && (
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
                             <Label
@@ -4849,6 +5504,7 @@ export default function NewAssessmentBuilder() {
                             }}
                           />
                         </div>
+                        )}
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
                             <Label
@@ -4965,15 +5621,7 @@ export default function NewAssessmentBuilder() {
                   </CardContent>
                 </Card>
 
-                {metadata.mode === "Groupwork" && (
-                  <GroupWorkConfigSection
-                    config={metadata as any}
-                    onConfigChange={(updates) => {
-                      setMetadata((prev) => ({ ...prev, ...updates }));
-                      triggerDebouncedAutosave(2);
-                    }}
-                  />
-                )}
+
               </div>
 
               <div className="space-y-6">
@@ -5063,218 +5711,487 @@ export default function NewAssessmentBuilder() {
         );
       case 3: {
         const roster = selectedWorkspaceDetail?.roster || [];
+        const isGroupMode = metadata.mode === "Groupwork";
 
         return (
           <div className="space-y-6">
-            <Card className="shadow-none border">
-              <CardHeader className="py-5 border-b">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="text-base font-bold flex items-center gap-2">
-                      <Users className="size-5 text-primary" /> Target Audience{" "}
-                      <span className="text-red-500">*</span>
-                    </CardTitle>
-                    <CardDescription>
-                      Determine which students will take this assessment.
-                    </CardDescription>
-                  </div>
-                  {metadata.audience_type === "selected" && (
-                    <Badge
-                      variant="secondary"
-                      className="font-semibold text-xs h-7 px-3"
-                    >
-                      Selected: {metadata.target_student_ids?.length || 0} of{" "}
-                      {roster.length} students
-                    </Badge>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <RadioGroup
-                  value={metadata.audience_type || "all"}
-                  onValueChange={(val: "all" | "selected") => {
-                    const updated = {
-                      ...metadata,
-                      audience_type: val,
-                      target_student_ids:
-                        val === "all" ? [] : metadata.target_student_ids || [],
-                    };
-                    setMetadata(updated);
-                    triggerDebouncedAutosave(3, updated);
-                  }}
-                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                >
-                  <div>
-                    <RadioGroupItem
-                      value="all"
-                      id="audience-all"
-                      className="peer sr-only"
-                    />
-                    <Label
-                      htmlFor="audience-all"
-                      className="flex flex-col items-start justify-between rounded-xl border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all h-full"
-                    >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-4 text-primary opacity-0 peer-data-[state=checked]:opacity-100 [&:has([data-state=checked])]:opacity-100 transition-opacity" />
-                        <span className="font-bold text-sm">
-                          All Enrolled Students
-                        </span>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                        This assessment will automatically be assigned to all
-                        students enrolled in the selected Teaching Workspace.
-                      </p>
-                    </Label>
-                  </div>
+            {isGroupMode ? (
+              <Card className="shadow-none border">
+                <CardHeader className="py-5 border-b">
+                  <CardTitle className="text-base font-bold flex items-center gap-2">
+                    <Users className="size-5 text-primary" /> Group Formation
+                    Panel
+                  </CardTitle>
+                  <CardDescription>
+                    Organize students into groups for this group work
+                    assessment.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <Tabs defaultValue="auto" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="auto">Auto-Formation</TabsTrigger>
+                      <TabsTrigger value="manual">Manual Builder</TabsTrigger>
+                      <TabsTrigger value="csv">CSV Import</TabsTrigger>
+                    </TabsList>
 
-                  <div>
-                    <RadioGroupItem
-                      value="selected"
-                      id="audience-selected"
-                      className="peer sr-only"
-                    />
-                    <Label
-                      htmlFor="audience-selected"
-                      className="flex flex-col items-start justify-between rounded-xl border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all h-full"
-                    >
-                      <div className="flex items-center gap-2">
-                        <CheckCircle2 className="size-4 text-primary opacity-0 peer-data-[state=checked]:opacity-100 [&:has([data-state=checked])]:opacity-100 transition-opacity" />
-                        <span className="font-bold text-sm">
-                          Selected Students Only
-                        </span>
+                    <TabsContent value="auto" className="space-y-6 pt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="max-group-size">Max Group Size</Label>
+                          <Input
+                            id="max-group-size"
+                            type="number"
+                            min={2}
+                            max={10}
+                            value={metadata.max_group_size || 4}
+                            onChange={(e) => {
+                              const updated = {
+                                ...metadata,
+                                max_group_size: parseInt(e.target.value) || 4,
+                              };
+                              setMetadata(updated);
+                              triggerDebouncedAutosave(3, updated);
+                            }}
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="formation-mode">Formation Mode</Label>
+                          <Select
+                            value={metadata.group_formation_mode || "random"}
+                            onValueChange={(val) => {
+                              const updated = {
+                                ...metadata,
+                                group_formation_mode: val,
+                                group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                              };
+                              setMetadata(updated);
+                              triggerDebouncedAutosave(3, updated);
+                            }}
+                          >
+                            <SelectTrigger id="formation-mode">
+                              <SelectValue placeholder="Select formation mode..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="random">
+                                Random Split
+                              </SelectItem>
+                              <SelectItem value="similar_performance">
+                                Similar Academic Performance
+                              </SelectItem>
+                              <SelectItem value="diverse_performance">
+                                Diverse Academic Performance
+                              </SelectItem>
+                              <SelectItem value="self_enrol">
+                                Self Enrollment
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                        Restrict this assessment to specific students (e.g.
-                        makeup, reassessment, special assignment).
-                      </p>
-                    </Label>
-                  </div>
-                </RadioGroup>
 
-                {metadata.audience_type === "selected" && (
-                  <div className="space-y-4 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="relative w-full sm:max-w-xs">
-                        <Input
-                          placeholder="Search student by name, email, or ID..."
-                          value={studentSearch}
-                          onChange={(e) => setStudentSearch(e.target.value)}
-                          className="h-9 text-xs"
-                        />
-                      </div>
-                      <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                      <div className="flex justify-end gap-3 pt-4 border-t">
                         <Button
-                          variant="outline"
-                          size="sm"
                           type="button"
-                          className="h-8 text-[11px] font-semibold"
-                          onClick={() => {
-                            const allIds = roster.map(
-                              (s) => s.id || s.student_id,
-                            );
-                            const updated = {
-                              ...metadata,
-                              target_student_ids: allIds,
-                            };
-                            setMetadata(updated);
-                            triggerDebouncedAutosave(3, updated);
-                          }}
-                        >
-                          Select All
-                        </Button>
-                        <Button
                           variant="outline"
-                          size="sm"
-                          type="button"
-                          className="h-8 text-[11px] font-semibold text-destructive hover:bg-destructive/5"
-                          onClick={() => {
-                            const updated = {
-                              ...metadata,
-                              target_student_ids: [],
-                            };
-                            setMetadata(updated);
-                            triggerDebouncedAutosave(3, updated);
-                          }}
+                          onClick={handleTriggerAutoGrouping}
+                          disabled={isGeneratingAutoGroups}
+                          className="h-10 px-6"
                         >
-                          Deselect All
+                          {isGeneratingAutoGroups
+                            ? "Generating..."
+                            : "Generate & Preview Groups"}
                         </Button>
                       </div>
-                    </div>
 
-                    <div className="border rounded-lg overflow-hidden bg-background">
-                      <ScrollArea className="h-72 w-full">
-                        <div className="divide-y">
-                          {filteredRoster.map((student) => {
-                            const studentIdStr =
-                              student.id || student.student_id;
-                            const isChecked =
-                              metadata.target_student_ids?.includes(
-                                studentIdStr,
-                              );
-                            return (
-                              <div
-                                key={studentIdStr}
-                                className="flex items-center justify-between p-3.5 hover:bg-muted/10 transition-colors"
+                      {autoGroupsPreview && (
+                        <div className="space-y-4 pt-6 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                          <h4 className="text-sm font-bold text-foreground">
+                            Generated Groups Preview
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {autoGroupsPreview.map((g) => (
+                              <Card
+                                key={g.id}
+                                className="border bg-background/50 shadow-none"
                               >
-                                <div className="flex items-center gap-3">
-                                  <Checkbox
-                                    id={`student-${studentIdStr}`}
-                                    checked={isChecked}
-                                    onCheckedChange={(checked) => {
-                                      const updatedIds = checked
-                                        ? [
-                                            ...(metadata.target_student_ids ||
-                                              []),
-                                            studentIdStr,
-                                          ]
-                                        : (
-                                            metadata.target_student_ids || []
-                                          ).filter((id) => id !== studentIdStr);
-                                      const updated = {
-                                        ...metadata,
-                                        target_student_ids: updatedIds,
-                                      };
-                                      setMetadata(updated);
-                                      triggerDebouncedAutosave(3, updated);
-                                    }}
-                                  />
-                                  <label
-                                    htmlFor={`student-${studentIdStr}`}
-                                    className="cursor-pointer space-y-0.5"
-                                  >
-                                    <p className="text-xs font-semibold text-foreground leading-none">
-                                      {student.name}
-                                    </p>
-                                    <p className="text-[10px] text-muted-foreground">
-                                      {student.email}
-                                    </p>
-                                  </label>
-                                </div>
-                                <div className="text-right">
+                                <CardHeader className="p-3 border-b bg-muted/20 flex flex-row items-center justify-between">
+                                  <span className="text-xs font-bold text-foreground">
+                                    {g.name}
+                                  </span>
                                   <Badge
                                     variant="outline"
-                                    className="text-[10px] h-5 px-2 font-mono"
+                                    className="text-[10px] px-1.5 h-4.5"
                                   >
-                                    {student.student_id}
+                                    {g.members.length} members
                                   </Badge>
-                                </div>
-                              </div>
-                            );
-                          })}
-                          {filteredRoster.length === 0 && (
-                            <div className="text-center py-16 text-muted-foreground text-xs italic">
-                              {roster.length === 0
-                                ? "No students enrolled in this workspace."
-                                : "No matching students found."}
-                            </div>
-                          )}
+                                </CardHeader>
+                                <CardContent className="p-3 space-y-1 text-xs">
+                                  {g.members.map((m) => (
+                                    <div
+                                      key={m.id}
+                                      className="flex justify-between items-center py-1"
+                                    >
+                                      <span className="font-medium">
+                                        {m.name}
+                                      </span>
+                                      {m.is_leader && (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[9px] bg-primary/5 text-primary border-primary/20"
+                                        >
+                                          Leader
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  ))}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                          <div className="flex justify-end gap-3 pt-4">
+                            <Button
+                              type="button"
+                              onClick={handleConfirmAutoGrouping}
+                              className="h-10 px-6 font-semibold"
+                            >
+                              Confirm & Apply Grouping
+                            </Button>
+                          </div>
                         </div>
-                      </ScrollArea>
+                      )}
+
+                      {!autoGroupsPreview && groups.length > 0 && (
+                        <div className="space-y-4 pt-6 border-t border-dashed">
+                          <h4 className="text-sm font-bold text-foreground">
+                            Active Groups ({groups.length})
+                          </h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {groups.map((g) => (
+                              <Card
+                                key={g.id}
+                                className="border bg-background/50 shadow-none"
+                              >
+                                <CardHeader className="p-3 border-b bg-muted/20 flex flex-row items-center justify-between">
+                                  <span className="text-xs font-bold text-foreground">
+                                    {g.name}
+                                  </span>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] px-1.5 h-4.5"
+                                  >
+                                    {g.members.length} members
+                                  </Badge>
+                                </CardHeader>
+                                <CardContent className="p-3 space-y-1 text-xs">
+                                  {g.members.map((m) => (
+                                    <div
+                                      key={m.id}
+                                      className="flex justify-between items-center py-1"
+                                    >
+                                      <span className="font-medium">
+                                        {m.name}
+                                      </span>
+                                      {m.is_leader && (
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[9px] bg-primary/5 text-primary border-primary/20"
+                                        >
+                                          Leader
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  ))}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="manual" className="pt-6">
+                      <GroupBuilderDnd
+                        courseId={
+                          metadata.teaching_workspace_id || metadata.course_id
+                        }
+                        initialGroups={groups}
+                        maxGroupSize={metadata.max_group_size || 4}
+                        onSave={async (newGroups) => {
+                          const assessmentId = draftIdRef.current;
+                          if (!assessmentId) {
+                            toast.error("Please complete Step 1 first.");
+                            return;
+                          }
+                          const manualInputs = newGroups.map((g) => ({
+                            name: g.name,
+                            members: g.members.map((m) => ({
+                              student_id: m.id,
+                              is_leader: !!m.is_leader,
+                            })),
+                          }));
+                          try {
+                            await groupWorkApi.saveManualGroups(
+                              assessmentId,
+                              manualInputs,
+                            );
+                            setGroups(newGroups);
+                            toast.success("Manual groups saved successfully!");
+                          } catch (err: any) {
+                            toast.error("Failed to save manual groups.");
+                          }
+                        }}
+                      />
+                    </TabsContent>
+
+                    <TabsContent value="csv" className="pt-6">
+                      <GroupCsvImport
+                        assessmentId={draftIdRef.current || undefined}
+                        onImport={async (importedGroups) => {
+                          const roster = selectedWorkspaceDetail?.roster || [];
+                          const mappedGroups: Group[] = importedGroups.map(
+                            (ig: any, index: number) => ({
+                              id: `group-csv-${index}-${Date.now()}`,
+                              name: ig.name,
+                              members: (ig.members || []).map((m: any) => {
+                                const studentInfo = roster.find(
+                                  (r) =>
+                                    (r.id || r.student_id) === m.student_id,
+                                );
+                                return {
+                                  id: m.student_id,
+                                  name: studentInfo?.name || "Student",
+                                  email: studentInfo?.email || "",
+                                  is_leader: !!m.is_leader,
+                                };
+                              }),
+                            }),
+                          );
+                          setGroups(mappedGroups);
+                          toast.success(
+                            "Groups successfully applied from CSV!",
+                          );
+                        }}
+                      />
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="shadow-none border">
+                <CardHeader className="py-5 border-b">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle className="text-base font-bold flex items-center gap-2">
+                        <Users className="size-5 text-primary" /> Target
+                        Audience <span className="text-red-500">*</span>
+                      </CardTitle>
+                      <CardDescription>
+                        Determine which students will take this assessment.
+                      </CardDescription>
                     </div>
+                    {metadata.audience_type === "selected" && (
+                      <Badge
+                        variant="secondary"
+                        className="font-semibold text-xs h-7 px-3"
+                      >
+                        Selected: {metadata.target_student_ids?.length || 0} of{" "}
+                        {roster.length} students
+                      </Badge>
+                    )}
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
+                  <RadioGroup
+                    value={metadata.audience_type || "all"}
+                    onValueChange={(val: "all" | "selected") => {
+                      const updated = {
+                        ...metadata,
+                        audience_type: val,
+                        target_student_ids:
+                          val === "all"
+                            ? []
+                            : metadata.target_student_ids || [],
+                      };
+                      setMetadata(updated);
+                      triggerDebouncedAutosave(3, updated);
+                    }}
+                    className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                  >
+                    <div>
+                      <RadioGroupItem
+                        value="all"
+                        id="audience-all"
+                        className="peer sr-only"
+                      />
+                      <Label
+                        htmlFor="audience-all"
+                        className="flex flex-col items-start justify-between rounded-xl border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all h-full"
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="size-4 text-primary opacity-0 peer-data-[state=checked]:opacity-100 [&:has([data-state=checked])]:opacity-100 transition-opacity" />
+                          <span className="font-bold text-sm">
+                            All Enrolled Students
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                          This assessment will automatically be assigned to all
+                          students enrolled in the selected Teaching Workspace.
+                        </p>
+                      </Label>
+                    </div>
+
+                    <div>
+                      <RadioGroupItem
+                        value="selected"
+                        id="audience-selected"
+                        className="peer sr-only"
+                      />
+                      <Label
+                        htmlFor="audience-selected"
+                        className="flex flex-col items-start justify-between rounded-xl border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all h-full"
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="size-4 text-primary opacity-0 peer-data-[state=checked]:opacity-100 [&:has([data-state=checked])]:opacity-100 transition-opacity" />
+                          <span className="font-bold text-sm">
+                            Selected Students Only
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                          Restrict this assessment to specific students (e.g.
+                          makeup, reassessment, special assignment).
+                        </p>
+                      </Label>
+                    </div>
+                  </RadioGroup>
+
+                  {metadata.audience_type === "selected" && (
+                    <div className="space-y-4 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+                        <div className="relative w-full sm:max-w-xs">
+                          <Input
+                            placeholder="Search student by name, email, or ID..."
+                            value={studentSearch}
+                            onChange={(e) => setStudentSearch(e.target.value)}
+                            className="h-9 text-xs"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            className="h-8 text-[11px] font-semibold"
+                            onClick={() => {
+                              const allIds = roster.map(
+                                (s) => s.id || s.student_id,
+                              );
+                              const updated = {
+                                ...metadata,
+                                target_student_ids: allIds,
+                              };
+                              setMetadata(updated);
+                              triggerDebouncedAutosave(3, updated);
+                            }}
+                          >
+                            Select All
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            className="h-8 text-[11px] font-semibold text-destructive hover:bg-destructive/5"
+                            onClick={() => {
+                              const updated = {
+                                ...metadata,
+                                target_student_ids: [],
+                              };
+                              setMetadata(updated);
+                              triggerDebouncedAutosave(3, updated);
+                            }}
+                          >
+                            Deselect All
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="border rounded-lg overflow-hidden bg-background">
+                        <ScrollArea className="h-72 w-full">
+                          <div className="divide-y">
+                            {filteredRoster.map((student) => {
+                              const studentIdStr =
+                                student.id || student.student_id;
+                              const isChecked =
+                                metadata.target_student_ids?.includes(
+                                  studentIdStr,
+                                );
+                              return (
+                                <div
+                                  key={studentIdStr}
+                                  className="flex items-center justify-between p-3.5 hover:bg-muted/10 transition-colors"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Checkbox
+                                      id={`student-${studentIdStr}`}
+                                      checked={isChecked}
+                                      onCheckedChange={(checked) => {
+                                        const updatedIds = checked
+                                          ? [
+                                              ...(metadata.target_student_ids ||
+                                                []),
+                                              studentIdStr,
+                                            ]
+                                          : (
+                                              metadata.target_student_ids || []
+                                            ).filter(
+                                              (id) => id !== studentIdStr,
+                                            );
+                                        const updated = {
+                                          ...metadata,
+                                          target_student_ids: updatedIds,
+                                        };
+                                        setMetadata(updated);
+                                        triggerDebouncedAutosave(3, updated);
+                                      }}
+                                    />
+                                    <label
+                                      htmlFor={`student-${studentIdStr}`}
+                                      className="cursor-pointer space-y-0.5"
+                                    >
+                                      <p className="text-xs font-semibold text-foreground leading-none">
+                                        {student.name}
+                                      </p>
+                                      <p className="text-[10px] text-muted-foreground">
+                                        {student.email}
+                                      </p>
+                                    </label>
+                                  </div>
+                                  <div className="text-right">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[10px] h-5 px-2 font-mono"
+                                    >
+                                      {student.student_id}
+                                    </Badge>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            {filteredRoster.length === 0 && (
+                              <div className="text-center py-16 text-muted-foreground text-xs italic">
+                                {roster.length === 0
+                                  ? "No students enrolled in this workspace."
+                                  : "No matching students found."}
+                              </div>
+                            )}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t">
               <Button variant="ghost" onClick={() => handleNextStep(2)}>
@@ -5307,7 +6224,9 @@ export default function NewAssessmentBuilder() {
                 <Button
                   onClick={async () => {
                     if (aiCandidates.length > 0) {
-                      toast.warning("Please review or clear your current candidate questions before generating new ones.");
+                      toast.warning(
+                        "Please review or clear your current candidate questions before generating new ones.",
+                      );
                       setAiReviewDrawerOpen(true);
                       return;
                     }
@@ -5377,22 +6296,33 @@ export default function NewAssessmentBuilder() {
                         size="sm"
                         onClick={async () => {
                           if (aiCandidates.length > 0) {
-                            toast.warning("Please review or clear your current candidate questions before generating new ones.");
+                            toast.warning(
+                              "Please review or clear your current candidate questions before generating new ones.",
+                            );
                             setAiReviewDrawerOpen(true);
                             return;
                           }
 
-                          const sectionIndex = blueprint.findIndex((s) => s.id === sec.id);
+                          const sectionIndex = blueprint.findIndex(
+                            (s) => s.id === sec.id,
+                          );
                           const activeResult = await ensureDraftId();
                           if (!activeResult) return;
 
                           let realSectionId = sec.id;
-                          if (activeResult.sections && activeResult.sections[sectionIndex]) {
-                            realSectionId = activeResult.sections[sectionIndex].id;
+                          if (
+                            activeResult.sections &&
+                            activeResult.sections[sectionIndex]
+                          ) {
+                            realSectionId =
+                              activeResult.sections[sectionIndex].id;
                           }
-                           const defaults = {
+                          const defaults = {
                             topic: sec.topics || metadata.title || "",
-                            question_type: sec.allowedTypes.length > 1 ? "mixed" : (sec.allowedTypes[0] || "mcq"),
+                            question_type:
+                              sec.allowedTypes.length > 1
+                                ? "mixed"
+                                : sec.allowedTypes[0] || "mcq",
                             difficulty: sec.difficulty.toLowerCase(),
                             count: sec.questions || 3,
                             bloom_level: sec.bloomLevel || "understand",
@@ -5402,7 +6332,9 @@ export default function NewAssessmentBuilder() {
                             hardPercent: 30,
                           };
                           setAiTargetSectionId(realSectionId);
-                          setAiGenerationConfig(loadSavedAiConfig(realSectionId, defaults));
+                          setAiGenerationConfig(
+                            loadSavedAiConfig(realSectionId, defaults),
+                          );
                           setAiDrawerOpen(true);
                         }}
                         className="h-7 text-xs"
@@ -5450,7 +6382,9 @@ export default function NewAssessmentBuilder() {
                               updateSection(
                                 sec.id,
                                 "marks",
-                                e.target.value === "" ? "" as any : parseInt(e.target.value) || 0,
+                                e.target.value === ""
+                                  ? ("" as any)
+                                  : parseInt(e.target.value) || 0,
                               );
                               triggerDebouncedAutosave(4);
                             }}
@@ -5470,7 +6404,9 @@ export default function NewAssessmentBuilder() {
                               updateSection(
                                 sec.id,
                                 "questions",
-                                e.target.value === "" ? "" as any : parseInt(e.target.value) || 0,
+                                e.target.value === ""
+                                  ? ("" as any)
+                                  : parseInt(e.target.value) || 0,
                               );
                               triggerDebouncedAutosave(4);
                             }}
@@ -5489,7 +6425,9 @@ export default function NewAssessmentBuilder() {
                             if (v.length > 0) {
                               updateSection(sec.id, "allowedTypes", v);
                             } else {
-                              updateSection(sec.id, "allowedTypes", [...sec.allowedTypes]);
+                              updateSection(sec.id, "allowedTypes", [
+                                ...sec.allowedTypes,
+                              ]);
                             }
                           }}
                           className="flex flex-wrap gap-1.5 justify-start"
@@ -5515,6 +6453,25 @@ export default function NewAssessmentBuilder() {
                           ))}
                         </ToggleGroup>
                       </div>
+
+                      {metadata.question_distribution_mode === "PER_GROUP" && (
+                        <div className="flex items-center space-x-2 pt-2 pb-2 animate-in fade-in duration-200">
+                          <Checkbox
+                            id={`per-group-${sec.id}`}
+                            checked={sec.per_group || false}
+                            onCheckedChange={(checked) => {
+                              updateSection(sec.id, "per_group", !!checked);
+                              triggerDebouncedAutosave(4);
+                            }}
+                          />
+                          <Label
+                            htmlFor={`per-group-${sec.id}`}
+                            className="cursor-pointer font-bold text-xs flex items-center gap-1.5"
+                          >
+                            <Users className="size-3.5 text-primary" /> Per-Group Question Set (different questions per group)
+                          </Label>
+                        </div>
+                      )}
 
                       <div className="grid grid-cols-2 gap-4 pt-2">
                         <div className="space-y-1.5">
@@ -5755,83 +6712,241 @@ export default function NewAssessmentBuilder() {
               </Popover>
             </div>
 
-            <div className="space-y-8">
-              {blueprint.map((sec, idx) => (
-                <div key={sec.id} className="space-y-4">
-                  <div className="flex items-center gap-3 bg-muted/20 p-3 rounded-lg border">
-                    <Badge className="px-2.5 h-6 text-xs bg-muted text-foreground hover:bg-muted shadow-none uppercase border font-semibold">
-                      Section {idx + 1}
-                    </Badge>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-semibold block truncate">
-                        {sec.section} – {sec.topics || "General Topics"}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold">
-                        {sec.marks} Marks Target
-                      </span>
+            {metadata.question_distribution_mode === "PER_GROUP" && (
+              <div className="flex justify-center border-b pb-4">
+                <Tabs value={step5ViewMode} onValueChange={(val: any) => setStep5ViewMode(val)} className="w-full max-w-md">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="standard" className="text-xs font-semibold">Standard Section View</TabsTrigger>
+                    <TabsTrigger value="per_group" className="text-xs font-semibold">Per-Group Assignment Board</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
+            )}
+
+            {metadata.question_distribution_mode === "PER_GROUP" && step5ViewMode === "per_group" ? (
+              <GroupQuestionEditor
+                groups={groups.map((g) => ({
+                  id: g.id,
+                  name: g.name,
+                  memberCount: g.members.length,
+                }))}
+                totalMarks={totalMarks}
+                getGroupMarks={(groupId) => {
+                  return questions
+                    .filter((q) => {
+                      const sec = blueprint.find((s) => s.id === q.sectionId);
+                      if (!sec) return false;
+                      if (sec.per_group === false) return true;
+                      return q.groupId === groupId;
+                    })
+                    .reduce((s, q) => s + q.marks, 0);
+                }}
+                renderQuestionEditor={(groupId) => (
+                  <div className="space-y-8 mt-4">
+                    {blueprint.map((sec, idx) => {
+                      const isPerGroupSection = sec.per_group !== false;
+                      const groupQuestions = questions.filter(
+                        (q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === groupId)
+                      );
+
+                      return (
+                        <div key={sec.id} className="space-y-4 border p-4 rounded-xl bg-muted/5">
+                          <div className="flex justify-between items-center bg-muted/10 p-3 rounded-lg border">
+                            <div className="flex items-center gap-3">
+                              <Badge className="bg-muted text-foreground uppercase border font-semibold">
+                                Section {idx + 1}
+                              </Badge>
+                              <div className="min-w-0">
+                                <span className="text-sm font-semibold block truncate">
+                                  {sec.section}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                                  {sec.marks} Marks Target
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-xs font-bold block">
+                                {groupQuestions.reduce((s, q) => s + q.marks, 0)} / {sec.marks} Marks
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {groupQuestions.map((q, qIdx) => (
+                              <QuestionCard
+                                key={q.id}
+                                question={q}
+                                index={qIdx}
+                                allowedTypes={sec.allowedTypes}
+                                onUpdate={(u) => {
+                                  updateQuestion(q.id, u);
+                                }}
+                                onDelete={() => {
+                                  removeQuestion(q.id);
+                                }}
+                                onSaveToBank={() => handleSaveToBank(q)}
+                                onUpdateOption={(oi, u) => {
+                                  updateOption(q.id, oi, u);
+                                }}
+                                onAddOption={() => {
+                                  addOption(q.id);
+                                }}
+                                onRemoveOption={(oi) => {
+                                  removeOption(q.id, oi);
+                                }}
+                              />
+                            ))}
+
+                            <div className="flex gap-4">
+                              <Button
+                                variant="outline"
+                                className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
+                                onClick={() => {
+                                  addQuestion(sec.id, isPerGroupSection ? groupId : undefined);
+                                }}
+                              >
+                                <Plus className="size-4 text-primary" />
+                                <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                                  Add Manually
+                                </span>
+                              </Button>
+                              <QuestionBankSelector
+                                selectedIds={questions.map((q) => q.id)}
+                                onSelect={(q) => {
+                                  handleBankSelect(q, sec.id, isPerGroupSection ? groupId : undefined);
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              />
+            ) : (
+              <div className="space-y-8">
+              {blueprint.map((sec, idx) => {
+                const isPerGroupSection = metadata.question_distribution_mode === "PER_GROUP" && sec.per_group !== false;
+                const currentGroupId = selectedGroupFilter[sec.id] || (groups[0]?.id || "");
+
+                return (
+                  <div key={sec.id} className="space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-lg border">
+                      <div className="flex items-center gap-3">
+                        <Badge className="px-2.5 h-6 text-xs bg-muted text-foreground hover:bg-muted shadow-none uppercase border font-semibold">
+                          Section {idx + 1}
+                        </Badge>
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold block truncate">
+                            {sec.section} – {sec.topics || "General Topics"}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                            {sec.marks} Marks Target
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-4">
+                        {isPerGroupSection && groups.length > 0 && (
+                          <div className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-md border shadow-sm">
+                            <Label htmlFor={`group-select-${sec.id}`} className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                              Target Group:
+                            </Label>
+                            <Select
+                              value={currentGroupId}
+                              onValueChange={(val) => {
+                                setSelectedGroupFilter((prev) => ({ ...prev, [sec.id]: val }));
+                              }}
+                            >
+                              <SelectTrigger id={`group-select-${sec.id}`} className="h-8 text-xs font-bold w-40">
+                                <SelectValue placeholder="Select group..." />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {groups.map((g) => (
+                                  <SelectItem key={g.id} value={g.id}>
+                                    {g.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        )}
+
+                        <div className="text-right">
+                          <span className="text-xs font-bold block">
+                            {questions
+                              .filter((q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === currentGroupId))
+                              .reduce((s, q) => s + q.marks, 0)}{" "}
+                            / {sec.marks} Marks
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <span className="text-xs font-bold block">
-                        {questions
-                          .filter((q) => q.sectionId === sec.id)
-                          .reduce((s, q) => s + q.marks, 0)}{" "}
-                        / {sec.marks} Marks
-                      </span>
+
+                    <div className="space-y-4">
+                      {isPerGroupSection && groups.length === 0 ? (
+                        <div className="p-8 border border-dashed rounded-lg text-center text-xs text-muted-foreground">
+                          No groups found. Please form groups in Step 3 first to manage questions for this section.
+                        </div>
+                      ) : (
+                        questions
+                          .filter((q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === currentGroupId))
+                          .map((q, qIdx) => (
+                            <QuestionCard
+                              key={q.id}
+                              question={q}
+                              index={qIdx}
+                              allowedTypes={sec.allowedTypes}
+                              onUpdate={(u) => {
+                                updateQuestion(q.id, u);
+                              }}
+                              onDelete={() => {
+                                removeQuestion(q.id);
+                              }}
+                              onSaveToBank={() => handleSaveToBank(q)}
+                              onUpdateOption={(oi, u) => {
+                                updateOption(q.id, oi, u);
+                              }}
+                              onAddOption={() => {
+                                addOption(q.id);
+                              }}
+                              onRemoveOption={(oi) => {
+                                removeOption(q.id, oi);
+                              }}
+                            />
+                          ))
+                      )}
+
+                      {(!isPerGroupSection || groups.length > 0) && (
+                        <div className="flex gap-4">
+                          <Button
+                            variant="outline"
+                            className="flex-1 h-14 border border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-0.5 justify-center"
+                            onClick={() => {
+                              addQuestion(sec.id, isPerGroupSection ? currentGroupId : undefined);
+                            }}
+                          >
+                            <Plus className="size-4 text-primary" />
+                            <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                              Add Manually
+                            </span>
+                          </Button>
+                          <QuestionBankSelector
+                            selectedIds={questions.map((q) => q.id)}
+                            onSelect={(q) => {
+                              handleBankSelect(q, sec.id, isPerGroupSection ? currentGroupId : undefined);
+                            }}
+                          />
+                        </div>
+                      )}
                     </div>
                   </div>
-
-                  <div className="space-y-4">
-                    {questions
-                      .filter((q) => q.sectionId === sec.id)
-                      .map((q, qIdx) => (
-                        <QuestionCard
-                          key={q.id}
-                          question={q}
-                          index={qIdx}
-                          allowedTypes={sec.allowedTypes}
-                          onUpdate={(u) => {
-                            updateQuestion(q.id, u);
-                          }}
-                          onDelete={() => {
-                            removeQuestion(q.id);
-                          }}
-                          onSaveToBank={() => handleSaveToBank(q)}
-                          onUpdateOption={(oi, u) => {
-                            updateOption(q.id, oi, u);
-                          }}
-                          onAddOption={() => {
-                            addOption(q.id);
-                          }}
-                          onRemoveOption={(oi) => {
-                            removeOption(q.id, oi);
-                          }}
-                        />
-                      ))}
-
-                    <div className="flex gap-4">
-                      <Button
-                        variant="outline"
-                        className="flex-1 h-14 border border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-0.5 justify-center"
-                        onClick={() => {
-                          addQuestion(sec.id);
-                        }}
-                      >
-                        <Plus className="size-4 text-primary" />
-                        <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                          Add Manually
-                        </span>
-                      </Button>
-                      <QuestionBankSelector
-                        selectedIds={questions.map((q) => q.id)}
-                        onSelect={(q) => {
-                          handleBankSelect(q, sec.id);
-                        }}
-                      />
-                    </div>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t">
               <Button variant="ghost" onClick={() => handleNextStep(4)}>
@@ -5848,19 +6963,28 @@ export default function NewAssessmentBuilder() {
           </div>
         );
       case 6: {
-        const isControlled = [
-          "CAT",
-          "Summative",
-          "Formative",
-          "Final Exam",
-        ].includes(metadata.mode);
+        const isGroupMode = metadata.mode === "Groupwork";
+        const isControlled =
+          ["CAT", "Summative", "Formative", "Final Exam"].includes(metadata.mode) ||
+          (isGroupMode && rules.supervised);
+
+        // Group work assignment stats for the summary card
+        const assignedStudentIds = new Set(
+          groups.flatMap((g) => g.members?.map((m: any) => m.id || m.student_id) ?? [])
+        );
+        const totalRoster = selectedWorkspaceDetail?.roster?.length ?? 0;
+        const assignedCount = assignedStudentIds.size;
+        const unassignedCount = Math.max(0, totalRoster - assignedCount);
+
         const isPublishButtonDisabled =
           isPublishing ||
           currentMarks !== totalMarks ||
           !metadata.teaching_workspace_id ||
           (metadata.audience_type === "selected" &&
             (!metadata.target_student_ids ||
-              metadata.target_student_ids.length === 0));
+              metadata.target_student_ids.length === 0)) ||
+          (isGroupMode && groups.length === 0) ||
+          (isGroupMode && unassignedCount > 0);
 
         return (
           <div className="space-y-6 max-w-4xl mx-auto">
@@ -5880,7 +7004,7 @@ export default function NewAssessmentBuilder() {
                   {metadata.durationMinutes}m)
                 </span>
                 <span className="flex items-center gap-1">
-                  <Users className="size-3.5" /> {metadata.mode}
+                  <Users className="size-3.5" /> {metadata.mode === "Groupwork" ? "Group Work" : metadata.mode}
                 </span>
               </div>
             </div>
@@ -5889,6 +7013,81 @@ export default function NewAssessmentBuilder() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="md:col-span-2 space-y-6">
+                {/* Group Configuration Summary — shown only for Group Work */}
+                {isGroupMode && (
+                  <Card className="shadow-none border">
+                    <CardHeader className="py-4 border-b">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                        <Users className="size-4 text-primary" /> Group Configuration Summary
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-5 space-y-4">
+                      {unassignedCount > 0 && (
+                        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
+                          <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <p className="text-xs text-destructive font-semibold">
+                            {unassignedCount} student{unassignedCount !== 1 ? "s are" : " is"} not assigned to any group.
+                            All students must be assigned before publishing.
+                          </p>
+                        </div>
+                      )}
+                      {groups.length === 0 && (
+                        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
+                          <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <p className="text-xs text-destructive font-semibold">
+                            No groups have been formed. Please complete Step 3 (Group Formation) before publishing.
+                          </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Groups Formed</p>
+                          <p className={`text-xl font-bold ${groups.length > 0 ? "text-emerald-600" : "text-destructive"}`}>
+                            {groups.length}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Students Assigned</p>
+                          <p className={`text-xl font-bold ${unassignedCount === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                            {assignedCount} <span className="text-sm text-muted-foreground font-normal">/ {totalRoster}</span>
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Formation Mode</p>
+                          <p className="text-sm font-semibold capitalize">
+                            {metadata.group_formation_mode?.replace(/_/g, " ") || "Not set"}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Submission Mode</p>
+                          <p className="text-sm font-semibold">
+                            {metadata.submission_mode === "SINGLE_LEADER" ? "Single Leader" :
+                              metadata.submission_mode === "ALL_MEMBERS" ? "All Members" :
+                              metadata.submission_mode === "MAJORITY_VOTE" ? "Majority Vote" : "Single Leader"}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Peer Evaluation</p>
+                          <p className={`text-sm font-semibold ${metadata.peer_evaluation_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
+                            {metadata.peer_evaluation_enabled ? "Enabled" : "Disabled"}
+                          </p>
+                          {metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline && (
+                            <p className="text-[10px] text-muted-foreground">
+                              Deadline: {format(new Date(metadata.peer_evaluation_deadline), "PPP")}
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Indiv. Weighting</p>
+                          <p className={`text-sm font-semibold ${metadata.individual_weighting_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
+                            {metadata.individual_weighting_enabled ? "Enabled" : "Disabled"}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Publishing & Monitoring Section */}
                 <Card className="shadow-none border">
                   <CardHeader className="py-4 border-b">
@@ -6094,7 +7293,7 @@ export default function NewAssessmentBuilder() {
                       <div className="text-xs text-muted-foreground bg-muted/20 border p-3 rounded-lg flex items-center gap-2">
                         <Info className="size-4 text-primary" />
                         <span>
-                          This is a low-risk assessment ({metadata.mode}). No
+                          This is a low-risk assessment ({metadata.mode === "Groupwork" ? "Group Work" : metadata.mode}). No
                           supervisor configuration is required.
                         </span>
                       </div>
@@ -6154,7 +7353,11 @@ export default function NewAssessmentBuilder() {
                                     [item.key]: v,
                                   };
                                   setRules(updatedRules);
-                                  triggerDebouncedAutosave(6, undefined, updatedRules);
+                                  triggerDebouncedAutosave(
+                                    6,
+                                    undefined,
+                                    updatedRules,
+                                  );
                                 }}
                               />
                             </div>
@@ -6287,6 +7490,28 @@ export default function NewAssessmentBuilder() {
                             </span>
                           </div>
                         )}
+                        {isGroupMode && (
+                          <>
+                            <div className="flex items-center gap-2">
+                              {groups.length > 0 ? (
+                                <Check className="size-3.5 text-emerald-500" />
+                              ) : (
+                                <X className="size-3.5 text-destructive" />
+                              )}
+                              <span>Groups formed ({groups.length})</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {unassignedCount === 0 ? (
+                                <Check className="size-3.5 text-emerald-500" />
+                              ) : (
+                                <X className="size-3.5 text-destructive" />
+                              )}
+                              <span>
+                                All students assigned ({assignedCount}/{totalRoster})
+                              </span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
 
@@ -6409,122 +7634,130 @@ export default function NewAssessmentBuilder() {
 
       {selectedWorkspaceDetail && (
         <Card className="border border-border/50 bg-muted/10">
-          <CardContent className="p-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="space-y-1 w-full">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge
-                    variant="outline"
-                    className="bg-primary/5 text-primary border-primary/20 font-semibold text-xs"
-                  >
-                    {selectedWorkspaceDetail.class_name || "GLOBAL"}
-                  </Badge>
-                  <h3 className="text-sm font-bold text-foreground">
-                    {selectedWorkspaceDetail.title} (
-                    {selectedWorkspaceDetail.code})
-                  </h3>
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-4 p-4 text-left"
+            onClick={() => setIsWorkspaceDetailOpen((prev) => !prev)}
+          >
+            <div className="space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className="bg-primary/5 text-primary border-primary/20 font-semibold text-xs"
+                >
+                  {selectedWorkspaceDetail.class_name || "GLOBAL"}
+                </Badge>
+                <h3 className="text-sm font-bold text-foreground">
+                  {selectedWorkspaceDetail.title} (
+                  {selectedWorkspaceDetail.code})
+                </h3>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Teaching workspace context and roster details
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-[10px] font-semibold">
+                {selectedWorkspaceDetail.student_count} students
+              </Badge>
+              <ChevronDown
+                className={cn(
+                  "size-4 text-muted-foreground transition-transform",
+                  isWorkspaceDetailOpen && "rotate-180",
+                )}
+              />
+            </div>
+          </button>
+          {isWorkspaceDetailOpen && (
+            <CardContent className="px-4 pb-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-y-2 gap-x-4 pt-3 text-[11px] text-muted-foreground border-t mt-1">
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Institution
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.institution_name}
+                  </span>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-y-2 gap-x-4 pt-3 text-[11px] text-muted-foreground border-t mt-3">
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Institution
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.institution_name}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Department
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.department_name || "N/A"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Program
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.option_name || "N/A"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Class / Section
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.class_name || "N/A"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Course / Module
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.title}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Academic Year
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.academic_year.includes(
-                        "Semester",
-                      )
-                        ? selectedWorkspaceDetail.academic_year
-                            .split("Semester")[0]
-                            .trim()
-                        : selectedWorkspaceDetail.academic_year}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Semester
-                    </span>
-                    <span className="text-foreground/90 font-medium">
-                      {selectedWorkspaceDetail.academic_year.includes(
-                        "Semester",
-                      )
-                        ? "Semester " +
-                          selectedWorkspaceDetail.academic_year
-                            .split("Semester")[1]
-                            .trim()
-                        : "N/A"}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Total Students
-                    </span>
-                    <span className="flex items-center gap-1 font-semibold text-primary">
-                      <Users className="size-3" />{" "}
-                      {selectedWorkspaceDetail.student_count}
-                    </span>
-                  </div>
-                  <div>
-                    <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
-                      Status
-                    </span>
-                    <span
-                      className={cn(
-                        "text-xs font-semibold capitalize",
-                        selectedWorkspaceDetail.status === "active" ||
-                          selectedWorkspaceDetail.status === "ACTIVE"
-                          ? "text-emerald-600"
-                          : "text-amber-500",
-                      )}
-                    >
-                      {selectedWorkspaceDetail.status || "Active"}
-                    </span>
-                  </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Department
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.department_name || "N/A"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Program
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.option_name || "N/A"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Class / Section
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.class_name || "N/A"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Course / Module
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.title}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Academic Year
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.academic_year.includes("Semester")
+                      ? selectedWorkspaceDetail.academic_year
+                          .split("Semester")[0]
+                          .trim()
+                      : selectedWorkspaceDetail.academic_year}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Semester
+                  </span>
+                  <span className="text-foreground/90 font-medium">
+                    {selectedWorkspaceDetail.academic_year.includes("Semester")
+                      ? "Semester " +
+                        selectedWorkspaceDetail.academic_year
+                          .split("Semester")[1]
+                          .trim()
+                      : "N/A"}
+                  </span>
+                </div>
+                <div>
+                  <span className="block font-medium text-foreground/75 uppercase tracking-wider text-[9px] mb-0.5">
+                    Status
+                  </span>
+                  <span
+                    className={cn(
+                      "text-xs font-semibold capitalize",
+                      selectedWorkspaceDetail.status === "active" ||
+                        selectedWorkspaceDetail.status === "ACTIVE"
+                        ? "text-emerald-600"
+                        : "text-amber-500",
+                    )}
+                  >
+                    {selectedWorkspaceDetail.status || "Active"}
+                  </span>
                 </div>
               </div>
-            </div>
-          </CardContent>
+            </CardContent>
+          )}
         </Card>
       )}
+
       {/* Mobile Accordion Stepper (visible on mobile, hidden on desktop) */}
       <div className="md:hidden block space-y-4">
         {STEPS_DATA.map((s, index) => {
@@ -6552,7 +7785,7 @@ export default function NewAssessmentBuilder() {
                     {stepNum}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {s.title}
+                    {stepNum === 3 && metadata.mode === "Groupwork" ? "Group Formation" : s.title}
                   </span>
                 </div>
                 <ChevronDown
@@ -6589,7 +7822,7 @@ export default function NewAssessmentBuilder() {
                       {stepNum}
                     </StepperIndicator>
                     <StepperTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground data-[state=active]:text-foreground">
-                      {s.title}
+                      {stepNum === 3 && metadata.mode === "Groupwork" ? "Group Formation" : s.title}
                     </StepperTitle>
                   </StepperTrigger>
                 </StepperItem>
@@ -6635,7 +7868,7 @@ export default function NewAssessmentBuilder() {
                     {metadata.title || "Untitled Assessment"}
                   </div>
                   <div>
-                    <strong>Assessment Type:</strong> {metadata.mode || "CAT"}
+                    <strong>Assessment Type:</strong> {(metadata.mode === "Groupwork" ? "Group Work" : metadata.mode) || "CAT"}
                   </div>
                 </div>
 
@@ -6726,14 +7959,28 @@ export default function NewAssessmentBuilder() {
                             { value: "ordering", label: "Ordering" },
                             { value: "casestudy", label: "Case Study" },
                           ];
-                          const activeSec = blueprint.find((b) => b.id === aiTargetSectionId);
-                          let visibleTypes = activeSec && activeSec.allowedTypes?.length > 0
-                            ? allTypes.filter((t) => (activeSec.allowedTypes as string[]).includes(t.value))
-                            : allTypes;
+                          const activeSec = blueprint.find(
+                            (b) => b.id === aiTargetSectionId,
+                          );
+                          let visibleTypes =
+                            activeSec && activeSec.allowedTypes?.length > 0
+                              ? allTypes.filter((t) =>
+                                  (activeSec.allowedTypes as string[]).includes(
+                                    t.value,
+                                  ),
+                                )
+                              : allTypes;
 
-                          if (activeSec && activeSec.allowedTypes && activeSec.allowedTypes.length > 1) {
+                          if (
+                            activeSec &&
+                            activeSec.allowedTypes &&
+                            activeSec.allowedTypes.length > 1
+                          ) {
                             visibleTypes = [
-                              { value: "mixed", label: "Mixed (All Selected Formats)" },
+                              {
+                                value: "mixed",
+                                label: "Mixed (All Selected Formats)",
+                              },
                               ...visibleTypes,
                             ];
                           }
@@ -6878,7 +8125,10 @@ export default function NewAssessmentBuilder() {
           }
         }}
       >
-        <SheetContent side="right" className="w-full sm:max-w-2xl md:max-w-3xl p-6 flex flex-col h-full overflow-hidden">
+        <SheetContent
+          side="right"
+          className="w-full sm:max-w-2xl md:max-w-3xl p-6 flex flex-col h-full overflow-hidden"
+        >
           <SheetHeader className="border-b pb-4 shrink-0">
             <SheetTitle className="flex items-center gap-2 text-lg font-bold">
               <CheckCircle2 className="size-5 text-emerald-500" /> Review AI
@@ -6890,18 +8140,24 @@ export default function NewAssessmentBuilder() {
             </SheetDescription>
             {/* Source legend */}
             <div className="flex items-center gap-3 pt-1 flex-wrap">
-              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Source:</span>
+              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
+                Source:
+              </span>
               <div className="flex items-center gap-1.5">
                 <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 pointer-events-none">
                   <BookOpen className="size-2.5" /> Lecture Material
                 </Badge>
-                <span className="text-[10px] text-muted-foreground">grounded in your uploaded course materials</span>
+                <span className="text-[10px] text-muted-foreground">
+                  grounded in your uploaded course materials
+                </span>
               </div>
               <div className="flex items-center gap-1.5">
                 <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50 pointer-events-none">
                   <BrainCircuit className="size-2.5" /> AI Knowledge
                 </Badge>
-                <span className="text-[10px] text-muted-foreground">no matching lecture material found — review carefully</span>
+                <span className="text-[10px] text-muted-foreground">
+                  no matching lecture material found — review carefully
+                </span>
               </div>
             </div>
           </SheetHeader>
@@ -6992,7 +8248,7 @@ export default function NewAssessmentBuilder() {
                         >
                           <Check className="size-4" />
                         </Button>
-                         <Button
+                        <Button
                           variant="ghost"
                           size="icon"
                           onClick={() => {
@@ -7002,13 +8258,16 @@ export default function NewAssessmentBuilder() {
                               cand.parsed_explanation || "",
                             );
                             setEditingOptions(
-                              (cand.options || cand._options || []).map((o: any) => ({
-                                option_text: o.text || o.option_text || "",
-                                option_text_right: o.option_text_right || o.explanation || "",
-                                is_correct: o.is_correct ?? false,
-                                order_index: o.order_index ?? 0,
-                                match_key: o.match_key,
-                              }))
+                              (cand.options || cand._options || []).map(
+                                (o: any) => ({
+                                  option_text: o.text || o.option_text || "",
+                                  option_text_right:
+                                    o.option_text_right || o.explanation || "",
+                                  is_correct: o.is_correct ?? false,
+                                  order_index: o.order_index ?? 0,
+                                  match_key: o.match_key,
+                                }),
+                              ),
                             );
                           }}
                           className="h-8 w-8 text-primary hover:bg-primary/5"
@@ -7057,27 +8316,40 @@ export default function NewAssessmentBuilder() {
                             </Label>
                             <div className="space-y-2">
                               {editingOptions.map((opt, oIdx) => {
-                                const qType = mapBackendToFrontendType(cand.question_type);
+                                const qType = mapBackendToFrontendType(
+                                  cand.question_type,
+                                );
                                 return (
-                                  <div key={oIdx} className="flex gap-2 items-center">
+                                  <div
+                                    key={oIdx}
+                                    className="flex gap-2 items-center"
+                                  >
                                     {qType === "matching" ? (
                                       <>
                                         <Input
                                           value={opt.option_text || ""}
                                           onChange={(e) => {
                                             const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            newOpts[oIdx] = {
+                                              ...newOpts[oIdx],
+                                              option_text: e.target.value,
+                                            };
                                             setEditingOptions(newOpts);
                                           }}
                                           placeholder="Left value..."
                                           className="h-8 text-xs flex-1"
                                         />
-                                        <span className="text-xs text-muted-foreground">➔</span>
+                                        <span className="text-xs text-muted-foreground">
+                                          ➔
+                                        </span>
                                         <Input
                                           value={opt.option_text_right || ""}
                                           onChange={(e) => {
                                             const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text_right: e.target.value };
+                                            newOpts[oIdx] = {
+                                              ...newOpts[oIdx],
+                                              option_text_right: e.target.value,
+                                            };
                                             setEditingOptions(newOpts);
                                           }}
                                           placeholder="Right value..."
@@ -7090,7 +8362,10 @@ export default function NewAssessmentBuilder() {
                                           value={opt.option_text || ""}
                                           onChange={(e) => {
                                             const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            newOpts[oIdx] = {
+                                              ...newOpts[oIdx],
+                                              option_text: e.target.value,
+                                            };
                                             setEditingOptions(newOpts);
                                           }}
                                           placeholder="Sub-question text..."
@@ -7098,10 +8373,18 @@ export default function NewAssessmentBuilder() {
                                         />
                                         <Input
                                           type="number"
-                                          value={opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5"}
+                                          value={
+                                            opt.match_key !== undefined &&
+                                            opt.match_key !== null
+                                              ? opt.match_key
+                                              : "5"
+                                          }
                                           onChange={(e) => {
                                             const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = { ...newOpts[oIdx], match_key: e.target.value };
+                                            newOpts[oIdx] = {
+                                              ...newOpts[oIdx],
+                                              match_key: e.target.value,
+                                            };
                                             setEditingOptions(newOpts);
                                           }}
                                           placeholder="Marks"
@@ -7114,16 +8397,21 @@ export default function NewAssessmentBuilder() {
                                           checked={opt.is_correct}
                                           onCheckedChange={(checked) => {
                                             const newOpts = [...editingOptions];
-                                            if (qType === "truefalse" || qType === "mcq") {
+                                            if (
+                                              qType === "truefalse" ||
+                                              qType === "mcq"
+                                            ) {
                                               if (checked) {
                                                 newOpts.forEach((o, idx) => {
                                                   o.is_correct = idx === oIdx;
                                                 });
                                               } else {
-                                                newOpts[oIdx].is_correct = false;
+                                                newOpts[oIdx].is_correct =
+                                                  false;
                                               }
                                             } else {
-                                              newOpts[oIdx].is_correct = !!checked;
+                                              newOpts[oIdx].is_correct =
+                                                !!checked;
                                             }
                                             setEditingOptions(newOpts);
                                           }}
@@ -7132,7 +8420,10 @@ export default function NewAssessmentBuilder() {
                                           value={opt.option_text || ""}
                                           onChange={(e) => {
                                             const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                            newOpts[oIdx] = {
+                                              ...newOpts[oIdx],
+                                              option_text: e.target.value,
+                                            };
                                             setEditingOptions(newOpts);
                                           }}
                                           placeholder="Option text..."
@@ -7170,41 +8461,57 @@ export default function NewAssessmentBuilder() {
                         </p>
                         {(() => {
                           const opts = cand.options || cand._options || [];
-                          return opts.length > 0 && (
-                            <div className="grid grid-cols-2 gap-2 pt-2">
-                              {opts.map((opt: any, oIdx: number) => (
-                              <div
-                                key={oIdx}
-                                className={cn(
-                                  "text-xs p-2 rounded border flex items-center justify-between",
-                                  opt.is_correct
-                                    ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                    : "bg-muted/10 border-border",
-                                )}
-                              >
-                                <span>
-                                  {(() => {
-                                    const textVal = opt.text || opt.option_text || "";
-                                    const rightVal = opt.explanation || opt.option_text_right || "";
-                                    const marksVal = opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5";
-                                    const normType = (cand.question_type || "").toLowerCase().replaceAll("_", "");
-                                    
-                                    if (normType === "matching") {
-                                      return `${textVal} ➔ ${rightVal}`;
-                                    }
-                                    if (normType === "casestudy") {
-                                      const guidance = rightVal ? ` — Guidance: ${rightVal}` : "";
-                                      return `${textVal} (${marksVal} Marks)${guidance}`;
-                                    }
-                                    return textVal;
-                                  })()}
-                                </span>
-                                {opt.is_correct && (
-                                  <Check className="size-3 text-emerald-600" />
-                                )}
+                          return (
+                            opts.length > 0 && (
+                              <div className="grid grid-cols-2 gap-2 pt-2">
+                                {opts.map((opt: any, oIdx: number) => (
+                                  <div
+                                    key={oIdx}
+                                    className={cn(
+                                      "text-xs p-2 rounded border flex items-center justify-between",
+                                      opt.is_correct
+                                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+                                        : "bg-muted/10 border-border",
+                                    )}
+                                  >
+                                    <span>
+                                      {(() => {
+                                        const textVal =
+                                          opt.text || opt.option_text || "";
+                                        const rightVal =
+                                          opt.explanation ||
+                                          opt.option_text_right ||
+                                          "";
+                                        const marksVal =
+                                          opt.match_key !== undefined &&
+                                          opt.match_key !== null
+                                            ? opt.match_key
+                                            : "5";
+                                        const normType = (
+                                          cand.question_type || ""
+                                        )
+                                          .toLowerCase()
+                                          .replaceAll("_", "");
+
+                                        if (normType === "matching") {
+                                          return `${textVal} ➔ ${rightVal}`;
+                                        }
+                                        if (normType === "casestudy") {
+                                          const guidance = rightVal
+                                            ? ` — Guidance: ${rightVal}`
+                                            : "";
+                                          return `${textVal} (${marksVal} Marks)${guidance}`;
+                                        }
+                                        return textVal;
+                                      })()}
+                                    </span>
+                                    {opt.is_correct && (
+                                      <Check className="size-3 text-emerald-600" />
+                                    )}
+                                  </div>
+                                ))}
                               </div>
-                            ))}
-                          </div>
+                            )
                           );
                         })()}
                         {cand.parsed_explanation && (

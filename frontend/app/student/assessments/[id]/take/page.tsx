@@ -1,7 +1,13 @@
 // app/student/assessments/[id]/take/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback, useRef } from "react";
+import React, {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { useParams, useRouter } from "next/navigation";
 import Image from "next/image";
 import {
@@ -50,7 +56,11 @@ import {
   SheetTrigger,
   SheetClose,
 } from "@/components/ui/sheet";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
@@ -100,15 +110,34 @@ import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
 // ─── Domain Types ────────────────────────────────────────────────────────────
 
 export type AssessmentType =
-  | "CAT" | "SUMMATIVE" | "FORMATIVE" | "HOMEWORK" | "GROUP_WORK" | "REASSESSMENT" | "ASSIGNMENT";
+  | "CAT"
+  | "SUMMATIVE"
+  | "FORMATIVE"
+  | "HOMEWORK"
+  | "GROUP_WORK"
+  | "REASSESSMENT"
+  | "ASSIGNMENT";
 
 export type QuestionType =
-  | "MCQ" | "TRUE_FALSE" | "MULTIPLE_CHOICE" | "MATCHING" | "ORDERING"
-  | "FILL_BLANK" | "SHORT_ANSWER" | "ESSAY" | "CASE_STUDY" | "COMPUTATIONAL";
+  | "MCQ"
+  | "TRUE_FALSE"
+  | "MULTIPLE_CHOICE"
+  | "MATCHING"
+  | "ORDERING"
+  | "FILL_BLANK"
+  | "SHORT_ANSWER"
+  | "ESSAY"
+  | "CASE_STUDY"
+  | "COMPUTATIONAL";
 
 export type AnswerType =
-  | "SINGLE_OPTION" | "MULTI_OPTION" | "TEXT" | "MATCH_PAIRS"
-  | "ORDERED_LIST" | "FILL_BLANKS" | "FILE";
+  | "SINGLE_OPTION"
+  | "MULTI_OPTION"
+  | "TEXT"
+  | "MATCH_PAIRS"
+  | "ORDERED_LIST"
+  | "FILL_BLANKS"
+  | "FILE";
 
 export interface QuestionOption {
   id: string;
@@ -229,7 +258,8 @@ class QuestionErrorBoundary extends React.Component<
     if (this.state.hasError) {
       return (
         <div className="p-4 rounded-lg border border-destructive/20 bg-destructive/5 text-xs text-destructive font-medium text-center">
-          This question could not be rendered. Your previous answer has been preserved.
+          This question could not be rendered. Your previous answer has been
+          preserved.
           <br />
           <button
             className="mt-2 underline"
@@ -263,16 +293,28 @@ function useAssessmentTimer({
     if (stage !== "taking" || !expiresAt) return;
     const calculateTimeRemaining = () => {
       const expiry = new Date(expiresAt);
-      if (Number.isNaN(expiry.getTime())) { setTimeLeft(0); return; }
-      const remaining = Math.max(0, Math.floor((expiry.getTime() - Date.now()) / 1000));
+      if (Number.isNaN(expiry.getTime())) {
+        setTimeLeft(0);
+        return;
+      }
+      const remaining = Math.max(
+        0,
+        Math.floor((expiry.getTime() - Date.now()) / 1000),
+      );
       setTimeLeft(remaining);
       if (remaining <= WARN_10MIN_THRESHOLD_S && !warned10mRef.current) {
         warned10mRef.current = true;
         toast.warning("10 minutes remaining in this assessment session.");
       }
-      if (remaining <= WARN_5MIN_THRESHOLD_S && remaining > 0 && !warned5mRef.current) {
+      if (
+        remaining <= WARN_5MIN_THRESHOLD_S &&
+        remaining > 0 &&
+        !warned5mRef.current
+      ) {
         warned5mRef.current = true;
-        toast.error("Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.");
+        toast.error(
+          "Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.",
+        );
       }
       if (remaining <= 0) onAutoSubmit();
     };
@@ -294,7 +336,10 @@ function useIntegrityMonitor({
   stage: Stage;
   assessment: AssessmentMeta | null;
   isHighSecurity: boolean;
-  handleIntegrityEvent: (type: string, metadata?: Record<string, unknown>) => Promise<void>;
+  handleIntegrityEvent: (
+    type: string,
+    metadata?: Record<string, unknown>,
+  ) => Promise<void>;
   setIsFullscreen: (val: boolean) => void;
 }) {
   // Fullscreen enforcement
@@ -314,7 +359,12 @@ function useIntegrityMonitor({
     return () => {
       document.removeEventListener("fullscreenchange", checkFullscreen);
     };
-  }, [stage, assessment?.fullscreen_required, handleIntegrityEvent, setIsFullscreen]);
+  }, [
+    stage,
+    assessment?.fullscreen_required,
+    handleIntegrityEvent,
+    setIsFullscreen,
+  ]);
 
   // Tab visibility changes
   useEffect(() => {
@@ -446,7 +496,7 @@ function useOfflineSync({
     questionId: string,
     qType: string,
     answerVal: AnswerValue,
-    changeType: "autosave" | "manual_save"
+    changeType: "autosave" | "manual_save",
   ) => Promise<void>;
 }) {
   const [isOnline, setIsOnline] = useState(true);
@@ -479,7 +529,9 @@ function useOfflineSync({
         try {
           localStorage.setItem(queueKey, JSON.stringify(queue));
         } catch (e) {
-          toast.error("Local storage full — answer could not be cached offline.");
+          toast.error(
+            "Local storage full — answer could not be cached offline.",
+          );
         }
       } catch (e) {
         console.error("Failed to save answer locally", e);
@@ -537,7 +589,7 @@ function useOfflineSync({
 
     window.addEventListener("online", updateOnlineStatus);
     window.addEventListener("offline", updateOnlineStatus);
-    
+
     const initialStatus = navigator.onLine;
     setTimeout(() => {
       setIsOnline(initialStatus);
@@ -650,12 +702,18 @@ function DroppableMatchTarget({
           }}
           className={cn(
             "bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8",
-            isDragging && "pointer-events-none"
+            isDragging && "pointer-events-none",
           )}
         >
-          <option value="" className="text-muted-foreground">Select or Drop match...</option>
+          <option value="" className="text-muted-foreground">
+            Select or Drop match...
+          </option>
           {optionsPool.map((opt, i) => (
-            <option key={i} value={opt} className="text-foreground bg-background">
+            <option
+              key={i}
+              value={opt}
+              className="text-foreground bg-background"
+            >
               {opt}
             </option>
           ))}
@@ -677,7 +735,11 @@ function DroppableMatchTarget({
   );
 }
 
-function MatchingDnd({ q, currentVal, setAnswers }: {
+function MatchingDnd({
+  q,
+  currentVal,
+  setAnswers,
+}: {
   q: AssessmentQuestion;
   currentVal: Record<string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
@@ -686,7 +748,9 @@ function MatchingDnd({ q, currentVal, setAnswers }: {
   const [isDragging, setIsDragging] = useState(false);
 
   const premises = useMemo(() => {
-    return (q.options || []).filter((o: QuestionOption) => o.text || o.option_text);
+    return (q.options || []).filter(
+      (o: QuestionOption) => o.text || o.option_text,
+    );
   }, [q.options]);
 
   const responses = useMemo(() => {
@@ -864,10 +928,12 @@ function DroppableBlank({
         }}
         className={cn(
           "bg-transparent border-none text-xs font-semibold text-primary focus:outline-none cursor-pointer w-full text-center",
-          isDragging && "pointer-events-none"
+          isDragging && "pointer-events-none",
         )}
       >
-        <option value="" className="text-muted-foreground/60">Select or Drop...</option>
+        <option value="" className="text-muted-foreground/60">
+          Select or Drop...
+        </option>
         {optionsPool.map((opt, i) => (
           <option key={i} value={opt} className="text-foreground bg-background">
             {opt}
@@ -878,7 +944,11 @@ function DroppableBlank({
   );
 }
 
-function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
+function FillInTheBlanksDnd({
+  q,
+  currentVal,
+  setAnswers,
+}: {
   q: AssessmentQuestion;
   currentVal: Record<number, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
@@ -947,7 +1017,7 @@ function FillInTheBlanksDnd({ q, currentVal, setAnswers }: {
                   index={i}
                   value={blankAnswers[i]}
                   onRemove={() => removeAnswer(i)}
-                  optionsPool={pool.map(p => p.text)}
+                  optionsPool={pool.map((p) => p.text)}
                   isDragging={isDragging}
                   onSelect={(val) => {
                     setAnswers((prev: Answers) => ({
@@ -1055,12 +1125,17 @@ function SortableOrderItem({
   );
 }
 
-function OrderingQuestion({ q, currentVal, setAnswers }: {
+function OrderingQuestion({
+  q,
+  currentVal,
+  setAnswers,
+}: {
   q: AssessmentQuestion;
   currentVal: string[] | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
-  const currentOrder = currentVal || q.options?.map((o: QuestionOption) => o.id) || [];
+  const currentOrder =
+    currentVal || q.options?.map((o: QuestionOption) => o.id) || [];
   const moveItem = (from: number, to: number) => {
     const newOrder = [...currentOrder];
     const [removed] = newOrder.splice(from, 1);
@@ -1099,7 +1174,9 @@ function OrderingQuestion({ q, currentVal, setAnswers }: {
         >
           <div className="space-y-1.5">
             {currentOrder.map((optId: string, idx: number) => {
-              const opt = q.options?.find((o: QuestionOption) => o.id === optId);
+              const opt = q.options?.find(
+                (o: QuestionOption) => o.id === optId,
+              );
               return (
                 <SortableOrderItem
                   key={optId}
@@ -1122,7 +1199,16 @@ function OrderingQuestion({ q, currentVal, setAnswers }: {
   );
 }
 
-const LECTURER_REVIEW_TYPES = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational", "computationalreasoning"];
+const LECTURER_REVIEW_TYPES = [
+  "shortanswer",
+  "short_answer",
+  "essay",
+  "casestudy",
+  "case_study",
+  "practical",
+  "computational",
+  "computationalreasoning",
+];
 
 const formatTime = (seconds: number): string => {
   if (seconds >= 3600) {
@@ -1141,13 +1227,23 @@ export default function TakeAssessmentPage() {
   const router = useRouter();
   const assessmentId = params.id as string;
 
-  const requiresLecturerReview = useCallback((q: AssessmentQuestion): boolean => {
-    if (!q) return false;
-    if (q.grading_mode === "AUTO") return false;
-    if (q.grading_mode === "MANUAL") return true;
-    const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-    return LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
-  }, []);
+  const requiresLecturerReview = useCallback(
+    (q: AssessmentQuestion): boolean => {
+      if (!q) return false;
+      if (q.grading_mode === "AUTO") return false;
+      if (q.grading_mode === "MANUAL") return true;
+      const t = (q.type || q.question_type || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
+      return (
+        LECTURER_REVIEW_TYPES.includes(t) ||
+        t === "computational" ||
+        t === "short_answer" ||
+        t === "case_study"
+      );
+    },
+    [],
+  );
 
   const [stage, setStage] = useState<Stage>("intro");
   const [assessment, setAssessment] = useState<AssessmentMeta | null>(null);
@@ -1181,13 +1277,16 @@ export default function TakeAssessmentPage() {
   >({});
   const [saveStatus, setSaveStatus] = useState<Record<string, SaveStatus>>({});
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
-  const [currentWarning, setCurrentWarning] = useState<IntegrityWarning | null>(null);
+  const [currentWarning, setCurrentWarning] = useState<IntegrityWarning | null>(
+    null,
+  );
   const [warningModalOpen, setWarningModalOpen] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
   const [submittedAttempt, setSubmittedAttempt] = useState<any>(null);
   const [isPollingScore, setIsPollingScore] = useState(false);
 
-  const [pendingAttemptStartData, setPendingAttemptStartData] = useState<any>(null);
+  const [pendingAttemptStartData, setPendingAttemptStartData] =
+    useState<any>(null);
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   const timeSpentRef = useRef<Record<string, number>>({});
@@ -1195,7 +1294,15 @@ export default function TakeAssessmentPage() {
   const isNavigatingRef = useRef(false);
   const stageRef = useRef<Stage>(stage);
   const processedWarningIds = useRef<Set<string>>(new Set());
-  const saveAnswerRef = useRef<((questionId: string, qType: string, answerVal: AnswerValue, changeType: "autosave" | "manual_save") => Promise<void>) | null>(null);
+  const saveAnswerRef = useRef<
+    | ((
+        questionId: string,
+        qType: string,
+        answerVal: AnswerValue,
+        changeType: "autosave" | "manual_save",
+      ) => Promise<void>)
+    | null
+  >(null);
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -1213,43 +1320,65 @@ export default function TakeAssessmentPage() {
           const currentExpiry = new Date(prev).getTime();
           return new Date(currentExpiry + pauseDuration).toISOString();
         });
-        toast.info(`Timer extended by ${Math.round(pauseDuration / 1000)} seconds to account for warning review.`);
+        toast.info(
+          `Timer extended by ${Math.round(pauseDuration / 1000)} seconds to account for warning review.`,
+        );
       }
     }
   }, [warningModalOpen, expiresAt]);
 
-  const [viewingSectionIntro, setViewingSectionIntro] = useState<string | null>(null);
+  const [viewingSectionIntro, setViewingSectionIntro] = useState<string | null>(
+    null,
+  );
   const [instructionsExpanded, setInstructionsExpanded] = useState(true);
   const prevQuestionRef = useRef<AssessmentQuestion | null>(null);
 
-  const isQuestionAnswered = useCallback((q: AssessmentQuestion, val: any): boolean => {
-    if (val === undefined || val === null) return false;
-    const answerType = getAnswerType(q.type || q.question_type || "");
+  const isQuestionAnswered = useCallback(
+    (q: AssessmentQuestion, val: any): boolean => {
+      if (val === undefined || val === null) return false;
+      const answerType = getAnswerType(q.type || q.question_type || "");
 
-    if (answerType === "TEXT") {
-      return typeof val === "string" && val.trim() !== "";
-    }
-    if (answerType === "SINGLE_OPTION") {
-      return typeof val === "string" && val !== "";
-    }
-    if (answerType === "MULTI_OPTION" || answerType === "ORDERED_LIST") {
-      return Array.isArray(val) && val.length > 0;
-    }
-    if (answerType === "MATCH_PAIRS") {
-      return typeof val === "object" && Object.keys(val).length > 0;
-    }
-    if (answerType === "FILL_BLANKS") {
-      if (typeof val !== "object" || Object.keys(val).length === 0) return false;
-      return Object.values(val).some(v => typeof v === "string" && v.trim() !== "");
-    }
-    if (answerType === "FILE") {
-      if (typeof val === "object") {
-        return !!val.file_url;
+      if (answerType === "TEXT") {
+        if (typeof val === "string") {
+          return val.trim() !== "";
+        }
+        if (typeof val === "object" && val !== null) {
+          return Object.values(val).some((entry) =>
+            typeof entry === "string" ? entry.trim() !== "" : false,
+          );
+        }
+        return false;
       }
-      return typeof val === "string" && val.trim() !== "";
-    }
-    return false;
-  }, []);
+      if (answerType === "SINGLE_OPTION") {
+        return typeof val === "string" && val !== "";
+      }
+      if (answerType === "MULTI_OPTION" || answerType === "ORDERED_LIST") {
+        return Array.isArray(val) && val.length > 0;
+      }
+      if (answerType === "MATCH_PAIRS") {
+        return typeof val === "object" && Object.keys(val).length > 0;
+      }
+      if (answerType === "FILL_BLANKS") {
+        if (typeof val !== "object" || Object.keys(val).length === 0)
+          return false;
+        return Object.values(val).some(
+          (v) => typeof v === "string" && v.trim() !== "",
+        );
+      }
+      if (answerType === "FILE") {
+        if (typeof val === "object" && val !== null) {
+          return !!(
+            val.file_url ||
+            (typeof val.answer_text === "string" &&
+              val.answer_text.trim() !== "")
+          );
+        }
+        return typeof val === "string" && val.trim() !== "";
+      }
+      return false;
+    },
+    [],
+  );
 
   const currentQ = questions[currentQuestionIndex];
   const isHighSecurity = useMemo(
@@ -1288,7 +1417,8 @@ export default function TakeAssessmentPage() {
       essay: "TEXT",
       casestudy: "TEXT",
       case_study: "TEXT",
-      computational: "TEXT",
+      computational: "FILE",
+      computationalreasoning: "FILE",
       practical: "FILE",
     };
     return map[normalized] ?? "TEXT";
@@ -1313,29 +1443,35 @@ export default function TakeAssessmentPage() {
     [autoSubmit],
   );
 
-  const startPollingScore = useCallback(async (attId: string, token: string) => {
-    setIsPollingScore(true);
-    let attempts = 0;
-    if (pollingIntervalRef.current) {
-      clearInterval(pollingIntervalRef.current);
-    }
-    pollingIntervalRef.current = setInterval(async () => {
-      try {
-        const detail = await attemptApi.getAttemptDetail(attId, token);
-        setSubmittedAttempt(detail);
-        if ((detail.total_score !== null && detail.total_score !== undefined) || attempts >= 20) {
-          if (pollingIntervalRef.current) {
-            clearInterval(pollingIntervalRef.current);
-            pollingIntervalRef.current = null;
-          }
-          setIsPollingScore(false);
-        }
-      } catch (err) {
-        console.error("Error polling attempt score:", err);
+  const startPollingScore = useCallback(
+    async (attId: string, token: string) => {
+      setIsPollingScore(true);
+      let attempts = 0;
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
       }
-      attempts++;
-    }, 3000);
-  }, []);
+      pollingIntervalRef.current = setInterval(async () => {
+        try {
+          const detail = await attemptApi.getAttemptDetail(attId, token);
+          setSubmittedAttempt(detail);
+          if (
+            (detail.total_score !== null && detail.total_score !== undefined) ||
+            attempts >= 20
+          ) {
+            if (pollingIntervalRef.current) {
+              clearInterval(pollingIntervalRef.current);
+              pollingIntervalRef.current = null;
+            }
+            setIsPollingScore(false);
+          }
+        } catch (err) {
+          console.error("Error polling attempt score:", err);
+        }
+        attempts++;
+      }, 3000);
+    },
+    [],
+  );
 
   const handleIntegrityEvent = useCallback(
     async (type: string, metadata: Record<string, unknown> = {}) => {
@@ -1380,9 +1516,12 @@ export default function TakeAssessmentPage() {
   const { isOnline, queueLocalSave, flushOfflineQueue } = useOfflineSync({
     attemptId,
     attemptToken,
-    saveAnswer: useCallback(async (questionId, qType, answerVal, changeType) => {
-      await saveAnswerRef.current?.(questionId, qType, answerVal, changeType);
-    }, []),
+    saveAnswer: useCallback(
+      async (questionId, qType, answerVal, changeType) => {
+        await saveAnswerRef.current?.(questionId, qType, answerVal, changeType);
+      },
+      [],
+    ),
   });
 
   const saveAnswer = useCallback(
@@ -1397,7 +1536,10 @@ export default function TakeAssessmentPage() {
 
       const answerType = getAnswerType(qType);
       const timeOnQuestion = timeSpentRef.current[questionId] || 0;
-      const isSkipped = isSkippedOverride !== undefined ? isSkippedOverride : !!skippedQuestions[questionId];
+      const isSkipped =
+        isSkippedOverride !== undefined
+          ? isSkippedOverride
+          : !!skippedQuestions[questionId];
 
       const payload: any = {
         attempt_id: attemptId,
@@ -1474,8 +1616,6 @@ export default function TakeAssessmentPage() {
 
   saveAnswerRef.current = saveAnswer;
 
-
-
   // Sync / Load logic: Detect existing attempt on mount (Resume attempt support)
   const syncSavedSubmissions = async (attId: string) => {
     try {
@@ -1486,23 +1626,38 @@ export default function TakeAssessmentPage() {
           savedAnswers[s.question_id] = s.selected_option_ids || [];
         } else if (s.answer_type === "SINGLE_OPTION") {
           const q = questions.find((x) => x.id === s.question_id);
-          const isMulti = q && getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+          const isMulti =
+            q &&
+            getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
           savedAnswers[s.question_id] = isMulti
-            ? (s.selected_option_ids || [])
-            : (s.selected_option_ids?.[0] || "");
-        }
-        else if (s.answer_type === "MATCH_PAIRS")
+            ? s.selected_option_ids || []
+            : s.selected_option_ids?.[0] || "";
+        } else if (s.answer_type === "MATCH_PAIRS")
           savedAnswers[s.question_id] = s.match_pairs_json || {};
         else if (s.answer_type === "FILL_BLANKS")
           savedAnswers[s.question_id] = s.fill_blank_answers || {};
         else if (s.answer_type === "ORDERED_LIST")
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
         else if (s.answer_type === "FILE")
-          savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
+          savedAnswers[s.question_id] = {
+            file_url: s.file_url || "",
+            filename: s.file_url
+              ? s.file_url.split("/").pop() || "uploaded_file"
+              : "",
+            answer_text: s.answer_text || "",
+          };
         else {
           const q = questions.find((x) => x.id === s.question_id);
-          const isCaseStudy = q && (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
-          if (isCaseStudy && typeof s.answer_text === "string" && s.answer_text.trim().startsWith("{")) {
+          const isCaseStudy =
+            q &&
+            (q.type || q.question_type || "")
+              .toLowerCase()
+              .replace(/[^a-z0-9_]/g, "") === "casestudy";
+          if (
+            isCaseStudy &&
+            typeof s.answer_text === "string" &&
+            s.answer_text.trim().startsWith("{")
+          ) {
             try {
               savedAnswers[s.question_id] = JSON.parse(s.answer_text);
             } catch {
@@ -1515,14 +1670,18 @@ export default function TakeAssessmentPage() {
       });
       // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
       questions.forEach((q) => {
-        if (getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" && !savedAnswers[q.id]) {
+        if (
+          getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" &&
+          !savedAnswers[q.id]
+        ) {
           savedAnswers[q.id] = q.options?.map((o) => o.id) || [];
         }
       });
       setAnswers(savedAnswers);
       lastSavedValuesRef.current = { ...savedAnswers };
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : "Failed to sync submissions";
+      const message =
+        err instanceof Error ? err.message : "Failed to sync submissions";
       console.error(message, err);
       toast.warning("Could not load previously saved answers. Starting fresh.");
     }
@@ -1550,9 +1709,12 @@ export default function TakeAssessmentPage() {
         // Check for student's IN_PROGRESS or PAUSED attempts
         const attemptsRes = await apiClient("/attempts/me");
         if (controller.signal.aborted) return;
-        const completedAttempts = attemptsRes.items?.filter(
-          (a: any) => a.assessment_id === assessmentId && ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED"].includes(a.status)
-        ) || [];
+        const completedAttempts =
+          attemptsRes.items?.filter(
+            (a: any) =>
+              a.assessment_id === assessmentId &&
+              ["SUBMITTED", "AUTO_SUBMITTED", "TERMINATED"].includes(a.status),
+          ) || [];
         setAttemptNumber(completedAttempts.length + 1);
 
         const activeAttempt = attemptsRes.items?.find(
@@ -1596,7 +1758,10 @@ export default function TakeAssessmentPage() {
                 toast.success("Attempt resumed successfully.");
               } catch (err: unknown) {
                 if (controller.signal.aborted) return;
-                const message = err instanceof Error ? err.message : "Failed to resume paused attempt.";
+                const message =
+                  err instanceof Error
+                    ? err.message
+                    : "Failed to resume paused attempt.";
                 toast.error(message);
                 setStage("intro");
               }
@@ -1632,7 +1797,10 @@ export default function TakeAssessmentPage() {
         }
       } catch (err: unknown) {
         if (controller.signal.aborted) return;
-        const message = err instanceof Error ? err.message : "Failed to load assessment context.";
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Failed to load assessment context.";
         toast.error(message);
         router.push("/student/assessments");
       } finally {
@@ -1676,9 +1844,10 @@ export default function TakeAssessmentPage() {
             const data = JSON.parse(event.data);
             if (data.type === "warning" || data.warning) {
               const warningId = data.warning?.id || data.id;
-              if (warningId && processedWarningIds.current.has(warningId)) return;
+              if (warningId && processedWarningIds.current.has(warningId))
+                return;
               if (warningId) processedWarningIds.current.add(warningId);
-              setWarnings(prev => {
+              setWarnings((prev) => {
                 const newCount = prev + 1;
                 if (newCount >= 3) {
                   terminateSession("Warnings exceeded.");
@@ -1715,8 +1884,6 @@ export default function TakeAssessmentPage() {
       if (reconnectTimeout !== null) window.clearTimeout(reconnectTimeout);
     };
   }, [stage, attemptId, terminateSession]);
-
-
 
   // Timer with server deadline countdown
   const saveAllPendingAnswers = useCallback(async () => {
@@ -1780,7 +1947,10 @@ export default function TakeAssessmentPage() {
     prevQuestionRef.current = currentQ;
 
     // Detect section boundary crossing
-    if (prevQ && prevQ.assessment_section_id !== currentQ.assessment_section_id) {
+    if (
+      prevQ &&
+      prevQ.assessment_section_id !== currentQ.assessment_section_id
+    ) {
       setViewingSectionIntro(currentQ.assessment_section_id || "default");
     }
   }, [currentQuestionIndex, stage, currentQ]);
@@ -1966,7 +2136,7 @@ export default function TakeAssessmentPage() {
       setAttemptToken(data.access_token);
       sessionStorage.setItem(`attempt_token_${data.id}`, data.access_token);
       setExpiresAt(data.expires_at);
-      
+
       const attemptData = await attemptApi.getAttemptDetail(
         data.id,
         data.access_token,
@@ -1981,24 +2151,43 @@ export default function TakeAssessmentPage() {
           if (s.answer_type === "MULTI_OPTION") {
             savedAnswers[s.question_id] = s.selected_option_ids || [];
           } else if (s.answer_type === "SINGLE_OPTION") {
-            const q = (attemptData.questions || []).find((x: any) => x.id === s.question_id);
-            const isMulti = q && getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+            const q = (attemptData.questions || []).find(
+              (x: any) => x.id === s.question_id,
+            );
+            const isMulti =
+              q &&
+              getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
             savedAnswers[s.question_id] = isMulti
-              ? (s.selected_option_ids || [])
-              : (s.selected_option_ids?.[0] || "");
-          }
-          else if (s.answer_type === "MATCH_PAIRS")
+              ? s.selected_option_ids || []
+              : s.selected_option_ids?.[0] || "";
+          } else if (s.answer_type === "MATCH_PAIRS")
             savedAnswers[s.question_id] = s.match_pairs_json || {};
           else if (s.answer_type === "FILL_BLANKS")
             savedAnswers[s.question_id] = s.fill_blank_answers || {};
           else if (s.answer_type === "ORDERED_LIST")
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
           else if (s.answer_type === "FILE")
-            savedAnswers[s.question_id] = { file_url: s.file_url || "", filename: s.file_url ? s.file_url.split("/").pop() || "uploaded_file" : "", answer_text: s.answer_text || "" };
+            savedAnswers[s.question_id] = {
+              file_url: s.file_url || "",
+              filename: s.file_url
+                ? s.file_url.split("/").pop() || "uploaded_file"
+                : "",
+              answer_text: s.answer_text || "",
+            };
           else {
-            const q = (attemptData.questions || []).find((x: any) => x.id === s.question_id);
-            const isCaseStudy = q && (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
-            if (isCaseStudy && typeof s.answer_text === "string" && s.answer_text.trim().startsWith("{")) {
+            const q = (attemptData.questions || []).find(
+              (x: any) => x.id === s.question_id,
+            );
+            const isCaseStudy =
+              q &&
+              (q.type || q.question_type || "")
+                .toLowerCase()
+                .replace(/[^a-z0-9_]/g, "") === "casestudy";
+            if (
+              isCaseStudy &&
+              typeof s.answer_text === "string" &&
+              s.answer_text.trim().startsWith("{")
+            ) {
               try {
                 savedAnswers[s.question_id] = JSON.parse(s.answer_text);
               } catch {
@@ -2011,7 +2200,10 @@ export default function TakeAssessmentPage() {
         });
         // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
         (attemptData.questions || []).forEach((q: any) => {
-          if (getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" && !savedAnswers[q.id]) {
+          if (
+            getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" &&
+            !savedAnswers[q.id]
+          ) {
             savedAnswers[q.id] = q.options?.map((o: any) => o.id) || [];
           }
         });
@@ -2034,27 +2226,37 @@ export default function TakeAssessmentPage() {
     }
   };
 
-
-
   const getAssessmentTypeLabel = (type: string) => {
     if (!type) return "";
     switch (type.toLowerCase()) {
-      case "cat": return "Continuous Assessment Test";
-      case "summative": return "Summative Examination";
-      case "formative": return "Formative Assessment";
-      case "homework": return "Homework Assignment";
-      case "group_work": return "Group Work";
-      case "reassessment": return "Reassessment";
-      case "assignment": return "Assignment";
-      default: return type;
+      case "cat":
+        return "Continuous Assessment Test";
+      case "summative":
+        return "Summative Examination";
+      case "formative":
+        return "Formative Assessment";
+      case "homework":
+        return "Homework Assignment";
+      case "group_work":
+        return "Group Work";
+      case "reassessment":
+        return "Reassessment";
+      case "assignment":
+        return "Assignment";
+      default:
+        return type;
     }
   };
   const sectionGroups = useMemo(() => {
-    const sectionIds = Array.from(new Set(questions.map((q) => q.assessment_section_id)));
+    const sectionIds = Array.from(
+      new Set(questions.map((q) => q.assessment_section_id)),
+    );
     return sectionIds.map((sectionId) => ({
       sectionId,
       questions: questions.filter((q) => q.assessment_section_id === sectionId),
-      title: questions.find((q) => q.assessment_section_id === sectionId)?.section_title || "General Section",
+      title:
+        questions.find((q) => q.assessment_section_id === sectionId)
+          ?.section_title || "General Section",
     }));
   }, [questions]);
 
@@ -2063,10 +2265,8 @@ export default function TakeAssessmentPage() {
   }, [questions, answers, isQuestionAnswered]);
 
   const progress = useMemo(
-    () => questions.length > 0
-      ? (answeredCount / questions.length) * 100
-      : 0,
-    [answeredCount, questions.length]
+    () => (questions.length > 0 ? (answeredCount / questions.length) * 100 : 0),
+    [answeredCount, questions.length],
   );
 
   const renderQuestion = (q: AssessmentQuestion): React.ReactNode => {
@@ -2087,18 +2287,28 @@ export default function TakeAssessmentPage() {
     ) {
       return (
         <RadioGroup
-          value={typeof currentVal === "string" ? currentVal : Array.isArray(currentVal) && currentVal.length > 0 ? currentVal[0] : ""}
+          value={
+            typeof currentVal === "string"
+              ? currentVal
+              : Array.isArray(currentVal) && currentVal.length > 0
+                ? currentVal[0]
+                : ""
+          }
           onValueChange={(val) =>
             setAnswers((prev) => ({ ...prev, [q.id]: val }))
           }
           className="grid gap-3"
         >
           {q.options?.map((opt: QuestionOption) => {
-            const isSelected = currentVal === opt.id || (Array.isArray(currentVal) && currentVal.includes(opt.id));
+            const isSelected =
+              currentVal === opt.id ||
+              (Array.isArray(currentVal) && currentVal.includes(opt.id));
             return (
               <div
                 key={opt.id}
-                onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))}
+                onClick={() =>
+                  setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))
+                }
                 className={cn(
                   "flex items-center space-x-3 p-3.5 rounded-xl border transition-all cursor-pointer",
                   isSelected
@@ -2125,8 +2335,8 @@ export default function TakeAssessmentPage() {
       const selectedIds = Array.isArray(currentVal)
         ? currentVal
         : typeof currentVal === "string" && currentVal
-        ? [currentVal]
-        : [];
+          ? [currentVal]
+          : [];
 
       return (
         <div className="grid gap-3">
@@ -2175,12 +2385,13 @@ export default function TakeAssessmentPage() {
 
     // ─── B. TRUE / FALSE QUESTIONS ───
     if (type === "truefalse" || type === "true_false") {
-      const tfOptions = (q.options && q.options.length >= 2)
-        ? q.options
-        : [
-            { id: "true", text: "True", option_text: "True" },
-            { id: "false", text: "False", option_text: "False" }
-          ];
+      const tfOptions =
+        q.options && q.options.length >= 2
+          ? q.options
+          : [
+              { id: "true", text: "True", option_text: "True" },
+              { id: "false", text: "False", option_text: "False" },
+            ];
       return (
         <RadioGroup
           value={typeof currentVal === "string" ? currentVal : ""}
@@ -2192,7 +2403,9 @@ export default function TakeAssessmentPage() {
           {tfOptions.map((opt: QuestionOption) => (
             <div
               key={opt.id}
-              onClick={() => setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))}
+              onClick={() =>
+                setAnswers((prev) => ({ ...prev, [q.id]: opt.id }))
+              }
               className={cn(
                 "flex items-center space-x-3 p-3.5 rounded-xl border transition-all cursor-pointer",
                 currentVal === opt.id
@@ -2214,12 +2427,20 @@ export default function TakeAssessmentPage() {
     }
 
     // ─── C. FILL IN THE BLANK ───
-    if (type === "fillblank" || type === "fillblanks" || type === "fillintheblank" || type === "fillintheblanks" || type === "fill_blank") {
+    if (
+      type === "fillblank" ||
+      type === "fillblanks" ||
+      type === "fillintheblank" ||
+      type === "fillintheblanks" ||
+      type === "fill_blank"
+    ) {
       return (
         <FillInTheBlanksDnd
           q={q}
           currentVal={
-            currentVal && typeof currentVal === "object" && !Array.isArray(currentVal)
+            currentVal &&
+            typeof currentVal === "object" &&
+            !Array.isArray(currentVal)
               ? (currentVal as Record<number, string>)
               : undefined
           }
@@ -2234,7 +2455,9 @@ export default function TakeAssessmentPage() {
         <MatchingDnd
           q={q}
           currentVal={
-            currentVal && typeof currentVal === "object" && !Array.isArray(currentVal)
+            currentVal &&
+            typeof currentVal === "object" &&
+            !Array.isArray(currentVal)
               ? (currentVal as Record<string, string>)
               : undefined
           }
@@ -2252,15 +2475,19 @@ export default function TakeAssessmentPage() {
             className="w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
             placeholder="Type your response here..."
             value={textVal}
-            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+            onChange={(e) =>
+              setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+            }
           />
           {requiresLecturerReview(q) ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2271,12 +2498,20 @@ export default function TakeAssessmentPage() {
     if (type === "essay") {
       const textVal = typeof currentVal === "string" ? currentVal : "";
       const wordCount = textVal.trim().split(/\s+/).filter(Boolean).length;
-      
+
       const minWords = q.min_words;
       const maxWords = q.max_words;
-      
-      const isTooShort = minWords !== undefined && minWords !== null && minWords > 0 && wordCount < minWords;
-      const isTooLong = maxWords !== undefined && maxWords !== null && maxWords > 0 && wordCount > maxWords;
+
+      const isTooShort =
+        minWords !== undefined &&
+        minWords !== null &&
+        minWords > 0 &&
+        wordCount < minWords;
+      const isTooLong =
+        maxWords !== undefined &&
+        maxWords !== null &&
+        maxWords > 0 &&
+        wordCount > maxWords;
       const isOutRange = isTooShort || isTooLong;
 
       let wordLabel = `${wordCount} words`;
@@ -2293,26 +2528,36 @@ export default function TakeAssessmentPage() {
           <textarea
             className={cn(
               "w-full min-h-[250px] p-4 rounded-xl border bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
-              isOutRange ? "border-red-500/50 focus:border-red-500" : "border-muted/70"
+              isOutRange
+                ? "border-red-500/50 focus:border-red-500"
+                : "border-muted/70",
             )}
             placeholder="Write your detailed essay here..."
             value={textVal}
-            onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+            onChange={(e) =>
+              setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+            }
           />
           <div className="flex items-center justify-between">
             {requiresLecturerReview(q) ? (
               <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-                <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
+                <Clock className="size-3.5" /> Essay Review Required (No
+                auto-grading)
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-                <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+                <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+                Feedback)
               </div>
             )}
-            <span className={cn(
-              "text-xs font-semibold tabular-nums",
-              isOutRange ? "text-red-500 font-bold" : "text-muted-foreground/75"
-            )}>
+            <span
+              className={cn(
+                "text-xs font-semibold tabular-nums",
+                isOutRange
+                  ? "text-red-500 font-bold"
+                  : "text-muted-foreground/75",
+              )}
+            >
               {wordLabel}
             </span>
           </div>
@@ -2322,30 +2567,39 @@ export default function TakeAssessmentPage() {
 
     // ─── G. CASE STUDY ───
     if (type === "casestudy" || type === "case_study") {
-      const answersObj = typeof currentVal === "object" && currentVal !== null
-        ? currentVal
-        : {};
+      const answersObj =
+        typeof currentVal === "object" && currentVal !== null ? currentVal : {};
 
       return (
         <div className="space-y-6">
           {q.caseStudyContext && (
             <div className="p-4 rounded-xl border border-amber-500/15 bg-amber-500/[0.02] text-sm leading-relaxed italic text-foreground/80">
-              <span className="block font-bold text-xs uppercase text-amber-600 mb-1.5 tracking-wider">Case Study Context Reference</span>
+              <span className="block font-bold text-xs uppercase text-amber-600 mb-1.5 tracking-wider">
+                Case Study Context Reference
+              </span>
               {q.caseStudyContext}
             </div>
           )}
           {q.options && q.options.length > 0 ? (
             <div className="space-y-6">
               {q.options.map((opt: any, idx: number) => {
-                const marksVal = opt.match_key || opt.match_value || opt.order_index || 0;
+                const marksVal =
+                  opt.match_key || opt.match_value || opt.order_index || 0;
                 const subAnswer = answersObj[opt.id] || "";
                 return (
-                  <div key={opt.id} className="space-y-2 p-4 rounded-xl border border-muted/50 bg-background/50">
+                  <div
+                    key={opt.id}
+                    className="space-y-2 p-4 rounded-xl border border-muted/50 bg-background/50"
+                  >
                     <div className="flex items-start justify-between gap-4">
                       <h4 className="text-sm font-semibold text-foreground/90 leading-relaxed">
-                        {idx + 1}. {opt.text || opt.option_text || "Sub-question"}
+                        {idx + 1}.{" "}
+                        {opt.text || opt.option_text || "Sub-question"}
                       </h4>
-                      <Badge variant="secondary" className="text-[10px] shrink-0 font-bold uppercase tracking-wider bg-muted/60">
+                      <Badge
+                        variant="secondary"
+                        className="text-[10px] shrink-0 font-bold uppercase tracking-wider bg-muted/60"
+                      >
                         {marksVal} Marks
                       </Badge>
                     </div>
@@ -2372,17 +2626,21 @@ export default function TakeAssessmentPage() {
                 className="w-full min-h-[180px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
                 placeholder="Write your analysis and response here..."
                 value={typeof currentVal === "string" ? currentVal : ""}
-                onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+                onChange={(e) =>
+                  setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                }
               />
             </div>
           )}
           {requiresLecturerReview(q) ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Case Study Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2390,21 +2648,40 @@ export default function TakeAssessmentPage() {
     }
 
     // ─── H. PRACTICAL & COMPUTATIONAL ───
-    if (type === "practical" || type === "computational" || type === "computationalreasoning") {
+    if (
+      type === "practical" ||
+      type === "computational" ||
+      type === "computationalreasoning"
+    ) {
       const isPractical = type === "practical";
-      const fileVal = typeof currentVal === "object" && currentVal !== null ? (currentVal as any) : { file_url: "", filename: "", answer_text: typeof currentVal === "string" ? currentVal : "" };
+      const fileVal =
+        typeof currentVal === "object" && currentVal !== null
+          ? (currentVal as any)
+          : {
+              file_url: "",
+              filename: "",
+              answer_text: typeof currentVal === "string" ? currentVal : "",
+            };
       const fileUrl = fileVal.file_url || "";
       const filename = fileVal.filename || "";
       const answerText = fileVal.answer_text || "";
 
-      const allowedFileTypes = q.allowed_file_types || ["pdf", "docx", "zip", "jpg", "png"];
+      const allowedFileTypes = q.allowed_file_types || [
+        "pdf",
+        "docx",
+        "zip",
+        "jpg",
+        "png",
+      ];
       const maxFileSize = q.max_file_size || 10;
 
       return (
         <div className="space-y-4">
           <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.01] space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wider text-primary/60">
-              {isPractical ? "Instructions & Required Deliverables" : "Instructions & Calculation Steps"}
+              {isPractical
+                ? "Instructions & Required Deliverables"
+                : "Instructions & Calculation Steps"}
             </p>
             <p className="text-sm text-foreground/80 leading-relaxed font-medium">
               {isPractical
@@ -2415,15 +2692,24 @@ export default function TakeAssessmentPage() {
 
           <div className="space-y-2">
             <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-              {isPractical ? "Deliverable File" : "Supporting File / Scan (Optional)"}
+              {isPractical
+                ? "Deliverable File"
+                : "Supporting File / Scan (Optional)"}
             </Label>
             {fileUrl ? (
               <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] shadow-sm">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <FileText className="size-5 text-emerald-600 shrink-0" />
                   <div className="min-w-0">
-                    <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">{filename || "uploaded_file"}</p>
-                    <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="text-[10px] font-medium text-primary hover:underline">
+                    <p className="text-sm font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">
+                      {filename || "uploaded_file"}
+                    </p>
+                    <a
+                      href={fileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[10px] font-medium text-primary hover:underline"
+                    >
                       Download Uploaded File
                     </a>
                   </div>
@@ -2444,7 +2730,9 @@ export default function TakeAssessmentPage() {
               <div
                 className={cn(
                   "border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-all hover:bg-muted/5",
-                  isUploadingFile ? "opacity-60 pointer-events-none" : "border-muted-foreground/25"
+                  isUploadingFile
+                    ? "opacity-60 pointer-events-none"
+                    : "border-muted-foreground/25",
                 )}
                 onClick={() => fileInputRef.current?.click()}
               >
@@ -2458,14 +2746,18 @@ export default function TakeAssessmentPage() {
 
                     // Size validation
                     if (file.size > maxFileSize * 1024 * 1024) {
-                      toast.error(`File size exceeds maximum allowed size of ${maxFileSize}MB.`);
+                      toast.error(
+                        `File size exceeds maximum allowed size of ${maxFileSize}MB.`,
+                      );
                       return;
                     }
 
                     // Format validation
                     const ext = file.name.split(".").pop()?.toLowerCase() || "";
                     if (!allowedFileTypes.includes(ext)) {
-                      toast.error(`File format .${ext} is not allowed. Allowed: ${allowedFileTypes.join(", ").toUpperCase()}`);
+                      toast.error(
+                        `File format .${ext} is not allowed. Allowed: ${allowedFileTypes.join(", ").toUpperCase()}`,
+                      );
                       return;
                     }
 
@@ -2476,8 +2768,9 @@ export default function TakeAssessmentPage() {
                       formData.append("attempt_id", attemptId || "");
                       formData.append("question_id", q.id);
                       formData.append("access_token", attemptToken || "");
-                      
-                      const res = await submissionApi.uploadSubmissionFile(formData);
+
+                      const res =
+                        await submissionApi.uploadSubmissionFile(formData);
                       const downloadUrl = res.file_url;
                       const newVal = {
                         ...fileVal,
@@ -2504,10 +2797,16 @@ export default function TakeAssessmentPage() {
                 )}
                 <div className="text-center">
                   <p className="text-xs font-semibold text-foreground/80">
-                    {isUploadingFile ? "Uploading..." : isPractical ? "Click to select and upload deliverable file" : "Click to select and upload supporting file"}
+                    {isUploadingFile
+                      ? "Uploading..."
+                      : isPractical
+                        ? "Click to select and upload deliverable file"
+                        : "Click to select and upload supporting file"}
                   </p>
                   <p className="text-[10px] text-muted-foreground/60 mt-0.5">
-                    Supports {allowedFileTypes.map(t => t.toUpperCase()).join(", ")} up to {maxFileSize}MB
+                    Supports{" "}
+                    {allowedFileTypes.map((t) => t.toUpperCase()).join(", ")} up
+                    to {maxFileSize}MB
                   </p>
                 </div>
               </div>
@@ -2516,14 +2815,20 @@ export default function TakeAssessmentPage() {
 
           <div className="space-y-2">
             <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-              {isPractical ? "Comments & Supporting Notes" : "Your Reasoning / Calculations"}
+              {isPractical
+                ? "Comments & Supporting Notes"
+                : "Your Reasoning / Calculations"}
             </Label>
             <textarea
               className={cn(
                 "w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
-                !isPractical && "font-mono"
+                !isPractical && "font-mono",
               )}
-              placeholder={isPractical ? "Write your explanation or notes here..." : "Show your formulas and calculations here..."}
+              placeholder={
+                isPractical
+                  ? "Write your explanation or notes here..."
+                  : "Show your formulas and calculations here..."
+              }
               value={answerText}
               onChange={(e) => {
                 const newVal = { ...fileVal, answer_text: e.target.value };
@@ -2534,11 +2839,13 @@ export default function TakeAssessmentPage() {
 
           {requiresLecturerReview(q) ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2562,7 +2869,9 @@ export default function TakeAssessmentPage() {
         className="w-full min-h-[120px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
         placeholder="Type your response here..."
         value={textVal}
-        onChange={(e) => setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))}
+        onChange={(e) =>
+          setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+        }
       />
     );
   };
@@ -2573,10 +2882,13 @@ export default function TakeAssessmentPage() {
         <div className="flex flex-col items-center space-y-3 max-w-md w-full text-center">
           <Loader2 className="size-7 text-primary animate-spin" />
           <h3 className="font-bold text-sm text-foreground">
-            {assessment?.title ? `Loading "${assessment.title}"...` : "Preparing Assessment Session"}
+            {assessment?.title
+              ? `Loading "${assessment.title}"...`
+              : "Preparing Assessment Session"}
           </h3>
           <p className="text-xs text-muted-foreground max-w-xs leading-relaxed">
-            Initializing secure environment protocols and syncing your evaluation configuration.
+            Initializing secure environment protocols and syncing your
+            evaluation configuration.
           </p>
         </div>
         <div className="w-full max-w-md border border-border/50 rounded-xl p-5 space-y-4 bg-muted/[0.01] animate-pulse">
@@ -2625,19 +2937,51 @@ export default function TakeAssessmentPage() {
     );
 
   if (stage === "submitted") {
-    const AUTO_GRADED_TYPES = ["mcq", "truefalse", "true_final", "true_false", "matching", "fillblank", "fillblanks", "fillintheblank", "fillintheblanks", "ordering"];
-    const LECTURER_REVIEW_TYPES = ["shortanswer", "short_answer", "essay", "casestudy", "case_study", "practical", "computational", "computationalreasoning"];
+    const AUTO_GRADED_TYPES = [
+      "mcq",
+      "truefalse",
+      "true_final",
+      "true_false",
+      "matching",
+      "fillblank",
+      "fillblanks",
+      "fillintheblank",
+      "fillintheblanks",
+      "ordering",
+    ];
+    const LECTURER_REVIEW_TYPES = [
+      "shortanswer",
+      "short_answer",
+      "essay",
+      "casestudy",
+      "case_study",
+      "practical",
+      "computational",
+      "computationalreasoning",
+    ];
 
     const autoGradedQuestions = questions.filter((q) => {
-      const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+      const t = (q.type || q.question_type || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
       return AUTO_GRADED_TYPES.includes(t) || t === "mcq" || t === "true_false";
     });
     const openQuestions = questions.filter((q) => {
-      const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-      return LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
+      const t = (q.type || q.question_type || "")
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
+      return (
+        LECTURER_REVIEW_TYPES.includes(t) ||
+        t === "computational" ||
+        t === "short_answer" ||
+        t === "case_study"
+      );
     });
 
-    const autoGradedMax = autoGradedQuestions.reduce((acc, q) => acc + (q.marks || 0), 0);
+    const autoGradedMax = autoGradedQuestions.reduce(
+      (acc, q) => acc + (q.marks || 0),
+      0,
+    );
     const openMax = openQuestions.reduce((acc, q) => acc + (q.marks || 0), 0);
     const totalMax = questions.reduce((acc, q) => acc + (q.marks || 0), 0);
     const hasOpenQuestions = openQuestions.length > 0;
@@ -2645,23 +2989,31 @@ export default function TakeAssessmentPage() {
     const pendingQuestions = questions
       .map((q, idx) => ({ q, num: idx + 1 }))
       .filter(({ q }) => {
-        const t = (q.type || q.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-        const isManual = LECTURER_REVIEW_TYPES.includes(t) || t === "computational" || t === "short_answer" || t === "case_study";
+        const t = (q.type || q.question_type || "")
+          .toLowerCase()
+          .replace(/[^a-z0-9_]/g, "");
+        const isManual =
+          LECTURER_REVIEW_TYPES.includes(t) ||
+          t === "computational" ||
+          t === "short_answer" ||
+          t === "case_study";
         const wasAnswered = isQuestionAnswered(q, answers[q.id]);
         return isManual && wasAnswered;
       });
 
     const displayAutoGradedScore = !hasOpenQuestions
-      ? (submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
-          ? `${submittedAttempt.total_score} / ${totalMax} Marks`
-          : isPollingScore
-            ? "Calculating..."
-            : `— / ${totalMax} Marks`)
-      : (submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
-          ? "Instant feedback computed"
-          : isPollingScore
-            ? "Calculating..."
-            : "Grading complete");
+      ? submittedAttempt?.total_score !== undefined &&
+        submittedAttempt?.total_score !== null
+        ? `${submittedAttempt.total_score} / ${totalMax} Marks`
+        : isPollingScore
+          ? "Calculating..."
+          : `— / ${totalMax} Marks`
+      : submittedAttempt?.total_score !== undefined &&
+          submittedAttempt?.total_score !== null
+        ? "Instant feedback computed"
+        : isPollingScore
+          ? "Calculating..."
+          : "Grading complete";
 
     return (
       <div className="min-h-screen bg-background flex items-center justify-center p-4">
@@ -2699,16 +3051,26 @@ export default function TakeAssessmentPage() {
                 </div>
                 <div className="flex-1 space-y-1">
                   <div className="flex items-center justify-between">
-                    <h3 className="font-bold text-sm text-foreground">Auto-Graded Section</h3>
-                    <Badge variant="outline" className="text-[10px] font-bold text-emerald-600 bg-emerald-500/5 border-emerald-500/10">
+                    <h3 className="font-bold text-sm text-foreground">
+                      Auto-Graded Section
+                    </h3>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] font-bold text-emerald-600 bg-emerald-500/5 border-emerald-500/10"
+                    >
                       ✔ Completed
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    Objective feedback generated instantly. Auto-graded questions (Multiple Choice, True/False, Matching, and Fill in the Blanks) have been graded.
+                    Objective feedback generated instantly. Auto-graded
+                    questions (Multiple Choice, True/False, Matching, and Fill
+                    in the Blanks) have been graded.
                   </p>
                   <p className="text-sm font-semibold text-foreground pt-1.5 flex items-center gap-1.5">
-                    Score: <span className="text-emerald-600 font-bold tabular-nums">{displayAutoGradedScore}</span>
+                    Score:{" "}
+                    <span className="text-emerald-600 font-bold tabular-nums">
+                      {displayAutoGradedScore}
+                    </span>
                   </p>
                 </div>
               </div>
@@ -2721,13 +3083,20 @@ export default function TakeAssessmentPage() {
                   </div>
                   <div className="flex-1 space-y-2">
                     <div className="flex items-center justify-between">
-                      <h3 className="font-bold text-sm text-foreground">Lecturer Review Section</h3>
-                      <Badge variant="outline" className="text-[10px] font-bold text-amber-600 bg-amber-500/5 border-amber-500/15 animate-pulse">
+                      <h3 className="font-bold text-sm text-foreground">
+                        Lecturer Review Section
+                      </h3>
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] font-bold text-amber-600 bg-amber-500/5 border-amber-500/15 animate-pulse"
+                      >
                         ⏳ Pending Review
                       </Badge>
                     </div>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      This assessment contains open-ended questions (e.g. Essay, Short Answer, Practical deliverables) which require manual review and score assignment by your lecturer.
+                      This assessment contains open-ended questions (e.g. Essay,
+                      Short Answer, Practical deliverables) which require manual
+                      review and score assignment by your lecturer.
                     </p>
                     {pendingQuestions.length > 0 && (
                       <div className="space-y-1.5 pt-1">
@@ -2736,7 +3105,11 @@ export default function TakeAssessmentPage() {
                         </p>
                         <div className="flex flex-wrap gap-1">
                           {pendingQuestions.map(({ num }) => (
-                            <Badge key={num} variant="outline" className="border-amber-500/20 bg-amber-500/5 text-amber-700 font-medium text-[10px] px-1.5 py-0">
+                            <Badge
+                              key={num}
+                              variant="outline"
+                              className="border-amber-500/20 bg-amber-500/5 text-amber-700 font-medium text-[10px] px-1.5 py-0"
+                            >
                               Question {num}
                             </Badge>
                           ))}
@@ -2744,7 +3117,10 @@ export default function TakeAssessmentPage() {
                       </div>
                     )}
                     <p className="text-sm font-semibold text-foreground pt-1 flex items-center gap-1.5">
-                      Pending Marks: <span className="text-amber-600 font-bold tabular-nums">{openMax} Marks (Pending Review)</span>
+                      Pending Marks:{" "}
+                      <span className="text-amber-600 font-bold tabular-nums">
+                        {openMax} Marks (Pending Review)
+                      </span>
                     </p>
                   </div>
                 </div>
@@ -2759,16 +3135,21 @@ export default function TakeAssessmentPage() {
                     Estimated Total Score
                   </p>
                   <p className="text-lg font-bold text-foreground">
-                    {submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null ? (
+                    {submittedAttempt?.total_score !== undefined &&
+                    submittedAttempt?.total_score !== null ? (
                       <span className="text-emerald-600 font-extrabold text-2xl tabular-nums">
-                        {submittedAttempt.total_score} / {totalMax} <span className="text-xs text-muted-foreground font-normal">(graded so far)</span>
+                        {submittedAttempt.total_score} / {totalMax}{" "}
+                        <span className="text-xs text-muted-foreground font-normal">
+                          (graded so far)
+                        </span>
                       </span>
                     ) : (
                       "Estimated total not yet available"
                     )}
                   </p>
                   <p className="text-[10px] text-muted-foreground max-w-sm">
-                    Your final assessment score will be calculated and released once all pending responses are graded by your lecturer.
+                    Your final assessment score will be calculated and released
+                    once all pending responses are graded by your lecturer.
                   </p>
                 </>
               ) : (
@@ -2777,31 +3158,36 @@ export default function TakeAssessmentPage() {
                     Final Score
                   </p>
                   <p className="text-3xl font-extrabold text-emerald-600 tabular-nums">
-                    {submittedAttempt?.total_score !== undefined && submittedAttempt?.total_score !== null
+                    {submittedAttempt?.total_score !== undefined &&
+                    submittedAttempt?.total_score !== null
                       ? `${submittedAttempt.total_score} / ${totalMax}`
                       : isPollingScore
                         ? "Calculating..."
                         : "Score Pending Release"}
                   </p>
                   <p className="text-[10px] text-muted-foreground">
-                    This assessment contained only auto-graded questions. Your results have been finalized.
+                    This assessment contained only auto-graded questions. Your
+                    results have been finalized.
                   </p>
                 </>
               )}
             </div>
 
             <div className="flex flex-col gap-3 w-full">
-              {assessment?.result_release_mode?.toUpperCase() === "IMMEDIATE" && attemptId && (
-                <Button
-                  onClick={() => router.push(`/student/results/${attemptId}`)}
-                  className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-emerald-600 hover:bg-emerald-700 text-white transition-all animate-pulse"
-                >
-                  View Result Detail
-                </Button>
-              )}
-              
+              {assessment?.result_release_mode?.toUpperCase() === "IMMEDIATE" &&
+                attemptId && (
+                  <Button
+                    onClick={() => router.push(`/student/results/${attemptId}`)}
+                    className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-emerald-600 hover:bg-emerald-700 text-white transition-all animate-pulse"
+                  >
+                    View Result Detail
+                  </Button>
+                )}
+
               <Button
-                onClick={() => router.push(`/student/assessments/${assessmentId}/results`)}
+                onClick={() =>
+                  router.push(`/student/assessments/${assessmentId}/results`)
+                }
                 className="w-full h-11 text-xs font-bold rounded-xl shadow-md bg-primary hover:bg-primary/90 text-primary-foreground transition-all"
               >
                 View Assessment Submission & Review
@@ -2821,11 +3207,26 @@ export default function TakeAssessmentPage() {
     );
   }
 
-  const unansweredRequired = questions.filter((q) => q.is_required && !isQuestionAnswered(q, answers[q.id]));
-  const unansweredOptional = questions.filter((q) => !q.is_required && !isQuestionAnswered(q, answers[q.id]) && !skippedQuestions[q.id]);
-  const unansweredRequiredNums = unansweredRequired.map((q) => questions.findIndex((x) => x.id === q.id) + 1);
-  const unansweredOptionalNums = unansweredOptional.map((q) => questions.findIndex((x) => x.id === q.id) + 1);
-  const firstUnansweredIndex = questions.findIndex((q) => !isQuestionAnswered(q, answers[q.id]) && (q.is_required || !skippedQuestions[q.id]));
+  const unansweredRequired = questions.filter(
+    (q) => q.is_required && !isQuestionAnswered(q, answers[q.id]),
+  );
+  const unansweredOptional = questions.filter(
+    (q) =>
+      !q.is_required &&
+      !isQuestionAnswered(q, answers[q.id]) &&
+      !skippedQuestions[q.id],
+  );
+  const unansweredRequiredNums = unansweredRequired.map(
+    (q) => questions.findIndex((x) => x.id === q.id) + 1,
+  );
+  const unansweredOptionalNums = unansweredOptional.map(
+    (q) => questions.findIndex((x) => x.id === q.id) + 1,
+  );
+  const firstUnansweredIndex = questions.findIndex(
+    (q) =>
+      !isQuestionAnswered(q, answers[q.id]) &&
+      (q.is_required || !skippedQuestions[q.id]),
+  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col font-sans">
@@ -2859,12 +3260,15 @@ export default function TakeAssessmentPage() {
               {assessment?.title}
             </div>
             {assessment?.is_open_book !== undefined && stage === "taking" && (
-              <Badge variant="outline" className={cn(
-                "text-[10px] py-0 font-bold uppercase tracking-wider h-5 px-2 shrink-0 select-none",
-                assessment.is_open_book 
-                  ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600"
-                  : "border-muted-foreground/20 bg-muted/5 text-muted-foreground"
-              )}>
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-[10px] py-0 font-bold uppercase tracking-wider h-5 px-2 shrink-0 select-none",
+                  assessment.is_open_book
+                    ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-600"
+                    : "border-muted-foreground/20 bg-muted/5 text-muted-foreground",
+                )}
+              >
                 {assessment.is_open_book ? "Open Book" : "Closed Book"}
               </Badge>
             )}
@@ -2885,11 +3289,15 @@ export default function TakeAssessmentPage() {
             <Timer className="size-4" /> {formatTime(timeLeft)}
           </div>
           {warnings > 0 && (
-            <div className={cn(
-              "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold",
-              warnings === 1 && "border-amber-500/20 text-amber-600 bg-amber-500/10",
-              warnings >= 2 && "border-destructive/20 text-destructive bg-destructive/10 animate-pulse",
-            )}>
+            <div
+              className={cn(
+                "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold",
+                warnings === 1 &&
+                  "border-amber-500/20 text-amber-600 bg-amber-500/10",
+                warnings >= 2 &&
+                  "border-destructive/20 text-destructive bg-destructive/10 animate-pulse",
+              )}
+            >
               <AlertTriangle className="size-3.5" />
               {warnings}/3 Warnings
             </div>
@@ -2928,17 +3336,26 @@ export default function TakeAssessmentPage() {
                     </h4>
                     <p className="text-sm font-semibold text-amber-900 leading-tight">
                       This exam closes at:{" "}
-                      {new Date(assessment.end_date).toLocaleTimeString(undefined, {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}{" "}
-                      ({new Date(assessment.end_date).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })})
+                      {new Date(assessment.end_date).toLocaleTimeString(
+                        undefined,
+                        {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        },
+                      )}{" "}
+                      (
+                      {new Date(assessment.end_date).toLocaleDateString(
+                        undefined,
+                        {
+                          month: "short",
+                          day: "numeric",
+                        },
+                      )}
+                      )
                     </p>
                     <p className="text-[10px] text-amber-700/80 leading-normal">
-                      Ensure you submit your answers before this time. No additional time will be granted.
+                      Ensure you submit your answers before this time. No
+                      additional time will be granted.
                     </p>
                   </div>
                 </div>
@@ -2965,10 +3382,14 @@ export default function TakeAssessmentPage() {
                   <p className="text-[10px] text-muted-foreground/80 font-bold uppercase tracking-wider mb-1">
                     Reference
                   </p>
-                  <p className={cn(
-                    "text-sm md:text-base font-bold truncate",
-                    assessment.is_open_book ? "text-emerald-600" : "text-muted-foreground/80"
-                  )}>
+                  <p
+                    className={cn(
+                      "text-sm md:text-base font-bold truncate",
+                      assessment.is_open_book
+                        ? "text-emerald-600"
+                        : "text-muted-foreground/80",
+                    )}
+                  >
                     {assessment.is_open_book ? "Open Book" : "Closed Book"}
                   </p>
                 </div>
@@ -2998,14 +3419,23 @@ export default function TakeAssessmentPage() {
                   </h3>
                   <div className="space-y-2 max-h-[180px] overflow-y-auto pr-1">
                     {assessment.sections
-                      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                      .sort(
+                        (a, b) => (a.order_index ?? 0) - (b.order_index ?? 0),
+                      )
                       .map((sec, sIdx) => (
-                        <div key={sec.id || sIdx} className="p-3 border border-border/50 rounded-lg bg-muted/[0.01]">
+                        <div
+                          key={sec.id || sIdx}
+                          className="p-3 border border-border/50 rounded-lg bg-muted/[0.01]"
+                        >
                           <div className="flex items-center justify-between font-semibold text-xs text-foreground mb-1">
                             <span>
-                              Section {String.fromCharCode(65 + sIdx)}: {sec.title}
+                              Section {String.fromCharCode(65 + sIdx)}:{" "}
+                              {sec.title}
                             </span>
-                            <Badge variant="secondary" className="text-[10px] py-0 font-bold bg-muted/60 text-muted-foreground">
+                            <Badge
+                              variant="secondary"
+                              className="text-[10px] py-0 font-bold bg-muted/60 text-muted-foreground"
+                            >
                               {sec.allocated_marks ?? 0} Marks
                             </Badge>
                           </div>
@@ -3079,9 +3509,11 @@ export default function TakeAssessmentPage() {
                   autoComplete="new-password"
                 />
                 {passwordError && (
-                  <p className="text-xs text-destructive font-medium text-center">{passwordError}</p>
+                  <p className="text-xs text-destructive font-medium text-center">
+                    {passwordError}
+                  </p>
                 )}
-                 <Button
+                <Button
                   type="submit"
                   disabled={isVerifyingPassword}
                   className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
@@ -3094,88 +3526,91 @@ export default function TakeAssessmentPage() {
         </div>
       )}
 
-      {stage === "readiness" && (() => {
-        const readinessItems = ([
-          assessment?.fullscreen_required && {
-            text: "You must remain in full-screen mode throughout this assessment.",
-            icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
-          },
-          assessment?.is_supervised && {
-            text: "This session is actively monitored by your lecturer.",
-            icon: <Shield className="size-4 text-primary shrink-0" />,
-          },
-          assessment?.ai_assistance_allowed === false && {
-            text: "AI tools and browser extensions are blocked during this assessment.",
-            icon: <Lock className="size-4 text-destructive shrink-0" />,
-          },
-          {
-            text: "Your browser activity is logged. Tab switches, copy attempts, and window focus changes are recorded.",
-            icon: <Check className="size-4 text-emerald-600 shrink-0" />,
-          },
-          {
-            text: `Receiving 3 integrity warnings will terminate your session. You currently have 0 warnings.`,
-            icon: <AlertTriangle className="size-4 text-amber-600 shrink-0" />,
-          },
-          assessment?.duration_minutes && {
-            text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
-            icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
-          },
-        ].filter(Boolean) as { text: string; icon: React.ReactNode }[]);
+      {stage === "readiness" &&
+        (() => {
+          const readinessItems = [
+            assessment?.fullscreen_required && {
+              text: "You must remain in full-screen mode throughout this assessment.",
+              icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
+            },
+            assessment?.is_supervised && {
+              text: "This session is actively monitored by your lecturer.",
+              icon: <Shield className="size-4 text-primary shrink-0" />,
+            },
+            assessment?.ai_assistance_allowed === false && {
+              text: "AI tools and browser extensions are blocked during this assessment.",
+              icon: <Lock className="size-4 text-destructive shrink-0" />,
+            },
+            {
+              text: "Your browser activity is logged. Tab switches, copy attempts, and window focus changes are recorded.",
+              icon: <Check className="size-4 text-emerald-600 shrink-0" />,
+            },
+            {
+              text: `Receiving 3 integrity warnings will terminate your session. You currently have 0 warnings.`,
+              icon: (
+                <AlertTriangle className="size-4 text-amber-600 shrink-0" />
+              ),
+            },
+            assessment?.duration_minutes && {
+              text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
+              icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
+            },
+          ].filter(Boolean) as { text: string; icon: React.ReactNode }[];
 
-        return (
-          <div className="flex-1 flex items-center justify-center p-4">
-            <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
-              <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
-                <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Protocol Declaration
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <div className="space-y-2">
-                  {readinessItems.map((item, i) => (
-                    <div
-                      key={i}
-                      className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
-                    >
-                      {item.icon}
-                      <span className="text-xs font-medium text-foreground/75">
-                        {item.text}
-                      </span>
-                    </div>
-                  ))}
-                </div>
-                <div className="space-y-4">
-                  <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
-                    <Checkbox
-                      id="readiness"
-                      checked={readinessChecked}
-                      onCheckedChange={(c) => setReadinessChecked(!!c)}
-                      className="mt-0.5 size-4 rounded border-primary/30"
-                    />
-                    <Label
-                      htmlFor="readiness"
-                      className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
-                    >
-                      I declare and commit adherence to the institutional academic
-                      integrity standards.
-                    </Label>
+          return (
+            <div className="flex-1 flex items-center justify-center p-4">
+              <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
+                <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
+                  <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                    Protocol Declaration
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
+                  <div className="space-y-2">
+                    {readinessItems.map((item, i) => (
+                      <div
+                        key={i}
+                        className="flex gap-3 p-3 rounded-lg border border-border/40 bg-muted/5 items-center"
+                      >
+                        {item.icon}
+                        <span className="text-xs font-medium text-foreground/75">
+                          {item.text}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <Button
-                    onClick={handleReadinessConfirm}
-                    disabled={!readinessChecked}
-                    className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
-                  >
-                    Start Timer & Begin Assessment
-                  </Button>
-                  <p className="text-[10px] text-muted-foreground text-center font-medium">
-                    Note: The assessment countdown timer begins immediately.
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-        );
-      })()}
+                  <div className="space-y-4">
+                    <div className="flex items-start gap-3 p-3 rounded-lg bg-primary/5 border border-primary/10">
+                      <Checkbox
+                        id="readiness"
+                        checked={readinessChecked}
+                        onCheckedChange={(c) => setReadinessChecked(!!c)}
+                        className="mt-0.5 size-4 rounded border-primary/30"
+                      />
+                      <Label
+                        htmlFor="readiness"
+                        className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
+                      >
+                        I declare and commit adherence to the institutional
+                        academic integrity standards.
+                      </Label>
+                    </div>
+                    <Button
+                      onClick={handleReadinessConfirm}
+                      disabled={!readinessChecked}
+                      className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
+                    >
+                      Start Timer & Begin Assessment
+                    </Button>
+                    <p className="text-[10px] text-muted-foreground text-center font-medium">
+                      Note: The assessment countdown timer begins immediately.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          );
+        })()}
 
       {stage === "taking" && (
         <div className="flex-1 flex overflow-hidden bg-muted/[0.01]">
@@ -3200,7 +3635,10 @@ export default function TakeAssessmentPage() {
                 <div className="flex items-center justify-between px-0.5">
                   <div className="flex-1 max-w-[200px] space-y-1.5">
                     <div className="flex justify-between text-xs font-medium text-muted-foreground/80">
-                      <span>Progress ({answeredCount} of {questions.length} answered)</span>
+                      <span>
+                        Progress ({answeredCount} of {questions.length}{" "}
+                        answered)
+                      </span>
                       <span>{Math.round(progress)}%</span>
                     </div>
                     <Progress
@@ -3213,11 +3651,18 @@ export default function TakeAssessmentPage() {
                     <div className="md:hidden">
                       <Sheet>
                         <SheetTrigger asChild>
-                          <Button variant="outline" size="xs" className="h-7 text-[11px] font-semibold gap-1 rounded-lg border-border hover:bg-muted/50">
+                          <Button
+                            variant="outline"
+                            size="xs"
+                            className="h-7 text-[11px] font-semibold gap-1 rounded-lg border-border hover:bg-muted/50"
+                          >
                             <Menu className="size-3.5" /> Navigate
                           </Button>
                         </SheetTrigger>
-                        <SheetContent side="bottom" className="h-[75vh] rounded-t-2xl p-6 bg-background flex flex-col border-t">
+                        <SheetContent
+                          side="bottom"
+                          className="h-[75vh] rounded-t-2xl p-6 bg-background flex flex-col border-t"
+                        >
                           <SheetHeader className="text-left pb-2">
                             <SheetTitle className="text-sm font-semibold uppercase tracking-widest text-muted-foreground/60">
                               Assessment Matrix
@@ -3227,87 +3672,113 @@ export default function TakeAssessmentPage() {
                             </SheetDescription>
                           </SheetHeader>
                           <div className="flex-1 overflow-y-auto space-y-5 pr-1 py-4">
-                            {sectionGroups.map(({ sectionId, questions: sectionQuestions, title: sectionTitle }) => {
-                              return (
-                                <div key={sectionId || "gen"} className="space-y-2">
-                                  <div className="text-xs font-semibold text-muted-foreground/75 truncate text-left">
-                                    {sectionTitle}
-                                  </div>
-                                  <div className="grid grid-cols-5 gap-2">
-                                    {sectionQuestions.map((q) => {
-                                      const idx = questions.findIndex((gq) => gq.id === q.id);
-                                      const isAnswered = isQuestionAnswered(q, answers[q.id]);
-                                      const isCurrent = idx === currentQuestionIndex;
-                                      const isFlagged = flaggedQuestions[q.id];
-                                      const isSkipped = skippedQuestions[q.id];
+                            {sectionGroups.map(
+                              ({
+                                sectionId,
+                                questions: sectionQuestions,
+                                title: sectionTitle,
+                              }) => {
+                                return (
+                                  <div
+                                    key={sectionId || "gen"}
+                                    className="space-y-2"
+                                  >
+                                    <div className="text-xs font-semibold text-muted-foreground/75 truncate text-left">
+                                      {sectionTitle}
+                                    </div>
+                                    <div className="grid grid-cols-5 gap-2">
+                                      {sectionQuestions.map((q) => {
+                                        const idx = questions.findIndex(
+                                          (gq) => gq.id === q.id,
+                                        );
+                                        const isAnswered = isQuestionAnswered(
+                                          q,
+                                          answers[q.id],
+                                        );
+                                        const isCurrent =
+                                          idx === currentQuestionIndex;
+                                        const isFlagged =
+                                          flaggedQuestions[q.id];
+                                        const isSkipped =
+                                          skippedQuestions[q.id];
 
-                                      let statusColor =
-                                        "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
-                                      if (isAnswered) {
-                                        if (isFlagged) {
-                                          statusColor =
-                                            "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
-                                        } else if (isSkipped) {
-                                          statusColor =
-                                            "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                                        let statusColor =
+                                          "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
+                                        if (isAnswered) {
+                                          if (isFlagged) {
+                                            statusColor =
+                                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                                          } else if (isSkipped) {
+                                            statusColor =
+                                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                                          } else {
+                                            statusColor =
+                                              "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                                          }
                                         } else {
-                                          statusColor =
-                                            "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                                          if (isFlagged) {
+                                            statusColor =
+                                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                                          } else if (isSkipped) {
+                                            statusColor =
+                                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                                          }
                                         }
-                                      } else {
-                                        if (isFlagged) {
-                                          statusColor =
-                                            "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
-                                        } else if (isSkipped) {
-                                          statusColor =
-                                            "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
-                                        }
-                                      }
 
-                                      const buttonAriaLabel = `Go to question ${idx + 1}${
-                                        isCurrent ? ", current question" : ""
-                                      }${
-                                        isAnswered
-                                          ? isFlagged
-                                            ? ", answered, flagged for review"
-                                            : isSkipped
-                                              ? ", answered, marked as skipped"
-                                              : ", answered"
-                                          : isFlagged
-                                            ? ", unanswered, flagged for review"
-                                            : isSkipped
-                                              ? ", unanswered, marked as skipped"
-                                              : ", unanswered"
-                                      }`;
+                                        const buttonAriaLabel = `Go to question ${idx + 1}${
+                                          isCurrent ? ", current question" : ""
+                                        }${
+                                          isAnswered
+                                            ? isFlagged
+                                              ? ", answered, flagged for review"
+                                              : isSkipped
+                                                ? ", answered, marked as skipped"
+                                                : ", answered"
+                                            : isFlagged
+                                              ? ", unanswered, flagged for review"
+                                              : isSkipped
+                                                ? ", unanswered, marked as skipped"
+                                                : ", unanswered"
+                                        }`;
 
-                                      return (
-                                        <SheetClose key={q.id} asChild>
-                                          <button
-                                            onClick={() => navigateToQuestion(idx)}
-                                            aria-label={buttonAriaLabel}
-                                            className={cn(
-                                              "h-9 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
-                                              isCurrent
-                                                ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
-                                                : statusColor,
-                                            )}
-                                          >
-                                            {(idx + 1).toString().padStart(2, "0")}
-                                          </button>
-                                        </SheetClose>
-                                      );
-                                    })}
+                                        return (
+                                          <SheetClose key={q.id} asChild>
+                                            <button
+                                              onClick={() =>
+                                                navigateToQuestion(idx)
+                                              }
+                                              aria-label={buttonAriaLabel}
+                                              className={cn(
+                                                "h-9 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
+                                                isCurrent
+                                                  ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
+                                                  : statusColor,
+                                              )}
+                                            >
+                                              {(idx + 1)
+                                                .toString()
+                                                .padStart(2, "0")}
+                                            </button>
+                                          </SheetClose>
+                                        );
+                                      })}
+                                    </div>
                                   </div>
-                                </div>
-                              );
-                            })}
+                                );
+                              },
+                            )}
                           </div>
                           {assessment?.instructions && (
                             <div className="pt-4 border-t border-dashed">
                               <Dialog>
                                 <DialogTrigger asChild>
-                                  <Button variant="outline" size="sm" className="w-full text-xs font-semibold gap-1.5 rounded-lg">
-                                    <Info className="size-3.5" /> General Instructions
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="w-full text-xs font-semibold gap-1.5 rounded-lg"
+                                  >
+                                    <Info className="size-3.5" /> General
+                                    Instructions
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent className="sm:max-w-md p-6 border-none shadow-xl rounded-xl bg-background text-left">
@@ -3321,7 +3792,11 @@ export default function TakeAssessmentPage() {
                                   </div>
                                   <div className="flex justify-end">
                                     <DialogClose asChild>
-                                      <Button type="button" variant="secondary" className="h-9 px-4 text-xs font-semibold rounded-lg">
+                                      <Button
+                                        type="button"
+                                        variant="secondary"
+                                        className="h-9 px-4 text-xs font-semibold rounded-lg"
+                                      >
                                         Close
                                       </Button>
                                     </DialogClose>
@@ -3341,7 +3816,9 @@ export default function TakeAssessmentPage() {
                     )}
                     {saveStatus[currentQ?.id] === "saved" && (
                       <span className="text-xs text-emerald-600 font-medium">
-                        Saved {lastSaved && `at ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
+                        Saved{" "}
+                        {lastSaved &&
+                          `at ${lastSaved.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`}
                       </span>
                     )}
                     {saveStatus[currentQ?.id] === "failed" && (
@@ -3365,21 +3842,44 @@ export default function TakeAssessmentPage() {
                         <BookOpen className="size-8" />
                       </div>
                       <div className="space-y-2">
-                        <Badge variant="outline" className="text-xs font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20">
+                        <Badge
+                          variant="outline"
+                          className="text-xs font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20"
+                        >
                           New Section
                         </Badge>
                         <h2 className="text-2xl font-bold tracking-tight text-foreground">
                           {currentQ?.section_title || "General Section"}
                         </h2>
                         <div className="flex justify-center gap-6 text-xs text-muted-foreground uppercase font-bold mt-2">
-                          <span>{questions.filter(x => x.assessment_section_id === currentQ?.assessment_section_id).length} Questions</span>
+                          <span>
+                            {
+                              questions.filter(
+                                (x) =>
+                                  x.assessment_section_id ===
+                                  currentQ?.assessment_section_id,
+                              ).length
+                            }{" "}
+                            Questions
+                          </span>
                           <span>•</span>
-                          <span>{questions.filter(x => x.assessment_section_id === currentQ?.assessment_section_id).reduce((sum, x) => sum + (x.marks || 0), 0)} Marks</span>
+                          <span>
+                            {questions
+                              .filter(
+                                (x) =>
+                                  x.assessment_section_id ===
+                                  currentQ?.assessment_section_id,
+                              )
+                              .reduce((sum, x) => sum + (x.marks || 0), 0)}{" "}
+                            Marks
+                          </span>
                         </div>
                       </div>
                       {currentQ?.section_instructions && (
                         <div className="w-full p-4 rounded-xl border border-primary/10 bg-primary/[0.02] text-sm text-foreground/80 leading-relaxed text-left">
-                          <span className="block font-bold text-xs uppercase text-primary/60 mb-2 tracking-wider">Section Instructions</span>
+                          <span className="block font-bold text-xs uppercase text-primary/60 mb-2 tracking-wider">
+                            Section Instructions
+                          </span>
                           {currentQ.section_instructions}
                         </div>
                       )}
@@ -3421,22 +3921,34 @@ export default function TakeAssessmentPage() {
                           )}
                         >
                           <Bookmark className="size-3.5" />
-                          {flaggedQuestions[currentQ?.id] ? "Flagged" : "Flag for review"}
+                          {flaggedQuestions[currentQ?.id]
+                            ? "Flagged"
+                            : "Flag for review"}
                         </Button>
                         {!currentQ?.is_required && (
                           <>
-                            <Separator orientation="vertical" className="h-4 bg-border/60 mx-1" />
+                            <Separator
+                              orientation="vertical"
+                              className="h-4 bg-border/60 mx-1"
+                            />
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => {
                                 if (currentQ) {
-                                  const nextSkippedVal = !skippedQuestions[currentQ.id];
+                                  const nextSkippedVal =
+                                    !skippedQuestions[currentQ.id];
                                   setSkippedQuestions((prev) => ({
                                     ...prev,
                                     [currentQ.id]: nextSkippedVal,
                                   }));
-                                  saveAnswer(currentQ.id, currentQ.type, answers[currentQ.id], "manual_save", nextSkippedVal);
+                                  saveAnswer(
+                                    currentQ.id,
+                                    currentQ.type,
+                                    answers[currentQ.id],
+                                    "manual_save",
+                                    nextSkippedVal,
+                                  );
                                 }
                               }}
                               className={cn(
@@ -3447,7 +3959,9 @@ export default function TakeAssessmentPage() {
                               )}
                             >
                               <AlertTriangle className="size-3.5" />
-                              {skippedQuestions[currentQ?.id] ? "Skipped" : "Mark as Skipped"}
+                              {skippedQuestions[currentQ?.id]
+                                ? "Skipped"
+                                : "Mark as Skipped"}
                             </Button>
                           </>
                         )}
@@ -3455,41 +3969,63 @@ export default function TakeAssessmentPage() {
                     </CardHeader>
                     <CardContent className="p-6 md:p-10">
                       {/* Show section instructions when entering a new section */}
-                      {currentQ?.section_instructions && (() => {
-                        const firstQOfSection = questions.find(x => x.assessment_section_id === currentQ.assessment_section_id);
-                        const isFirstQ = firstQOfSection?.id === currentQ.id;
-                        if (!isFirstQ) return null;
+                      {currentQ?.section_instructions &&
+                        (() => {
+                          const firstQOfSection = questions.find(
+                            (x) =>
+                              x.assessment_section_id ===
+                              currentQ.assessment_section_id,
+                          );
+                          const isFirstQ = firstQOfSection?.id === currentQ.id;
+                          if (!isFirstQ) return null;
 
-                        return (
-                          <Collapsible open={instructionsExpanded} onOpenChange={setInstructionsExpanded} className="mb-6">
-                            <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.02] space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold uppercase tracking-widest text-primary/60">
-                                  Section Instructions
-                                </span>
-                                <CollapsibleTrigger asChild>
-                                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 rounded-md">
-                                    <ChevronDown className={cn("size-4 transition-transform", instructionsExpanded ? "rotate-180" : "")} />
-                                  </Button>
-                                </CollapsibleTrigger>
-                              </div>
-                              <CollapsibleContent className="text-sm text-foreground/75 leading-relaxed space-y-3">
-                                <p>{currentQ.section_instructions}</p>
-                                <div className="flex justify-end pt-1">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => setInstructionsExpanded(false)}
-                                    className="h-7 text-[10px] font-bold uppercase tracking-wider text-primary border-primary/20 hover:bg-primary/5 rounded-md"
-                                  >
-                                    Acknowledge and Continue
-                                  </Button>
+                          return (
+                            <Collapsible
+                              open={instructionsExpanded}
+                              onOpenChange={setInstructionsExpanded}
+                              className="mb-6"
+                            >
+                              <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.02] space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold uppercase tracking-widest text-primary/60">
+                                    Section Instructions
+                                  </span>
+                                  <CollapsibleTrigger asChild>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="h-6 w-6 p-0 rounded-md"
+                                    >
+                                      <ChevronDown
+                                        className={cn(
+                                          "size-4 transition-transform",
+                                          instructionsExpanded
+                                            ? "rotate-180"
+                                            : "",
+                                        )}
+                                      />
+                                    </Button>
+                                  </CollapsibleTrigger>
                                 </div>
-                              </CollapsibleContent>
-                            </div>
-                          </Collapsible>
-                        );
-                      })()}
+                                <CollapsibleContent className="text-sm text-foreground/75 leading-relaxed space-y-3">
+                                  <p>{currentQ.section_instructions}</p>
+                                  <div className="flex justify-end pt-1">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        setInstructionsExpanded(false)
+                                      }
+                                      className="h-7 text-[10px] font-bold uppercase tracking-wider text-primary border-primary/20 hover:bg-primary/5 rounded-md"
+                                    >
+                                      Acknowledge and Continue
+                                    </Button>
+                                  </div>
+                                </CollapsibleContent>
+                              </div>
+                            </Collapsible>
+                          );
+                        })()}
                       <div className="space-y-4 mb-8">
                         <div className="flex items-start gap-3.5">
                           <span className="size-7 bg-muted/60 rounded-lg flex items-center justify-center text-xs font-semibold text-muted-foreground shrink-0 mt-1">
@@ -3500,7 +4036,10 @@ export default function TakeAssessmentPage() {
                               <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80">
                                 Question {currentQuestionIndex + 1}
                               </span>
-                              <Badge variant="secondary" className="text-[9px] h-4.5 py-0 px-1.5 font-bold uppercase tracking-wider bg-muted/80 text-muted-foreground">
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] h-4.5 py-0 px-1.5 font-bold uppercase tracking-wider bg-muted/80 text-muted-foreground"
+                              >
                                 {currentQ?.marks || 0} Marks
                               </Badge>
                             </div>
@@ -3513,7 +4052,10 @@ export default function TakeAssessmentPage() {
                           <div className="ml-10.5 p-1 border border-border/40 rounded-xl bg-muted/5 inline-block relative max-w-full overflow-hidden">
                             <Image
                               src={currentQ.imageUrl}
-                              alt={currentQ.image_alt_text || "Question illustration context"}
+                              alt={
+                                currentQ.image_alt_text ||
+                                "Question illustration context"
+                              }
                               width={480}
                               height={270}
                               className="max-h-[240px] rounded-lg object-contain w-auto h-auto"
@@ -3586,85 +4128,100 @@ export default function TakeAssessmentPage() {
               Assessment Matrix
             </h3>
             <div className="space-y-5 overflow-y-auto pr-1 pb-6">
-              {sectionGroups.map(({ sectionId, questions: sectionQuestions, title: sectionTitle }) => {
-                return (
-                  <div key={sectionId || "gen"} className="space-y-2">
-                    <div className="text-xs font-semibold text-muted-foreground/75 px-1 truncate">
-                      {sectionTitle}
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      {sectionQuestions.map((q) => {
-                        const idx = questions.findIndex((gq) => gq.id === q.id);
-                        const isAnswered = isQuestionAnswered(q, answers[q.id]);
-                        const isCurrent = idx === currentQuestionIndex;
-                        const isFlagged = flaggedQuestions[q.id];
-                        const isSkipped = skippedQuestions[q.id];
+              {sectionGroups.map(
+                ({
+                  sectionId,
+                  questions: sectionQuestions,
+                  title: sectionTitle,
+                }) => {
+                  return (
+                    <div key={sectionId || "gen"} className="space-y-2">
+                      <div className="text-xs font-semibold text-muted-foreground/75 px-1 truncate">
+                        {sectionTitle}
+                      </div>
+                      <div className="grid grid-cols-4 gap-2">
+                        {sectionQuestions.map((q) => {
+                          const idx = questions.findIndex(
+                            (gq) => gq.id === q.id,
+                          );
+                          const isAnswered = isQuestionAnswered(
+                            q,
+                            answers[q.id],
+                          );
+                          const isCurrent = idx === currentQuestionIndex;
+                          const isFlagged = flaggedQuestions[q.id];
+                          const isSkipped = skippedQuestions[q.id];
 
-                        let statusColor =
-                          "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
-                        if (isAnswered) {
-                          if (isFlagged) {
-                            statusColor =
-                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
-                          } else if (isSkipped) {
-                            statusColor =
-                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                          let statusColor =
+                            "bg-muted/10 border-border/40 text-muted-foreground/60 hover:bg-muted/20";
+                          if (isAnswered) {
+                            if (isFlagged) {
+                              statusColor =
+                                "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                            } else if (isSkipped) {
+                              statusColor =
+                                "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                            } else {
+                              statusColor =
+                                "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                            }
                           } else {
-                            statusColor =
-                              "border-emerald-500/20 bg-emerald-500/10 text-emerald-600 hover:bg-emerald-500/20";
+                            if (isFlagged) {
+                              statusColor =
+                                "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
+                            } else if (isSkipped) {
+                              statusColor =
+                                "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
+                            }
                           }
-                        } else {
-                          if (isFlagged) {
-                            statusColor =
-                              "border-amber-500/20 bg-amber-500/10 text-amber-600 hover:bg-amber-500/20";
-                          } else if (isSkipped) {
-                            statusColor =
-                              "border-red-500/20 bg-red-500/10 text-red-600 hover:bg-red-500/20";
-                          }
-                        }
 
-                        const buttonAriaLabel = `Go to question ${idx + 1}${
-                          isCurrent ? ", current question" : ""
-                        }${
-                          isAnswered
-                            ? isFlagged
-                              ? ", answered, flagged for review"
-                              : isSkipped
-                                ? ", answered, marked as skipped"
-                                : ", answered"
-                            : isFlagged
-                              ? ", unanswered, flagged for review"
-                              : isSkipped
-                                ? ", unanswered, marked as skipped"
-                                : ", unanswered"
-                        }`;
+                          const buttonAriaLabel = `Go to question ${idx + 1}${
+                            isCurrent ? ", current question" : ""
+                          }${
+                            isAnswered
+                              ? isFlagged
+                                ? ", answered, flagged for review"
+                                : isSkipped
+                                  ? ", answered, marked as skipped"
+                                  : ", answered"
+                              : isFlagged
+                                ? ", unanswered, flagged for review"
+                                : isSkipped
+                                  ? ", unanswered, marked as skipped"
+                                  : ", unanswered"
+                          }`;
 
-                        return (
-                          <button
-                            key={q.id}
-                            onClick={() => navigateToQuestion(idx)}
-                            aria-label={buttonAriaLabel}
-                            className={cn(
-                              "h-8 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
-                              isCurrent
-                                ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
-                                : statusColor,
-                            )}
-                          >
-                            {(idx + 1).toString().padStart(2, "0")}
-                          </button>
-                        );
-                      })}
+                          return (
+                            <button
+                              key={q.id}
+                              onClick={() => navigateToQuestion(idx)}
+                              aria-label={buttonAriaLabel}
+                              className={cn(
+                                "h-8 rounded-lg border text-xs font-semibold transition-all flex items-center justify-center",
+                                isCurrent
+                                  ? "ring-2 ring-primary ring-offset-1 border-primary bg-primary text-primary-foreground"
+                                  : statusColor,
+                              )}
+                            >
+                              {(idx + 1).toString().padStart(2, "0")}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                },
+              )}
             </div>
             <div className="mt-auto space-y-3 pt-4 border-t border-dashed border-border/40">
               {assessment?.instructions && (
                 <Dialog>
                   <DialogTrigger asChild>
-                    <Button variant="outline" size="sm" className="w-full text-xs font-semibold gap-1.5 border-border hover:bg-muted/50 rounded-lg">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full text-xs font-semibold gap-1.5 border-border hover:bg-muted/50 rounded-lg"
+                    >
                       <Info className="size-3.5" /> General Instructions
                     </Button>
                   </DialogTrigger>
@@ -3682,7 +4239,11 @@ export default function TakeAssessmentPage() {
                     </div>
                     <div className="flex justify-end">
                       <DialogClose asChild>
-                        <Button type="button" variant="secondary" className="h-9 px-4 text-xs font-semibold rounded-lg">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="h-9 px-4 text-xs font-semibold rounded-lg"
+                        >
                           Close
                         </Button>
                       </DialogClose>
@@ -3691,16 +4252,18 @@ export default function TakeAssessmentPage() {
                 </Dialog>
               )}
 
-              <div className={cn(
-                "flex items-center gap-2 font-medium text-xs",
-                isOnline ? "text-muted-foreground/50" : "text-amber-600"
-              )}>
-                <div className={cn(
-                  "size-2 rounded-full",
-                  isOnline
-                    ? "bg-primary animate-pulse"
-                    : "bg-amber-500"
-                )} />
+              <div
+                className={cn(
+                  "flex items-center gap-2 font-medium text-xs",
+                  isOnline ? "text-muted-foreground/50" : "text-amber-600",
+                )}
+              >
+                <div
+                  className={cn(
+                    "size-2 rounded-full",
+                    isOnline ? "bg-primary animate-pulse" : "bg-amber-500",
+                  )}
+                />
                 {isOnline ? "Secure Sync Live" : "Offline — Saving Locally"}
               </div>
             </div>
@@ -3709,13 +4272,17 @@ export default function TakeAssessmentPage() {
       )}
 
       <Dialog open={warningModalOpen} onOpenChange={() => {}}>
-        <DialogContent className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background" role="alertdialog">
+        <DialogContent
+          className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background"
+          role="alertdialog"
+        >
           <AlertTriangle className="size-10 text-destructive mx-auto mb-3" />
           <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
             Integrity Protocols Alert
           </DialogTitle>
           <DialogDescription className="text-xs text-muted-foreground mt-1">
-            An integrity warning has been flagged on your session. You must acknowledge this notice to return to the exam.
+            An integrity warning has been flagged on your session. You must
+            acknowledge this notice to return to the exam.
           </DialogDescription>
           <p className="text-sm text-muted-foreground py-4 leading-relaxed">
             {currentWarning?.message || "Academic integrity warning issued."}
@@ -3742,7 +4309,9 @@ export default function TakeAssessmentPage() {
                   setWarningModalOpen(false);
                   setCurrentWarning(null);
                 } catch (e) {
-                  toast.error("Failed to acknowledge warning. Please try again.");
+                  toast.error(
+                    "Failed to acknowledge warning. Please try again.",
+                  );
                 }
               } else {
                 setWarningModalOpen(false);
@@ -3779,7 +4348,11 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-emerald-50/20 border border-emerald-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-emerald-600">Answered</span>
                 <span className="text-base font-bold text-emerald-600 mt-1">
-                  {questions.filter((q) => isQuestionAnswered(q, answers[q.id])).length}
+                  {
+                    questions.filter((q) =>
+                      isQuestionAnswered(q, answers[q.id]),
+                    ).length
+                  }
                 </span>
               </div>
               <div className="p-3 bg-amber-50/20 border border-amber-500/10 rounded-lg flex flex-col justify-between">
@@ -3791,7 +4364,13 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-red-50/20 border border-red-500/10 rounded-lg flex flex-col justify-between">
                 <span className="text-red-600">Skipped Explicitly</span>
                 <span className="text-base font-bold text-red-600 mt-1">
-                  {questions.filter((q) => skippedQuestions[q.id] && !isQuestionAnswered(q, answers[q.id])).length}
+                  {
+                    questions.filter(
+                      (q) =>
+                        skippedQuestions[q.id] &&
+                        !isQuestionAnswered(q, answers[q.id]),
+                    ).length
+                  }
                 </span>
               </div>
             </div>
@@ -3800,9 +4379,15 @@ export default function TakeAssessmentPage() {
               <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-left">
                 <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
                 <div className="text-xs text-red-700 leading-relaxed">
-                  <span className="font-semibold block">Required Action Required</span>
-                  You have {unansweredRequired.length} unanswered required {unansweredRequired.length === 1 ? "question" : "questions"} that must be answered before submission.
-                  <span className="block mt-1 font-bold">Questions: {unansweredRequiredNums.join(", ")}</span>
+                  <span className="font-semibold block">
+                    Required Action Required
+                  </span>
+                  You have {unansweredRequired.length} unanswered required{" "}
+                  {unansweredRequired.length === 1 ? "question" : "questions"}{" "}
+                  that must be answered before submission.
+                  <span className="block mt-1 font-bold">
+                    Questions: {unansweredRequiredNums.join(", ")}
+                  </span>
                 </div>
               </div>
             )}
@@ -3811,9 +4396,14 @@ export default function TakeAssessmentPage() {
               <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/15 flex items-start gap-2.5 text-left">
                 <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
                 <div className="text-xs text-destructive leading-relaxed">
-                  <span className="font-semibold block">Unanswered Optional Questions</span>
-                  You have {unansweredOptional.length} unanswered optional {unansweredOptional.length === 1 ? "question" : "questions"}.
-                  <span className="block mt-1 font-bold text-destructive/80">Questions: {unansweredOptionalNums.join(", ")}</span>
+                  <span className="font-semibold block">
+                    Unanswered Optional Questions
+                  </span>
+                  You have {unansweredOptional.length} unanswered optional{" "}
+                  {unansweredOptional.length === 1 ? "question" : "questions"}.
+                  <span className="block mt-1 font-bold text-destructive/80">
+                    Questions: {unansweredOptionalNums.join(", ")}
+                  </span>
                 </div>
               </div>
             )}
@@ -3834,7 +4424,8 @@ export default function TakeAssessmentPage() {
                   setShowSubmitConfirm(false);
                 }}
               >
-                <ArrowRight className="size-3.5" /> Jump to First Unanswered (Question {firstUnansweredIndex + 1})
+                <ArrowRight className="size-3.5" /> Jump to First Unanswered
+                (Question {firstUnansweredIndex + 1})
               </Button>
             )}
             <div className="flex gap-3">
@@ -3857,20 +4448,35 @@ export default function TakeAssessmentPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={showTerminateConfirm} onOpenChange={setShowTerminateConfirm}>
+      <Dialog
+        open={showTerminateConfirm}
+        onOpenChange={setShowTerminateConfirm}
+      >
         <DialogContent className="sm:max-w-sm p-6 border-none shadow-xl rounded-xl bg-background text-center">
           <AlertTriangle className="size-8 text-destructive mx-auto mb-3" />
           <DialogTitle className="text-base font-semibold text-destructive">
             Terminate Session?
           </DialogTitle>
           <p className="text-xs text-muted-foreground mt-2 mb-5 leading-relaxed font-normal">
-            This will end your assessment attempt. Your saved answers will be preserved.
+            This will end your assessment attempt. Your saved answers will be
+            preserved.
           </p>
           <div className="flex gap-3">
-            <Button variant="outline" className="flex-1 h-9 text-xs rounded-lg" onClick={() => setShowTerminateConfirm(false)}>
+            <Button
+              variant="outline"
+              className="flex-1 h-9 text-xs rounded-lg"
+              onClick={() => setShowTerminateConfirm(false)}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" className="flex-1 h-9 text-xs rounded-lg" onClick={() => { setShowTerminateConfirm(false); submitAssessment(); }}>
+            <Button
+              variant="destructive"
+              className="flex-1 h-9 text-xs rounded-lg"
+              onClick={() => {
+                setShowTerminateConfirm(false);
+                submitAssessment();
+              }}
+            >
               Terminate
             </Button>
           </div>

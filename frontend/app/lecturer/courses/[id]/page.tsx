@@ -4,7 +4,13 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -81,7 +87,6 @@ import {
   AttachmentMedia,
   AttachmentTitle,
 } from "@/components/ui/attachment";
-
 
 export default function LecturerWorkspaceDetail() {
   const params = useParams();
@@ -299,7 +304,9 @@ export default function LecturerWorkspaceDetail() {
             <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Class Average</p>
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                    Class Average
+                  </p>
                   <p className="text-2xl font-bold tracking-tight text-primary">
                     {workspace.performance_avg.toFixed(1)}%
                   </p>
@@ -311,7 +318,9 @@ export default function LecturerWorkspaceDetail() {
             <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Active Students</p>
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                    Active Students
+                  </p>
                   <p className="text-2xl font-bold tracking-tight text-foreground">
                     {workspace.student_count}
                   </p>
@@ -323,7 +332,9 @@ export default function LecturerWorkspaceDetail() {
             <Card className="bg-card/30 backdrop-blur-sm shadow-none border border-border/50 rounded-xl">
               <CardContent className="p-5 flex items-center justify-between">
                 <div className="space-y-1 min-w-0">
-                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">Target Class</p>
+                  <p className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
+                    Target Class
+                  </p>
                   <p className="text-lg font-bold truncate text-foreground mt-1">
                     {workspace.class_name}
                   </p>
@@ -338,8 +349,12 @@ export default function LecturerWorkspaceDetail() {
             <CardContent className="p-5">
               <div className="mb-3 flex justify-between items-center">
                 <div className="space-y-1">
-                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">Syllabus Execution</h3>
-                  <p className="text-xs text-muted-foreground font-medium">Integrated workspace data</p>
+                  <h3 className="text-sm font-bold uppercase tracking-wider text-foreground">
+                    Syllabus Execution
+                  </h3>
+                  <p className="text-xs text-muted-foreground font-medium">
+                    Integrated workspace data
+                  </p>
                 </div>
                 <span className="text-2xl font-bold tracking-tight text-primary">
                   {workspace.performance_avg.toFixed(1)}%
@@ -359,7 +374,9 @@ export default function LecturerWorkspaceDetail() {
                 <CardTitle className="text-sm font-bold flex items-center gap-2 uppercase tracking-wider">
                   <Layers className="size-4 text-primary" /> Student Registry
                 </CardTitle>
-                <CardDescription className="text-[11px] font-medium text-muted-foreground">Directory of all students enrolled in this course.</CardDescription>
+                <CardDescription className="text-[11px] font-medium text-muted-foreground">
+                  Directory of all students enrolled in this course.
+                </CardDescription>
               </div>
               <div className="relative w-full sm:w-64">
                 <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/60" />
@@ -375,10 +392,18 @@ export default function LecturerWorkspaceDetail() {
               <Table>
                 <TableHeader className="bg-muted/5 border-b border-border/40">
                   <TableRow className="h-10 hover:bg-transparent border-none">
-                    <TableHead className="text-[10px] font-bold uppercase tracking-wider pl-6 text-muted-foreground">Student ID</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Student Details</TableHead>
-                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Course Progression</TableHead>
-                    <TableHead className="text-right text-[10px] font-bold uppercase tracking-wider pr-6 text-muted-foreground">Actions</TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider pl-6 text-muted-foreground">
+                      Student ID
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Student Details
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Course Progression
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] font-bold uppercase tracking-wider pr-6 text-muted-foreground">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -417,7 +442,10 @@ export default function LecturerWorkspaceDetail() {
                               {student.progress}%
                             </span>
                             <div className="w-full h-1 bg-muted rounded-full overflow-hidden">
-                              <div className="h-full bg-emerald-500" style={{ width: `${student.progress}%` }} />
+                              <div
+                                className="h-full bg-emerald-500"
+                                style={{ width: `${student.progress}%` }}
+                              />
                             </div>
                           </div>
                         </TableCell>
@@ -444,7 +472,7 @@ export default function LecturerWorkspaceDetail() {
           <Card className="bg-primary/[0.02] border-primary/10 rounded-xl shadow-none">
             <CardHeader className="pb-3 border-b border-primary/10 bg-primary/[0.03]">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                 Quick Navigation
+                Quick Navigation
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-3 pt-4">
@@ -452,9 +480,7 @@ export default function LecturerWorkspaceDetail() {
                 asChild
                 className="w-full justify-between h-9 text-xs font-bold rounded-lg shadow-sm"
               >
-                <Link
-                  href="/lecturer/assessments/new"
-                >
+                <Link href="/lecturer/assessments/new">
                   New Assessment <ArrowRight className="size-3.5" />
                 </Link>
               </Button>
@@ -477,7 +503,12 @@ export default function LecturerWorkspaceDetail() {
             <CardHeader className="flex flex-row items-center justify-between py-3 px-4 border-b border-border/40 bg-muted/10">
               <CardTitle className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-foreground">
                 <BookOpen className="size-4 text-primary" /> Course Materials
-                <Badge variant="outline" className="ml-1 text-[9px] font-bold py-0 h-4 border-border/60 text-muted-foreground">{materials.length}</Badge>
+                <Badge
+                  variant="outline"
+                  className="ml-1 text-[9px] font-bold py-0 h-4 border-border/60 text-muted-foreground"
+                >
+                  {materials.length}
+                </Badge>
               </CardTitle>
               <div className="flex items-center gap-3">
                 <label className="text-[10px] flex items-center gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground transition-colors">
@@ -517,7 +548,9 @@ export default function LecturerWorkspaceDetail() {
                 {materials.length === 0 && !uploading ? (
                   <div className="flex flex-col items-center justify-center py-12 px-4 space-y-2 text-muted-foreground">
                     <FileText className="size-6 opacity-20" />
-                    <p className="text-xs font-medium italic">No files uploaded.</p>
+                    <p className="text-xs font-medium italic">
+                      No files uploaded.
+                    </p>
                   </div>
                 ) : (
                   <AttachmentGroup className="flex-col gap-2 p-4">
@@ -527,8 +560,12 @@ export default function LecturerWorkspaceDetail() {
                           <Spinner />
                         </AttachmentMedia>
                         <AttachmentContent>
-                          <AttachmentTitle>Uploading material...</AttachmentTitle>
-                          <AttachmentDescription>Please wait · Processing file</AttachmentDescription>
+                          <AttachmentTitle>
+                            Uploading material...
+                          </AttachmentTitle>
+                          <AttachmentDescription>
+                            Please wait · Processing file
+                          </AttachmentDescription>
                         </AttachmentContent>
                       </Attachment>
                     )}
@@ -538,7 +575,10 @@ export default function LecturerWorkspaceDetail() {
                         className="w-full justify-between hover:bg-accent/10 transition-all cursor-pointer"
                         onClick={async () => {
                           try {
-                            await lecturerApi.downloadMaterial(m.id, m.original_filename);
+                            await lecturerApi.downloadMaterial(
+                              m.id,
+                              m.original_filename,
+                            );
                             toast.success("Download started");
                           } catch (err: any) {
                             toast.error("Failed to download material");
@@ -549,9 +589,15 @@ export default function LecturerWorkspaceDetail() {
                           <FileCodeIcon className="size-4 text-primary" />
                         </AttachmentMedia>
                         <AttachmentContent>
-                          <AttachmentTitle>{m.display_name || m.original_filename}</AttachmentTitle>
+                          <AttachmentTitle>
+                            {m.display_name || m.original_filename}
+                          </AttachmentTitle>
                           <AttachmentDescription>
-                            {m.file_extension.replace(".", "").toUpperCase()} · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB
+                            {m.file_extension
+                              ? m.file_extension.replace(".", "").toUpperCase()
+                              : "FILE"}{" "}
+                            · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)}{" "}
+                            MB
                             {!m.is_student_visible && " · Hidden"}
                           </AttachmentDescription>
                         </AttachmentContent>
@@ -595,11 +641,15 @@ export default function LecturerWorkspaceDetail() {
                 <div className="grid grid-cols-4 gap-4 p-4 rounded-lg border bg-muted/30">
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Student ID</p>
-                    <p className="text-sm font-semibold text-foreground">{record.student_id}</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {record.student_id}
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Email</p>
-                    <p className="text-sm font-semibold text-foreground truncate">{record.email}</p>
+                    <p className="text-sm font-semibold text-foreground truncate">
+                      {record.email}
+                    </p>
                   </div>
                   <div className="space-y-1">
                     <p className="text-xs text-muted-foreground">Enrolled At</p>
@@ -617,7 +667,8 @@ export default function LecturerWorkspaceDetail() {
 
                 <div className="space-y-3">
                   <h3 className="text-sm font-semibold flex items-center gap-2">
-                    <Activity className="size-4 text-muted-foreground" /> Assessment History
+                    <Activity className="size-4 text-muted-foreground" />{" "}
+                    Assessment History
                   </h3>
                   <div className="rounded-lg border divide-y overflow-hidden">
                     {record.attempts.length === 0 ? (
@@ -673,9 +724,7 @@ export default function LecturerWorkspaceDetail() {
             >
               Close
             </Button>
-            <Button>
-              Export Report
-            </Button>
+            <Button>Export Report</Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -690,7 +739,9 @@ export default function LecturerWorkspaceDetail() {
           </DialogHeader>
           <div className="p-5">
             <p className="text-sm text-muted-foreground leading-relaxed">
-              Are you sure you want to archive this teaching workspace? Archiving will hide the workspace from active dashboards, but all student grades and attempts data will be preserved.
+              Are you sure you want to archive this teaching workspace?
+              Archiving will hide the workspace from active dashboards, but all
+              student grades and attempts data will be preserved.
             </p>
           </div>
           <div className="p-4 border-t flex justify-end gap-2">
@@ -717,12 +768,16 @@ export default function LecturerWorkspaceDetail() {
       </Dialog>
 
       {/* Delete Material Alert Dialog */}
-      <AlertDialog open={!!deleteMaterialId} onOpenChange={(o) => !o && setDeleteMaterialId(null)}>
+      <AlertDialog
+        open={!!deleteMaterialId}
+        onOpenChange={(o) => !o && setDeleteMaterialId(null)}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Material</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this material? This action cannot be undone.
+              Are you sure you want to delete this material? This action cannot
+              be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

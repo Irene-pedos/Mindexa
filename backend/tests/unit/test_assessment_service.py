@@ -39,3 +39,49 @@ async def test_bulk_save_draft_assessment_no_missing_greenlet():
     db_mock.flush.assert_called_once()
     db_mock.expire.assert_called_once_with(mock_assessment)
     service._repo.get_by_id.assert_called_once_with(mock_assessment.id)
+
+
+def test_bulk_assessment_metadata_peer_evaluation_validation():
+    from app.schemas.assessment import BulkAssessmentMetadata
+    from datetime import datetime, timedelta
+
+    # 1. peerEvaluationEnabled is True, but peerEvaluationDeadline is missing -> should raise ValueError
+    with pytest.raises(ValueError, match="peerEvaluationDeadline is required"):
+        BulkAssessmentMetadata(
+            title="Group Project",
+            peerEvaluationEnabled=True,
+            peerEvaluationDeadline=None,
+            peerEvaluationWeightPercent=20,
+        )
+
+    # 2. peerEvaluationDeadline <= windowEnd -> should raise ValueError
+    now = datetime.now()
+    with pytest.raises(ValueError, match="peerEvaluationDeadline must be after"):
+        BulkAssessmentMetadata(
+            title="Group Project",
+            windowEnd=now + timedelta(days=2),
+            peerEvaluationEnabled=True,
+            peerEvaluationDeadline=now + timedelta(days=1),
+            peerEvaluationWeightPercent=20,
+        )
+
+    # 3. peerEvaluationWeightPercent out of bounds -> should raise ValueError
+    with pytest.raises(ValueError, match="peerEvaluationWeightPercent must be between"):
+        BulkAssessmentMetadata(
+            title="Group Project",
+            windowEnd=now + timedelta(days=2),
+            peerEvaluationEnabled=True,
+            peerEvaluationDeadline=now + timedelta(days=3),
+            peerEvaluationWeightPercent=150,
+        )
+
+    # 4. Valid peer evaluation -> should succeed
+    meta = BulkAssessmentMetadata(
+        title="Group Project",
+        windowEnd=now + timedelta(days=2),
+        peerEvaluationEnabled=True,
+        peerEvaluationDeadline=now + timedelta(days=3),
+        peerEvaluationWeightPercent=20,
+    )
+    assert meta.peerEvaluationEnabled is True
+    assert meta.peerEvaluationWeightPercent == 20

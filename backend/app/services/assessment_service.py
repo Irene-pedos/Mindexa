@@ -169,6 +169,11 @@ class AssessmentService:
             question_distribution_mode=QuestionDistributionMode(data.question_distribution_mode) if data.question_distribution_mode else None,
             require_all_member_approval=data.require_all_member_approval,
             require_all_member_participation=data.require_all_member_participation,
+            submission_mode=data.submission_mode,
+            peer_evaluation_enabled=data.peer_evaluation_enabled,
+            peer_evaluation_deadline=data.peer_evaluation_deadline,
+            peer_evaluation_weight_percent=data.peer_evaluation_weight_percent,
+            individual_weighting_enabled=data.individual_weighting_enabled,
             appeal_window_days=data.appeal_window_days,
         )
 
@@ -268,6 +273,16 @@ class AssessmentService:
             update_fields["require_all_member_approval"] = data.require_all_member_approval
         if data.require_all_member_participation is not None:
             update_fields["require_all_member_participation"] = data.require_all_member_participation
+        if data.submission_mode is not None:
+            update_fields["submission_mode"] = data.submission_mode
+        if data.peer_evaluation_enabled is not None:
+            update_fields["peer_evaluation_enabled"] = data.peer_evaluation_enabled
+        if data.peer_evaluation_deadline is not None:
+            update_fields["peer_evaluation_deadline"] = data.peer_evaluation_deadline
+        if data.peer_evaluation_weight_percent is not None:
+            update_fields["peer_evaluation_weight_percent"] = data.peer_evaluation_weight_percent
+        if data.individual_weighting_enabled is not None:
+            update_fields["individual_weighting_enabled"] = data.individual_weighting_enabled
         if data.appeal_window_days is not None:
             update_fields["appeal_window_days"] = data.appeal_window_days
         if data.show_marks_per_question is not None:
@@ -726,11 +741,36 @@ class AssessmentService:
                 if await group_svc.check_enrollment_drift(assessment_id):
                     errors.append("Class enrollment has changed. Group assignments are no longer valid and must be rebuilt.")
 
+                # Validate exactly one group per student mapping
+                roster_student_ids = set(await self._group_repo.list_target_student_ids(assessment_id))
+                student_group_counts = {}
+                for group in groups:
+                    for member in group.members:
+                        student_group_counts[member.student_id] = student_group_counts.get(member.student_id, 0) + 1
+
+                # 1. Double assignment check
+                multiple_groups = [sid for sid, count in student_group_counts.items() if count > 1]
+                if multiple_groups:
+                    errors.append("Some students are assigned to more than one group.")
+
+                # 2. Complete coverage check
+                unassigned_students = roster_student_ids - set(student_group_counts.keys())
+                if unassigned_students:
+                    errors.append("All enrolled students must be assigned to exactly one group before finalizing.")
+
                 unlocked = [group for group in groups if not group.is_locked]
                 if unlocked:
                     errors.append("All groups must be locked before finalizing the assessment.")
                 if assessment.question_distribution_mode is None:
                     errors.append("Group work assessments must define a question distribution mode before finalizing.")
+                if assessment.peer_evaluation_enabled:
+                    if not assessment.peer_evaluation_deadline:
+                        errors.append("Peer evaluation deadline is required when peer evaluation is enabled.")
+                    elif assessment.window_end and assessment.peer_evaluation_deadline <= assessment.window_end:
+                        errors.append("Peer evaluation deadline must occur after the group submission deadline.")
+                    if assessment.peer_evaluation_weight_percent is not None:
+                        if not (0 < assessment.peer_evaluation_weight_percent <= 100):
+                            errors.append("Peer evaluation weight percentage must be between 1 and 100.")
 
         # If any errors, don't finalize
         if errors:
@@ -1241,6 +1281,11 @@ class AssessmentService:
                 "question_distribution_mode": QuestionDistributionMode(data.metadata.questionDistributionMode) if is_group and data.metadata.questionDistributionMode else None,
                 "require_all_member_approval": data.rules.requireAllMemberApproval if is_group else False,
                 "require_all_member_participation": data.rules.requireAllMemberParticipation if is_group else False,
+                "submission_mode": data.metadata.submissionMode if is_group else None,
+                "peer_evaluation_enabled": data.metadata.peerEvaluationEnabled if is_group else False,
+                "peer_evaluation_deadline": data.metadata.peerEvaluationDeadline if is_group else None,
+                "peer_evaluation_weight_percent": data.metadata.peerEvaluationWeightPercent if is_group else None,
+                "individual_weighting_enabled": data.metadata.individualWeightingEnabled if is_group else False,
                 "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
                 "audience_type": data.metadata.audience_type,
                 "target_student_ids": data.metadata.target_student_ids,
@@ -1284,6 +1329,11 @@ class AssessmentService:
                 question_distribution_mode=QuestionDistributionMode(data.metadata.questionDistributionMode) if is_group and data.metadata.questionDistributionMode else None,
                 require_all_member_approval=data.rules.requireAllMemberApproval if is_group else False,
                 require_all_member_participation=data.rules.requireAllMemberParticipation if is_group else False,
+                submission_mode=data.metadata.submissionMode if is_group else None,
+                peer_evaluation_enabled=data.metadata.peerEvaluationEnabled if is_group else False,
+                peer_evaluation_deadline=data.metadata.peerEvaluationDeadline if is_group else None,
+                peer_evaluation_weight_percent=data.metadata.peerEvaluationWeightPercent if is_group else None,
+                individual_weighting_enabled=data.metadata.individualWeightingEnabled if is_group else False,
                 appeal_window_days=data.metadata.appealWindowDays if is_group else None,
                 late_submission_allowed=data.rules.lateSubmissionAllowed,
                 late_penalty_percent=data.rules.latePenaltyPercent,
@@ -1403,6 +1453,7 @@ class AssessmentService:
                     "types": b_sec.allowedTypes or ["mcq"],
                     "difficulty": b_sec.difficulty or "Medium",
                     "bloom_level": b_sec.bloomLevel or "understand",
+                    "per_group": getattr(b_sec, "per_group", False),
                 },
                 difficulty_distribution=b_sec.difficultyDistribution,
                 ai_generation_prompt_hint=b_sec.aiPromptHint,
@@ -1650,5 +1701,31 @@ class AssessmentService:
                 if str(s_id) == str(current_user.id):
                     continue
                 await add_or_restore_supervisor_in_bulk(s_id, SupervisorRole.ASSISTANT)
+
+        # 6. Save Groups from payload if provided
+        if is_group and data.groups:
+            from app.services.group_work_service import GroupWorkService
+            from app.schemas.group_work import ManualGroupCreateRequest, ManualGroupInput, ManualGroupMemberInput
+            group_svc = GroupWorkService(self.db)
+            manual_request = ManualGroupCreateRequest(
+                groups=[
+                    ManualGroupInput(
+                        name=g.name,
+                        members=[
+                            ManualGroupMemberInput(
+                                student_id=m.student_id,
+                                is_leader=m.is_leader
+                            )
+                            for m in g.members
+                        ]
+                    )
+                    for g in data.groups
+                ]
+            )
+            await group_svc.save_manual_groups(
+                assessment_id=assessment.id,
+                current_user=current_user,
+                data=manual_request
+            )
 
         return assessment

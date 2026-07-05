@@ -41,6 +41,7 @@ from app.schemas.grading import (
     ModerationStatsResponse,
     QueueItemAssignRequest,
     SubmissionGradeResponse,
+    SuggestChangesRequest,
     VerifyMarksResponse,
     AIGradeFeedbackRequest,
 )
@@ -347,6 +348,28 @@ async def get_grade_for_response(
                 
     resp_obj.ai_grading_basis = "RUBRIC" if has_rubric else "GENERAL_KNOWLEDGE"
     return resp_obj
+
+
+@router.post(
+    "/response/{response_id}/suggest-changes",
+    summary="Suggest changes to AI grading for re-evaluation",
+)
+async def suggest_ai_changes(
+    response_id: uuid.UUID,
+    body: SuggestChangesRequest,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Pass lecturer feedback/correction back to AI and trigger immediate re-grading.
+    """
+    service = GradingService(db)
+    result = await service.suggest_ai_changes(
+        response_id=response_id,
+        lecturer_id=current_user.id,
+        feedback=body.feedback,
+    )
+    return result
 
 
 # ── GET ALL GRADES FOR ATTEMPT ────────────────────────────────────────────────

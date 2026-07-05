@@ -421,6 +421,9 @@ class GroupWorkService:
             can_request_approval=await self._can_request_approval(submission.id, group.id, assessment_id),
             can_submit=await self._can_finalize_submission(submission.id, group.id, assessment_id),
             appeal=await self._serialize_appeal(appeal) if appeal else None,
+            total_score=submission.total_score,
+            feedback=submission.feedback,
+            member_overrides=submission.member_overrides,
         )
 
     async def save_group_answer(
@@ -864,7 +867,7 @@ class GroupWorkService:
         page_size: int = 30,
     ) -> tuple[list[GroupSubmissionSummary], int]:
         """Fetch group submissions that need grading for a lecturer."""
-        from app.db.enums import GroupSubmissionStatus, GroupAppealStatus
+        from app.db.enums import GroupSubmissionStatus, GroupAppealStatus, GroupApprovalStatus
         from app.schemas.grading import GroupSubmissionSummary
 
         items, total = await self.submission_repo.get_grading_queue(
@@ -891,6 +894,10 @@ class GroupWorkService:
                 a.status == GroupAppealStatus.PENDING for a in item.appeals
             ) if hasattr(item, "appeals") else False
 
+            approved_member_count = 0
+            if hasattr(item, "approvals") and item.approvals:
+                approved_member_count = sum(1 for appr in item.approvals if appr.status == GroupApprovalStatus.APPROVED)
+
             summaries.append(
                 GroupSubmissionSummary(
                     id=item.id,
@@ -899,6 +906,7 @@ class GroupWorkService:
                     assessment_id=item.assessment_id,
                     assessment_title=item.assessment.title if item.assessment else "Unknown Assessment",
                     member_count=member_count,
+                    approved_member_count=approved_member_count,
                     status=item.status.value,
                     score=item.total_score,
                     max_score=item.max_score,
@@ -929,6 +937,7 @@ class GroupWorkService:
             max_score=data.max_score,
             feedback=data.feedback,
             graded_by_id=current_user.id,
+            member_overrides=data.member_overrides,
         )
 
     async def release_group_result(
@@ -1109,3 +1118,90 @@ class GroupWorkService:
         for user_id, display_name, first_name, last_name in result.all():
             names[user_id] = display_name or " ".join(part for part in [first_name, last_name] if part).strip() or str(user_id)
         return names
+
+    async def get_submission_workspace(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        current_user: User,
+    ) -> GroupWorkspaceResponse:
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+        assessment = await self._get_assessment_for_edit(submission.assessment_id, current_user)
+        
+        group = await self.group_repo.get_group_by_id(submission.group_id, include_members=True)
+        if not group:
+            raise NotFoundError("Group not found.", code="GROUP_NOT_FOUND")
+
+        materials = await self.submission_repo.list_materials(assessment_id=assessment.id, group_id=group.id)
+        answers = submission.answers or []
+        comments = submission.comments or []
+        approvals = submission.approvals or []
+        activity = submission.activity_logs or []
+        active_member_ids = await self.submission_repo.list_active_member_ids(submission.id)
+        appeal = await self.appeal_repo.get_active_by_submission(submission.id)
+        questions = await self._list_workspace_questions(assessment, group.id)
+        profiles = await self._get_user_profiles([member.student_id for member in group.members if not member.is_deleted])
+        question_title_map = {str(question.id): question.content for question in questions}
+
+        activity_responses = [
+            GroupActivityLogResponse(
+                id=item.id,
+                submission_id=item.submission_id,
+                student_id=item.student_id,
+                student_name=profiles.get(item.student_id, str(item.student_id)),
+                activity_type=item.activity_type,
+                question_id=item.question_id,
+                metadata_json=item.metadata_json,
+                details={"question_title": question_title_map.get(str(item.question_id))} if item.question_id else None,
+                created_at=item.created_at,
+            )
+            for item in activity
+        ]
+        
+        workspace_members = []
+        approval_map = {approval.student_id: approval.status for approval in approvals}
+        participation_map: dict[uuid.UUID, int] = {}
+        for entry in activity:
+            participation_map[entry.student_id] = participation_map.get(entry.student_id, 0) + 1
+            
+        for member in group.members:
+            if member.is_deleted:
+                continue
+            workspace_members.append(
+                GroupWorkspaceMemberResponse(
+                    student_id=member.student_id,
+                    student_name=profiles.get(member.student_id, member.student_name),
+                    group_role=member.group_role,
+                    is_leader=member.is_leader,
+                    participation_count=participation_map.get(member.student_id, 0),
+                    approval_status=approval_map.get(member.student_id, GroupApprovalStatus.PENDING),
+                    is_online=False,
+                )
+            )
+
+        return GroupWorkspaceResponse(
+            assessment_id=assessment.id,
+            group=await self._serialize_group(group),
+            group_name=group.name,
+            assessment=await self._serialize_workspace_assessment(assessment),
+            submission_id=submission.id,
+            submission_status=submission.status,
+            question_distribution_mode=assessment.question_distribution_mode,
+            questions=questions,
+            members=workspace_members,
+            materials=materials,
+            answers=[GroupSubmissionAnswerResponse.model_validate(a) for a in answers],
+            comments=[GroupSubmissionCommentResponse.model_validate(c) for c in comments],
+            approvals=[GroupSubmissionApprovalResponse.model_validate(a) for a in approvals],
+            activity_log=activity_responses,
+            activities=activity_responses,
+            active_member_ids=active_member_ids,
+            can_request_approval=False,
+            can_submit=False,
+            appeal=await self._serialize_appeal(appeal) if appeal else None,
+            total_score=submission.total_score,
+            feedback=submission.feedback,
+            member_overrides=submission.member_overrides,
+        )

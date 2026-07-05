@@ -239,6 +239,14 @@ class Assessment(AuditedBaseModel, table=True):
     question_distribution_mode: Optional[QuestionDistributionMode] = Field(default=None, nullable=True)
     require_all_member_approval: bool = Field(default=False, nullable=False)
     require_all_member_participation: bool = Field(default=False, nullable=False)
+    submission_mode: Optional[str] = Field(default="SINGLE_LEADER", nullable=True, max_length=50)
+    peer_evaluation_enabled: bool = Field(default=False, nullable=False)
+    peer_evaluation_deadline: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
+    peer_evaluation_weight_percent: Optional[int] = Field(default=None, nullable=True)
+    individual_weighting_enabled: bool = Field(default=False, nullable=False)
     appeal_window_days: Optional[int] = Field(default=None, nullable=True)
     group_invalidated_at: Optional[datetime] = Field(
         default=None,

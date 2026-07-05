@@ -57,6 +57,11 @@ class AssessmentStep1Request(MindexaSchema):
     question_distribution_mode: QuestionDistributionMode | None = None
     require_all_member_approval: bool = False
     require_all_member_participation: bool = False
+    submission_mode: str | None = "SINGLE_LEADER"
+    peer_evaluation_enabled: bool = False
+    peer_evaluation_deadline: datetime | None = None
+    peer_evaluation_weight_percent: int | None = None
+    individual_weighting_enabled: bool = False
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
 
     @model_validator(mode="after")
@@ -107,6 +112,11 @@ class AssessmentStep2Request(MindexaSchema):
     question_distribution_mode: QuestionDistributionMode | None = None
     require_all_member_approval: bool | None = None
     require_all_member_participation: bool | None = None
+    submission_mode: str | None = None
+    peer_evaluation_enabled: bool | None = None
+    peer_evaluation_deadline: datetime | None = None
+    peer_evaluation_weight_percent: int | None = None
+    individual_weighting_enabled: bool | None = None
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
     late_submission_allowed: bool | None = None
     late_penalty_percent: float | None = Field(
@@ -280,6 +290,11 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     question_distribution_mode: QuestionDistributionMode | None
     require_all_member_approval: bool
     require_all_member_participation: bool
+    submission_mode: str | None
+    peer_evaluation_enabled: bool
+    peer_evaluation_deadline: datetime | None
+    peer_evaluation_weight_percent: int | None
+    individual_weighting_enabled: bool
     appeal_window_days: int | None
     group_invalidated_at: datetime | None
     group_membership_locked_at: datetime | None

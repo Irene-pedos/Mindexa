@@ -64,10 +64,23 @@ export function GroupCsvImport({ assessmentId, onImport }: GroupCsvImportProps) 
 
       // Call API to validate
       const res = await groupWorkApi.importGroupsCsv(assessmentId, rows);
-      setImportResult(res);
+      const normalized = {
+        is_valid: (res.error_count || 0) === 0,
+        groups: (res.valid_groups || []).map((vg: any) => ({
+          name: vg.name,
+          members: (vg.members || []).map((m: any) => ({
+            student_id: m.student_id,
+            is_leader: !!m.is_leader
+          }))
+        })),
+        errors: (res.errors || []).map((err: any) => 
+          `Row ${err.row_number || "?"}: ${err.reason || "Validation error for student ID " + err.student_id}`
+        )
+      };
+      setImportResult(normalized);
       
-      if (res.is_valid) {
-        toast.success(`CSV validated: ${res.groups.length} groups found.`);
+      if (normalized.is_valid) {
+        toast.success(`CSV validated: ${normalized.groups.length} groups found.`);
       } else {
         toast.error("CSV has validation errors. Please review below.");
       }

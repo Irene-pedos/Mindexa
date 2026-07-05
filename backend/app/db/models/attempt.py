@@ -560,6 +560,7 @@ class GroupSubmission(BaseModel, table=True):
     total_score: Optional[float] = Field(default=None, nullable=True)
     max_score: Optional[float] = Field(default=None, nullable=True)
     feedback: Optional[str] = Field(default=None, nullable=True)
+    member_overrides: Optional[dict] = Field(default=None, sa_column=Column(JSONB, nullable=True))
 
     assessment: Optional["Assessment"] = Relationship(
         back_populates="group_submissions"

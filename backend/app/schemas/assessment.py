@@ -156,6 +156,11 @@ class AssessmentCreateRequest(BaseModel):
     question_distribution_mode: str | None = None
     require_all_member_approval: bool = False
     require_all_member_participation: bool = False
+    submission_mode: str | None = "SINGLE_LEADER"
+    peer_evaluation_enabled: bool = False
+    peer_evaluation_deadline: datetime | None = None
+    peer_evaluation_weight_percent: int | None = None
+    individual_weighting_enabled: bool = False
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
 
     @field_validator("assessment_type")
@@ -266,6 +271,11 @@ class AssessmentGeneralUpdate(BaseModel):
     question_distribution_mode: str | None = None
     require_all_member_approval: bool | None = None
     require_all_member_participation: bool | None = None
+    submission_mode: str | None = None
+    peer_evaluation_enabled: bool | None = None
+    peer_evaluation_deadline: datetime | None = None
+    peer_evaluation_weight_percent: int | None = None
+    individual_weighting_enabled: bool | None = None
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
     show_marks_per_question: bool | None = None
     show_feedback_after_submit: bool | None = None
@@ -427,6 +437,11 @@ class AssessmentDetailResponse(BaseModel):
     question_distribution_mode: str | None = None
     require_all_member_approval: bool = False
     require_all_member_participation: bool = False
+    submission_mode: str | None = "SINGLE_LEADER"
+    peer_evaluation_enabled: bool = False
+    peer_evaluation_deadline: datetime | None = None
+    peer_evaluation_weight_percent: int | None = None
+    individual_weighting_enabled: bool = False
     appeal_window_days: int | None = None
     group_invalidated_at: datetime | None = None
     group_membership_locked_at: datetime | None = None
@@ -488,6 +503,7 @@ class BulkAssessmentSection(BaseModel):
     bloomLevel: str | None = "understand"
     aiPromptHint: str | None = None
     difficultyDistribution: dict[str, int] | None = None
+    per_group: bool | None = False
 
     @model_validator(mode="before")
     @classmethod
@@ -570,20 +586,37 @@ class BulkAssessmentMetadata(BaseModel):
     groupAssignmentMode: str | None = None
     questionDistributionMode: str | None = None
     appealWindowDays: int = 0
+    submissionMode: str | None = "SINGLE_LEADER"
+    peerEvaluationEnabled: bool | None = False
+    peerEvaluationDeadline: datetime | None = None
+    peerEvaluationWeightPercent: int | None = None
+    individualWeightingEnabled: bool | None = False
     academic_year: str | None = None
 
     @model_validator(mode="before")
     @classmethod
     def ensure_numeric(cls, data: dict) -> dict:
         if not isinstance(data, dict): return data
-        for f in ["durationMinutes", "passing_marks", "appealWindowDays", "maxGroupSize"]:
+        for f in ["durationMinutes", "passing_marks", "appealWindowDays", "maxGroupSize", "peerEvaluationWeightPercent"]:
             val = data.get(f)
             if val == "" or val is None:
-                data[f] = 0 if f != "maxGroupSize" else None
+                data[f] = 0 if f not in ["maxGroupSize", "peerEvaluationWeightPercent"] else None
             elif isinstance(val, str):
                 try: data[f] = int(val)
                 except ValueError: data[f] = 0
         return data
+
+    @model_validator(mode="after")
+    def validate_peer_evaluation(self) -> "BulkAssessmentMetadata":
+        if self.peerEvaluationEnabled:
+            if not self.peerEvaluationDeadline:
+                raise ValueError("peerEvaluationDeadline is required when peerEvaluationEnabled is True.")
+            if self.windowEnd and self.peerEvaluationDeadline <= self.windowEnd:
+                raise ValueError("peerEvaluationDeadline must be after the group submission deadline.")
+            if self.peerEvaluationWeightPercent is not None:
+                if not (0 < self.peerEvaluationWeightPercent <= 100):
+                    raise ValueError("peerEvaluationWeightPercent must be between 1 and 100.")
+        return self
 
 
 class BulkAssessmentRules(BaseModel):
@@ -621,10 +654,19 @@ class BulkAssessmentRules(BaseModel):
         return data
 
 
+class BulkAssessmentGroupMember(BaseModel):
+    student_id: uuid.UUID
+    is_leader: bool = False
+
+class BulkAssessmentGroup(BaseModel):
+    name: str
+    members: list[BulkAssessmentGroupMember] = []
+
 class BulkAssessmentPublishRequest(BaseModel):
     id: str | uuid.UUID | None = None
     metadata: BulkAssessmentMetadata
     blueprint: list[BulkAssessmentSection] | None = []
     questions: list[BulkAssessmentQuestion] | None = []
     rules: BulkAssessmentRules
+    groups: list[BulkAssessmentGroup] | None = []
     draft_step: int | None = Field(default=None, ge=1, le=6)

@@ -294,6 +294,7 @@ class GroupSubmissionRepository:
         max_score: float,
         feedback: str | None,
         graded_by_id: uuid.UUID,
+        member_overrides: dict | None = None,
     ) -> None:
         await self.db.execute(
             update(GroupSubmission)
@@ -305,6 +306,7 @@ class GroupSubmissionRepository:
                 graded_by_id=graded_by_id,
                 graded_at=_utcnow(),
                 status=GroupSubmissionStatus.GRADED,
+                member_overrides=member_overrides,
             )
         )
 
@@ -427,6 +429,7 @@ class GroupSubmissionRepository:
             selectinload(GroupSubmission.assessment),
             selectinload(GroupSubmission.group).selectinload(StudentGroup.members),
             selectinload(GroupSubmission.appeals),
+            selectinload(GroupSubmission.approvals),
         )
 
         result = await self.db.execute(stmt)

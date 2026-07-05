@@ -214,6 +214,9 @@ class GroupWorkspaceResponse(MindexaSchema):
     can_request_approval: bool = False
     can_submit: bool = False
     appeal: GroupAppealResponse | None = None
+    total_score: float | None = None
+    feedback: str | None = None
+    member_overrides: dict[str, float] | None = None
 
 
 class SaveGroupAnswerRequest(MindexaSchema):

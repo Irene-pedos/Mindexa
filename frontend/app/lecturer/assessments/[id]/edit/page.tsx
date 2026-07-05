@@ -116,6 +116,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
+import { groupWorkApi } from "@/lib/api/group-work";
 import { authApi } from "@/lib/api/auth";
 import { academicApi } from "@/lib/api/academic";
 import { aiGenerationApi } from "@/lib/api/ai-generation";
@@ -167,6 +168,11 @@ type AssessmentMode =
   | "Summative"
   | "Groupwork"
   | "Reassessment";
+
+type GroupFormationMode = "SELF_ENROL" | "LECTURER_ASSIGNED" | "AUTO_BALANCED";
+type QuestionDistributionMode = "SHARED" | "PER_GROUP";
+type GroupSubmissionMode = "SINGLE_LEADER" | "ALL_MEMBERS" | "MAJORITY_VOTE";
+
 type Difficulty = "Easy" | "Medium" | "Hard";
 type QuestionType =
   | "mcq"
@@ -180,6 +186,21 @@ type QuestionType =
   | "casestudy";
 
 type ComputationalSubType = "decision" | "search" | "counting" | "optimization";
+
+interface GroupMember {
+  id: string; // unique ID for React keys and DnD component tracking
+  student_id?: string; // explicit student system ID
+  member_record_id?: string; // backend group member record ID
+  name: string;
+  email: string;
+  is_leader?: boolean;
+}
+
+interface Group {
+  id: string;
+  name: string;
+  members: GroupMember[];
+}
 
 interface QuestionOption {
   id?: string;
@@ -212,6 +233,7 @@ interface BlueprintSection {
     | "analyze"
     | "evaluate"
     | "create";
+  per_group?: boolean;
 }
 
 interface Question {
@@ -2016,6 +2038,11 @@ export default function EditAssessmentPage() {
     { id: string; name: string; role: "PRIMARY" | "ASSISTANT" | "OBSERVER" }[]
   >([]);
   const [studentSearch, setStudentSearch] = useState("");
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<Record<string, string>>({});
+  const [step5ViewMode, setStep5ViewMode] = useState<"standard" | "per_group">("standard");
+  const [groups, setGroups] = useState<Group[]>([]);
+  const [isGeneratingAutoGroups, setIsGeneratingAutoGroups] = useState(false);
+  const [autoGroupsPreview, setAutoGroupsPreview] = useState<Group[] | null>(null);
 
   const questionSensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -2110,6 +2137,7 @@ export default function EditAssessmentPage() {
     mode: "CAT" as AssessmentMode,
     institution_id: "",
     course_id: "",
+    subject_id: "",
     teaching_workspace_id: "",
     department_ids: [] as string[],
     option_ids: [] as string[],
@@ -2125,10 +2153,15 @@ export default function EditAssessmentPage() {
     customInstructions: "",
     max_group_size: 4,
     group_formation_mode: "self_enrol",
-    group_assignment_mode: "AUTOMATIC" as "AUTOMATIC" | "MANUAL",
+    group_assignment_mode: "MANUAL" as "AUTOMATIC" | "MANUAL",
     question_distribution_mode: "SHARED" as "SHARED" | "PER_GROUP",
     require_all_member_approval: true,
     require_all_member_participation: true,
+    submission_mode: "SINGLE_LEADER" as "SINGLE_LEADER" | "ALL_MEMBERS" | "MAJORITY_VOTE",
+    peer_evaluation_enabled: false,
+    peer_evaluation_deadline: "" as any,
+    peer_evaluation_weight_percent: "" as any,
+    individual_weighting_enabled: false,
     appeal_window_days: 7,
     audience_type: "all" as "all" | "selected",
     target_student_ids: [] as string[],
@@ -2157,6 +2190,25 @@ export default function EditAssessmentPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isReviewApplying, setIsReviewApplying] = useState(false);
   const [passingMarksPercent, setPassingMarksPercent] = useState(70);
+
+  // Smart defaults for Group Work mode
+  useEffect(() => {
+    setRules((prev) => {
+      const isGroupWork = metadata.mode === "Groupwork";
+      if (isGroupWork) {
+        return {
+          ...prev,
+          aiAllowed: prev.supervised ? false : prev.aiAllowed,
+          browserRestricted: prev.supervised ? prev.browserRestricted : false,
+          integrityMonitoring: prev.supervised ? prev.integrityMonitoring : false,
+          shuffleQuestions: false,
+          shuffleOptions: false,
+          attempts: 1,
+        };
+      }
+      return prev;
+    });
+  }, [rules.supervised, metadata.mode]);
 
   const metadataRef = useRef(metadata);
   const rulesRef = useRef(rules);
@@ -2290,6 +2342,7 @@ export default function EditAssessmentPage() {
             false,
           institution_id: data.institution_id || "",
           course_id: data.course_id || "",
+          subject_id: data.subject_id || "",
           teaching_workspace_id: data.teaching_workspace_id || "",
           department_ids:
             data.target_sections
@@ -2325,6 +2378,11 @@ export default function EditAssessmentPage() {
             data.require_all_member_approval || false,
           require_all_member_participation:
             data.require_all_member_participation || false,
+          submission_mode: data.submission_mode || "SINGLE_LEADER",
+          peer_evaluation_enabled: data.peer_evaluation_enabled || false,
+          peer_evaluation_deadline: data.peer_evaluation_deadline || "",
+          peer_evaluation_weight_percent: data.peer_evaluation_weight_percent || "",
+          individual_weighting_enabled: data.individual_weighting_enabled || false,
           appeal_window_days: data.appeal_window_days || 7,
           audience_type: data.audience_type || "all",
           target_student_ids: data.target_student_ids || [],
@@ -2361,6 +2419,7 @@ export default function EditAssessmentPage() {
                 s.allowed_question_types?.bloom_level ||
                 s.bloom_level ||
                 "understand",
+              per_group: s.allowed_question_types?.per_group || false,
             })),
           );
         }
@@ -2731,10 +2790,57 @@ export default function EditAssessmentPage() {
 
     const payload = {
       id: id as string,
+      groups: m.mode === "Groupwork"
+        ? groups.map((g) => ({
+            name: g.name,
+            members: g.members.map((mem) => ({
+              student_id: mem.student_id || mem.id,
+              is_leader: !!mem.is_leader
+            }))
+          }))
+        : undefined,
       metadata: {
-        ...m,
+        title: m.title || "Untitled Assessment",
+        description: m.description || "",
+        mode: m.mode || "CAT",
         assessment_type:
           m.mode === "Groupwork" ? "GROUP_WORK" : m.mode.toUpperCase(),
+        institution_id: m.institution_id || undefined,
+        course_id: m.course_id || undefined,
+        department_ids: m.department_ids || [],
+        option_ids: m.option_ids || [],
+        class_group_ids: m.class_group_ids || [],
+        teaching_workspace_id: m.teaching_workspace_id || undefined,
+        subject_id: m.subject_id || undefined,
+        audience_type: m.audience_type || "all",
+        target_student_ids: m.target_student_ids || [],
+        date: m.date || undefined,
+        startTime: m.startTime || undefined,
+        endTime: m.endTime || undefined,
+        durationMinutes: m.durationMinutes ? parseInt(m.durationMinutes as any) : 120,
+        passing_marks: m.passing_marks ? parseInt(m.passing_marks as any) : 70,
+        selectedInstructions: m.selectedInstructions || [],
+        customInstructions: m.customInstructions || "",
+        maxGroupSize: m.max_group_size || undefined,
+        groupFormation: (() => {
+          const fm = m.group_formation_mode;
+          if (fm === "self_enrol") return "SELF_ENROL";
+          if (fm === "random" || fm === "similar_performance" || fm === "diverse_performance") return "AUTO_BALANCED";
+          return "LECTURER_ASSIGNED";
+        })(),
+        groupAssignmentMode: m.group_assignment_mode || undefined,
+        questionDistributionMode: m.question_distribution_mode || undefined,
+        appealWindowDays: m.appeal_window_days ? parseInt(m.appeal_window_days as any) : 0,
+        submissionMode: m.submission_mode || "SINGLE_LEADER",
+        peerEvaluationEnabled: m.peer_evaluation_enabled || false,
+        peerEvaluationDeadline: (m.peer_evaluation_enabled && m.peer_evaluation_deadline)
+          ? new Date(m.peer_evaluation_deadline).toISOString()
+          : null,
+        peerEvaluationWeightPercent: (m.peer_evaluation_enabled && m.peer_evaluation_weight_percent)
+          ? parseInt(m.peer_evaluation_weight_percent as any)
+          : null,
+        individualWeightingEnabled: m.individual_weighting_enabled || false,
+        academic_year: m.academic_year || undefined,
       },
       blueprint: blueprintRef.current.map((b) => ({
         id: b.id,
@@ -2745,6 +2851,7 @@ export default function EditAssessmentPage() {
         difficulty: b.difficulty,
         allowedTypes: b.allowedTypes.map((t) => mapFrontendToBackendType(t)),
         bloomLevel: b.bloomLevel,
+        per_group: b.per_group || false,
       })),
       questions: activeQuestions.map((q) => {
         let finalOptions: QuestionOption[] = (q.options || []).map((opt) => ({
@@ -2790,6 +2897,8 @@ export default function EditAssessmentPage() {
       }),
       rules: {
         ...r,
+        requireAllMemberApproval: m.require_all_member_approval,
+        requireAllMemberParticipation: m.require_all_member_participation,
         supervisor_ids: supervisorListRef.current.map((s) => s.id),
       },
     };
@@ -3626,7 +3735,7 @@ export default function EditAssessmentPage() {
     triggerDebouncedAutosave(5, undefined, undefined, nextQuestions);
   };
 
-  const addQuestion = (sectionId: string) => {
+  const addQuestion = (sectionId: string, groupId?: string) => {
     const sec = blueprint.find((s) => s.id === sectionId);
     if (!sec) return;
     const type = sec.allowedTypes[0] || "mcq";
@@ -3640,6 +3749,7 @@ export default function EditAssessmentPage() {
     const newQ: Question = {
       id: `q-${Date.now()}`,
       sectionId,
+      groupId,
       text: "",
       type: type as any,
       marks: defaultMarks,
@@ -3754,6 +3864,7 @@ export default function EditAssessmentPage() {
   const handleBankSelect = async (
     bankItem: QuestionBankItem,
     sectionId: string,
+    groupId?: string,
   ) => {
     try {
       const q = await questionApi.getQuestion(bankItem.id);
@@ -3768,6 +3879,7 @@ export default function EditAssessmentPage() {
         {
           id: `q-bank-${q.id}-${Date.now()}`,
           sectionId,
+          groupId,
           text: q.content,
           imageUrl: q.image_url,
           type: mappedType,
@@ -3859,6 +3971,77 @@ export default function EditAssessmentPage() {
     return format(d, "h:mm a");
   };
 
+  useEffect(() => {
+    async function fetchGroups() {
+      if (!id || !selectedWorkspaceDetail || !metadata.is_group_assessment) return;
+      try {
+        const roster = selectedWorkspaceDetail.roster || [];
+        const fetched = await groupWorkApi.getGroups(id as string);
+        const mappedGroups = fetched.map((sg: any) => ({
+          id: sg.id,
+          name: sg.name,
+          members: (sg.members || []).map((m: any) => {
+            const studentInfo = roster.find((r: any) => (r.id || r.student_id) === m.student_id);
+            return {
+              id: m.student_id,
+              name: m.name || studentInfo?.name || "Student",
+              email: studentInfo?.email || "",
+              is_leader: !!m.is_leader
+            };
+          })
+        }));
+        setGroups(mappedGroups);
+      } catch (err) {
+        console.error("Failed to load existing groups:", err);
+      }
+    }
+    fetchGroups();
+  }, [id, selectedWorkspaceDetail, metadata.is_group_assessment]);
+
+  const handleTriggerAutoGrouping = async () => {
+    if (!id) {
+      toast.error("Assessment ID not found.");
+      return;
+    }
+    setIsGeneratingAutoGroups(true);
+    try {
+      const res = await groupWorkApi.autoGenerateGroups(id as string, {
+        max_group_size: metadata.max_group_size || 4,
+        allow_smaller_final_group: true,
+        naming_pattern: "Group {index}"
+      });
+      const roster = selectedWorkspaceDetail?.roster || [];
+      const mappedGroups: Group[] = res.map((sg: any) => ({
+        id: sg.id,
+        name: sg.name,
+        members: (sg.members || []).map((m: any) => {
+          const studentInfo = roster.find(r => (r.id || r.student_id) === m.student_id);
+          return {
+            id: m.student_id,
+            name: m.name || studentInfo?.name || "Student",
+            email: studentInfo?.email || "",
+            is_leader: !!m.is_leader
+          };
+        })
+      }));
+      setAutoGroupsPreview(mappedGroups);
+      toast.success("Groups auto-generated successfully! Check preview below.");
+    } catch (err: any) {
+      console.error(err);
+      toast.error(err.message || "Failed to auto-generate groups.");
+    } finally {
+      setIsGeneratingAutoGroups(false);
+    }
+  };
+
+  const handleConfirmAutoGrouping = () => {
+    if (autoGroupsPreview) {
+      setGroups(autoGroupsPreview);
+      setAutoGroupsPreview(null);
+      toast.success("Auto-grouping layout confirmed and applied!");
+    }
+  };
+
   const renderStepContent = (stepNum: number) => {
     switch (stepNum) {
       case 1:
@@ -3946,8 +4129,14 @@ export default function EditAssessmentPage() {
                       value={metadata.mode}
                       disabled={isFieldDisabled("mode")}
                       onValueChange={(v: any) => {
-                        setMetadata({ ...metadata, mode: v });
-                        runAutosave(1, { mode: v });
+                        const isGroup = v === "Groupwork";
+                        const updated = {
+                          ...metadata,
+                          mode: v,
+                          is_group_assessment: isGroup
+                        };
+                        setMetadata(updated);
+                        runAutosave(1, updated);
                       }}
                     >
                       <SelectTrigger className="h-10" id="mode">
@@ -3963,7 +4152,7 @@ export default function EditAssessmentPage() {
                           "Groupwork",
                         ].map((m) => (
                           <SelectItem key={m} value={m}>
-                            {m}
+                            {m === "Groupwork" ? "Group Work" : m}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -4006,7 +4195,7 @@ export default function EditAssessmentPage() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="endTime">
-                      End Time <span className="text-red-500">*</span>
+                      {metadata.mode === "Groupwork" ? "Group Submission Deadline" : "End Time"} <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       type="time"
@@ -4056,6 +4245,206 @@ export default function EditAssessmentPage() {
               </CardContent>
             </Card>
 
+            {metadata.mode === "Groupwork" && (
+              <Card className="shadow-none border mt-6 animate-in fade-in slide-in-from-top-2 duration-200">
+                <CardHeader className="py-4 border-b">
+                  <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <Users className="size-4 text-primary" /> Compact Group Work Settings
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-5 space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="max-group-size-st1">Max Group Size</Label>
+                      <Input
+                        id="max-group-size-st1"
+                        type="number"
+                        min={2}
+                        max={10}
+                        value={metadata.max_group_size || 4}
+                        onChange={(e) => {
+                          const updated = {
+                            ...metadata,
+                            max_group_size: parseInt(e.target.value) || 4,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="formation-mode-st1">Formation Mode</Label>
+                      <Select
+                        value={metadata.group_formation_mode || "random"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            group_formation_mode: val,
+                            group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="formation-mode-st1">
+                          <SelectValue placeholder="Select formation mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="random">Random Split</SelectItem>
+                          <SelectItem value="similar_performance">Similar Academic Performance</SelectItem>
+                          <SelectItem value="diverse_performance">Diverse Academic Performance</SelectItem>
+                          <SelectItem value="self_enrol">Self Enrollment</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="assignment-mode-st1">Assignment Mode</Label>
+                      <Select
+                        value={metadata.group_assignment_mode || "AUTOMATIC"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            group_assignment_mode: val as any,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="assignment-mode-st1">
+                          <SelectValue placeholder="Select assignment mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="AUTOMATIC">Automatic</SelectItem>
+                          <SelectItem value="MANUAL">Manual</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed">
+                    <div className="space-y-2">
+                      <Label htmlFor="submission-mode-st1">Submission Mode</Label>
+                      <Select
+                        value={metadata.submission_mode || "SINGLE_LEADER"}
+                        onValueChange={(val) => {
+                          const updated = {
+                            ...metadata,
+                            submission_mode: val as any,
+                          };
+                          setMetadata(updated);
+                          runAutosave(1, updated);
+                        }}
+                      >
+                        <SelectTrigger id="submission-mode-st1">
+                          <SelectValue placeholder="Select submission mode..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SINGLE_LEADER">Single Leader Submits on Behalf of Group</SelectItem>
+                          <SelectItem value="ALL_MEMBERS">All Members Submit Individually (Aggregated)</SelectItem>
+                          <SelectItem value="MAJORITY_VOTE">Majority Vote (Multiple submissions, consensus needed)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-[10px] text-muted-foreground">
+                        Defines which team member can trigger the group submission workflow.
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col justify-center space-y-4">
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="indiv-weighting-st1"
+                          checked={metadata.individual_weighting_enabled || false}
+                          onCheckedChange={(checked) => {
+                            const updated = {
+                              ...metadata,
+                              individual_weighting_enabled: checked,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="indiv-weighting-st1" className="cursor-pointer">Enable Individual Contribution Weighting</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Adjust final student marks by an individual contribution factor.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center space-x-2">
+                        <Switch
+                          id="peer-eval-st1"
+                          checked={metadata.peer_evaluation_enabled || false}
+                          onCheckedChange={(checked) => {
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_enabled: checked,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <div className="space-y-0.5">
+                          <Label htmlFor="peer-eval-st1" className="cursor-pointer">Enable Intra-Group Peer Evaluation</Label>
+                          <p className="text-[10px] text-muted-foreground">
+                            Allow group members to grade each other&apos;s performance.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {metadata.peer_evaluation_enabled && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="space-y-2">
+                        <Label htmlFor="peer-eval-weight-st1">Peer Score Weight (%)</Label>
+                        <Input
+                          id="peer-eval-weight-st1"
+                          type="number"
+                          min={1}
+                          max={100}
+                          placeholder="e.g. 20"
+                          value={metadata.peer_evaluation_weight_percent || ""}
+                          onChange={(e) => {
+                            const val = e.target.value === "" ? "" : parseInt(e.target.value) || 0;
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_weight_percent: val as any,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground">
+                          Percentage of final mark determined by the average peer rating.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="peer-eval-deadline-st1">Peer Evaluation Deadline</Label>
+                        <Input
+                          id="peer-eval-deadline-st1"
+                          type="datetime-local"
+                          value={metadata.peer_evaluation_deadline || ""}
+                          onChange={(e) => {
+                            const updated = {
+                              ...metadata,
+                              peer_evaluation_deadline: e.target.value,
+                            };
+                            setMetadata(updated);
+                            runAutosave(1, updated);
+                          }}
+                        />
+                        <p className="text-[10px] text-muted-foreground text-destructive font-medium">
+                          Note: The peer review deadline is separate and must occur AFTER the general group submission deadline.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <div className="flex justify-end mt-8">
               <Button
                 size="lg"
@@ -4081,6 +4470,18 @@ export default function EditAssessmentPage() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-5 space-y-6">
+                    {metadata.mode === "Groupwork" && (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3.5 flex items-start gap-3">
+                        <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Group Work Assessment — Security rules relaxed by default</p>
+                          <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                            Safe Browser, Integrity Monitoring, and question shuffling have been disabled as group work is typically a take-home deliverable.
+                            Review and adjust these settings if your delivery context requires stricter controls (e.g. an in-class group presentation).
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     <div className="space-y-4">
                       {[
                         {
@@ -4181,6 +4582,7 @@ export default function EditAssessmentPage() {
 
                     <div className="pt-5 border-t">
                       <div className="space-y-4">
+                        {metadata.mode !== "Groupwork" && (
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
                             <Label
@@ -4201,6 +4603,8 @@ export default function EditAssessmentPage() {
                             }}
                           />
                         </div>
+                        )}
+                        {metadata.mode !== "Groupwork" && (
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
                             <Label htmlFor="shuffleOptions" className="text-sm">
@@ -4216,6 +4620,7 @@ export default function EditAssessmentPage() {
                             }}
                           />
                         </div>
+                        )}
 
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
@@ -4399,124 +4804,325 @@ export default function EditAssessmentPage() {
             s.student_id?.toLowerCase().includes(sl)
           );
         });
+        const isGroupMode = metadata.mode === "Groupwork";
 
         return (
           <div className="space-y-6">
-            <Card className="shadow-none border">
-              <CardHeader className="py-5 border-b">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="text-base font-bold flex items-center gap-2">
-                      <Users className="size-5 text-primary" /> Target Audience
-                    </CardTitle>
-                    <CardDescription>
-                      Determine who takes this assessment.
-                    </CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-6 space-y-6">
-                <RadioGroup
-                  value={metadata.audience_type || "all"}
-                  disabled={isFieldDisabled("audience_type")}
-                  onValueChange={(val: any) => {
-                    setMetadata({ ...metadata, audience_type: val });
-                    runAutosave(3, { audience_type: val });
-                  }}
-                  className="grid grid-cols-1 md:grid-cols-2 gap-4"
-                >
-                  <div className="flex items-start space-x-2 border p-4 rounded-xl">
-                    <RadioGroupItem value="all" id="aud-all" />
-                    <Label htmlFor="aud-all" className="cursor-pointer">
-                      <span className="font-bold block">
-                        All enrolled Students
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Assigned to everyone in workspace.
-                      </span>
-                    </Label>
-                  </div>
-                  <div className="flex items-start space-x-2 border p-4 rounded-xl">
-                    <RadioGroupItem value="selected" id="aud-sel" />
-                    <Label htmlFor="aud-sel" className="cursor-pointer">
-                      <span className="font-bold block">
-                        Selected Students Only
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        Restricted to specific individuals.
-                      </span>
-                    </Label>
-                  </div>
-                </RadioGroup>
+            {isGroupMode ? (
+              <Card className="shadow-none border">
+                <CardHeader className="py-5 border-b">
+                  <CardTitle className="text-base font-bold flex items-center gap-2">
+                    <Users className="size-5 text-primary" /> Group Formation Panel
+                  </CardTitle>
+                  <CardDescription>
+                    Organize students into groups for this group work assessment.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="p-6">
+                  <Tabs defaultValue="auto" className="w-full">
+                    <TabsList className="grid w-full grid-cols-3">
+                      <TabsTrigger value="auto">Auto-Formation</TabsTrigger>
+                      <TabsTrigger value="manual">Manual Builder</TabsTrigger>
+                      <TabsTrigger value="csv">CSV Import</TabsTrigger>
+                    </TabsList>
 
-                {metadata.audience_type === "selected" && (
-                  <div className="space-y-4 pt-4 border-t border-dashed">
-                    <Input
-                      placeholder="Search student..."
-                      value={studentSearch}
-                      onChange={(e) => setStudentSearch(e.target.value)}
-                      className="h-9 text-xs max-w-xs"
-                    />
-                    <div className="border rounded-lg overflow-hidden bg-background">
-                      <ScrollArea className="h-72 w-full">
-                        <div className="divide-y">
-                          {filteredRoster.map((s) => {
-                            const sid = s.id || s.student_id;
-                            const checked =
-                              metadata.target_student_ids?.includes(sid);
-                            return (
-                              <div
-                                key={sid}
-                                className="flex items-center justify-between p-3 hover:bg-muted/10"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <Checkbox
-                                    checked={checked}
-                                    disabled={isFieldDisabled("audience_type")}
-                                    onCheckedChange={(c) => {
-                                      const ids = c
-                                        ? [
-                                            ...(metadata.target_student_ids ||
-                                              []),
-                                            sid,
-                                          ]
-                                        : (
-                                            metadata.target_student_ids || []
-                                          ).filter((i) => i !== sid);
-                                      setMetadata({
-                                        ...metadata,
-                                        target_student_ids: ids,
-                                      });
-                                      runAutosave(3, {
-                                        target_student_ids: ids,
-                                      });
-                                    }}
-                                  />
-                                  <div>
-                                    <p className="text-xs font-semibold">
-                                      {s.name}
-                                    </p>
-                                    <p className="text-[10px] text-muted-foreground">
-                                      {s.email}
-                                    </p>
-                                  </div>
-                                </div>
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px]"
-                                >
-                                  {s.student_id}
-                                </Badge>
-                              </div>
-                            );
-                          })}
+                    <TabsContent value="auto" className="space-y-6 pt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="max-group-size">Max Group Size</Label>
+                          <Input
+                            id="max-group-size"
+                            type="number"
+                            min={2}
+                            max={10}
+                            value={metadata.max_group_size || 4}
+                            onChange={(e) => {
+                              const updated = {
+                                ...metadata,
+                                max_group_size: parseInt(e.target.value) || 4,
+                              };
+                              setMetadata(updated);
+                              runAutosave(3, updated);
+                            }}
+                          />
                         </div>
-                      </ScrollArea>
+                        <div className="space-y-2">
+                          <Label htmlFor="formation-mode">Formation Mode</Label>
+                          <Select
+                            value={metadata.group_formation_mode || "random"}
+                            onValueChange={(val) => {
+                              const updated = {
+                                ...metadata,
+                                group_formation_mode: val,
+                                group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                              };
+                              setMetadata(updated);
+                              runAutosave(3, updated);
+                            }}
+                          >
+                            <SelectTrigger id="formation-mode">
+                              <SelectValue placeholder="Select formation mode..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="random">Random Split</SelectItem>
+                              <SelectItem value="similar_performance">Similar Academic Performance</SelectItem>
+                              <SelectItem value="diverse_performance">Diverse Academic Performance</SelectItem>
+                              <SelectItem value="self_enrol">Self Enrollment</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end gap-3 pt-4 border-t">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={handleTriggerAutoGrouping}
+                          disabled={isGeneratingAutoGroups}
+                          className="h-10 px-6"
+                        >
+                          {isGeneratingAutoGroups ? "Generating..." : "Generate & Preview Groups"}
+                        </Button>
+                      </div>
+
+                      {autoGroupsPreview && (
+                        <div className="space-y-4 pt-6 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                          <h4 className="text-sm font-bold text-foreground">Generated Groups Preview</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {autoGroupsPreview.map((g) => (
+                              <Card key={g.id} className="border bg-background/50 shadow-none">
+                                <CardHeader className="p-3 border-b bg-muted/20 flex flex-row items-center justify-between">
+                                  <span className="text-xs font-bold text-foreground">{g.name}</span>
+                                  <Badge variant="outline" className="text-[10px] px-1.5 h-4.5">
+                                    {g.members.length} members
+                                  </Badge>
+                                </CardHeader>
+                                <CardContent className="p-3 space-y-1 text-xs">
+                                  {g.members.map((m) => (
+                                    <div key={m.id} className="flex justify-between items-center py-1">
+                                      <span className="font-medium">{m.name}</span>
+                                      {m.is_leader && (
+                                        <Badge variant="outline" className="text-[9px] bg-primary/5 text-primary border-primary/20">
+                                          Leader
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  ))}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                          <div className="flex justify-end gap-3 pt-4">
+                            <Button
+                              type="button"
+                              onClick={handleConfirmAutoGrouping}
+                              className="h-10 px-6 font-semibold"
+                            >
+                              Confirm & Apply Grouping
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+
+                      {!autoGroupsPreview && groups.length > 0 && (
+                        <div className="space-y-4 pt-6 border-t border-dashed">
+                          <h4 className="text-sm font-bold text-foreground">Active Groups ({groups.length})</h4>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {groups.map((g) => (
+                              <Card key={g.id} className="border bg-background/50 shadow-none">
+                                <CardHeader className="p-3 border-b bg-muted/20 flex flex-row items-center justify-between">
+                                  <span className="text-xs font-bold text-foreground">{g.name}</span>
+                                  <Badge variant="outline" className="text-[10px] px-1.5 h-4.5">
+                                    {g.members.length} members
+                                  </Badge>
+                                </CardHeader>
+                                <CardContent className="p-3 space-y-1 text-xs">
+                                  {g.members.map((m) => (
+                                    <div key={m.id} className="flex justify-between items-center py-1">
+                                      <span className="font-medium">{m.name}</span>
+                                      {m.is_leader && (
+                                        <Badge variant="outline" className="text-[9px] bg-primary/5 text-primary border-primary/20">
+                                          Leader
+                                        </Badge>
+                                      )}
+                                    </div>
+                                  ))}
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </TabsContent>
+
+                    <TabsContent value="manual" className="pt-6">
+                      <GroupBuilderDnd
+                        courseId={metadata.teaching_workspace_id || metadata.course_id}
+                        initialGroups={groups}
+                        maxGroupSize={metadata.max_group_size || 4}
+                        onSave={async (newGroups) => {
+                          if (!id) return;
+                          const manualInputs = newGroups.map(g => ({
+                            name: g.name,
+                            members: g.members.map(m => ({
+                              student_id: m.id,
+                              is_leader: !!m.is_leader,
+                            })),
+                          }));
+                          try {
+                            await groupWorkApi.saveManualGroups(id as string, manualInputs);
+                            setGroups(newGroups);
+                            toast.success("Manual groups saved successfully!");
+                          } catch (err: any) {
+                            toast.error("Failed to save manual groups.");
+                          }
+                        }}
+                      />
+                    </TabsContent>
+
+                    <TabsContent value="csv" className="pt-6">
+                      <GroupCsvImport
+                        assessmentId={id as string}
+                        onImport={async (importedGroups) => {
+                          const roster = selectedWorkspaceDetail?.roster || [];
+                          const mappedGroups: Group[] = importedGroups.map((ig: any, index: number) => ({
+                            id: `group-csv-${index}-${Date.now()}`,
+                            name: ig.name,
+                            members: (ig.members || []).map((m: any) => {
+                              const studentInfo = roster.find(r => (r.id || r.student_id) === m.student_id);
+                              return {
+                                id: m.student_id,
+                                name: studentInfo?.name || "Student",
+                                email: studentInfo?.email || "",
+                                is_leader: !!m.is_leader
+                              };
+                            })
+                          }));
+                          setGroups(mappedGroups);
+                          toast.success("Groups successfully applied from CSV!");
+                        }}
+                      />
+                    </TabsContent>
+                  </Tabs>
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="shadow-none border">
+                <CardHeader className="py-5 border-b">
+                  <div className="flex justify-between items-center">
+                    <div>
+                      <CardTitle className="text-base font-bold flex items-center gap-2">
+                        <Users className="size-5 text-primary" /> Target Audience
+                      </CardTitle>
+                      <CardDescription>
+                        Determine who takes this assessment.
+                      </CardDescription>
                     </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
+                </CardHeader>
+                <CardContent className="p-6 space-y-6">
+                  <RadioGroup
+                    value={metadata.audience_type || "all"}
+                    disabled={isFieldDisabled("audience_type")}
+                    onValueChange={(val: any) => {
+                      setMetadata({ ...metadata, audience_type: val });
+                      runAutosave(3, { audience_type: val });
+                    }}
+                    className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                  >
+                    <div className="flex items-start space-x-2 border p-4 rounded-xl">
+                      <RadioGroupItem value="all" id="aud-all" />
+                      <Label htmlFor="aud-all" className="cursor-pointer">
+                        <span className="font-bold block">
+                          All enrolled Students
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Assigned to everyone in workspace.
+                        </span>
+                      </Label>
+                    </div>
+                    <div className="flex items-start space-x-2 border p-4 rounded-xl">
+                      <RadioGroupItem value="selected" id="aud-sel" />
+                      <Label htmlFor="aud-sel" className="cursor-pointer">
+                        <span className="font-bold block">
+                          Selected Students Only
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          Restricted to specific individuals.
+                        </span>
+                      </Label>
+                    </div>
+                  </RadioGroup>
+
+                  {metadata.audience_type === "selected" && (
+                    <div className="space-y-4 pt-4 border-t border-dashed">
+                      <Input
+                        placeholder="Search student..."
+                        value={studentSearch}
+                        onChange={(e) => setStudentSearch(e.target.value)}
+                        className="h-9 text-xs max-w-xs"
+                      />
+                      <div className="border rounded-lg overflow-hidden bg-background">
+                        <ScrollArea className="h-72 w-full">
+                          <div className="divide-y">
+                            {filteredRoster.map((s) => {
+                              const sid = s.id || s.student_id;
+                              const checked =
+                                metadata.target_student_ids?.includes(sid);
+                              return (
+                                <div
+                                  key={sid}
+                                  className="flex items-center justify-between p-3 hover:bg-muted/10"
+                                >
+                                  <div className="flex items-center gap-3">
+                                    <Checkbox
+                                      checked={checked}
+                                      disabled={isFieldDisabled("audience_type")}
+                                      onCheckedChange={(c) => {
+                                        const ids = c
+                                          ? [
+                                              ...(metadata.target_student_ids ||
+                                                []),
+                                              sid,
+                                            ]
+                                          : (
+                                              metadata.target_student_ids || []
+                                            ).filter((i) => i !== sid);
+                                        setMetadata({
+                                          ...metadata,
+                                          target_student_ids: ids,
+                                        });
+                                        runAutosave(3, {
+                                          target_student_ids: ids,
+                                        });
+                                      }}
+                                    />
+                                    <div>
+                                      <p className="text-xs font-semibold">
+                                        {s.name}
+                                      </p>
+                                      <p className="text-[10px] text-muted-foreground">
+                                        {s.email}
+                                      </p>
+                                    </div>
+                                  </div>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px]"
+                                  >
+                                    {s.student_id}
+                                  </Badge>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
             <div className="flex justify-between mt-8">
               <Button variant="ghost" onClick={() => handleNextStep(2)}>
                 Back
@@ -4665,6 +5271,26 @@ export default function EditAssessmentPage() {
                           ))}
                         </ToggleGroup>
                       </div>
+
+                      {metadata.question_distribution_mode === "PER_GROUP" && (
+                        <div className="flex items-center space-x-2 pt-2 pb-2 animate-in fade-in duration-200">
+                          <Checkbox
+                            id={`per-group-${sec.id}`}
+                            checked={sec.per_group || false}
+                            onCheckedChange={(checked) => {
+                              updateSection(sec.id, { per_group: !!checked });
+                              runAutosave(4);
+                            }}
+                          />
+                          <Label
+                            htmlFor={`per-group-${sec.id}`}
+                            className="cursor-pointer font-bold text-xs flex items-center gap-1.5"
+                          >
+                            <Users className="size-3.5 text-primary" /> Per-Group Question Set (different questions per group)
+                          </Label>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                           <Label className="text-xs font-semibold">
@@ -4764,41 +5390,70 @@ export default function EditAssessmentPage() {
               </div>
             </div>
 
-            <div className="space-y-8">
-              {blueprint.map((sec, idx) => (
-                <div key={sec.id} className="space-y-4">
-                  <div className="flex items-center gap-3 bg-muted/20 p-3 rounded-lg border">
-                    <Badge className="bg-muted text-foreground uppercase border font-semibold">
-                      Section {idx + 1}
-                    </Badge>
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-semibold block truncate">
-                        {sec.section}
-                      </span>
-                      <span className="text-[10px] text-muted-foreground uppercase font-bold">
-                        {sec.marks} Marks Target
-                      </span>
-                    </div>
-                  </div>
+            {metadata.question_distribution_mode === "PER_GROUP" && (
+              <div className="flex justify-center border-b pb-4">
+                <Tabs value={step5ViewMode} onValueChange={(val: any) => setStep5ViewMode(val)} className="w-full max-w-md">
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="standard" className="text-xs font-semibold">Standard Section View</TabsTrigger>
+                    <TabsTrigger value="per_group" className="text-xs font-semibold">Per-Group Assignment Board</TabsTrigger>
+                  </TabsList>
+                </Tabs>
+              </div>
+            )}
 
-                  <DndContext
-                    sensors={questionSensors}
-                    collisionDetection={closestCenter}
-                    onDragEnd={(event) => handleQuestionDragEnd(event, sec.id)}
-                    modifiers={[restrictToVerticalAxis]}
-                  >
-                    <SortableContext
-                      items={questions
-                        .filter((q) => q.sectionId === sec.id)
-                        .map((q) => q.id)}
-                      strategy={verticalListSortingStrategy}
-                    >
-                      <div className="space-y-4">
-                        {questions
-                          .filter((q) => q.sectionId === sec.id)
-                          .map((q, qIdx) => (
-                            <SortableQuestionItem key={q.id} id={q.id}>
+            {metadata.question_distribution_mode === "PER_GROUP" && step5ViewMode === "per_group" ? (
+              <GroupQuestionEditor
+                groups={groups.map((g) => ({
+                  id: g.id,
+                  name: g.name,
+                  memberCount: g.members.length,
+                }))}
+                totalMarks={totalMarks}
+                getGroupMarks={(groupId) => {
+                  return questions
+                    .filter((q) => {
+                      const sec = blueprint.find((s) => s.id === q.sectionId);
+                      if (!sec) return false;
+                      if (sec.per_group === false) return true;
+                      return q.groupId === groupId;
+                    })
+                    .reduce((s, q) => s + q.marks, 0);
+                }}
+                renderQuestionEditor={(groupId) => (
+                  <div className="space-y-8 mt-4">
+                    {blueprint.map((sec, idx) => {
+                      const isPerGroupSection = sec.per_group !== false;
+                      const groupQuestions = questions.filter(
+                        (q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === groupId)
+                      );
+
+                      return (
+                        <div key={sec.id} className="space-y-4 border p-4 rounded-xl bg-muted/5">
+                          <div className="flex justify-between items-center bg-muted/10 p-3 rounded-lg border">
+                            <div className="flex items-center gap-3">
+                              <Badge className="bg-muted text-foreground uppercase border font-semibold">
+                                Section {idx + 1}
+                              </Badge>
+                              <div className="min-w-0">
+                                <span className="text-sm font-semibold block truncate">
+                                  {sec.section}
+                                </span>
+                                <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                                  {sec.marks} Marks Target
+                                </span>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-xs font-bold block">
+                                {groupQuestions.reduce((s, q) => s + q.marks, 0)} / {sec.marks} Marks
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-4">
+                            {groupQuestions.map((q, qIdx) => (
                               <QuestionCard
+                                key={q.id}
                                 question={q}
                                 index={qIdx}
                                 allowedTypes={sec.allowedTypes}
@@ -4821,58 +5476,188 @@ export default function EditAssessmentPage() {
                                   removeOption(q.id, oi);
                                 }}
                               />
-                            </SortableQuestionItem>
-                          ))}
-                      </div>
-                    </SortableContext>
-                  </DndContext>
+                            ))}
 
-                  {!isFieldDisabled("questions") && (
-                    <div className="flex gap-4">
-                      <Button
-                        variant="outline"
-                        className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
-                        onClick={() => {
-                          addQuestion(sec.id);
-                        }}
-                      >
-                        <Plus className="size-4 text-primary" />
-                        <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                          Add Manually
-                        </span>
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
-                        onClick={() => {
-                          setAiGenerationConfig({
-                            ...aiGenerationConfig,
-                            topic: sec.topics || "",
-                            difficulty:
-                              sec.difficulty?.toLowerCase() || "medium",
-                            bloom_level: sec.bloomLevel || "understand",
-                          });
-                          setAiTargetSectionId(sec.id);
-                          setAiDrawerOpen(true);
-                        }}
-                      >
-                        <BrainCircuit className="size-4 text-primary animate-pulse" />
-                        <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                          Generate with AI
-                        </span>
-                      </Button>
-                      <QuestionBankSelector
-                        selectedIds={questions.map((q) => q.id)}
-                        courseId={metadata.course_id}
-                        onSelect={(q) => {
-                          handleBankSelect(q, sec.id);
-                        }}
-                      />
+                            {!isFieldDisabled("questions") && (
+                              <div className="flex gap-4">
+                                <Button
+                                  variant="outline"
+                                  className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
+                                  onClick={() => {
+                                    addQuestion(sec.id, isPerGroupSection ? groupId : undefined);
+                                  }}
+                                >
+                                  <Plus className="size-4 text-primary" />
+                                  <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                                    Add Manually
+                                  </span>
+                                </Button>
+                                <QuestionBankSelector
+                                  selectedIds={questions.map((q) => q.id)}
+                                  courseId={metadata.course_id}
+                                  onSelect={(q) => {
+                                    handleBankSelect(q, sec.id, isPerGroupSection ? groupId : undefined);
+                                  }}
+                                />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              />
+            ) : (
+              <div className="space-y-8">
+              {blueprint.map((sec, idx) => {
+                const isPerGroupSection = metadata.question_distribution_mode === "PER_GROUP" && sec.per_group !== false;
+                const currentGroupId = selectedGroupFilter[sec.id] || (groups[0]?.id || "");
+                const sectionQuestions = questions.filter(
+                  (q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === currentGroupId)
+                );
+
+                return (
+                  <div key={sec.id} className="space-y-4">
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-lg border">
+                      <div className="flex items-center gap-3">
+                        <Badge className="bg-muted text-foreground uppercase border font-semibold">
+                          Section {idx + 1}
+                        </Badge>
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold block truncate">
+                            {sec.section}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                            {sec.marks} Marks Target
+                          </span>
+                        </div>
+                      </div>
+
+                      {isPerGroupSection && groups.length > 0 && (
+                        <div className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-md border shadow-sm">
+                          <Label htmlFor={`group-select-${sec.id}`} className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
+                            Target Group:
+                          </Label>
+                          <Select
+                            value={currentGroupId}
+                            onValueChange={(val) => {
+                              setSelectedGroupFilter((prev) => ({ ...prev, [sec.id]: val }));
+                            }}
+                          >
+                            <SelectTrigger id={`group-select-${sec.id}`} className="h-8 text-xs font-bold w-40">
+                              <SelectValue placeholder="Select group..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {groups.map((g) => (
+                                <SelectItem key={g.id} value={g.id}>
+                                  {g.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              ))}
+
+                    {isPerGroupSection && groups.length === 0 ? (
+                      <div className="p-8 border border-dashed rounded-lg text-center text-xs text-muted-foreground">
+                        No groups found. Please form groups in Step 3 first to manage questions for this section.
+                      </div>
+                    ) : (
+                      <>
+                        <DndContext
+                          sensors={questionSensors}
+                          collisionDetection={closestCenter}
+                          onDragEnd={(event) => handleQuestionDragEnd(event, sec.id)}
+                          modifiers={[restrictToVerticalAxis]}
+                        >
+                          <SortableContext
+                            items={sectionQuestions.map((q) => q.id)}
+                            strategy={verticalListSortingStrategy}
+                          >
+                            <div className="space-y-4">
+                              {sectionQuestions.map((q, qIdx) => (
+                                <SortableQuestionItem key={q.id} id={q.id}>
+                                  <QuestionCard
+                                    question={q}
+                                    index={qIdx}
+                                    allowedTypes={sec.allowedTypes}
+                                    disabled={isFieldDisabled("questions")}
+                                    workspaceId={metadata.teaching_workspace_id}
+                                    onUpdate={(u) => {
+                                      updateQuestion(q.id, u);
+                                    }}
+                                    onDelete={() => {
+                                      removeQuestion(q.id);
+                                    }}
+                                    onSaveToBank={() => handleSaveToBank(q)}
+                                    onUpdateOption={(oi, u) => {
+                                      updateOption(q.id, oi, u);
+                                    }}
+                                    onAddOption={() => {
+                                      addOption(q.id);
+                                    }}
+                                    onRemoveOption={(oi) => {
+                                      removeOption(q.id, oi);
+                                    }}
+                                  />
+                                </SortableQuestionItem>
+                              ))}
+                            </div>
+                          </SortableContext>
+                        </DndContext>
+
+                        {!isFieldDisabled("questions") && (
+                          <div className="flex gap-4">
+                            <Button
+                              variant="outline"
+                              className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
+                              onClick={() => {
+                                addQuestion(sec.id, isPerGroupSection ? currentGroupId : undefined);
+                              }}
+                            >
+                              <Plus className="size-4 text-primary" />
+                              <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                                Add Manually
+                              </span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
+                              onClick={() => {
+                                setAiGenerationConfig({
+                                  ...aiGenerationConfig,
+                                  topic: sec.topics || "",
+                                  difficulty:
+                                    sec.difficulty?.toLowerCase() || "medium",
+                                  bloom_level: sec.bloomLevel || "understand",
+                                });
+                                setAiTargetSectionId(sec.id);
+                                setAiDrawerOpen(true);
+                              }}
+                            >
+                              <BrainCircuit className="size-4 text-primary animate-pulse" />
+                              <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                                Generate with AI
+                              </span>
+                            </Button>
+                            <QuestionBankSelector
+                              selectedIds={questions.map((q) => q.id)}
+                              courseId={metadata.course_id}
+                              onSelect={(q) => {
+                                handleBankSelect(q, sec.id, isPerGroupSection ? currentGroupId : undefined);
+                              }}
+                            />
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
+            )}
 
             <div className="flex justify-between mt-8 pt-6 border-t">
               <Button variant="ghost" onClick={() => handleNextStep(4)}>
@@ -4884,7 +5669,21 @@ export default function EditAssessmentPage() {
             </div>
           </div>
         );
-      case 6:
+      case 6: {
+        const isGroupMode = metadata.mode === "Groupwork";
+        const assignedStudentIds = new Set(
+          groups.flatMap((g) => g.members?.map((m: any) => m.id || m.student_id) ?? [])
+        );
+        const totalRoster = selectedWorkspaceDetail?.roster?.length ?? 0;
+        const assignedCount = assignedStudentIds.size;
+        const unassignedCount = Math.max(0, totalRoster - assignedCount);
+
+        const isUpdateDisabled =
+          isUpdating ||
+          currentMarks !== totalMarks ||
+          (isGroupMode && groups.length === 0) ||
+          (isGroupMode && unassignedCount > 0);
+
         return (
           <div className="space-y-6 max-w-4xl mx-auto">
             <div className="space-y-2">
@@ -4908,6 +5707,81 @@ export default function EditAssessmentPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
               <div className="md:col-span-2 space-y-6">
+                {/* Group Configuration Summary — shown only for Group Work */}
+                {isGroupMode && (
+                  <Card className="shadow-none border">
+                    <CardHeader className="py-4 border-b">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                        <Users className="size-4 text-primary" /> Group Configuration Summary
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-5 space-y-4">
+                      {unassignedCount > 0 && (
+                        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
+                          <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <p className="text-xs text-destructive font-semibold">
+                            {unassignedCount} student{unassignedCount !== 1 ? "s are" : " is"} not assigned to any group.
+                            All students must be assigned before saving.
+                          </p>
+                        </div>
+                      )}
+                      {groups.length === 0 && (
+                        <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
+                          <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
+                          <p className="text-xs text-destructive font-semibold">
+                            No groups have been formed. Please complete Step 3 (Group Formation) before saving.
+                          </p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Groups Formed</p>
+                          <p className={`text-xl font-bold ${groups.length > 0 ? "text-emerald-600" : "text-destructive"}`}>
+                            {groups.length}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Students Assigned</p>
+                          <p className={`text-xl font-bold ${unassignedCount === 0 ? "text-emerald-600" : "text-amber-600"}`}>
+                            {assignedCount} <span className="text-sm text-muted-foreground font-normal">/ {totalRoster}</span>
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Formation Mode</p>
+                          <p className="text-sm font-semibold capitalize">
+                            {metadata.group_formation_mode?.replace(/_/g, " ") || "Not set"}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Submission Mode</p>
+                          <p className="text-sm font-semibold">
+                            {metadata.submission_mode === "SINGLE_LEADER" ? "Single Leader" :
+                              metadata.submission_mode === "ALL_MEMBERS" ? "All Members" :
+                              metadata.submission_mode === "MAJORITY_VOTE" ? "Majority Vote" : "Single Leader"}
+                          </p>
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Peer Evaluation</p>
+                          <p className={`text-sm font-semibold ${metadata.peer_evaluation_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
+                            {metadata.peer_evaluation_enabled ? "Enabled" : "Disabled"}
+                          </p>
+                          {metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline && (
+                            <p className="text-[10px] text-muted-foreground">
+                              Deadline: {format(new Date(metadata.peer_evaluation_deadline), "PPP")}
+                            </p>
+                          )}
+                        </div>
+                        <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Indiv. Weighting</p>
+                          <p className={`text-sm font-semibold ${metadata.individual_weighting_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
+                            {metadata.individual_weighting_enabled ? "Enabled" : "Disabled"}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Validation and Distribution Report Card */}
                 {(validationResult || distributionData) && (
                   <Card className="shadow-none border border-zinc-200">
@@ -5172,6 +6046,62 @@ export default function EditAssessmentPage() {
 
                     <Separator />
 
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-bold uppercase text-muted-foreground">
+                        Finalization Checklist
+                      </p>
+                      <div className="grid gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          {blueprint.length > 0 ? (
+                            <Check className="size-3.5 text-emerald-500" />
+                          ) : (
+                            <X className="size-3.5 text-destructive" />
+                          )}
+                          <span>Has blueprint sections</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {questions.length > 0 ? (
+                            <Check className="size-3.5 text-emerald-500" />
+                          ) : (
+                            <X className="size-3.5 text-destructive" />
+                          )}
+                          <span>Has question nodes</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {currentMarks === totalMarks ? (
+                            <Check className="size-3.5 text-emerald-500" />
+                          ) : (
+                            <X className="size-3.5 text-destructive" />
+                          )}
+                          <span>Marks sum matches total ({totalMarks})</span>
+                        </div>
+                        {isGroupMode && (
+                          <>
+                            <div className="flex items-center gap-2">
+                              {groups.length > 0 ? (
+                                <Check className="size-3.5 text-emerald-500" />
+                              ) : (
+                                <X className="size-3.5 text-destructive" />
+                              )}
+                              <span>Groups formed ({groups.length})</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {unassignedCount === 0 ? (
+                                <Check className="size-3.5 text-emerald-500" />
+                              ) : (
+                                <X className="size-3.5 text-destructive" />
+                              )}
+                              <span>
+                                All students assigned ({assignedCount}/{totalRoster})
+                              </span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <Separator />
+
                     <div className="space-y-3">
                       <div className="flex items-start gap-2.5">
                         <Checkbox
@@ -5189,7 +6119,7 @@ export default function EditAssessmentPage() {
                       </div>
                       <Button
                         onClick={handleUpdate}
-                        disabled={isUpdating || !lecturerConfirmed}
+                        disabled={isUpdateDisabled || !lecturerConfirmed}
                         className="w-full h-10 font-semibold"
                       >
                         {isUpdating ? "Updating..." : "Update Assessment"}
@@ -5201,6 +6131,7 @@ export default function EditAssessmentPage() {
             </div>
           </div>
         );
+      }
       default:
         return null;
     }
@@ -5254,7 +6185,7 @@ export default function EditAssessmentPage() {
                   {idx + 1}
                 </StepperIndicator>
                 <StepperTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground data-[state=active]:text-foreground">
-                  {s.title}
+                  {idx + 1 === 3 && metadata.mode === "Groupwork" ? "Group Formation" : s.title}
                 </StepperTitle>
               </StepperTrigger>
             </StepperItem>

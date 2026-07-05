@@ -13,22 +13,20 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
-from fastapi.responses import FileResponse
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.exceptions import AuthorizationError, NotFoundError, ConflictError, ValidationError
+from app.core.exceptions import (AuthorizationError, ConflictError,
+                                 NotFoundError, ValidationError)
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 from app.db.session import get_db
-from app.dependencies.auth import require_active_user, require_lecturer_or_admin, require_student
-from app.schemas.submission import (
-    AttemptSubmissionsResponse,
-    SubmissionLogEntry,
-    SubmissionResponse,
-    SubmitAnswerRequest,
-)
+from app.dependencies.auth import (require_active_user,
+                                   require_lecturer_or_admin, require_student)
+from app.schemas.submission import (AttemptSubmissionsResponse,
+                                    SubmissionLogEntry, SubmissionResponse,
+                                    SubmitAnswerRequest)
 from app.services.submission_service import SubmissionService
+from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi.responses import FileResponse
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/submissions", tags=["Submissions"])
 
@@ -162,7 +160,7 @@ async def get_response_logs(
 ) -> list[SubmissionLogEntry]:
     """
     Return the full immutable audit trail for a response.
-    Shows every autosave and manual save with before/after values.
+    Shows every autosave, manual save, and grading edit action.
     Only accessible to lecturers and admins.
     """
     repo = SubmissionRepository(db)
@@ -170,8 +168,87 @@ async def get_response_logs(
     if not response:
         raise NotFoundError("Response not found", code="RESPONSE_NOT_FOUND")
 
-    logs = await repo.list_logs_for_response(response_id)
-    return [SubmissionLogEntry.model_validate(log) for log in logs]
+    # Get student name
+    from app.db.models.auth import User, UserProfile
+    from app.db.models.attempt import AssessmentAttempt, SubmissionGrade
+    from sqlalchemy import select
+
+    student_stmt = (
+        select(UserProfile.display_name, UserProfile.first_name, UserProfile.last_name)
+        .join(User, User.id == UserProfile.user_id)
+        .join(AssessmentAttempt, AssessmentAttempt.student_id == User.id)
+        .where(AssessmentAttempt.id == response.attempt_id)
+    )
+    student_res = await db.execute(student_stmt)
+    student_row = student_res.first()
+    student_name = "Student"
+    if student_row:
+        student_name = student_row.display_name or f"{student_row.first_name} {student_row.last_name}"
+
+    # Get all StudentResponseLog
+    db_logs = await repo.list_logs_for_response(response_id)
+    
+    entries = []
+    for log in db_logs:
+        entries.append(SubmissionLogEntry(
+            id=log.id,
+            response_id=log.response_id,
+            attempt_id=log.attempt_id,
+            question_id=log.question_id,
+            change_type=log.change_type,
+            previous_value=log.previous_value,
+            new_value=log.new_value,
+            created_at=log.created_at,
+            created_by_id=None,
+            created_by_name=student_name if log.change_type in ["autosave", "manual_save", "submit", "auto_submit"] else "System Engine"
+        ))
+
+    # Fetch all grading edits (SubmissionGrade)
+    grade_stmt = (
+        select(SubmissionGrade)
+        .where(SubmissionGrade.response_id == response_id)
+        .order_by(SubmissionGrade.created_at.asc())
+    )
+    grade_res = await db.execute(grade_stmt)
+    grades = grade_res.scalars().all()
+
+    # Collect lecturer IDs to resolve profiles
+    lecturer_ids = {g.created_by_id for g in grades if g.created_by_id}
+    lecturer_names = {}
+    if lecturer_ids:
+        lec_stmt = (
+            select(User.id, UserProfile.display_name, UserProfile.first_name, UserProfile.last_name)
+            .join(UserProfile, UserProfile.user_id == User.id)
+            .where(User.id.in_(list(lecturer_ids)))
+        )
+        lec_res = await db.execute(lec_stmt)
+        for row in lec_res.all():
+            lecturer_names[row.id] = row.display_name or f"{row.first_name} {row.last_name}"
+
+    for idx, grade in enumerate(grades):
+        change_type = "GRADE_FINALIZED" if idx == 0 else "GRADE_REVISED"
+        lec_name = lecturer_names.get(grade.created_by_id, f"Lecturer {str(grade.created_by_id)[:8]}") if grade.created_by_id else "System Engine"
+        
+        entries.append(SubmissionLogEntry(
+            id=grade.id,
+            response_id=response_id,
+            attempt_id=response.attempt_id,
+            question_id=response.question_id,
+            change_type=change_type,
+            previous_value=None,
+            new_value={
+                "score": float(grade.score) if grade.score is not None else None,
+                "feedback": grade.feedback,
+                "grading_mode": grade.grading_mode.value if hasattr(grade.grading_mode, 'value') else grade.grading_mode,
+            },
+            created_at=grade.created_at,
+            created_by_id=grade.created_by_id,
+            created_by_name=lec_name
+        ))
+
+    # Sort unified entries chronologically
+    entries.sort(key=lambda x: x.created_at)
+    return entries
 
 
 # ── UPLOAD DELIVERABLE FILE ───────────────────────────────────────────────────
@@ -195,9 +272,10 @@ async def upload_submission_file(
     Validates attempt ownership and access token, writes file to dedicated submission path,
     and returns file metadata including the download URL.
     """
-    from app.services.attempt_service import AttemptService
-    from app.core.config import settings
     import os
+
+    from app.core.config import settings
+    from app.services.attempt_service import AttemptService
 
     # 1. Validate the active attempt and access token
     attempt_service = AttemptService(db)
@@ -246,32 +324,40 @@ async def upload_submission_file(
             code="INVALID_FILE_TYPE",
         )
 
-    # 6. Validate file size (enforce server-side limit)
-    content = await file.read()
-    file_size = len(content)
-    if file_size > settings.max_upload_size_bytes:
-        raise ValidationError(
-            f"File size exceeds the limit.",
-            code="FILE_TOO_LARGE",
-        )
-
-    # 7. Create directory: uploads/submissions/{attempt_id}/{question_id}/
+    # 6. Validate file size without buffering the whole payload in memory
     relative_dir = os.path.join("submissions", str(attempt_id), str(question_id))
     absolute_dir = os.path.join(settings.UPLOAD_DIR, relative_dir)
     os.makedirs(absolute_dir, exist_ok=True)
 
-    # 8. Generate safe unique filename
     safe_name = f"{uuid.uuid4()}{ext}"
     file_path = os.path.join(relative_dir, safe_name)
     absolute_path = os.path.join(settings.UPLOAD_DIR, file_path)
 
-    # 9. Write file to disk
-    with open(absolute_path, "wb") as f:
-        f.write(content)
+    file_size = 0
+    try:
+        with open(absolute_path, "wb") as f:
+            while True:
+                chunk = await file.read(8192)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > settings.max_upload_size_bytes:
+                    raise ValidationError(
+                        f"File size exceeds the limit.",
+                        code="FILE_TOO_LARGE",
+                    )
+                f.write(chunk)
+    except ValidationError:
+        if os.path.exists(absolute_path):
+            try:
+                os.remove(absolute_path)
+            except OSError:
+                pass
+        raise
 
     # 10. Return the file access details
     # We expose /api/v1/submissions/download/{attempt_id}/{question_id}/{filename}
-    download_url = f"/submissions/download/{attempt_id}/{question_id}/{safe_name}"
+    download_url = f"/api/v1/submissions/download/{attempt_id}/{question_id}/{safe_name}"
     return {
         "file_url": download_url,
         "filename": file.filename,
@@ -299,9 +385,10 @@ async def download_submission_file(
     - Students: only their own attempt.
     - Lecturers/Admins: any attempt.
     """
-    from app.db.repositories.attempt_repo import AttemptRepository
-    from app.core.config import settings
     import os
+
+    from app.core.config import settings
+    from app.db.repositories.attempt_repo import AttemptRepository
 
     # 1. Fetch the attempt to check ownership/permissions
     attempt_repo = AttemptRepository(db)
@@ -311,8 +398,29 @@ async def download_submission_file(
 
     # 2. Check permission
     from app.db.enums import UserRole
-    if current_user.role == UserRole.STUDENT and attempt.student_id != current_user.id:
-        raise AuthorizationError("Access denied to this file submission", code="ACCESS_DENIED")
+    if current_user.role == UserRole.STUDENT:
+        if attempt.student_id != current_user.id:
+            raise AuthorizationError("Access denied to this file submission", code="ACCESS_DENIED")
+    elif current_user.role == UserRole.LECTURER:
+        from app.db.models.academic import Course
+        from app.db.repositories.assessment_repo import AssessmentRepository
+
+        assessment_repo = AssessmentRepository(db)
+        assessment = await assessment_repo.get_by_id_simple(attempt.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found", code="ASSESSMENT_NOT_FOUND")
+
+        course = await db.get(Course, assessment.course_id)
+        if not course:
+            raise NotFoundError("Course not found", code="COURSE_NOT_FOUND")
+
+        owns_assessment = str(assessment.created_by_id) == str(current_user.id)
+        same_institution = (
+            getattr(current_user.profile, "institution_id", None)
+            and str(current_user.profile.institution_id) == str(course.institution_id)
+        )
+        if not owns_assessment and not same_institution:
+            raise AuthorizationError("Access denied to this file submission", code="ACCESS_DENIED")
 
     # 3. Locate the file on disk
     relative_path = os.path.join("submissions", str(attempt_id), str(question_id), filename)
@@ -321,7 +429,7 @@ async def download_submission_file(
     # Validate directory traversal prevention
     absolute_path = os.path.abspath(absolute_path)
     allowed_base_dir = os.path.abspath(settings.UPLOAD_DIR)
-    if not absolute_path.startswith(allowed_base_dir):
+    if os.path.commonpath([absolute_path, allowed_base_dir]) != allowed_base_dir:
         raise AuthorizationError("Access denied", code="DIRECTORY_TRAVERSAL_PREVENTED")
 
     if not os.path.exists(absolute_path) or not os.path.isfile(absolute_path):

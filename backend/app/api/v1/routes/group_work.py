@@ -141,6 +141,26 @@ async def lock_groups(
     return groups
 
 
+# ── LECTURER: WORKSPACE ───────────────────────────────────────────────────────
+
+
+@router.get(
+    "/submissions/{submission_id}/workspace",
+    response_model=GroupWorkspaceResponse,
+    summary="Get the collaborative workspace details for a group submission (Lecturer view)",
+)
+async def get_submission_workspace(
+    submission_id: uuid.UUID,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupWorkspaceResponse:
+    svc = _service(db)
+    return await svc.get_submission_workspace(
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+
 # ── STUDENT: WORKSPACE ───────────────────────────────────────────────────────
 
 

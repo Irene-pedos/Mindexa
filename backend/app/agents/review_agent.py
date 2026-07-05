@@ -48,9 +48,10 @@ class ReviewAgent(BaseAgent):
         question_type: str,
         attempt_id: uuid.UUID | None = None,
         response_id: uuid.UUID | None = None,
+        lecturer_feedback: str | None = None,
     ) -> ReviewAgentOutput:
         """
-        Analyze a student response and suggest a grade.
+        Analyze a student response and suggest a grade, optionally refining based on lecturer feedback.
         """
         prompt_template = self._get_prompt()
         
@@ -62,14 +63,24 @@ class ReviewAgent(BaseAgent):
             .replace("{{question_type}}", question_type)
         )
 
-        request = AICompletionRequest(
-            messages=[
-                AIMessage(role="system", content=system_content),
+        messages = [
+            AIMessage(role="system", content=system_content),
+            AIMessage(
+                role="user", 
+                content="Please analyze this student response and provide a grading suggestion."
+            ),
+        ]
+        if lecturer_feedback:
+            messages.append(
                 AIMessage(
-                    role="user", 
-                    content="Please analyze this student response and provide a grading suggestion."
-                ),
-            ],
+                    role="user",
+                    content=f"Lecturer feedback / correction request: \"{lecturer_feedback}\"\n"
+                            f"Please re-evaluate the student's answer, incorporate the lecturer's guidance, and adjust the score, rationale, and alignment notes accordingly."
+                )
+            )
+
+        request = AICompletionRequest(
+            messages=messages,
             temperature=0.0,  # Strict, consistent grading
             max_tokens=1500,
         )
@@ -81,7 +92,7 @@ class ReviewAgent(BaseAgent):
             actor_role="lecturer" if lecturer_id else "system",
             subject_entity_type="student_response",
             subject_entity_id=response_id,
-            prompt_summary=f"Grading suggestion for response {response_id}",
+            prompt_summary=f"Grading suggestion for response {response_id}" if not lecturer_feedback else f"Re-evaluation for response {response_id}",
             prompt_version=f"{self.prompt_name}_{self.prompt_version}",
         )
 

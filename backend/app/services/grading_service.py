@@ -32,20 +32,21 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from app.core.config import settings
 from app.core.exceptions import ConflictError, NotFoundError, ValidationError
 from app.core.logger import get_logger
-from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus, QuestionType
-from app.db.models.attempt import GradingQueueItem, StudentResponse, SubmissionGrade
+from app.db.enums import (GradingMode, GradingQueuePriority,
+                          GradingQueueStatus, QuestionType)
+from app.db.models.attempt import (GradingQueueItem, StudentResponse,
+                                   SubmissionGrade)
 from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.submission_repo import SubmissionRepository
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 logger = get_logger("mindexa.grading_service")
 
@@ -372,6 +373,110 @@ class GradingService:
             "suggested_score": ai_output.suggested_score,
         }
 
+    async def suggest_ai_changes(
+        self,
+        *,
+        response_id: uuid.UUID,
+        lecturer_id: uuid.UUID,
+        feedback: str,
+    ) -> dict[str, Any]:
+        """
+        Send lecturer feedback back to the AI for re-grading.
+        """
+        from app.db.enums import GradingQueueStatus
+
+        # Fetch response
+        response = await self.submission_repo.get_response_by_id(response_id)
+        if not response:
+            raise NotFoundError(f"StudentResponse {response_id} not found.")
+
+        # Fetch question and rubric
+        question = await self.question_repo.get_by_id_simple(response.question_id)
+        if not question:
+            raise NotFoundError(f"Question {response.question_id} not found.")
+
+        rubric = await self.assessment_repo.get_rubric_for_question(response.question_id)
+        rubric_content = "Generic academic standards"
+        if rubric:
+            rubric_content = "\n".join([
+                f"- {c.name}: {c.description} ({c.weight} marks)"
+                for c in rubric.criteria
+            ])
+
+        # Call AI Review Agent with lecturer feedback
+        from app.agents.review_agent import ReviewAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+
+        provider = get_ai_provider()
+        gateway = AIGateway(self.db, provider)
+        agent = ReviewAgent(gateway)
+
+        student_answer = response.answer_text or "No answer provided"
+
+        ai_output = await agent.review_response(
+            question_text=question.content,
+            student_answer=student_answer,
+            rubric_content=rubric_content,
+            max_score=float(question.marks),
+            question_type=question.question_type,
+            response_id=response.id,
+            lecturer_feedback=feedback,
+            lecturer_id=lecturer_id,
+        )
+
+        # Apply suggestion
+        await self.apply_ai_grading(
+            response_id=response.id,
+            ai_suggested_score=ai_output.suggested_score,
+            ai_rationale=ai_output.rationale,
+            ai_confidence=ai_output.confidence,
+            max_score=float(question.marks),
+            graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+        )
+
+        # Regenerate feedback draft
+        from app.agents.feedback_agent import FeedbackAgent
+        feedback_agent = FeedbackAgent(gateway)
+        grade = await self.grading_repo.get_grade_by_response(response.id)
+        if grade:
+            fb_output = await feedback_agent.draft_feedback(
+                lecturer_id=lecturer_id,
+                assessment_title="Assessment",
+                score=ai_output.suggested_score,
+                max_score=float(question.marks),
+                rubric_content=rubric_content,
+                lecturer_notes=feedback,
+                student_response_summary=student_answer[:500],
+                attempt_id=grade.attempt_id,
+                grade_id=grade.id,
+            )
+            await self.grading_repo.update_grade(
+                grade_id=grade.id,
+                updated_by_id=lecturer_id,
+                ai_feedback_draft=fb_output.draft_feedback,
+                ai_feedback_strengths=fb_output.strengths,
+                ai_feedback_improvements=fb_output.areas_for_improvement,
+                ai_feedback_suggestions=fb_output.suggestions,
+            )
+
+        # Also update queue item status back to AI_SUGGESTED
+        # (in case it was cleared or modified previously)
+        queue_item = await self.grading_repo.get_active_queue_item_for_response(response_id)
+        if queue_item:
+            await self.grading_repo.update_queue_item(
+                queue_item.id,
+                status=GradingQueueStatus.AI_SUGGESTED,
+            )
+
+        return {
+            "status": "completed",
+            "response_id": str(response.id),
+            "suggested_score": ai_output.suggested_score,
+            "ai_rationale": ai_output.rationale,
+            "ai_confidence": ai_output.confidence,
+        }
+
     # -----------------------------------------------------------------------
     # APPLY AI GRADING SUGGESTION
     # -----------------------------------------------------------------------
@@ -468,7 +573,7 @@ class GradingService:
             # This is crucial for batch grading where duplicate requests or refreshes might occur.
             if is_final:
                 return existing
-            
+
             raise ConflictError(
                 "This grade has already been finalised",
                 code="GRADE_ALREADY_FINAL",
@@ -596,7 +701,8 @@ class GradingService:
             if graded_count == response_count and response_count > 0:
                 from app.db.enums import NotificationType, ResultReleaseMode
                 from app.db.models.auth import User
-                from app.db.repositories.assessment_repo import AssessmentRepository
+                from app.db.repositories.assessment_repo import \
+                    AssessmentRepository
                 from app.db.repositories.result_repo import ResultRepository
                 from app.services.result_service import ResultService
                 from app.workers.tasks import send_email_notification
@@ -837,10 +943,9 @@ class GradingService:
             2. Find all assessments belonging to those courses.
             3. Filter the queue by those assessment IDs.
         """
-        from sqlalchemy import select
-
         from app.db.models.academic import Course, TeachingAssignment
         from app.db.models.assessment import Assessment
+        from sqlalchemy import select
 
         # 1. Find lecturer's assessment IDs
         stmt = (
@@ -891,17 +996,17 @@ class GradingService:
         """
         Compute class-level grading statistics for an assessment.
         """
-        from sqlalchemy import func, select
-
         from app.db.enums import EnrollmentStatus, GradingQueueStatus
         from app.db.models.academic import StudentEnrollment
-        from app.db.models.assessment import Assessment, AssessmentTargetSection
+        from app.db.models.assessment import (Assessment,
+                                              AssessmentTargetSection)
         from app.db.models.attempt import AssessmentAttempt, GradingQueueItem
         from app.db.models.result import AssessmentResult
+        from sqlalchemy import func, select
 
         # 1. Load assessment
         assessment = await self.db.get(
-            Assessment, 
+            Assessment,
             assessment_id,
             options=[selectinload(Assessment.workspace)]
         )
@@ -996,17 +1101,17 @@ class GradingService:
         Generate/Fetch an AI-powered summary for a class's performance in an assessment.
         Computes dynamic pedagogical insights based on actual student result breakdown and integrity risk scores.
         """
-        from datetime import UTC, datetime
         import uuid as std_uuid
+        from datetime import UTC, datetime
 
-        from sqlalchemy import func, select, or_
-
-        from app.db.models.academic import ClassSection, StudentEnrollment, Course
-        from app.db.models.result import AssessmentResult, ResultBreakdown
-        from app.db.models.question import Question
+        from app.db.models.academic import (ClassSection, Course,
+                                            StudentEnrollment)
         from app.db.models.assessment import Assessment
         from app.db.models.attempt import AssessmentAttempt
         from app.db.models.auth import User, UserProfile
+        from app.db.models.question import Question
+        from app.db.models.result import AssessmentResult, ResultBreakdown
+        from sqlalchemy import func, or_, select
 
         section = await self.db.get(ClassSection, class_id)
         if not section:
@@ -1034,9 +1139,9 @@ class GradingService:
             AssessmentResult.student_id.in_(section_students_stmt)
         )
         metrics = (await self.db.execute(metrics_stmt)).mappings().one()
-        
+
         avg_score = float(metrics.avg_score or 0.0)
-        
+
         # 2. Pass rate
         pass_stmt = select(func.count(AssessmentResult.id)).where(
             AssessmentResult.assessment_id == assessment_id,
@@ -1054,7 +1159,12 @@ class GradingService:
 
         topic_stmt = select(
             Question.topic_tag,
-            func.avg(ResultBreakdown.score / ResultBreakdown.max_score * 100).label("avg_pct")
+            func.coalesce(
+                func.avg(
+                    (ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100)
+                ),
+                0,
+            ).label("avg_pct")
         ).join(
             Question, Question.id == ResultBreakdown.question_id
         ).where(
@@ -1073,7 +1183,7 @@ class GradingService:
         if not topic_scores:
             title_lower = (asmt.title or "").lower() if asmt else ""
             course_lower = course_name.lower()
-            
+
             if "database" in title_lower or "database" in course_lower or "sql" in title_lower:
                 all_possible = {
                     "Entity Relationship Diagrams": avg_score + 5,
@@ -1095,7 +1205,7 @@ class GradingService:
                     "Critical Analysis": avg_score - 8,
                     "Advanced Integration": avg_score - 12
                 }
-                
+
             strong_topics = [t for t, score in all_possible.items() if score >= 65]
             weak_topics = [t for t, score in all_possible.items() if score < 65]
 
@@ -1113,13 +1223,25 @@ class GradingService:
         if metrics.total_results > 0:
             mistakes_stmt = select(
                 Question.content,
-                func.avg(ResultBreakdown.score / ResultBreakdown.max_score * 100).label("avg_pct")
+                func.coalesce(
+                    func.avg(
+                        (ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100)
+                    ),
+                    0,
+                ).label("avg_pct")
             ).join(
                 Question, Question.id == ResultBreakdown.question_id
             ).where(
                 ResultBreakdown.result_id.in_(results_stmt)
-            ).group_by(Question.id, Question.content).order_by(func.avg(ResultBreakdown.score / ResultBreakdown.max_score * 100).asc()).limit(3)
-            
+            ).group_by(Question.id, Question.content).order_by(
+                func.coalesce(
+                    func.avg(
+                        (ResultBreakdown.score / func.nullif(ResultBreakdown.max_score, 0) * 100)
+                    ),
+                    0,
+                ).asc()
+            ).limit(3)
+
             mistakes_res = await self.db.execute(mistakes_stmt)
             for row in mistakes_res.fetchall():
                 if row.avg_pct < 70:
@@ -1168,12 +1290,57 @@ class GradingService:
                     reasons.append(f"Score of {row.percentage:.1f}% (below passing)")
                 if row.integrity_risk_score and row.integrity_risk_score > 50:
                     reasons.append(f"High integrity risk ({row.integrity_risk_score}%)")
-                
+
                 students_needing_attention.append({
                     "id": str(std_uuid.uuid4()),
                     "name": name,
                     "reason": " and ".join(reasons)
                 })
+
+        # 6. Compute AI background job progress & usage stats (Bug 30)
+        from app.db.enums import GradingQueueStatus
+        from app.db.models.ai import AIActionLog
+        from app.db.models.attempt import GradingQueueItem, StudentResponse
+
+        queue_stmt = select(GradingQueueItem.status).where(
+            GradingQueueItem.assessment_id == assessment_id,
+            GradingQueueItem.student_id.in_(section_students_stmt)
+        )
+        queue_res = await self.db.execute(queue_stmt)
+        queue_statuses = queue_res.scalars().all()
+
+        total_ai_graded = sum(
+            1 for s in queue_statuses
+            if s in [GradingQueueStatus.AI_SUGGESTED.value, GradingQueueStatus.COMPLETED.value]
+        )
+        pending_ai_grading = sum(
+            1 for s in queue_statuses
+            if s in [GradingQueueStatus.PENDING.value, GradingQueueStatus.ASSIGNED.value, GradingQueueStatus.IN_PROGRESS.value]
+        )
+        estimated_remaining_seconds = pending_ai_grading * 8
+
+        # Aggregate tokens and cost from AIActionLog for this class responses
+        response_stmt = select(StudentResponse.id).where(
+            StudentResponse.attempt_id.in_(
+                select(AssessmentAttempt.id).where(
+                    AssessmentAttempt.assessment_id == assessment_id,
+                    AssessmentAttempt.student_id.in_(section_students_stmt)
+                )
+            )
+        )
+
+        log_stmt = select(
+            func.sum(AIActionLog.total_tokens).label("total_tokens"),
+            func.sum(func.coalesce(AIActionLog.cost_estimate, 0.0)).label("total_cost")
+        ).where(
+            AIActionLog.subject_entity_type == "student_response",
+            AIActionLog.subject_entity_id.in_(response_stmt)
+        )
+        log_res = await self.db.execute(log_stmt)
+        log_row = log_res.mappings().one()
+
+        total_ai_tokens = int(log_row.total_tokens or 0)
+        total_ai_cost = float(log_row.total_cost or 0.0)
 
         return {
             "class_id": class_id,
@@ -1184,7 +1351,12 @@ class GradingService:
             "weak_topics": weak_topics,
             "common_mistakes": common_mistakes,
             "students_needing_attention": students_needing_attention,
-            "ai_generated_at": datetime.now(UTC)
+            "ai_generated_at": datetime.now(UTC),
+            "total_ai_graded": total_ai_graded,
+            "pending_ai_grading": pending_ai_grading,
+            "total_ai_tokens": total_ai_tokens,
+            "total_ai_cost": total_ai_cost,
+            "estimated_remaining_seconds": estimated_remaining_seconds
         }
 
     # -----------------------------------------------------------------------
@@ -1199,7 +1371,7 @@ class GradingService:
         """
         Returns analytics and outliers for a question to assist moderation.
         """
-        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.models.question import AssessmentQuestion, Question
 
         q = await self.db.get(Question, question_id)
         if not q:
