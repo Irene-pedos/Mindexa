@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import HeroUITabs from "@/components/ui/heroui-tabs";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -35,10 +35,14 @@ import {
   TimerOff,
   SearchIcon,
   Lock,
+  ArrowRight,
+  HelpCircle,
+  FileText,
+  AlertCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
-import { notificationApi } from "@/lib/api/notification"; // BUG-18 fix: typed notification API
+import { notificationApi } from "@/lib/api/notification";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import {
   getAssessmentProgressStatus,
@@ -71,10 +75,10 @@ function CountdownBadge({ expiresAt }: { expiresAt: string }) {
   }, [expiresAt]);
   
   if (timeLeft === "Expired") {
-    return <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5">Expired</Badge>;
+    return <Badge variant="destructive" className="text-[10px] px-1.5 py-0.5 font-bold uppercase tracking-wider">Expired</Badge>;
   }
   return (
-    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-1.5 py-0.5 flex items-center gap-1 font-mono">
+    <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-2 py-0.5 flex items-center gap-1 font-mono font-semibold">
       <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
       {timeLeft}
     </Badge>
@@ -104,7 +108,7 @@ export default function StudentAssessmentsPage() {
       try {
         const [assessData, notifData] = await Promise.all([
           assessmentApi.getAssessments({ page, page_size: pageSize }),
-          notificationApi.getNotifications(true).catch(() => ({ items: [] })),  // BUG-18 fix: use typed notificationApi
+          notificationApi.getNotifications(true).catch(() => ({ items: [] })),
         ]);
         setAssessments(assessData.items || []);
         setTotal(assessData.total || 0);
@@ -181,6 +185,7 @@ export default function StudentAssessmentsPage() {
         variant: "destructive" as const,
         color: "bg-destructive/10 text-destructive border-destructive/20",
         available: false,
+        icon: <ShieldAlert className="size-3 shrink-0" />,
       };
     }
 
@@ -190,11 +195,12 @@ export default function StudentAssessmentsPage() {
         variant: "outline" as const,
         color:
           progressStatus.tone === "success"
-            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+            ? "bg-success/10 text-success border-success/20"
             : progressStatus.tone === "warning"
-              ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-              : "bg-blue-500/10 text-blue-600 border-blue-500/20",
+              ? "bg-warning/10 text-warning border-warning/15"
+              : "bg-primary/10 text-primary border-primary/20",
         available: false,
+        icon: progressStatus.tone === "success" ? <CheckCircle2 className="size-3 shrink-0" /> : <Clock className="size-3 shrink-0" />,
       };
     }
 
@@ -204,6 +210,7 @@ export default function StudentAssessmentsPage() {
         variant: "outline" as const,
         color: "bg-muted text-muted-foreground border-muted-foreground/35",
         available: false,
+        icon: <TimerOff className="size-3 shrink-0" />,
       };
     }
 
@@ -214,6 +221,7 @@ export default function StudentAssessmentsPage() {
         variant: "secondary" as const,
         color: "bg-secondary text-secondary-foreground border-transparent",
         available: false,
+        icon: <Calendar className="size-3 shrink-0" />,
       };
     }
 
@@ -222,6 +230,7 @@ export default function StudentAssessmentsPage() {
       variant: category === "IN_PROGRESS" ? "default" : ("default" as const),
       color: category === "IN_PROGRESS" ? "bg-primary text-primary-foreground" : "",
       available: true,
+      icon: category === "IN_PROGRESS" ? <span className="size-1.5 rounded-full bg-primary-foreground animate-pulse shrink-0" /> : <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />,
     };
   };
 
@@ -235,16 +244,16 @@ export default function StudentAssessmentsPage() {
       <Card
         key={assessment.id}
         className={cn(
-          "shadow-none border border-border/50 hover:bg-muted/10 transition-all duration-300 rounded-xl overflow-hidden bg-card/30",
+          "shadow-sm border border-border/45 hover:border-primary/20 hover:shadow-md transition-all duration-300 rounded-xl overflow-hidden bg-card/30 hover:bg-card/45 backdrop-blur-sm",
           category === "VIOLATION" && "border-destructive/30 bg-destructive/5 hover:border-destructive/50"
         )}
       >
         <div className="flex flex-col md:flex-row">
-          <div className="flex-1 p-5 space-y-3">
+          <div className="flex-1 py-3.5 px-5 space-y-3.5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <div className="flex items-center gap-2 mb-1 flex-wrap">
-                  <h3 className="text-base font-medium text-foreground">
+                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                  <h3 className="text-base font-semibold text-foreground tracking-tight">
                     {assessment.title}
                   </h3>
                   {category === "IN_PROGRESS" && assessment.student_attempt_expires_at && (
@@ -254,12 +263,12 @@ export default function StudentAssessmentsPage() {
                     <div className="size-2 rounded-full bg-emerald-500 animate-pulse" />
                   )}
                   {isSupervised && (
-                    <Badge variant="outline" className="text-[9px] uppercase font-medium px-1.5 h-4.5 flex items-center gap-1">
+                    <Badge variant="outline" className="text-[9px] uppercase font-bold px-1.5 h-4.5 flex items-center gap-1 border-primary/20 bg-primary/5 text-primary">
                       <Lock className="size-2.5" /> Supervised
                     </Badge>
                   )}
                   {assessment.is_password_protected && (
-                    <Badge variant="outline" className="text-[9px] bg-amber-500/5 text-amber-600 border-amber-500/20 px-1.5 h-4.5 flex items-center gap-1 font-medium">
+                    <Badge variant="outline" className="text-[9px] bg-warning/5 text-warning border-warning/15 px-1.5 h-4.5 flex items-center gap-1 font-semibold">
                       <Lock className="size-2.5" /> Password Required
                     </Badge>
                   )}
@@ -271,12 +280,13 @@ export default function StudentAssessmentsPage() {
                   <span>{getAssessmentTypeLabel(assessment.assessment_type)}</span>
                 </div>
               </div>
-              <Badge variant={status.variant} className={cn("text-xs font-medium px-2.5 py-0.5 rounded-full capitalize shadow-none border", status.color)}>
+              <Badge variant={status.variant} className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 capitalize shadow-none border", status.color)}>
+                {status.icon}
                 {status.label}
               </Badge>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 pt-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 pt-1">
               <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium">
                 <Calendar className="size-3.5 opacity-60 text-muted-foreground" />
                 <span>{assessment.window_start ? format(new Date(assessment.window_start), "MMM d, yyyy • HH:mm") : "Open window"}</span>
@@ -300,30 +310,30 @@ export default function StudentAssessmentsPage() {
 
             <div className="text-[11px] text-muted-foreground/80 font-medium">
               {assessment.late_submission_allowed ? (
-                <span className="text-emerald-600 font-medium">Late submission is eligible for this assessment.</span>
+                <span className="text-success font-semibold">Late submission is eligible for this assessment.</span>
               ) : (
-                <span className="text-red-500/90 font-medium">Late submissions are not allowed.</span>
+                <span className="text-destructive font-semibold">Late submissions are not allowed.</span>
               )}
             </div>
           </div>
 
-          <div className="bg-muted/20 border-t md:border-t-0 md:border-l border-border/40 p-5 flex items-center justify-between md:justify-center md:flex-col gap-4 min-w-[160px]">
+          <div className="bg-muted/20 border-t md:border-t-0 md:border-l border-border/40 p-4 flex items-center justify-between md:justify-center md:flex-col gap-3.5 min-w-[160px]">
             <div className="text-center md:mb-1">
-              <div className="text-sm font-medium tabular-nums text-foreground">{assessment.total_marks || 100} Points</div>
-              <div className="text-xs text-muted-foreground/70">Assessment Weight</div>
+              <div className="text-sm font-semibold tabular-nums text-foreground">{assessment.total_marks || 100} Points</div>
+              <div className="text-xs text-muted-foreground/75 font-medium">Assessment Weight</div>
             </div>
 
             {category === "SUBMITTED" || category === "GRADED" || category === "VIOLATION" ? (
               <Button 
                 variant="outline" 
                 size="sm" 
-                className="h-8 text-xs font-medium px-4 rounded-lg border-border/60 w-full" 
+                className="h-8 text-xs font-semibold px-4 rounded-lg border-border/60 w-full hover:bg-muted/50 transition-colors" 
                 disabled={!assessment.student_attempt_id}
                 asChild={!!assessment.student_attempt_id}
               >
                 {assessment.student_attempt_id ? (
-                  <Link href={`/student/results/${assessment.student_attempt_id}`}>
-                    {category === "VIOLATION" ? "Audit Log" : "View Results"}
+                  <Link href={`/student/results/${assessment.student_attempt_id}`} className="flex items-center justify-center gap-1">
+                    {category === "VIOLATION" ? "Audit Log" : "View Results"} <ArrowRight className="size-3" />
                   </Link>
                 ) : (
                   <span>Results Pending</span>
@@ -332,7 +342,7 @@ export default function StudentAssessmentsPage() {
             ) : (
               <Button 
                 size="sm" 
-                className="h-8 text-xs font-medium px-4 rounded-lg shadow-none w-full" 
+                className="h-8 text-xs font-semibold px-4 rounded-lg shadow-none w-full transition-all" 
                 disabled={!status.available} 
                 variant={status.available ? "default" : "secondary"}
                 onClick={() => {
@@ -379,13 +389,16 @@ export default function StudentAssessmentsPage() {
     return "No assessments identified in this category.";
   };
 
+
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
+
       {/* Precision Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border/40">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border/25">
         <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">Assessments</h1>
-          <p className="text-sm text-muted-foreground">Manage and track your active, upcoming, and completed academic evaluations.</p>
+          <h1 className="text-xl font-bold tracking-tight text-foreground">My Evaluations</h1>
+          <p className="text-xs text-muted-foreground font-medium">Manage and track your active, upcoming, and completed academic tasks.</p>
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
@@ -395,49 +408,56 @@ export default function StudentAssessmentsPage() {
               placeholder="Search assessments..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 h-9 text-sm rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors"
+              className="pl-9 h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors"
             />
           </div>
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-full sm:w-36 h-9 text-sm rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+            <SelectTrigger className="w-full sm:w-36 h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
               <SelectValue placeholder="Assessment Type" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all" className="text-sm">All Types</SelectItem>
-              <SelectItem value="CAT" className="text-sm">CAT</SelectItem>
-              <SelectItem value="formative" className="text-sm">Formative</SelectItem>
-              <SelectItem value="summative" className="text-sm">Summative</SelectItem>
-              <SelectItem value="homework" className="text-sm">Homework</SelectItem>
-              <SelectItem value="group_work" className="text-sm">Group Work</SelectItem>
-              <SelectItem value="reassessment" className="text-sm">Reassessment</SelectItem>
+              <SelectItem value="all" className="text-xs">All Types</SelectItem>
+              <SelectItem value="CAT" className="text-xs">CAT</SelectItem>
+              <SelectItem value="formative" className="text-xs">Formative</SelectItem>
+              <SelectItem value="summative" className="text-xs">Summative</SelectItem>
+              <SelectItem value="homework" className="text-xs">Homework</SelectItem>
+              <SelectItem value="group_work" className="text-xs">Group Work</SelectItem>
+              <SelectItem value="reassessment" className="text-xs">Reassessment</SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      <Tabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
-        <TabsList className="bg-muted/30 p-1 rounded-xl w-full md:w-fit h-11 overflow-x-auto justify-start border border-border/40 shadow-none">
-          <TabsTrigger value="active" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
-            Active <span className="ml-1.5 bg-muted-foreground/10 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground">{getCount("active")}</span>
-            {hasNewInCategory("active") && <span className="absolute top-1 right-2 size-1.5 rounded-full bg-red-500 animate-pulse" />}
-          </TabsTrigger>
-          <TabsTrigger value="upcoming" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
-            Upcoming <span className="ml-1.5 bg-muted-foreground/10 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground">{getCount("upcoming")}</span>
-            {hasNewInCategory("upcoming") && <span className="absolute top-1 right-2 size-1.5 rounded-full bg-red-500 animate-pulse" />}
-          </TabsTrigger>
-          <TabsTrigger value="submitted" className="text-xs font-medium px-4 py-2 rounded-lg relative transition-all">
-            Submitted <span className="ml-1.5 bg-muted-foreground/10 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground">{getCount("submitted")}</span>
-            {hasNewInCategory("submitted") && <span className="absolute top-1 right-2 size-1.5 rounded-full bg-red-500 animate-pulse" />}
-          </TabsTrigger>
-          <TabsTrigger value="missed" className="text-xs font-medium px-4 py-2 rounded-lg transition-all">
-            Missed <span className="ml-1.5 bg-muted-foreground/10 px-1.5 py-0.5 rounded text-[10px] text-muted-foreground">{getCount("missed")}</span>
-          </TabsTrigger>
-          <TabsTrigger value="violations" className="text-xs font-medium px-4 py-2 rounded-lg transition-all data-[state=active]:text-destructive data-[state=active]:bg-destructive/10">
-            Violations <span className="ml-1.5 bg-destructive/15 px-1.5 py-0.5 rounded text-[10px] text-destructive-foreground/90">{getCount("violations")}</span>
-          </TabsTrigger>
-        </TabsList>
+      <HeroUITabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
+        <HeroUITabs.ListContainer>
+          <HeroUITabs.List aria-label="Assessment categories">
+            <HeroUITabs.Tab id="active" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
+              Active <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("active")}</span>
+              {hasNewInCategory("active") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
+              <HeroUITabs.Indicator />
+            </HeroUITabs.Tab>
+            <HeroUITabs.Tab id="upcoming" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
+              Upcoming <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("upcoming")}</span>
+              {hasNewInCategory("upcoming") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
+              <HeroUITabs.Indicator />
+            </HeroUITabs.Tab>
+            <HeroUITabs.Tab id="submitted" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
+              Submitted <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("submitted")}</span>
+              {hasNewInCategory("submitted") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
+              <HeroUITabs.Indicator />
+            </HeroUITabs.Tab>
+            <HeroUITabs.Tab id="missed" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
+              Missed <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("missed")}</span>
+              <HeroUITabs.Indicator />
+            </HeroUITabs.Tab>
+            <HeroUITabs.Tab id="violations" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all data-[selected=true]:text-destructive">
+              Violations <span className="ml-1.5 bg-destructive/10 px-1.5 py-0.5 rounded text-[10px] text-destructive font-bold">{getCount("violations")}</span>
+              <HeroUITabs.Indicator />
+            </HeroUITabs.Tab>
+          </HeroUITabs.List>
+        </HeroUITabs.ListContainer>
 
-        <div className="mt-4 space-y-3">
+        <div className="space-y-3 pt-4">
           {loading ? (
             [1, 2, 3].map((i) => (
               <Skeleton key={i} variant="media" className="h-24 w-full rounded-xl" />
@@ -446,15 +466,15 @@ export default function StudentAssessmentsPage() {
             filteredAssessments.map(renderAssessmentCard)
           ) : (
             <div className="py-16 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
-              <p className="text-sm font-medium text-muted-foreground">{getEmptyMessage()}</p>
+              <p className="text-xs font-semibold text-muted-foreground">{getEmptyMessage()}</p>
             </div>
           )}
         </div>
-      </Tabs>
+      </HeroUITabs>
 
       {/* Pagination Controls */}
       {total > pageSize && (
-        <div className="flex items-center justify-between pt-4 border-t border-border/40">
+        <div className="flex items-center justify-between pt-4 border-t border-border/20">
           <p className="text-xs text-muted-foreground font-medium">
             Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} assessments
           </p>
@@ -464,7 +484,7 @@ export default function StudentAssessmentsPage() {
               size="sm"
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="h-8 text-xs font-medium px-3 rounded-lg border-border/60"
+              className="h-8 text-xs font-semibold px-3 rounded-lg border-border/60"
             >
               Previous
             </Button>
@@ -473,7 +493,7 @@ export default function StudentAssessmentsPage() {
               size="sm"
               onClick={() => setPage(p => p + 1)}
               disabled={page * pageSize >= total}
-              className="h-8 text-xs font-medium px-3 rounded-lg border-border/60"
+              className="h-8 text-xs font-semibold px-3 rounded-lg border-border/60"
             >
               Next
             </Button>
@@ -482,11 +502,11 @@ export default function StudentAssessmentsPage() {
       )}
 
       {/* Integrity Notice - Compact */}
-      <div className="p-4 rounded-xl border border-primary/15 bg-primary/5 flex items-start gap-3.5 transition-all duration-300">
-        <ShieldAlert className="size-5 text-primary mt-0.5 opacity-85 shrink-0" />
+      <div className="p-4 rounded-xl border border-warning/15 bg-warning/5 flex items-start gap-3.5 transition-all duration-300">
+        <ShieldAlert className="size-5 text-warning mt-0.5 shrink-0" />
         <div className="space-y-1">
-          <p className="text-sm font-medium text-primary">Integrity Protocol Notice</p>
-          <p className="text-xs text-muted-foreground leading-relaxed max-w-3xl font-medium">
+          <p className="text-xs font-bold text-warning">Integrity Protocol Notice</p>
+          <p className="text-[11px] text-muted-foreground leading-relaxed max-w-4xl font-medium">
             High-security testing environments enforce strict environment locking. Switching tabs or applications will register as a violation, which may result in session termination and immediate automated submission.
           </p>
         </div>
@@ -512,7 +532,7 @@ export default function StudentAssessmentsPage() {
             <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
               <ShieldAlert className="size-4.5 text-primary shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
+                <p className="text-xs font-bold text-foreground">Fullscreen Environment</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   {selectedAssessmentForStart?.fullscreen_required 
                     ? "This exam enforces lock-down fullscreen. You must not exit fullscreen mode." 
@@ -525,7 +545,7 @@ export default function StudentAssessmentsPage() {
             <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
               <ShieldAlert className="size-4.5 text-red-500 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Tab and App Switching Prohibited</p>
+                <p className="text-xs font-bold text-foreground">Tab and App Switching Prohibited</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   Switching tabs, opening developer tools, or resizing the window registers as a violation. Multiple violations will cause automatic submission.
                 </p>
@@ -536,7 +556,7 @@ export default function StudentAssessmentsPage() {
             <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
               <History className="size-4.5 text-primary shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Attempt Tracking</p>
+                <p className="text-xs font-bold text-foreground">Attempt Tracking</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   Attempt {Math.min(selectedAssessmentForStart?.max_attempts, (selectedAssessmentForStart?.attempts_used || 0) + 1)} of {selectedAssessmentForStart?.max_attempts}. 
                   Remaining attempts: {Math.max(0, (selectedAssessmentForStart?.max_attempts || 1) - (selectedAssessmentForStart?.attempts_used || 0))}.
@@ -563,7 +583,7 @@ export default function StudentAssessmentsPage() {
               variant="outline" 
               size="sm" 
               onClick={() => setSelectedAssessmentForStart(null)}
-              className="h-9 text-xs font-medium rounded-lg border-border/60"
+              className="h-9 text-xs font-semibold rounded-lg border-border/60"
             >
               Cancel
             </Button>
@@ -576,7 +596,7 @@ export default function StudentAssessmentsPage() {
                   setSelectedAssessmentForStart(null);
                 }
               }}
-              className="h-9 text-xs font-medium rounded-lg shadow-none"
+              className="h-9 text-xs font-semibold rounded-lg shadow-none"
             >
               Start Assessment
             </Button>

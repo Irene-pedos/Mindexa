@@ -103,7 +103,7 @@ export default function AdminAssignmentPanel() {
   const [availableCourses, setAvailableCourses] = useState<AcademicCourse[]>([]);
   const [academicPeriods, setAcademicPeriods] = useState<any[]>([]);
   const [assignedCourseIds, setAssignedCourseIds] = useState<Set<string>>(new Set());
-  
+
   // Master List
   const [allAssignments, setAllAssignments] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -230,7 +230,7 @@ export default function AdminAssignmentPanel() {
   useEffect(() => {
     if (selectedDept && viewMode === "create") {
       setIsFetching(prev => ({ ...prev, options: true, courses: true, sections: true }));
-      
+
       // 1. Fetch Programs
       academicApi.getOptions(selectedDept)
         .then(setOptions)
@@ -394,9 +394,9 @@ export default function AdminAssignmentPanel() {
             </h1>
             <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5">Faculty Deployment Registry</p>
           </div>
-          
-          <Button 
-            size="sm" 
+
+          <Button
+            size="sm"
             className="h-8 rounded-lg gap-2 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold text-[10px] uppercase tracking-wider px-4 shadow-none"
             onClick={() => setViewMode("create")}
           >
@@ -409,15 +409,15 @@ export default function AdminAssignmentPanel() {
             <div className="p-3 border-b border-muted/10 bg-muted/5 flex items-center gap-3">
                 <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                    <Input 
-                        placeholder="Search by lecturer or module..." 
+                    <Input
+                        placeholder="Search by lecturer or module..."
                         className="pl-9 h-8 text-[11px] rounded-lg border-muted/30 bg-white focus:border-primary/40 focus:ring-0 transition-all"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
             </div>
-            
+
             <div className="flex-1 overflow-auto">
                 <Table>
                     <TableHeader className="bg-muted/5 border-b border-muted/10 sticky top-0 z-10 backdrop-blur-sm">
@@ -484,9 +484,9 @@ export default function AdminAssignmentPanel() {
                                             {assignment.academic_year}
                                         </TableCell>
                                         <TableCell className="text-right pr-5">
-                                            <Button 
-                                                variant="ghost" 
-                                                size="icon" 
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
                                                 className="size-6 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors"
                                                 onClick={() => handleRemoveAssignment(assignment.id)}
                                                 disabled={isProcessingRow === assignment.id}
@@ -506,18 +506,18 @@ export default function AdminAssignmentPanel() {
                     PG {currentPage} / {totalPages}
                 </p>
                 <div className="flex items-center gap-1">
-                    <Button 
-                        variant="ghost" 
-                        size="icon" 
-                        className="size-6 rounded-md" 
+                    <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-6 rounded-md"
                         disabled={currentPage === 1}
                         onClick={() => setCurrentPage(p => p - 1)}
                     >
                         <ChevronLeft className="size-3" />
                     </Button>
-                    <Button 
-                        variant="ghost" 
-                        size="icon" 
+                    <Button
+                        variant="ghost"
+                        size="icon"
                         className="size-6 rounded-md"
                         disabled={currentPage >= totalPages}
                         onClick={() => setCurrentPage(p => p + 1)}
@@ -541,11 +541,11 @@ export default function AdminAssignmentPanel() {
           </h1>
           <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest mt-0.5">Faculty Deployment Console</p>
         </div>
-        
+
         <div className="flex items-center gap-3">
-            <Button 
-                variant="ghost" 
-                size="sm" 
+            <Button
+                variant="ghost"
+                size="sm"
                 className="h-8 rounded-lg gap-2 text-muted-foreground font-semibold text-[10px] uppercase tracking-wider px-4"
                 onClick={() => setViewMode("registry")}
             >
@@ -584,14 +584,14 @@ export default function AdminAssignmentPanel() {
                         onClick={() => isValid && setActiveStep(step.id)}
                         className={cn(
                             "flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative border w-full",
-                            isActive 
-                                ? "bg-primary/5 text-primary border-primary/20" 
+                            isActive
+                                ? "bg-primary/5 text-primary border-primary/20"
                                 : !isValid ? "opacity-40 cursor-not-allowed border-transparent" : "hover:bg-muted/10 text-muted-foreground border-transparent"
                         )}
                     >
                         <div className={cn(
                             "size-8 rounded-lg flex items-center justify-center border transition-colors",
-                            isActive ? "bg-primary text-primary-foreground border-primary" : 
+                            isActive ? "bg-primary text-primary-foreground border-primary" :
                             isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
                             "bg-muted/10 border-muted/40 group-hover:bg-white"
                         )}>
@@ -616,12 +616,12 @@ export default function AdminAssignmentPanel() {
                 </div>
                 <div className="flex gap-1 h-1">
                     {STEPS.map((_, i) => (
-                        <div 
-                            key={i} 
+                        <div
+                            key={i}
                             className={cn(
-                                "flex-1 rounded-full transition-all duration-300", 
+                                "flex-1 rounded-full transition-all duration-300",
                                 i <= STEPS.findIndex(s => s.id === activeStep) ? "bg-primary" : "bg-muted/30"
-                            )} 
+                            )}
                         />
                     ))}
                 </div>
@@ -680,7 +680,7 @@ export default function AdminAssignmentPanel() {
                                     </div>
                                 </div>
                             </div>
-                            
+
                             <div className="p-5 rounded-2xl border border-primary/10 bg-primary/5 flex items-start gap-4">
                                 <Info className="size-5 text-primary shrink-0 mt-0.5" />
                                 <div>
@@ -830,7 +830,7 @@ export default function AdminAssignmentPanel() {
                                     </div>
                                 </div>
                              </div>
-                             
+
                              <p className="text-[10px] text-muted-foreground font-medium italic border-l-2 border-primary/20 pl-4 py-1">
                                 Note: These filters are optional. If not selected, the lecturer will be assigned to all courses within the department scope.
                              </p>
@@ -852,8 +852,8 @@ export default function AdminAssignmentPanel() {
 
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-                                    <Input 
-                                        placeholder="Filter available modules by name or code..." 
+                                    <Input
+                                        placeholder="Filter available modules by name or code..."
                                         className="pl-9 h-9 text-xs rounded-xl border-muted/30 bg-muted/5 focus:bg-white transition-all"
                                         value={courseSearch}
                                         onChange={(e) => setCourseSearch(e.target.value)}
@@ -893,7 +893,7 @@ export default function AdminAssignmentPanel() {
                                                     >
                                                         <div className={cn(
                                                             "size-5 rounded border transition-all flex items-center justify-center",
-                                                            isSelected ? "bg-primary border-primary" : 
+                                                            isSelected ? "bg-primary border-primary" :
                                                             isAssigned ? "bg-emerald-500 border-emerald-500" : "bg-white border-muted-foreground/30"
                                                         )}>
                                                             {(isSelected || isAssigned) && <Check className="size-3 text-white stroke-[3px]" />}

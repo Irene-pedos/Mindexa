@@ -1,16 +1,16 @@
 // app/student/notifications/page.tsx
-"use client"
+"use client";
 
-import React, { useEffect, useState } from "react"
+import React, { useEffect, useState } from "react";
 import {
   Bell,
   Calendar,
   Award,
   AlertTriangle,
   CheckCheck,
-  RefreshCcw,
   Eye,
   PlayCircle,
+  RefreshCcw,
 } from "lucide-react";
 import Link from "next/link";
 import { notificationApi, NotificationResponse } from "@/lib/api/notification";
@@ -19,7 +19,6 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
 export default function NotificationsPage() {
@@ -27,6 +26,9 @@ export default function NotificationsPage() {
     [],
   );
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<
+    "all" | "unread" | "assessments" | "alerts"
+  >("all");
 
   async function loadNotifications() {
     try {
@@ -68,34 +70,56 @@ export default function NotificationsPage() {
     switch (type) {
       case "RESULT_RELEASED":
       case "GROUP_RESULT_RELEASED":
-        return <Award className="size-5 text-emerald-600" />;
+        return <Award className="size-4.5 text-emerald-600" />;
       case "DEADLINE_EXTENDED":
-        return <Calendar className="size-5 text-amber-600" />;
+        return <Calendar className="size-4.5 text-amber-600" />;
       case "ASSESSMENT_PUBLISHED":
       case "GROUP_WORK_ASSIGNED":
-        return <Bell className="size-5 text-blue-600" />;
+        return <Bell className="size-4.5 text-blue-600" />;
       case "APPEAL_DECISION":
       case "APPEAL_RESOLVED":
-        return <AlertTriangle className="size-5 text-violet-600" />;
+        return <AlertTriangle className="size-4.5 text-violet-600" />;
       case "GROUP_APPROVAL_REQUEST":
       case "GROUP_APPEAL_REQUEST":
-        return <CheckCheck className="size-5 text-primary" />;
+        return <CheckCheck className="size-4.5 text-primary" />;
       case "GROUP_REASSESSMENT_ASSIGNED":
-        return <RefreshCcw className="size-5 text-amber-600" />;
+        return <RefreshCcw className="size-4.5 text-amber-600" />;
       default:
-        return <Bell className="size-5 text-muted-foreground" />;
+        return <Bell className="size-4.5 text-muted-foreground" />;
     }
   };
 
+  const filteredNotifications = notifications.filter((notif) => {
+    if (filter === "unread") return !notif.is_read;
+    if (filter === "assessments") {
+      return [
+        "RESULT_RELEASED",
+        "GROUP_RESULT_RELEASED",
+        "ASSESSMENT_PUBLISHED",
+        "GROUP_WORK_ASSIGNED",
+      ].includes(notif.notification_type);
+    }
+    if (filter === "alerts") {
+      return [
+        "DEADLINE_EXTENDED",
+        "GROUP_REASSESSMENT_ASSIGNED",
+        "APPEAL_DECISION",
+        "APPEAL_RESOLVED",
+      ].includes(notif.notification_type);
+    }
+    return true;
+  });
+
   return (
-    <div className="space-y-6 max-w-5xl mx-auto p-4 pb-12">
-      <div className="flex items-center justify-between px-1">
+    <div className="space-y-5 w-full max-w-7xl mx-auto p-4 md:p-6">
+      {/* Header Container */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight flex items-center gap-2.5">
-            <Bell className="size-5 text-primary" /> Notifications
+          <h1 className="text-lg font-bold tracking-tight text-zinc-900 flex items-center gap-2">
+            <Bell className="size-5 text-primary shrink-0" /> Notifications
           </h1>
-          <p className="text-muted-foreground text-[9px] font-semibold uppercase tracking-widest mt-0.5">
-            Academic Ledger • Real-time Monitoring Active
+          <p className="text-[10px]">
+            Registry Feed • Real-time Monitoring Active
           </p>
         </div>
         <Button
@@ -103,135 +127,201 @@ export default function NotificationsPage() {
           size="sm"
           onClick={handleMarkAllRead}
           disabled={notifications.every((n) => n.is_read)}
-          className="h-8 px-4 rounded-lg text-[10px] font-semibold uppercase tracking-tight"
+          className="h-8 px-3.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border-zinc-200 bg-white"
         >
-          <CheckCheck className="mr-1.5 size-3" /> Mark all read
+          <CheckCheck className="mr-1.5 size-3.5" /> Mark all read
         </Button>
       </div>
 
-      <Card className="shadow-none border rounded-xl overflow-hidden">
-        <CardHeader className="bg-muted/5 border-b py-3 px-5">
-          <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Registry Feed
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="divide-y divide-muted/10">
-            {loading ? (
-              [1, 2, 3].map((i) => (
-                <div key={i} className="p-5">
-                  <Skeleton className="h-16 w-full rounded-xl" />
-                </div>
-              ))
-            ) : notifications.length === 0 ? (
-              <div className="py-20 text-center bg-muted/5">
-                <Bell className="mx-auto size-10 text-muted-foreground/10 mb-4" />
-                <p className="text-[10px] font-semibold text-muted-foreground/40 uppercase tracking-widest">
-                  Transmission Archive Empty
-                </p>
-              </div>
-            ) : (
-              notifications.map((notif) => {
-                const isAssessment = [
-                  "ASSESSMENT_PUBLISHED",
-                  "GROUP_WORK_ASSIGNED",
-                  "GROUP_REASSESSMENT_ASSIGNED",
-                ].includes(notif.notification_type);
+      {/* Tabs Filter Bar */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 border-b border-zinc-100 scrollbar-none">
+        {[
+          {
+            id: "all",
+            label: "All Notifications",
+            count: notifications.length,
+          },
+          {
+            id: "unread",
+            label: "Unread",
+            count: notifications.filter((n) => !n.is_read).length,
+          },
+          {
+            id: "assessments",
+            label: "Assessments & Grades",
+            count: notifications.filter((n) =>
+              [
+                "RESULT_RELEASED",
+                "GROUP_RESULT_RELEASED",
+                "ASSESSMENT_PUBLISHED",
+                "GROUP_WORK_ASSIGNED",
+              ].includes(n.notification_type),
+            ).length,
+          },
+          {
+            id: "alerts",
+            label: "Alerts & Appeals",
+            count: notifications.filter((n) =>
+              [
+                "DEADLINE_EXTENDED",
+                "GROUP_REASSESSMENT_ASSIGNED",
+                "APPEAL_DECISION",
+                "APPEAL_RESOLVED",
+              ].includes(n.notification_type),
+            ).length,
+          },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setFilter(t.id as any)}
+            className={cn(
+              "px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 whitespace-nowrap",
+              filter === t.id
+                ? "border-primary bg-primary/5 text-primary shadow-sm"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-zinc-100",
+            )}
+          >
+            {t.label}
+            {t.count > 0 && (
+              <span
+                className={cn(
+                  "px-1.5 py-0.5 rounded-full text-[9px] font-bold leading-none",
+                  filter === t.id
+                    ? "bg-primary text-white"
+                    : "bg-zinc-100 text-muted-foreground border",
+                )}
+              >
+                {t.count}
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
 
-                return (
+      {/* Registry Feed list container */}
+      <div className="space-y-2">
+        {loading ? (
+          [1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="flex gap-4 p-4 border rounded-xl bg-white animate-pulse"
+            >
+              <Skeleton className="size-9 rounded-lg" />
+              <div className="space-y-2 flex-1">
+                <Skeleton className="h-4 w-1/3 rounded" />
+                <Skeleton className="h-3 w-5/6 rounded" />
+              </div>
+            </div>
+          ))
+        ) : filteredNotifications.length === 0 ? (
+          <div className="py-16 text-center bg-zinc-50/50 border border-dashed rounded-xl">
+            <Bell className="mx-auto size-8 text-muted-foreground/20 mb-3" />
+            <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest">
+              Transmission Feed Empty
+            </p>
+          </div>
+        ) : (
+          filteredNotifications.map((notif) => {
+            const isAssessment = [
+              "ASSESSMENT_PUBLISHED",
+              "GROUP_WORK_ASSIGNED",
+              "GROUP_REASSESSMENT_ASSIGNED",
+            ].includes(notif.notification_type);
+
+            return (
+              <div
+                key={notif.id}
+                className={cn(
+                  "group relative flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border rounded-xl bg-white/70 hover:bg-white shadow-sm transition-all duration-200",
+                  notif.is_read
+                    ? "border-zinc-200/50 opacity-75"
+                    : "border-primary/25",
+                )}
+              >
+                <div className="flex gap-3 flex-1 min-w-0">
                   <div
-                    key={notif.id}
                     className={cn(
-                      "flex flex-col sm:flex-row sm:items-center gap-5 p-5 transition-all group",
+                      "mt-0.5 shrink-0 size-9 rounded-lg flex items-center justify-center border transition-colors",
                       notif.is_read
-                        ? "bg-transparent opacity-70"
-                        : "bg-primary/[0.02] hover:bg-primary/[0.04]",
+                        ? "bg-zinc-50 border-zinc-200"
+                        : "bg-primary/5 border-primary/10 text-primary",
                     )}
                   >
-                    <div className="flex gap-4 flex-1 min-w-0">
-                      <div
-                        className={cn(
-                          "mt-0.5 shrink-0 size-10 rounded-xl flex items-center justify-center border transition-colors",
-                          notif.is_read
-                            ? "bg-muted/50 border-muted-foreground/10"
-                            : "bg-background border-primary/10 shadow-sm group-hover:border-primary/20",
-                        )}
-                      >
-                        {getIcon(notif.notification_type)}
-                      </div>
+                    {getIcon(notif.notification_type)}
+                  </div>
 
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => !notif.is_read && handleMarkRead(notif.id)}
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="font-semibold text-sm text-foreground/90 tracking-tight">
-                            {notif.title}
-                          </div>
-                          {!notif.is_read && (
-                            <Badge className="h-4 px-1.5 text-[8px] font-bold uppercase rounded-full bg-primary text-white border-none">
-                              New
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="text-muted-foreground mt-1 text-[13px] leading-relaxed line-clamp-2">
-                          {notif.body}
-                        </div>
-                        <div className="text-[10px] text-muted-foreground/60 mt-2.5 font-medium flex items-center gap-2 uppercase tracking-tight">
-                          <Calendar className="size-2.5" />
-                          {formatDistanceToNow(new Date(notif.created_at), {
-                            addSuffix: true,
-                          })}
-                        </div>
+                  <div
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => !notif.is_read && handleMarkRead(notif.id)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="font-semibold text-xs text-foreground/90 tracking-tight">
+                        {notif.title}
                       </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 sm:ml-4">
-                      {isAssessment && notif.action_url && (
-                        <Button
-                          asChild
-                          size="sm"
-                          className="h-9 px-5 rounded-lg text-[10px] font-bold uppercase tracking-wider shadow-none bg-primary hover:bg-primary/90"
-                          onClick={() => !notif.is_read && handleMarkRead(notif.id)}
-                        >
-                          <Link href={notif.action_url}>
-                            <PlayCircle className="size-3.5 mr-2" />
-                            Start Assessment
-                          </Link>
-                        </Button>
-                      )}
-                      {!isAssessment && notif.action_url && (
-                        <Button
-                          asChild
-                          variant="outline"
-                          size="sm"
-                          className="h-9 px-5 rounded-lg text-[10px] font-bold uppercase tracking-wider border-muted-foreground/20"
-                          onClick={() => !notif.is_read && handleMarkRead(notif.id)}
-                        >
-                          <Link href={notif.action_url}>
-                            <Eye className="size-3.5 mr-2" />
-                            View More
-                          </Link>
-                        </Button>
-                      )}
                       {!notif.is_read && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="size-9 rounded-full text-muted-foreground/40 hover:text-primary transition-colors"
-                          onClick={() => handleMarkRead(notif.id)}
-                        >
-                          <CheckCheck className="size-4" />
-                        </Button>
+                        <Badge className="h-4 px-1.5 text-[8px] font-bold uppercase rounded-full bg-primary text-white border-none shrink-0">
+                          New
+                        </Badge>
                       )}
+                    </div>
+                    <div className="text-muted-foreground mt-1 text-[11px] leading-relaxed max-w-3xl font-medium">
+                      {notif.body}
+                    </div>
+                    <div className="text-[9px] text-muted-foreground/60 mt-2 font-medium flex items-center gap-1.5 uppercase tracking-wide">
+                      <Calendar className="size-3" />
+                      {formatDistanceToNow(new Date(notif.created_at), {
+                        addSuffix: true,
+                      })}
                     </div>
                   </div>
-                );
-              })
-            )}
-          </div>
-        </CardContent>
-      </Card>
+                </div>
+
+                {/* Right side Actions */}
+                <div className="flex items-center gap-1.5 shrink-0 self-end md:self-center">
+                  {isAssessment && notif.action_url && (
+                    <Button
+                      asChild
+                      size="sm"
+                      className="h-7 px-3 rounded-lg text-[9px] font-bold uppercase tracking-wider shadow-none bg-primary hover:bg-primary/90 text-white"
+                      onClick={() => !notif.is_read && handleMarkRead(notif.id)}
+                    >
+                      <Link href={notif.action_url}>
+                        <PlayCircle className="size-3 mr-1.5" />
+                        Start
+                      </Link>
+                    </Button>
+                  )}
+                  {!isAssessment && notif.action_url && (
+                    <Button
+                      asChild
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-3 rounded-lg text-[9px] font-bold uppercase tracking-wider border-zinc-200 bg-white"
+                      onClick={() => !notif.is_read && handleMarkRead(notif.id)}
+                    >
+                      <Link href={notif.action_url}>
+                        <Eye className="size-3 mr-1.5" />
+                        View
+                      </Link>
+                    </Button>
+                  )}
+                  {!notif.is_read && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-7 rounded-lg text-muted-foreground/45 hover:text-primary transition-colors"
+                      onClick={() => handleMarkRead(notif.id)}
+                      title="Mark as read"
+                    >
+                      <CheckCheck className="size-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }

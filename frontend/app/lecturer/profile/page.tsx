@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, Shield, Bell, Loader2, GraduationCap } from "lucide-react";
+import { User, Mail, Phone, Shield, Bell, Loader2, GraduationCap, Briefcase } from "lucide-react";
 import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
 import { academicApi } from "@/lib/api/academic";
@@ -33,6 +33,20 @@ export default function LecturerProfilePage() {
     first_name: "",
     last_name: "",
     phone_number: "",
+  });
+
+  // Notification preferences with persistent state
+  const [browserNotifications, setBrowserNotifications] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pref_browser_notifs") !== "false";
+    }
+    return true;
+  });
+  const [emailNotifications, setEmailNotifications] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pref_email_notifs") !== "false";
+    }
+    return true;
   });
 
   useEffect(() => {
@@ -62,6 +76,9 @@ export default function LecturerProfilePage() {
     try {
       const updatedUser = await authApi.updateProfile(formData);
       localStorage.setItem("user", JSON.stringify(updatedUser));
+      // Persist notification prefs
+      localStorage.setItem("pref_browser_notifs", String(browserNotifications));
+      localStorage.setItem("pref_email_notifs", String(emailNotifications));
       checkAuth(); // Refresh global auth state
       toast.success("Profile updated successfully");
     } catch (err) {
@@ -69,6 +86,10 @@ export default function LecturerProfilePage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleChangePassword = () => {
+    toast.info("To change your password, please contact your institution's IT support or use the forgot-password flow from the login page.");
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -95,10 +116,10 @@ export default function LecturerProfilePage() {
 
   if (initialLoading) {
     return (
-      <div className="max-w-2xl mx-auto space-y-8">
-        <Skeleton className="h-10 w-64" />
-        <Card>
-          <CardContent className="p-10 space-y-4">
+      <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-300">
+        <Skeleton className="h-10 w-64 rounded-lg" />
+        <Card className="bg-card/30 border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
+          <CardContent className="p-6 space-y-4">
             <Skeleton className="h-24 w-24 rounded-full" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -109,46 +130,225 @@ export default function LecturerProfilePage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">
-          Lecturer Profile Settings
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-300">
+      <div className="border-b border-zinc-200 pb-2">
+        <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+          Profile Settings
         </h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your personal information and preferences
+        <p className="text-sm text-muted-foreground mt-1 font-medium">
+          Manage your personal information, staff credentials, and active teaching assignments.
         </p>
       </div>
 
-      {/* Profile Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Personal Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-6">
-            <Avatar className="h-24 w-24 border">
-              <AvatarImage
-                src={
-                  user?.profile?.avatar_url
-                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
-                    : "/avatars/user avatar.png"
-                }
-              />
-              <AvatarFallback className="text-3xl uppercase bg-muted">
-                {user?.profile?.first_name?.[0]}
-                {user?.profile?.last_name?.[0] || user?.email?.[0]}
-              </AvatarFallback>
-            </Avatar>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Button 
-                  variant="outline" 
-                  size="sm" 
-                  className="relative overflow-hidden h-9"
-                  disabled={loading}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* Left Column - Forms */}
+        <div className="lg:col-span-8 space-y-4">
+          {/* Profile Information */}
+          <Card className="bg-card/30 border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
+              <CardTitle className="text-base font-semibold text-foreground">Personal Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 px-5 pb-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName" className="text-xs font-semibold text-muted-foreground">First Name</Label>
+                  <Input
+                    id="firstName"
+                    value={formData.first_name}
+                    className="h-9 text-xs rounded-lg border-zinc-200 bg-white"
+                    onChange={(e) =>
+                      setFormData({ ...formData, first_name: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName" className="text-xs font-semibold text-muted-foreground">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    value={formData.last_name}
+                    className="h-9 text-xs rounded-lg border-zinc-200 bg-white"
+                    onChange={(e) =>
+                      setFormData({ ...formData, last_name: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-xs font-semibold text-muted-foreground">Work Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    value={user?.email || ""}
+                    readOnly
+                    className="pl-10 h-9 text-xs rounded-lg bg-zinc-50 text-muted-foreground border-zinc-200"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone" className="text-xs font-semibold text-muted-foreground">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    value={formData.phone_number}
+                    className="h-9 text-xs rounded-lg border-zinc-200 bg-white"
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone_number: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground">Staff ID</Label>
+                  <Input
+                    value={user?.profile?.staff_id || "N/A"}
+                    readOnly
+                    className="h-9 text-xs rounded-lg bg-zinc-50 text-muted-foreground border-zinc-200"
+                  />
+                </div>
+              </div>
+
+              <Separator className="bg-zinc-150 my-4" />
+
+              {/* Verified Teaching Assignments */}
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-primary">
+                  <GraduationCap className="size-4.5" /> Institutional Assignments
+                </h3>
+                
+                {assignments.length === 0 ? (
+                  <div className="p-8 text-center space-y-3 bg-zinc-50/50 border border-dashed rounded-xl">
+                    <div className="size-12 rounded-full bg-zinc-100 flex items-center justify-center mx-auto text-zinc-400">
+                      <Shield className="size-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs font-bold text-zinc-700">No active assignments found.</p>
+                      <p className="text-[11px] text-muted-foreground leading-normal max-w-sm mx-auto font-medium">
+                        Your teaching permissions will appear here once an administrator finalizes your department and course roles.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {assignments.map((ass) => (
+                      <div key={ass.id} className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/30 space-y-3 text-left">
+                        <div className="flex items-center justify-between border-b pb-2">
+                          <div className="font-bold text-zinc-800 text-xs flex items-center gap-1.5">
+                            <Briefcase className="size-3.5 text-zinc-500" />
+                            {ass.course_name || "Course Setup"}
+                          </div>
+                          <Badge variant="outline" className="text-[9px] font-bold h-5 uppercase px-2 border-primary/20 bg-primary/5 text-primary">
+                            {ass.role?.replace(/_/g, " ") || "Lecturer"}
+                          </Badge>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-[11px]">
+                          <div>
+                            <span className="text-muted-foreground font-semibold block text-[10px] uppercase">Institution</span>
+                            <span className="font-bold text-zinc-800">{ass.institution_name || "N/A"}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-semibold block text-[10px] uppercase">Department</span>
+                            <span className="font-bold text-zinc-800">{ass.department_name || "N/A"}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground font-semibold block text-[10px] uppercase">Section / Cohort</span>
+                            <span className="font-bold text-zinc-800">{ass.class_section_name || "General"}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Security & Preferences */}
+          <Card className="bg-card/30 border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
+              <CardTitle className="text-base font-semibold text-zinc-800 flex items-center gap-2">
+                <Shield className="size-4.5 text-primary" /> Security & Preferences
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 px-5 pb-5">
+              <div className="flex items-center justify-between gap-4 py-1">
+                <div className="space-y-0.5">
+                  <Label className="text-xs font-bold text-zinc-800">Browser Notifications</Label>
+                  <p className="text-[11px] font-medium text-muted-foreground leading-normal">
+                    Receive proctoring alerts, batch grading warnings, and general system updates in-app.
+                  </p>
+                </div>
+                <Switch
+                  checked={browserNotifications}
+                  onCheckedChange={setBrowserNotifications}
+                />
+              </div>
+
+              <Separator className="bg-zinc-150" />
+
+              <div className="flex items-center justify-between gap-4 py-1">
+                <div className="space-y-0.5">
+                  <Label className="text-xs font-bold text-zinc-800">Email Notifications</Label>
+                  <p className="text-[11px] font-medium text-muted-foreground leading-normal">
+                    Get regular digests on completed student submissions, grading queues, and appeal requests.
+                  </p>
+                </div>
+                <Switch
+                  checked={emailNotifications}
+                  onCheckedChange={setEmailNotifications}
+                />
+              </div>
+
+              <Separator className="bg-zinc-150" />
+
+              <div className="pt-2 flex justify-start">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleChangePassword}
+                  className="h-8 px-4 text-xs font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
                 >
-                  {loading ? <div className="size-4 rounded-full bg-primary/20 animate-pulse mr-2" /> : null}
-                  Change Photo
+                  Change Password
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Save Changes button */}
+          <div className="flex justify-end pt-2">
+            <Button
+              onClick={handleSave}
+              disabled={loading}
+              className="h-9 px-6 rounded-lg text-xs font-bold uppercase tracking-wider text-white"
+            >
+              {loading && <Loader2 className="mr-2 size-3.5 animate-spin" />}
+              Save Configuration
+            </Button>
+          </div>
+        </div>
+
+        {/* Right Column - Avatar & Info card */}
+        <div className="lg:col-span-4 space-y-4">
+          <Card className="bg-card/30 border border-zinc-200 rounded-xl shadow-sm overflow-hidden">
+            <CardContent className="p-5 flex flex-col items-center text-center space-y-4">
+              <div className="relative group">
+                <Avatar className="h-24 w-24 border-2 border-primary/20 shadow-md">
+                  <AvatarImage
+                    src={
+                      user?.profile?.avatar_url
+                        ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
+                        : undefined
+                    }
+                  />
+                  <AvatarFallback className="text-3xl font-bold bg-muted text-muted-foreground uppercase">
+                    {user?.profile?.first_name?.[0]}
+                    {user?.profile?.last_name?.[0] || user?.email?.[0]}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="absolute inset-0 rounded-full bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity duration-200 cursor-pointer">
+                  <span className="text-[10px] text-white font-bold uppercase tracking-wider">Upload</span>
                   <input
                     type="file"
                     className="absolute inset-0 opacity-0 cursor-pointer"
@@ -156,197 +356,35 @@ export default function LecturerProfilePage() {
                     onChange={handleFileChange}
                     disabled={loading}
                   />
-                </Button>
-              </div>
-              <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                JPG or PNG. Max 2MB.
-              </p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
-              <Input
-                id="firstName"
-                value={formData.first_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, first_name: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                value={formData.last_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, last_name: e.target.value })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="email">Work Email</Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 size-4 text-muted-foreground" />
-              <Input
-                id="email"
-                value={user?.email || ""}
-                readOnly
-                className="pl-10 bg-muted"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                value={formData.phone_number}
-                onChange={(e) =>
-                  setFormData({ ...formData, phone_number: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Staff ID</Label>
-              <Input
-                value={
-                   user?.profile?.staff_id || "N/A"
-                }
-                readOnly
-                className="bg-muted"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Academic Assignments */}
-      <Card className="border shadow-none rounded-xl overflow-hidden">
-        <CardHeader className="bg-muted/5 border-b py-4">
-          <div className="flex items-center justify-between">
-            <div className="space-y-0.5">
-                <CardTitle className="text-base font-semibold flex items-center gap-2">
-                    <GraduationCap className="size-4 text-primary" /> Institutional Assignments
-                </CardTitle>
-                <CardDescription className="text-[10px] uppercase font-bold tracking-wider">Verified Teaching Responsibilities</CardDescription>
-            </div>
-            <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20 rounded-full h-5 text-[10px]">
-                {assignments.length} ACTIVE
-            </Badge>
-          </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          {assignments.length === 0 ? (
-            <div className="p-8 text-center space-y-3">
-                <div className="size-12 rounded-full bg-muted/50 flex items-center justify-center mx-auto text-muted-foreground/30">
-                    <Shield className="size-6" />
                 </div>
-                <div className="space-y-1">
-                    <p className="text-sm font-semibold">No active assignments found.</p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                        Your teaching permissions will appear here once an institutional administrator finalizes your department and course roles.
-                    </p>
+              </div>
+
+              <div className="space-y-1">
+                <h2 className="text-base font-bold text-zinc-900 leading-tight">
+                  {user?.profile?.first_name} {user?.profile?.last_name}
+                </h2>
+                <Badge variant="outline" className="text-[9px] uppercase tracking-wider font-bold h-5 px-2 bg-primary/5 text-primary border-primary/20">
+                  Lecturer Account
+                </Badge>
+              </div>
+
+              <Separator className="bg-zinc-150" />
+
+              <div className="w-full text-left space-y-2.5 text-xs text-zinc-600 font-medium">
+                <div>
+                  <span className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider block">Authorized Role</span>
+                  <span className="text-zinc-800 font-semibold">{user?.role?.toUpperCase() || "LECTURER"}</span>
                 </div>
-            </div>
-          ) : (
-            <div className="divide-y">
-                {assignments.map((ass) => (
-                    <div key={ass.id} className="p-6 space-y-6">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">University / Institution</Label>
-                                <Input value={ass.institution_name || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Academic Year</Label>
-                                <Input value={ass.academic_year || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Campus</Label>
-                                <Input value={ass.campus_name || "Not applicable"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">College / Faculty</Label>
-                                <Input value={ass.college_name || "Not applicable"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Department</Label>
-                                <Input value={ass.department_name || "N/A"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium" />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Assigned Role</Label>
-                                <div className="flex items-center gap-3 h-9 px-4 rounded-full bg-primary/5 border border-primary/10 w-full">
-                                    <Shield className="size-3.5 text-primary" />
-                                    <span className="text-xs font-bold text-primary uppercase tracking-tight">
-                                        {ass.role.replace(/_/g, " ")}
-                                    </span>
-                                </div>
-                            </div>
-                            <div className="space-y-1.5">
-                                <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Program / Specialization</Label>
-                                <Input value={ass.option_name || "General Departmental Assignment"} readOnly className="bg-muted h-9 rounded-full text-xs font-medium italic" />
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Security & Preferences */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="size-5" /> Security & Notifications
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Enable Browser Notifications</div>
-              <div className="text-sm text-muted-foreground">
-                Receive reminders for grading tasks and system alerts
+                <div>
+                  <span className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider block">Registrar Status</span>
+                  <span className="text-emerald-600 font-semibold uppercase tracking-wide flex items-center gap-1.5">
+                    <span className="size-2 rounded-full bg-emerald-500 inline-block animate-pulse" /> Active & Verified
+                  </span>
+                </div>
               </div>
-            </div>
-            <Switch defaultChecked />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Email Notifications</div>
-              <div className="text-sm text-muted-foreground">
-                New submissions, student appeals, and administrative updates
-              </div>
-            </div>
-            <Switch defaultChecked />
-          </div>
-
-          <Separator />
-
-          <Button variant="outline" className="w-full">
-            Change Password
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button size="lg" onClick={handleSave} disabled={loading}>
-          {loading ? "Saving Changes..." : "Save Changes"}
-        </Button>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );

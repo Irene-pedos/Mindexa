@@ -120,10 +120,23 @@ export default function StudentGroupWorkWorkspace() {
       toast.error("Workspace is still initializing. Please wait a moment and try again.");
       return;
     }
+
+    const question = workspace.questions.find((q: any) => q.id === qId);
+    const qType = question?.type?.toLowerCase() || "";
+    const isMcq = ["mcq", "multiple_choice", "truefalse", "true_false"].includes(qType);
+
+    const formattedContent = content !== undefined && content !== null
+      ? (isMcq ? { selected_option_id: content } : { text: content })
+      : null;
+
+    const formattedNotes = notes !== undefined && notes !== null
+      ? { text: notes }
+      : null;
+
     try {
       await groupWorkApi.saveAnswer(assessmentId, workspace.submission_id, qId, {
-        answer_content: content,
-        notes_content: notes,
+        answer_content: formattedContent,
+        notes_content: formattedNotes,
         change_source: "manual_edit"
       });
       loadWorkspace(true);
@@ -279,6 +292,17 @@ export default function StudentGroupWorkWorkspace() {
            assessment={workspace.assessment} 
            groupName={workspace.group_name} 
          />
+
+         {/* Collaboration Info Banner */}
+         <div className="p-4 rounded-xl border border-primary/10 bg-primary/5 flex items-start gap-3.5 transition-all duration-300">
+           <Monitor className="size-5 text-primary mt-0.5 opacity-85 shrink-0 animate-pulse" />
+           <div className="space-y-1">
+             <p className="text-xs font-bold text-primary">Real-Time Team Collaboration Mode</p>
+             <p className="text-[11px] text-muted-foreground leading-relaxed max-w-4xl font-medium">
+               You are currently working in a shared session. All answers, edits, and code segments are synced in real-time across all team members. Use the discussion section to coordinate, and remember to submit your approval when you are satisfied with the solutions.
+             </p>
+           </div>
+         </div>
 
          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
             {/* LEFT: MAIN WORK AREA */}

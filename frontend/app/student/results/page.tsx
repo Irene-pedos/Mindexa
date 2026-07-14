@@ -34,7 +34,7 @@ import {
   getResultLifecycleSummary,
   getAssessmentCategory,
 } from "@/lib/grading-architecture";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import HeroUITabs from "@/components/ui/heroui-tabs";
 import {
   Select,
   SelectContent,
@@ -88,13 +88,8 @@ export default function StudentResultsPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
         <Skeleton className="h-8 w-48 rounded-md" />
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-20 w-full rounded-lg" />
-          ))}
-        </div>
         <Skeleton className="h-96 w-full rounded-xl" />
       </div>
     );
@@ -137,7 +132,7 @@ export default function StudentResultsPage() {
       <div
         key={result.id}
         className={cn(
-          "flex flex-col md:flex-row md:items-center justify-between p-4 hover:bg-muted/10 transition-colors group border-b last:border-0",
+          "flex flex-col md:flex-row md:items-center justify-between py-3 px-4 hover:bg-card/45 transition-colors group border-b last:border-0",
           category === "VIOLATION" && "bg-destructive/5 border-l-4 border-l-destructive"
         )}
       >
@@ -234,55 +229,44 @@ export default function StudentResultsPage() {
   }, {});
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-border/20">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             Results & Feedback
           </h1>
-          <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5">
-            <TrendingUp className="size-4 text-primary" /> Active academic evaluations and performance ledger.
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 font-medium">
+            <TrendingUp className="size-4 text-primary animate-pulse" /> Active academic evaluations and performance ledger.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="h-9 rounded-lg text-xs font-medium gap-2 border-border/55">
+        <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs font-semibold gap-2 border-border/60">
           <FileText className="size-4" /> Export Result Slip (PDF)
         </Button>
       </div>
 
-      {/* Summary Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        {[
-          { label: "Cumulative GPA", value: overallGPA.toFixed(2), icon: TrendingUp, progress: (overallGPA / 4.0) * 100 },
-          { label: "Average Grade Score", value: `${averagePerformance.toFixed(1)}%`, icon: TrendingUp },
-          { label: "Top Score Accomplished", value: `${bestPerformance?.percentage || 0}%`, icon: Trophy },
-          { label: "Registered Attempts", value: results.length.toString(), icon: FileText },
-        ].map((stat, i) => (
-          <Card key={i} className="shadow-none border rounded-xl overflow-hidden bg-card">
-            <CardContent className="p-4 space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{stat.label}</span>
-                <stat.icon className="size-4 text-primary/50" />
-              </div>
-              <div className="text-2xl font-semibold text-foreground tracking-tight">{stat.value}</div>
-              {stat.progress !== undefined && (
-                <div className="pt-1">
-                   <Progress value={stat.progress} className="h-1.5 bg-primary/10 rounded-full" />
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
       {/* Main Ledger */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <HeroUITabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/30 pb-3">
-          <TabsList className="bg-muted/30 p-1 rounded-xl w-fit h-11 border shadow-none">
-            <TabsTrigger value="all" className="text-xs font-medium px-4 py-2 rounded-lg">Performance Ledger</TabsTrigger>
-            <TabsTrigger value="graded" className="text-xs font-medium px-4 py-2 rounded-lg">Graded</TabsTrigger>
-            <TabsTrigger value="pending" className="text-xs font-medium px-4 py-2 rounded-lg">Under Review</TabsTrigger>
-            <TabsTrigger value="violations" className="text-xs font-medium px-4 py-2 rounded-lg text-destructive data-[state=active]:bg-destructive data-[state=active]:text-destructive-foreground">Violations</TabsTrigger>
-          </TabsList>
+          <HeroUITabs.ListContainer className="border-none w-fit">
+            <HeroUITabs.List aria-label="Results filter">
+              <HeroUITabs.Tab id="all" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+                Performance Ledger
+                <HeroUITabs.Indicator />
+              </HeroUITabs.Tab>
+              <HeroUITabs.Tab id="graded" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+                Graded
+                <HeroUITabs.Indicator />
+              </HeroUITabs.Tab>
+              <HeroUITabs.Tab id="pending" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+                Under Review
+                <HeroUITabs.Indicator />
+              </HeroUITabs.Tab>
+              <HeroUITabs.Tab id="violations" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all data-[selected=true]:text-destructive">
+                Violations
+                <HeroUITabs.Indicator />
+              </HeroUITabs.Tab>
+            </HeroUITabs.List>
+          </HeroUITabs.ListContainer>
           
           <div className="flex items-center gap-3">
             <div className="flex items-center gap-2.5">
@@ -292,45 +276,45 @@ export default function StudentResultsPage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                     <SelectItem value="newest" className="text-xs">Newest Attempt</SelectItem>
-                     <SelectItem value="oldest" className="text-xs">Oldest Attempt</SelectItem>
-                     <SelectItem value="highest" className="text-xs">Highest Mark</SelectItem>
-                     <SelectItem value="lowest" className="text-xs">Lowest Mark</SelectItem>
+                     <SelectItem value="newest" className="text-xs font-medium">Newest Attempt</SelectItem>
+                     <SelectItem value="oldest" className="text-xs font-medium">Oldest Attempt</SelectItem>
+                     <SelectItem value="highest" className="text-xs font-medium">Highest Mark</SelectItem>
+                     <SelectItem value="lowest" className="text-xs font-medium">Lowest Mark</SelectItem>
                   </SelectContent>
                </Select>
             </div>
             <Separator orientation="vertical" className="h-5" />
-            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground select-none">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground select-none">
               <Filter className="size-3.5" /> Filter by Module
             </div>
           </div>
         </div>
 
-        <TabsContent value={activeTab} className="mt-6">
+        <div className="pt-4">
            {filteredAndSortedResults.length === 0 ? (
-             <div className="py-16 text-center border border-dashed rounded-xl bg-muted/5 border-border/30">
-                <p className="text-sm font-medium text-muted-foreground">No matching evaluations identified in academic records.</p>
+             <div className="py-16 text-center border border-dashed rounded-xl bg-muted/5 border-border/30 animate-in fade-in duration-200">
+                <p className="text-xs font-semibold text-muted-foreground">No matching evaluations identified in academic records.</p>
              </div>
            ) : (
-             <div className="space-y-6">
-                {Object.entries(groupedResults).map(([course, courseResults]: any) => (
-                  <div key={course} className="space-y-2">
-                    <div className="flex items-center gap-3 px-1">
-                       <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">{course}</h2>
-                       <div className="h-[1px] flex-1 bg-border/40" />
-                       <span className="text-xs font-medium text-muted-foreground/45">{courseResults.length} Items</span>
-                    </div>
-                    <Card className="shadow-none border rounded-xl overflow-hidden bg-card">
-                       <div className="divide-y divide-border/20">
-                          {courseResults.map(renderResultItem)}
-                       </div>
-                    </Card>
-                  </div>
-                ))}
+             <div className="space-y-6 animate-in fade-in duration-300">
+                 {Object.entries(groupedResults).map(([course, courseResults]: any) => (
+                   <div key={course} className="space-y-2">
+                     <div className="flex items-center gap-3 px-1">
+                        <h2 className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">{course}</h2>
+                        <div className="h-[1px] flex-1 bg-border/40" />
+                        <span className="text-[10px] font-bold text-muted-foreground/45 uppercase">{courseResults.length} Items</span>
+                     </div>
+                     <Card className="shadow-none border rounded-xl overflow-hidden bg-card/30 border-border/45 hover:border-primary/20 backdrop-blur-sm transition-all duration-300">
+                        <div className="divide-y divide-border/20">
+                           {courseResults.map(renderResultItem)}
+                        </div>
+                     </Card>
+                   </div>
+                 ))}
              </div>
            )}
-        </TabsContent>
-      </Tabs>
+        </div>
+      </HeroUITabs>
 
       {/* Appeals Warning */}
       <Card className="bg-amber-500/5 border border-amber-500/15 rounded-xl overflow-hidden shadow-none">
@@ -341,7 +325,7 @@ export default function StudentResultsPage() {
                Formal assessment appeals or grade reviews must be requested within 7 business days of the release of results. All instructor and administrator determinations are subject to institutional academic policies.
              </p>
           </div>
-          <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs font-medium border-amber-500/35 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 transition-colors shadow-none shrink-0">
+          <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs font-semibold border-amber-500/35 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 transition-colors shadow-none shrink-0">
             Appeal Guidelines
           </Button>
         </CardContent>

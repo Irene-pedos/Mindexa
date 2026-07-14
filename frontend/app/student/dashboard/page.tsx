@@ -67,7 +67,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
-import { getAssessmentCategory, getAssessmentProgressStatus, isHighSecurityAssessment } from "@/lib/grading-architecture";
+import {
+  getAssessmentCategory,
+  getAssessmentProgressStatus,
+  isHighSecurityAssessment,
+} from "@/lib/grading-architecture";
 import Link from "next/link";
 
 interface PersonalResource extends StudentResourceResponse {
@@ -90,20 +94,30 @@ const NOTIFICATION_ICON_MAP: Record<string, React.ReactNode> = {
 };
 
 const getNotificationIcon = (type: string): React.ReactNode => {
-  return NOTIFICATION_ICON_MAP[type.toUpperCase()] ?? <Info className="size-3.5 text-muted-foreground" />;
+  return (
+    NOTIFICATION_ICON_MAP[type.toUpperCase()] ?? (
+      <Info className="size-3.5 text-muted-foreground" />
+    )
+  );
 };
 
 const getTerminationLabel = (status: string, reason?: string): string => {
   if (reason) return reason;
-  if (status === "AUTO_SUBMITTED") return "Attempt auto-submitted when time expired.";
-  if (status === "TERMINATED") return "Attempt ended due to integrity protocol.";
+  if (status === "AUTO_SUBMITTED")
+    return "Attempt auto-submitted when time expired.";
+  if (status === "TERMINATED")
+    return "Attempt ended due to integrity protocol.";
   return "Attempt concluded.";
 };
 
-const getNotificationLink = (notification: { notification_type: string; related_id?: string | null | undefined }): string => {
+const getNotificationLink = (notification: {
+  notification_type: string;
+  related_id?: string | null | undefined;
+}): string => {
   const type = notification.notification_type.toUpperCase();
   const id = notification.related_id;
-  if ((type.includes("RESULT") || type.includes("GRADE")) && id) return `/student/results/${id}`;
+  if ((type.includes("RESULT") || type.includes("GRADE")) && id)
+    return `/student/results/${id}`;
   if (type.includes("ASSESSMENT") && id) return `/student/assessments/${id}`;
   if (type.includes("INTEGRITY") && id) return `/student/results/${id}`;
   if (type.includes("REASSESSMENT") && id) return `/student/assessments/${id}`;
@@ -112,7 +126,12 @@ const getNotificationLink = (notification: { notification_type: string; related_
 
 const isCriticalNotification = (type: string): boolean => {
   const t = type.toUpperCase();
-  return t.includes("INTEGRITY") || t.includes("ALERT") || t.includes("WARNING") || t.includes("TERMINATED");
+  return (
+    t.includes("INTEGRITY") ||
+    t.includes("ALERT") ||
+    t.includes("WARNING") ||
+    t.includes("TERMINATED")
+  );
 };
 
 export default function StudentDashboard() {
@@ -131,11 +150,16 @@ export default function StudentDashboard() {
   }, [user]);
 
   const [data, setData] = useState<StudentDashboardResponse | null>(null);
-  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(null);
-  const [notifications, setNotifications] = useState<NotificationListResponse | null>(null);
+  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(
+    null,
+  );
+  const [notifications, setNotifications] =
+    useState<NotificationListResponse | null>(null);
   const [resources, setResources] = useState<PersonalResource[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>(
+    {},
+  );
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -154,20 +178,32 @@ export default function StudentDashboard() {
         if (controller.signal.aborted) return;
 
         if (dashRes.status === "fulfilled") setData(dashRes.value);
-        else setSectionErrors(prev => ({ ...prev, dashboard: dashRes.reason?.message || "Failed to load dashboard." }));
+        else
+          setSectionErrors((prev) => ({
+            ...prev,
+            dashboard: dashRes.reason?.message || "Failed to load dashboard.",
+          }));
 
         if (schedRes.status === "fulfilled") setSchedule(schedRes.value);
-        else setSectionErrors(prev => ({ ...prev, schedule: "Failed to load schedule." }));
+        else
+          setSectionErrors((prev) => ({
+            ...prev,
+            schedule: "Failed to load schedule.",
+          }));
 
         if (notifRes.status === "fulfilled") setNotifications(notifRes.value);
-        else setSectionErrors(prev => ({ ...prev, notifications: "Failed to load notifications." }));
+        else
+          setSectionErrors((prev) => ({
+            ...prev,
+            notifications: "Failed to load notifications.",
+          }));
 
         if (resRes.status === "fulfilled") {
           setResources(
             (resRes.value || []).map((r: any) => ({
               ...r,
               title: r.display_name || r.original_filename,
-            }))
+            })),
           );
         }
         // Resources failure is silent — non-critical
@@ -183,14 +219,16 @@ export default function StudentDashboard() {
   const violations = useMemo(() => {
     if (!data) return [];
     return (data.active_attempts ?? []).filter(
-      (a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED"
+      (a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED",
     );
   }, [data]);
 
   const displayName = user
-    ? ((user?.profile as { first_name?: string; display_name?: string })?.first_name ||
-       (user?.profile as { first_name?: string; display_name?: string })?.display_name ||
-       "Student")
+    ? (user?.profile as { first_name?: string; display_name?: string })
+        ?.first_name ||
+      (user?.profile as { first_name?: string; display_name?: string })
+        ?.display_name ||
+      "Student"
     : null; // null = still loading
 
   const greeting = useMemo(() => {
@@ -245,7 +283,7 @@ export default function StudentDashboard() {
 
   const unreadCount = useMemo(
     () => (notifications?.items ?? []).filter((n) => !n.is_read).length,
-    [notifications]
+    [notifications],
   );
 
   const dueTodayCount = useMemo(() => {
@@ -304,13 +342,17 @@ export default function StudentDashboard() {
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 text-center">
         <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5 max-w-sm w-full">
           <AlertTriangle className="size-6 text-destructive mx-auto mb-3" />
-          <p className="text-sm font-semibold text-destructive mb-1">Dashboard failed to load</p>
-          <p className="text-xs text-muted-foreground mb-4">{sectionErrors.dashboard}</p>
+          <p className="text-sm font-semibold text-destructive mb-1">
+            Dashboard failed to load
+          </p>
+          <p className="text-xs text-muted-foreground mb-4">
+            {sectionErrors.dashboard}
+          </p>
           <Button
             variant="outline"
             size="sm"
             className="h-8 text-xs"
-            onClick={() => setRetryKey(k => k + 1)}
+            onClick={() => setRetryKey((k) => k + 1)}
           >
             Retry
           </Button>
@@ -325,40 +367,20 @@ export default function StudentDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-2">
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">
+            <h1 className="text-2xl font-semibold ">
               {greeting},{" "}
               {displayName ? (
-                <>{displayName} 👋</>
+                <>{displayName}</>
               ) : (
                 <Skeleton className="inline-block h-6 w-28 align-middle" />
               )}
             </h1>
-            <p className="text-muted-foreground text-[9px] font-semibold uppercase tracking-widest mt-0.5">
+            <p className="text-muted-foreground text-[12px] mt-0.5">
               {data?.current_academic_period
-                ? `${data.current_academic_period} • Academic Registry`
-                : "Academic Registry"}
+                ? `${data.current_academic_period} • Student portal for learning and do assessments`
+                : "Student portal for learning and do assessments"}
             </p>
           </div>
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="dim"
-                size="sm"
-                mode="icon"
-                className="size-7 rounded-full opacity-40 hover:opacity-100 mt-1"
-              >
-                <Info className="size-3.5" />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent side="bottom" align="start" className="w-80 p-4">
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                Mindexa grades closed questions automatically and routes open
-                responses through lecturer-controlled review. Result release may
-                therefore happen in stages when an assessment contains essays,
-                short answers, case studies, or computational reasoning.
-              </p>
-            </PopoverContent>
-          </Popover>
         </div>
 
         <AcademicPlannerDropdown />
@@ -370,7 +392,10 @@ export default function StudentDashboard() {
           <AlertTriangle className="size-3.5 shrink-0" />
           <p className="text-xs font-semibold flex-1">
             {dueTodayCount} assessment{dueTodayCount > 1 ? "s" : ""} due today.{" "}
-            <Link href="/student/assessments" className="underline underline-offset-2 font-bold">
+            <Link
+              href="/student/assessments"
+              className="underline underline-offset-2 font-bold"
+            >
               View now →
             </Link>
           </p>
@@ -441,23 +466,37 @@ export default function StudentDashboard() {
       {violations.length > 0 && (
         <Card className="border-destructive/20 bg-destructive/[0.03] shadow-none rounded-xl overflow-hidden mb-4">
           <CardHeader className="py-3 px-5 border-b border-destructive/10 flex flex-row items-center gap-3">
-             <ShieldAlert className="size-5 text-destructive" />
-             <CardTitle className="text-xs font-bold uppercase tracking-widest text-destructive">Integrity Protocol Alerts</CardTitle>
+            <ShieldAlert className="size-5 text-destructive" />
+            <CardTitle className="text-xs font-bold uppercase tracking-widest text-destructive">
+              Integrity Protocol Alerts
+            </CardTitle>
           </CardHeader>
           <CardContent className="p-4 space-y-3">
-             {violations.map(v => (
-               <div key={v.id} className="flex items-center justify-between bg-background/60 p-3 rounded-lg border border-destructive/10">
-                  <div className="space-y-1">
-                     <p className="text-sm font-bold text-destructive">{v.assessment_title}</p>
-                     <p className="text-[10px] text-destructive font-medium uppercase">
-                        {getTerminationLabel(v.status, v.termination_reason)}
-                     </p>
-                  </div>
-                  <Button variant="destructive" size="sm" className="h-8 text-[10px] font-bold uppercase" asChild>
-                     <Link href={`/student/results/${v.assessment_id ?? v.id}`}>Review Audit</Link>
-                  </Button>
-               </div>
-             ))}
+            {violations.map((v) => (
+              <div
+                key={v.id}
+                className="flex items-center justify-between bg-background/60 p-3 rounded-lg border border-destructive/10"
+              >
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-destructive">
+                    {v.assessment_title}
+                  </p>
+                  <p className="text-[10px] text-destructive font-medium uppercase">
+                    {getTerminationLabel(v.status, v.termination_reason)}
+                  </p>
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 text-[10px] font-bold uppercase"
+                  asChild
+                >
+                  <Link href={`/student/results/${v.assessment_id ?? v.id}`}>
+                    Review Audit
+                  </Link>
+                </Button>
+              </div>
+            ))}
           </CardContent>
         </Card>
       )}
@@ -512,14 +551,18 @@ export default function StudentDashboard() {
                         href={getNotificationLink(notification)}
                         className={cn(
                           "p-3 flex items-start gap-3 hover:bg-muted/10 transition-colors block",
-                          isCriticalNotification(notification.notification_type) &&
-                            "border-l-2 border-destructive bg-destructive/[0.02]"
+                          isCriticalNotification(
+                            notification.notification_type,
+                          ) &&
+                            "border-l-2 border-destructive bg-destructive/[0.02]",
                         )}
                       >
                         <div
                           className={cn(
                             "mt-0.5 rounded-md p-1",
-                            notification.is_read ? "bg-muted text-muted-foreground" : "bg-primary/5 text-primary"
+                            notification.is_read
+                              ? "bg-muted text-muted-foreground"
+                              : "bg-primary/5 text-primary",
                           )}
                         >
                           {getNotificationIcon(notification.notification_type)}
@@ -528,7 +571,9 @@ export default function StudentDashboard() {
                           <p
                             className={cn(
                               "text-xs",
-                              notification.is_read ? "font-medium text-muted-foreground" : "font-semibold text-foreground/80"
+                              notification.is_read
+                                ? "font-medium text-muted-foreground"
+                                : "font-semibold text-foreground/80",
                             )}
                           >
                             {notification.title}

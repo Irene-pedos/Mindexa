@@ -295,6 +295,7 @@ class GroupSubmissionRepository:
         feedback: str | None,
         graded_by_id: uuid.UUID,
         member_overrides: dict | None = None,
+        status: GroupSubmissionStatus = GroupSubmissionStatus.GRADED,
     ) -> None:
         await self.db.execute(
             update(GroupSubmission)
@@ -305,7 +306,7 @@ class GroupSubmissionRepository:
                 feedback=feedback,
                 graded_by_id=graded_by_id,
                 graded_at=_utcnow(),
-                status=GroupSubmissionStatus.GRADED,
+                status=status,
                 member_overrides=member_overrides,
             )
         )

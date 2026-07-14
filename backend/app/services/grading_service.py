@@ -403,6 +403,46 @@ class GradingService:
                 for c in rubric.criteria
             ])
 
+        # Fetch existing grade first to check if already finalized
+        existing_grade = await self.grading_repo.get_grade_by_response(response_id)
+        if existing_grade and existing_grade.is_final:
+            raise ConflictError(
+                "This grade has already been finalised",
+                code="GRADE_ALREADY_FINAL",
+            )
+
+        # Get assessment_id
+        assessment_id = None
+        if existing_grade:
+            assessment_id = existing_grade.assessment_id
+        else:
+            from app.db.models.attempt import AssessmentAttempt
+            stmt = select(AssessmentAttempt.assessment_id).where(AssessmentAttempt.id == response.attempt_id)
+            res = await self.db.execute(stmt)
+            assessment_id = res.scalars().first()
+
+        if not assessment_id:
+            raise NotFoundError("Assessment not found for this response.")
+
+        # Authorization: Verify lecturer is assigned to this assessment's course
+        from app.core.exceptions import AuthorizationError
+        from app.db.models.academic import Course, TeachingAssignment
+        from app.db.models.assessment import Assessment
+
+        auth_stmt = (
+            select(TeachingAssignment.id)
+            .join(Course, Course.id == TeachingAssignment.course_id)
+            .join(Assessment, Assessment.course_id == Course.id)
+            .where(
+                TeachingAssignment.lecturer_id == lecturer_id,
+                Assessment.id == assessment_id,
+                TeachingAssignment.is_active == True
+            )
+        )
+        auth_res = await self.db.execute(auth_stmt)
+        if not auth_res.scalars().first():
+            raise AuthorizationError("You are not authorized to grade responses for this course")
+
         # Call AI Review Agent with lecturer feedback
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
@@ -859,6 +899,8 @@ class GradingService:
 
         # 1. Get all questions in the assessment
         aq_rows = await self.assessment_repo.list_assessment_questions(assessment_id)
+        assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
+        assessment_grading_mode = assessment.grading_mode if assessment else GradingMode.MANUAL
 
         # 2. Get existing responses (grade everything available for this attempt)
         responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
@@ -909,10 +951,12 @@ class GradingService:
                 )
                 counts["auto"] += 1
             elif q_type in OPEN_ENDED:
+                g_mode = assessment_grading_mode if assessment_grading_mode in (GradingMode.SEMI, GradingMode.MANUAL, GradingMode.RUBRIC) else GradingMode.MANUAL
                 await self.queue_manual_grading(
                     response=response,
                     assessment_id=assessment_id,
                     student_id=student_id,
+                    grading_mode=g_mode,
                 )
                 counts["queued"] += 1
 
@@ -1545,3 +1589,83 @@ class GradingService:
 
         # Fallback for any unhandled type
         return 0.0, False
+
+    async def process_ai_group_answer(
+        self,
+        group_answer,
+    ) -> None:
+        """
+        Orchestrate AI grading for a single group work answer.
+        """
+        import uuid
+        from app.db.models.question import Question
+        from app.db.models.assessment import Rubric
+        from app.core.exceptions import NotFoundError
+
+        # Fetch question and rubric
+        question = await self.question_repo.get_by_id_simple(group_answer.question_id)
+        if not question:
+            raise NotFoundError(f"Question {group_answer.question_id} not found.")
+
+        rubric = await self.assessment_repo.get_rubric_for_question(group_answer.question_id)
+        rubric_content = "Generic academic standards"
+        if rubric:
+            rubric_content = "\n".join([
+                f"- {c.name}: {c.description} ({c.weight} marks)"
+                for c in rubric.criteria
+            ])
+
+        # Call AI Review Agent
+        from app.agents.review_agent import ReviewAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+
+        provider = get_ai_provider()
+        gateway = AIGateway(self.db, provider)
+        agent = ReviewAgent(gateway)
+
+        # Get group answer text
+        ans_dict = group_answer.answer_content or {}
+        student_answer = ans_dict.get("text") or ans_dict.get("selected_option_id") or "No answer provided"
+
+        ai_output = await agent.review_response(
+            question_text=question.content,
+            student_answer=student_answer,
+            rubric_content=rubric_content,
+            max_score=float(question.marks),
+            question_type=question.question_type,
+            response_id=group_answer.id,
+        )
+
+        # Update group answer JSONB content with AI suggestion
+        if group_answer.answer_content is None:
+            group_answer.answer_content = {}
+            
+        group_answer.answer_content.update({
+            "ai_suggested_score": ai_output.suggested_score,
+            "ai_rationale": ai_output.rationale,
+            "ai_confidence": ai_output.confidence,
+        })
+
+        # Automatically generate feedback draft
+        from app.agents.feedback_agent import FeedbackAgent
+        feedback_agent = FeedbackAgent(gateway)
+        fb_output = await feedback_agent.draft_feedback(
+            lecturer_id=uuid.UUID(int=0),  # System
+            assessment_title="Assessment",
+            score=ai_output.suggested_score,
+            max_score=float(question.marks),
+            rubric_content=rubric_content,
+            lecturer_notes=ai_output.rationale,
+            student_response_summary=student_answer[:500],
+        )
+        
+        group_answer.answer_content.update({
+            "ai_feedback_draft": fb_output.draft_feedback,
+            "ai_feedback_strengths": fb_output.strengths,
+            "ai_feedback_improvements": fb_output.areas_for_improvement,
+            "ai_feedback_suggestions": fb_output.suggestions,
+        })
+        self.db.add(group_answer)
+        await self.db.flush()
+

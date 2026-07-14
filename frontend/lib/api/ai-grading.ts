@@ -32,6 +32,21 @@ export interface GradeReviewDetails {
   ai_feedback_strengths?: string[] | null;
   ai_feedback_improvements?: string[] | null;
   ai_feedback_suggestions?: string[] | null;
+  
+  // New backend fields
+  ai_review_status?: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED" | null;
+  ai_started_at?: string | null;
+  ai_completed_at?: string | null;
+  ai_confidence_level?: "HIGH" | "MEDIUM" | "LOW" | null;
+  rubric_alignment?: Array<{
+    criterion: string;
+    description: string;
+    points_awarded: number;
+    max_points: number;
+    matched: boolean;
+  }> | null;
+  detected_issues?: string[] | null;
+  question_grading_mode?: "AUTO" | "AI_ASSISTED" | "MANUAL" | null;
 }
 
 export const aiGradingApi = {

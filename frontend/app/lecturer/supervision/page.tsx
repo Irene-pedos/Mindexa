@@ -136,18 +136,18 @@ export default function LecturerLiveSupervision() {
 
   if (loading) {
     return (
-      <div className="space-y-8">
-        <div className="flex items-center justify-between">
-          <Skeleton variant="title" className="h-8 w-64" />
-          <Skeleton variant="title" className="h-10 w-[260px] rounded-lg" />
+      <div className="w-full space-y-3.5 p-1 md:p-2 animate-pulse">
+        <div className="flex items-center justify-between border-b pb-2">
+          <Skeleton variant="title" className="h-6 w-48 rounded" />
+          <Skeleton variant="title" className="h-8.5 w-[200px] rounded-lg" />
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-4 space-y-6">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <div className="lg:col-span-4 space-y-4">
             <Skeleton variant="media" className="h-48 w-full rounded-xl" />
             <Skeleton variant="media" className="h-32 w-full rounded-xl" />
           </div>
           <div className="lg:col-span-8">
-            <Skeleton variant="media" className="h-[500px] w-full rounded-xl" />
+            <Skeleton variant="media" className="h-[400px] w-full rounded-xl" />
           </div>
         </div>
       </div>
@@ -155,30 +155,29 @@ export default function LecturerLiveSupervision() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
             Live Supervision
           </h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            Real-time institutional integrity monitoring and detection
-            protocols.
+          <p className="text-sm text-muted-foreground mt-1 font-medium">
+            Real-time institutional integrity monitoring and detection protocols.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <Select
             value={activeAssessmentId}
             onValueChange={setActiveAssessmentId}
           >
-            <SelectTrigger className="w-[260px] h-10 rounded-full">
+            <SelectTrigger className="w-56 h-8.5 text-xs rounded-lg border-zinc-200 bg-white">
               <SelectValue placeholder="Select Session..." />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-lg shadow-lg">
               {assessments.map((a) => (
-                <SelectItem key={a.id} value={a.id}>
+                <SelectItem key={a.id} value={a.id} className="text-xs">
                   {a.title}
                 </SelectItem>
               ))}
@@ -186,7 +185,7 @@ export default function LecturerLiveSupervision() {
           </Select>
           <Button
             variant="default"
-            className="h-10 px-6 rounded-full font-medium shadow-none"
+            className="h-8.5 px-4 font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-none text-white bg-primary hover:bg-primary/95"
             onClick={async () => {
               try {
                 await supervisionApi.startSession(activeAssessmentId);

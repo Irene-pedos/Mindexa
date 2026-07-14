@@ -104,10 +104,10 @@ export default function ProfileSettingsPage() {
 
   if (initialLoading) {
     return (
-      <div className="max-w-2xl mx-auto space-y-8">
-        <Skeleton className="h-10 w-64" />
-        <Card>
-          <CardContent className="p-10 space-y-4">
+      <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
+        <Skeleton className="h-10 w-64 rounded-lg" />
+        <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+          <CardContent className="p-6 space-y-4">
             <Skeleton className="h-24 w-24 rounded-full" />
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
@@ -118,45 +118,172 @@ export default function ProfileSettingsPage() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
-      <div>
-        <h1 className="text-3xl font-semibold tracking-tight">
+    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
+      <div className="border-b border-border/25 pb-4">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Profile Settings
         </h1>
-        <p className="text-muted-foreground mt-1">
-          Manage your personal information and preferences
+        <p className="text-xs text-muted-foreground mt-1">
+          Manage your personal information, contact methods, and preferences
         </p>
       </div>
 
-      {/* Profile Information */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Personal Information</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="flex items-center gap-6">
-            <Avatar className="h-24 w-24 border">
-              <AvatarImage
-                src={
-                  user?.profile?.avatar_url
-                    ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
-                    : "/avatars/user avatar.png"
-                }
-              />
-              <AvatarFallback className="text-3xl uppercase bg-muted">
-                {user?.profile?.first_name?.[0]}
-                {user?.profile?.last_name?.[0] || user?.email?.[0]}
-              </AvatarFallback>
-            </Avatar>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left Column - Forms */}
+        <div className="lg:col-span-8 space-y-6">
+          {/* Profile Information */}
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
+              <CardTitle className="text-base font-semibold text-foreground">Personal Information</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4 px-5 pb-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="firstName" className="text-xs font-semibold text-muted-foreground">First Name</Label>
+                  <Input
+                    id="firstName"
+                    value={formData.first_name}
+                    className="h-9 text-xs rounded-lg"
+                    onChange={(e) =>
+                      setFormData({ ...formData, first_name: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="lastName" className="text-xs font-semibold text-muted-foreground">Last Name</Label>
+                  <Input
+                    id="lastName"
+                    value={formData.last_name}
+                    className="h-9 text-xs rounded-lg"
+                    onChange={(e) =>
+                      setFormData({ ...formData, last_name: e.target.value })
+                    }
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-xs font-semibold text-muted-foreground">University Email</Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    value={user?.email || ""}
+                    readOnly
+                    className="pl-10 h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="phone" className="text-xs font-semibold text-muted-foreground">Phone Number</Label>
+                  <Input
+                    id="phone"
+                    value={formData.phone_number}
+                    className="h-9 text-xs rounded-lg"
+                    onChange={(e) =>
+                      setFormData({ ...formData, phone_number: e.target.value })
+                    }
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold text-muted-foreground">Student ID</Label>
+                  <Input
+                    value={
+                      user?.profile?.student_id || user?.profile?.staff_id || "N/A"
+                    }
+                    readOnly
+                    className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40"
+                  />
+                </div>
+              </div>
+
+              <Separator className="bg-border/40 my-4" />
+
+              <div className="space-y-4">
+                <h3 className="text-xs font-bold uppercase tracking-wider flex items-center gap-2 text-primary">
+                  <BookOpen className="size-4" /> Academic Information
+                </h3>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-muted-foreground">College / Institution</Label>
+                    <Input
+                      value={user?.profile?.college || "N/A"}
+                      readOnly
+                      className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-muted-foreground">Department</Label>
+                    <Input
+                      value={user?.profile?.department || "N/A"}
+                      readOnly
+                      className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-muted-foreground">Option / Specialization</Label>
+                    <Input
+                      value={user?.profile?.option || "N/A"}
+                      readOnly
+                      className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-muted-foreground">Academic Level</Label>
+                      <Input
+                        value={user?.profile?.level ? `Level ${user.profile.level}` : "N/A"}
+                        readOnly
+                        className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40 text-center font-bold"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold text-muted-foreground">Academic Year / Period</Label>
+                      <Input
+                        value={user?.profile?.year || "N/A"}
+                        readOnly
+                        className="h-9 text-xs rounded-lg bg-muted/50 text-muted-foreground border-border/40 text-center"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[10px] text-muted-foreground/75 italic">
+                  * To request a change to your academic assignment, please contact your faculty administrator.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Column - Avatar & Preferences */}
+        <div className="lg:col-span-4 space-y-6">
+          {/* Avatar upload card */}
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardContent className="p-5 flex flex-col items-center text-center space-y-4">
+              <Avatar className="h-24 w-24 border border-border/60 shadow-sm">
+                <AvatarImage
+                  src={
+                    user?.profile?.avatar_url
+                      ? `${process.env.NEXT_PUBLIC_API_URL?.replace("/api/v1", "") || "http://localhost:8000"}${user.profile.avatar_url}`
+                      : "/avatars/user avatar.png"
+                  }
+                />
+                <AvatarFallback className="text-3xl uppercase bg-muted text-muted-foreground">
+                  {user?.profile?.first_name?.[0]}
+                  {user?.profile?.last_name?.[0] || user?.email?.[0]}
+                </AvatarFallback>
+              </Avatar>
+              <div className="space-y-2 w-full">
                 <Button 
                   variant="outline" 
                   size="sm" 
-                  className="relative overflow-hidden h-9"
+                  className="relative overflow-hidden h-8 text-xs font-semibold px-4 w-full rounded-lg border-border/60"
                   disabled={loading}
                 >
-                  {loading ? <div className="size-4 rounded-full bg-primary/20 animate-pulse mr-2" /> : null}
+                  {loading ? <div className="size-3 rounded-full bg-primary/20 animate-pulse mr-2" /> : null}
                   Change Photo
                   <input
                     type="file"
@@ -166,183 +293,65 @@ export default function ProfileSettingsPage() {
                     disabled={loading}
                   />
                 </Button>
+                <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">
+                  JPG or PNG. Max 2MB.
+                </p>
               </div>
-              <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
-                JPG or PNG. Max 2MB.
-              </p>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label htmlFor="firstName">First Name</Label>
-              <Input
-                id="firstName"
-                value={formData.first_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, first_name: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="lastName">Last Name</Label>
-              <Input
-                id="lastName"
-                value={formData.last_name}
-                onChange={(e) =>
-                  setFormData({ ...formData, last_name: e.target.value })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="email">University Email</Label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-3 size-4 text-muted-foreground" />
-              <Input
-                id="email"
-                value={user?.email || ""}
-                readOnly
-                className="pl-10 bg-muted"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-              <Label htmlFor="phone">Phone Number</Label>
-              <Input
-                id="phone"
-                value={formData.phone_number}
-                onChange={(e) =>
-                  setFormData({ ...formData, phone_number: e.target.value })
-                }
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Student ID</Label>
-              <Input
-                value={
-                  user?.profile?.student_id || user?.profile?.staff_id || "N/A"
-                }
-                readOnly
-                className="bg-muted"
-              />
-            </div>
-          </div>
-
-          <Separator />
-
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              <BookOpen className="size-4 text-primary" /> Academic Information
-            </h3>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>College / Institution</Label>
-                <Input
-                  value={user?.profile?.college || "N/A"}
-                  readOnly
-                  className="bg-muted"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Department</Label>
-                <Input
-                  value={user?.profile?.department || "N/A"}
-                  readOnly
-                  className="bg-muted"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>Option / Specialization</Label>
-                <Input
-                  value={user?.profile?.option || "N/A"}
-                  readOnly
-                  className="bg-muted"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label>Academic Level</Label>
-                  <Input
-                    value={user?.profile?.level ? `Level ${user.profile.level}` : "N/A"}
-                    readOnly
-                    className="bg-muted text-center font-bold"
-                  />
+          {/* Security & Preferences */}
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
+              <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+                <Shield className="size-5 text-primary" /> Security & Notifications
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-5 px-5 pb-5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-foreground">Browser Reminders</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Reminders for upcoming tests
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Academic Year / Period</Label>
-                  <Input
-                    value={user?.profile?.year || "N/A"}
-                    readOnly
-                    className="bg-muted text-center"
-                  />
+                <Switch
+                  checked={browserNotifications}
+                  onCheckedChange={setBrowserNotifications}
+                  id="pref-browser-notifs"
+                />
+              </div>
+
+              <Separator className="bg-border/40" />
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-foreground">Email Notifications</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Result releases & deadline changes
+                  </div>
                 </div>
+                <Switch
+                  checked={emailNotifications}
+                  onCheckedChange={setEmailNotifications}
+                  id="pref-email-notifs"
+                />
               </div>
-            </div>
-            <p className="text-[10px] text-muted-foreground italic">
-              * To request a change to your academic assignment, please contact your faculty administrator.
-            </p>
+
+              <Separator className="bg-border/40" />
+
+              <Button variant="outline" className="w-full h-8 text-xs font-semibold rounded-lg border-border/60" onClick={handleChangePassword}>
+                Change Password
+              </Button>
+            </CardContent>
+          </Card>
+
+          <div className="flex justify-end pt-2">
+            <Button size="lg" onClick={handleSave} disabled={loading} className="w-full h-9 text-xs font-semibold rounded-lg shadow-none">
+              {loading ? "Saving Changes..." : "Save Changes"}
+            </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      {/* Security & Preferences */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="size-5" /> Security & Notifications
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-8">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Enable Browser Notifications</div>
-              <div className="text-sm text-muted-foreground">
-                Receive reminders for upcoming assessments
-              </div>
-            </div>
-            {/* BUG-16 fix: controlled switch with state */}
-            <Switch
-              checked={browserNotifications}
-              onCheckedChange={setBrowserNotifications}
-              id="pref-browser-notifs"
-            />
-          </div>
-
-          <Separator />
-
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Email Notifications</div>
-              <div className="text-sm text-muted-foreground">
-                Result releases, deadline changes, and appeals
-              </div>
-            </div>
-            {/* BUG-16 fix: controlled switch with state */}
-            <Switch
-              checked={emailNotifications}
-              onCheckedChange={setEmailNotifications}
-              id="pref-email-notifs"
-            />
-          </div>
-
-          <Separator />
-
-          {/* BUG-31 fix: button now calls handleChangePassword */}
-          <Button variant="outline" className="w-full" onClick={handleChangePassword}>
-            Change Password
-          </Button>
-        </CardContent>
-      </Card>
-
-      <div className="flex justify-end">
-        <Button size="lg" onClick={handleSave} disabled={loading}>
-          {loading ? "Saving Changes..." : "Save Changes"}
-        </Button>
+        </div>
       </div>
     </div>
   );

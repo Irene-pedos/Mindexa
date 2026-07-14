@@ -36,7 +36,11 @@ import {
   Check,
   AlertTriangle,
   HelpCircle,
-  FileText
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  Settings,
+  Menu,
 } from "lucide-react";
 import {
   PureMultimodalInput,
@@ -46,6 +50,20 @@ import { geminiApi, ChatMessage } from "@/lib/api/gemini";
 import { lecturerApi, WorkspaceListItem, WorkspaceDetail, LecturerMaterialResponse } from "@/lib/api/lecturer";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { Separator } from "@/components/ui/separator";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tooltip as UITooltip,
+  TooltipContent as UITooltipContent,
+  TooltipProvider as UITooltipProvider,
+  TooltipTrigger as UITooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface AISession {
   id: string;
@@ -71,19 +89,19 @@ const parseGradingReview = (text: string): GradingReviewOutput => {
     missingConcepts: [],
     explanation: ""
   };
-  
+
   if (!text) return result;
-  
+
   const scoreMatch = text.match(/(?:Suggested Score|Score|\[SCORE\])[:\s]*([0-9]+(?:\s*\/\s*[0-9]+)?)/i);
   if (scoreMatch) {
     result.score = scoreMatch[1].trim();
   }
-  
+
   const confidenceMatch = text.match(/(?:Confidence Level|Confidence|\[CONFIDENCE\])[:\s]*(High|Medium|Low)/i);
   if (confidenceMatch) {
     result.confidence = confidenceMatch[1].trim();
   }
-  
+
   const conceptsMatch = text.match(/(?:Missing Concepts|\[MISSING_CONCEPTS\])[:\s]*([\s\S]*?)(?:\n\n|\n\[|\*\*|$)/i);
   if (conceptsMatch) {
     const listLines = conceptsMatch[1].trim().split("\n");
@@ -91,14 +109,14 @@ const parseGradingReview = (text: string): GradingReviewOutput => {
       .map(line => line.replace(/^[-*•]\s*/, "").trim())
       .filter(line => line.length > 0 && !line.toLowerCase().includes("rubric") && !line.toLowerCase().includes("suggested"));
   }
-  
+
   result.explanation = text
     .replace(/\[SCORE\]\s*.*(\n|$)/i, "")
     .replace(/\[CONFIDENCE\]\s*.*(\n|$)/i, "")
     .replace(/\[MISSING_CONCEPTS\]\s*([\s\S]*?)(?=\[ALIGNMENT_EXPLANATION\]|\[RATIONALE\]|Score|Confidence|$)/i, "")
     .replace(/\[ALIGNMENT_EXPLANATION\]\s*/i, "")
     .trim();
-    
+
   return result;
 };
 
@@ -110,6 +128,9 @@ export default function LecturerAIAssistant() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [prompt, setPrompt] = useState("");
   const [isFullScreen, setIsFullScreen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
+  const [isContextSheetOpen, setIsContextSheetOpen] = useState(false);
+  const [isConfigExpanded, setIsConfigExpanded] = useState(true);
 
   // Workspaces list & active selection
   const [workspaces, setWorkspaces] = useState<WorkspaceListItem[]>([]);
@@ -274,6 +295,7 @@ export default function LecturerAIAssistant() {
     if (session.workspaceId) {
       setSelectedWorkspaceId(session.workspaceId);
     }
+    setIsContextSheetOpen(false);
     toast.info(`Loaded session: ${session.title}`);
   };
 
@@ -338,6 +360,7 @@ export default function LecturerAIAssistant() {
           description: "Draft quiz, essay, or case study drafts for review",
           onClick: () => {
             setActiveTab("assessment");
+            setIsConfigExpanded(true);
             toast.info("Switched to Assessment Generator");
           }
         },
@@ -379,6 +402,7 @@ export default function LecturerAIAssistant() {
           onClick: () => {
             setActiveTab("content");
             setContentType("Lesson Notes");
+            setIsConfigExpanded(true);
             toast.info("Switched to Content Assistant: Lesson Notes");
           }
         },
@@ -388,6 +412,7 @@ export default function LecturerAIAssistant() {
           onClick: () => {
             setActiveTab("content");
             setContentType("Study Guide");
+            setIsConfigExpanded(true);
             toast.info("Switched to Content Assistant: Study Guide");
           }
         },
@@ -397,6 +422,7 @@ export default function LecturerAIAssistant() {
           onClick: () => {
             setActiveTab("content");
             setContentType("Revision Sheet");
+            setIsConfigExpanded(true);
             toast.info("Switched to Content Assistant: Revision Sheet");
           }
         }
@@ -410,6 +436,7 @@ export default function LecturerAIAssistant() {
           description: "Analyze essay responses against grading criteria",
           onClick: () => {
             setActiveTab("review");
+            setIsConfigExpanded(true);
             toast.info("Switched to Rubric Review Assistant");
           }
         },
@@ -418,6 +445,7 @@ export default function LecturerAIAssistant() {
           description: "Draft constructive performance feedback drafts",
           onClick: () => {
             setActiveTab("feedback");
+            setIsConfigExpanded(true);
             toast.info("Switched to Student Feedback Assistant");
           }
         },
@@ -426,6 +454,7 @@ export default function LecturerAIAssistant() {
           description: "Identify topic mastery trends and average scores",
           onClick: () => {
             setActiveTab("analytics");
+            setIsConfigExpanded(true);
             toast.info("Switched to Analytics Assistant");
           }
         }
@@ -439,6 +468,7 @@ export default function LecturerAIAssistant() {
           description: "Identify concept gaps across assessment results",
           onClick: () => {
             setActiveTab("insights");
+            setIsConfigExpanded(true);
             toast.info("Switched to Teaching Insights");
           }
         },
@@ -467,6 +497,7 @@ export default function LecturerAIAssistant() {
   // AI execution caller
   const executeAIRequest = async (userPrompt: string, systemContext: string) => {
     setIsGenerating(true);
+    setIsConfigExpanded(false); // Automatically collapse settings when generating
     try {
       const workspacePrefix = getWorkspaceContextPrompt();
       const resourcesPrefix = getSelectedResourcesPrompt();
@@ -552,7 +583,7 @@ Student Response:
 Grading Criteria / Rubric:
 "${gradingRubric || "General academic correctness"}"
 
-Analyze the response, identify missing concepts, suggest a score out of the maximum marks, and estimate your confidence level (Low, Medium, or High). 
+Analyze the response, identify missing concepts, suggest a score out of the maximum marks, and estimate your confidence level (Low, Medium, or High).
 Format your response structured with markers so the user can parse it:
 [SCORE] Suggested score (e.g. 15/20)
 [CONFIDENCE] Confidence level (Low/Medium/High)
@@ -590,7 +621,7 @@ Generate editable feedback containing strengths, weaknesses, areas for improveme
   // 5. Analyze Class performance
   const handleAnalyzeClassPerformance = () => {
     const ws = activeWorkspaceDetail || activeWorkspace;
-    const stats = ws 
+    const stats = ws
       ? `Course: ${ws.title} (${ws.code})
 - Student count: ${ws.student_count}
 - Class performance average: ${ws.performance_avg}%
@@ -616,7 +647,7 @@ Analyze assessment averages, masteries, difficult areas, and performance trends.
   // 6. Teaching Insights
   const handleGenerateTeachingInsights = () => {
     const ws = activeWorkspaceDetail || activeWorkspace;
-    const stats = ws 
+    const stats = ws
       ? `Course: ${ws.title} (${ws.code})
 - Performance Avg: ${ws.performance_avg}%
 - Class: ${ws.class_name}`
@@ -660,460 +691,303 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
     return parseGradingReview(generatedContent);
   }, [generatedContent, activeTab]);
 
+  const activeWorkspaceName = useMemo(() => {
+    return activeWorkspaceDetail?.title || activeWorkspace?.title || "No Workspace Connected";
+  }, [activeWorkspaceDetail, activeWorkspace]);
+
   return (
-    <div className={cn("space-y-6", isFullScreen && "fixed inset-0 z-50 bg-white p-6 overflow-y-auto flex flex-col")}>
-      
-      {!isFullScreen && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight text-zinc-900">Lecturer AI Assistant</h1>
-            <p className="text-zinc-500 mt-1 text-xs font-medium">
-              Academic assistant to draft assessments, create teaching resources, analyze performance, and review student progress.
-            </p>
-          </div>
+    <div className={cn("w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200", isFullScreen && "fixed inset-0 z-50 bg-white p-4 overflow-y-auto flex flex-col")}>
+
+      {/* Header Container */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Lecturer AI Assistant</h1>
+          <p className="text-sm text-muted-foreground mt-1 font-medium truncate">
+            Active: <span className="text-primary">{activeWorkspaceName}</span> · Draft pedagogical materials, assessments, and feedback.
+          </p>
         </div>
-      )}
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsContextSheetOpen(true)}
+            className="h-8.5 text-[10px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
+          >
+            <Folder className="size-3.5 mr-1.5 text-zinc-500" /> Context Context
+          </Button>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-        
-        {/* Left Column: Workspace Selector & Session Memory */}
-        {!isFullScreen && (
-          <div className="lg:col-span-3 space-y-4">
-            
-            {/* Active Workspace */}
-            <Card className="shadow-none border border-zinc-200 bg-white rounded-xl">
-              <CardHeader className="py-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-1.5 text-zinc-900">
-                  <Folder className="size-4 text-zinc-500" /> Active Workspace
-                </CardTitle>
-                <CardDescription className="text-xs text-zinc-500">Select target course context.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 pt-0">
-                <div className="space-y-2">
-                  <Label htmlFor="ws-select" className="text-xs font-medium text-zinc-600">Course / Class</Label>
-                  <select
-                    id="ws-select"
-                    value={selectedWorkspaceId}
-                    onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-                    className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700 focus:border-zinc-300"
-                  >
-                    {loadingWorkspaces ? (
-                      <option>Loading workspaces...</option>
-                    ) : workspaces.length === 0 ? (
-                      <option>No workspaces found</option>
-                    ) : (
-                      workspaces.map((ws) => (
-                        <option key={ws.id} value={ws.id}>
-                          {ws.code} - {ws.title}
-                        </option>
-                      ))
-                    )}
-                  </select>
-                </div>
+          {/* Fullscreen Trigger */}
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8.5 w-8.5 text-zinc-400 hover:text-zinc-600 rounded-lg border-zinc-200 bg-white"
+            onClick={() => setIsFullScreen(!isFullScreen)}
+            title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
+          >
+            {isFullScreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
+        </div>
+      </div>
 
-                {loadingWorkspaceDetail ? (
-                  <div className="text-[11px] text-zinc-400 py-2">Loading workspace parameters...</div>
-                ) : activeWorkspaceDetail ? (
-                  <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-200/80 text-[11px] font-medium space-y-1.5 text-zinc-600">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Institution:</span>
-                      <span className="text-zinc-800 truncate max-w-[150px]">{activeWorkspaceDetail.institution_name}</span>
-                    </div>
-                    {activeWorkspaceDetail.department_name && (
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Department:</span>
-                        <span className="text-zinc-800 truncate max-w-[150px]">{activeWorkspaceDetail.department_name}</span>
-                      </div>
-                    )}
-                    {activeWorkspaceDetail.option_name && (
-                      <div className="flex justify-between">
-                        <span className="text-zinc-500">Program:</span>
-                        <span className="text-zinc-800 truncate max-w-[150px]">{activeWorkspaceDetail.option_name}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Class:</span>
-                      <span className="text-zinc-800">{activeWorkspaceDetail.class_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Academic Year:</span>
-                      <span className="text-zinc-800">{activeWorkspaceDetail.academic_year}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Students:</span>
-                      <span className="text-zinc-800">{activeWorkspaceDetail.student_count} Enrolled</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Performance:</span>
-                      <span className="text-zinc-700">{activeWorkspaceDetail.performance_avg}% Avg</span>
-                    </div>
-                  </div>
-                ) : activeWorkspace ? (
-                  <div className="p-3 bg-zinc-50 rounded-lg border border-zinc-200/80 text-[11px] font-medium space-y-1.5 text-zinc-600">
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Class:</span>
-                      <span className="text-zinc-800">{activeWorkspace.class_name}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-zinc-500">Academic Year:</span>
-                      <span className="text-zinc-800">{activeWorkspace.academic_year}</span>
-                    </div>
-                  </div>
-                ) : null}
-              </CardContent>
-            </Card>
+      <div className="flex flex-col md:flex-row gap-4 items-start min-h-[600px] w-full">
 
-            {/* Resource Context */}
-            <Card className="shadow-none border border-zinc-200 bg-white rounded-xl">
-              <CardHeader className="py-4">
-                <CardTitle className="text-sm font-semibold flex items-center gap-1.5 text-zinc-900">
-                  <BookOpen className="size-4 text-zinc-500" /> Resource Context
-                </CardTitle>
-                <CardDescription className="text-xs text-zinc-500">Select files or sources AI uses.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3 pt-0">
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-xs font-normal text-zinc-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useCourseNotes}
-                      onChange={(e) => setUseCourseNotes(e.target.checked)}
-                      className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
-                    />
-                    <span>Course Notes / Syllabus</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs font-normal text-zinc-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useLecturerMaterials}
-                      onChange={(e) => setUseLecturerMaterials(e.target.checked)}
-                      className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
-                    />
-                    <span>Lecturer Materials</span>
-                  </label>
-                  <label className="flex items-center gap-2 text-xs font-normal text-zinc-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={useAssessmentRubric}
-                      onChange={(e) => setUseAssessmentRubric(e.target.checked)}
-                      className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
-                    />
-                    <span>Assessment Rubric</span>
-                  </label>
-                </div>
-
-                {workspaceMaterials.length > 0 && (
-                  <div className="pt-2 border-t border-zinc-100">
-                    <div className="text-[10px] uppercase font-bold tracking-wider text-zinc-400 mb-1.5">Workspace Files</div>
-                    <div className="space-y-1.5 max-h-28 overflow-y-auto pr-1">
-                      {workspaceMaterials.map((mat) => (
-                        <label key={mat.id} className="flex items-center gap-2 text-xs font-normal text-zinc-600 cursor-pointer truncate" title={mat.display_name || mat.original_filename}>
-                          <input
-                            type="checkbox"
-                            checked={selectedMaterials.includes(mat.id)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedMaterials([...selectedMaterials, mat.id]);
-                              } else {
-                                setSelectedMaterials(selectedMaterials.filter(id => id !== mat.id));
-                              }
-                            }}
-                            className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
-                          />
-                          <span className="truncate">{mat.display_name || mat.original_filename}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
+        {/* Horizontal Navigation List on Mobile Screens */}
+        <div className="md:hidden w-full overflow-x-auto flex border-b border-zinc-150 pb-1 gap-1">
+          {[
+            { id: "chat", label: "Chat", icon: Brain },
+            { id: "assessment", label: "Assessment", icon: Layers },
+            { id: "content", label: "Content", icon: BookOpen },
+            { id: "review", label: "Rubric Review", icon: BookOpenCheck },
+            { id: "feedback", label: "Feedback", icon: Award },
+            { id: "analytics", label: "Analytics", icon: BarChart2 },
+            { id: "insights", label: "Insights", icon: Lightbulb },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => {
+                  setActiveTab(tab.id as any);
+                  setGeneratedContent("");
+                  setIsConfigExpanded(true);
+                }}
+                className={cn(
+                  "flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all border",
+                  activeTab === tab.id
+                    ? "bg-primary text-white border-primary"
+                    : "bg-white text-zinc-600 border-zinc-250 hover:bg-zinc-50"
                 )}
-              </CardContent>
-            </Card>
+              >
+                <Icon className="size-3.5" />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
 
-            {/* Session Memory */}
-            <Card className="shadow-none border border-zinc-200 bg-white rounded-xl">
-              <CardHeader className="py-4 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-sm font-semibold flex items-center gap-1.5 text-zinc-900">
-                    <ClipboardList className="size-4 text-zinc-500" /> Recent Sessions
-                  </CardTitle>
-                  <CardDescription className="text-xs text-zinc-500">Reopen previous AI drafts.</CardDescription>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-zinc-400 hover:text-zinc-600"
-                  onClick={() => startNewSession("chat")}
-                  title="New Session"
-                >
-                  <Plus className="size-4" />
-                </Button>
-              </CardHeader>
-              <CardContent className="space-y-1.5 pt-0 max-h-52 overflow-y-auto pr-1">
-                {sessions.length === 0 ? (
-                  <div className="text-xs text-zinc-400 py-3 text-center">No recent sessions.</div>
-                ) : (
-                  sessions.map((s) => (
-                    <div
-                      key={s.id}
-                      className={cn(
-                        "flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-colors",
-                        currentSessionId === s.id ? "border-zinc-300 bg-zinc-50/80 text-zinc-900 font-medium" : "border-zinc-100 text-zinc-600"
-                      )}
-                      onClick={() => loadSession(s)}
-                    >
-                      <div className="truncate flex-1 text-left">
-                        <div className="truncate text-zinc-800">{s.title}</div>
-                        <div className="text-[9px] text-zinc-400 font-normal uppercase tracking-wider">{s.module}</div>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-6 w-6 text-zinc-400 hover:text-red-600 shrink-0"
-                        onClick={(e) => deleteSession(s.id, e)}
-                      >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  ))
-                )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
-
-        {/* Right Column: AI Assistant Modules Dashboard */}
+        {/* Collapsible Left Navigation Sidebar on Desktop */}
         <div className={cn(
-          isFullScreen ? "lg:col-span-12 fixed inset-0 z-50 bg-white p-6 flex flex-col" : "lg:col-span-9 space-y-4"
+          "hidden md:flex flex-col bg-zinc-50/50 p-1.5 rounded-xl border border-zinc-200 gap-1.5 h-fit shrink-0 text-start transition-all duration-300 relative",
+          isSidebarCollapsed ? "w-[54px]" : "w-[180px]"
         )}>
-          
-          <Card className="shadow-none border border-zinc-200 bg-zinc-50/20 flex flex-col min-h-[620px] rounded-xl overflow-hidden flex-1">
-            
-            {/* Tabs Navigation Header */}
-            <div className="flex border-b border-zinc-200 bg-white shrink-0 z-20 overflow-x-auto items-center pr-3">
-              <div className="flex flex-1">
-                {[
-                  { id: "chat", label: "Assistant Chat", icon: Brain },
-                  { id: "assessment", label: "Assessment Assistant", icon: Layers },
-                  { id: "content", label: "Content Assistant", icon: BookOpen },
-                  { id: "review", label: "Review Assistant", icon: BookOpenCheck },
-                  { id: "feedback", label: "Feedback Assistant", icon: Award },
-                  { id: "analytics", label: "Analytics Assistant", icon: BarChart2 },
-                  { id: "insights", label: "Teaching Insights", icon: Lightbulb },
-                ].map((tab) => {
-                  const Icon = tab.icon;
-                  return (
+          {[
+            { id: "chat", label: "Assistant Chat", icon: Brain },
+            { id: "assessment", label: "Assessment Draft", icon: Layers },
+            { id: "content", label: "Learning Materials", icon: BookOpen },
+            { id: "review", label: "Response Review", icon: BookOpenCheck },
+            { id: "feedback", label: "Student Feedback", icon: Award },
+            { id: "analytics", label: "Class Analytics", icon: BarChart2 },
+            { id: "insights", label: "Reinforcement", icon: Lightbulb },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const isTabActive = activeTab === tab.id;
+            return (
+              <UITooltipProvider key={tab.id} delayDuration={0}>
+                <UITooltip>
+                  <UITooltipTrigger asChild>
                     <button
-                      key={tab.id}
                       onClick={() => {
                         setActiveTab(tab.id as any);
                         setGeneratedContent("");
+                        setIsConfigExpanded(true);
                       }}
                       className={cn(
-                        "flex items-center gap-1.5 px-4 py-3.5 text-xs border-b-2 transition-all whitespace-nowrap font-medium",
-                        activeTab === tab.id
-                          ? "border-zinc-800 text-zinc-900 bg-zinc-50/50"
-                          : "border-transparent text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50/30"
+                        "w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold uppercase tracking-wide rounded-lg transition-all",
+                        isTabActive
+                          ? "bg-white border text-primary shadow-sm"
+                          : "text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100/70",
+                        isSidebarCollapsed && "justify-center px-0 gap-0"
                       )}
                     >
-                      <Icon className="size-3.5" />
-                      {tab.label}
+                      <Icon className="size-4 shrink-0" />
+                      {!isSidebarCollapsed && <span className="truncate">{tab.label}</span>}
                     </button>
-                  );
-                })}
+                  </UITooltipTrigger>
+                  <UITooltipContent side="right" className="px-2 py-1 text-xs font-semibold bg-zinc-900 text-white rounded shadow-md border-none">
+                    {tab.label}
+                  </UITooltipContent>
+                </UITooltip>
+              </UITooltipProvider>
+            );
+          })}
+
+          <Separator className="my-1 bg-zinc-200" />
+
+          {/* Toggle Button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="w-full h-8 text-xs font-semibold rounded-lg text-zinc-400 hover:text-zinc-800 hover:bg-zinc-100/50 flex items-center justify-center p-0"
+            title={isSidebarCollapsed ? "Expand Navigation" : "Collapse Navigation"}
+            type="button"
+          >
+            <ChevronDown className={cn(
+              "size-4 transition-transform duration-300",
+              isSidebarCollapsed ? "-rotate-90" : "rotate-90"
+            )} />
+          </Button>
+        </div>
+
+        {/* Right Main Panel Dashboard */}
+        <div className="flex-1 w-full bg-white border border-zinc-200 rounded-xl p-3 md:p-4 flex flex-col min-h-[560px]">
+
+          {/* Tab Content 1: Chat Assistant */}
+          {activeTab === "chat" && (
+            <div className="flex-1 flex flex-col min-h-0 space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-zinc-100 shrink-0">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1.5">
+                  <Brain className="size-4 text-primary shrink-0" /> Academic Assistant Chat
+                </h3>
               </div>
 
-              {/* Fullscreen Toggle */}
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-zinc-400 hover:text-zinc-600 shrink-0 ml-2"
-                onClick={() => setIsFullScreen(!isFullScreen)}
-                title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-              >
-                {isFullScreen ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-              </Button>
-            </div>
-
-            {/* Active Workspace Banner inside Zen Mode */}
-            {isFullScreen && activeWorkspace && (
-              <div className="px-6 py-2 border-b border-zinc-100 bg-zinc-50 flex items-center justify-between text-xs text-zinc-500">
-                <div className="flex gap-4">
-                  <span><strong>Workspace:</strong> {activeWorkspace.code} - {activeWorkspace.title}</span>
-                  <span><strong>Class:</strong> {activeWorkspace.class_name}</span>
-                  <span><strong>Institution:</strong> {activeWorkspace.institution_name}</span>
-                </div>
-                <span>Academic Year: {activeWorkspace.academic_year}</span>
-              </div>
-            )}
-
-            {/* Tab Contents */}
-            <div className="flex-1 p-5 md:p-6 bg-white flex flex-col min-h-0">
-              
-              {/* Tab 1: Chat Assistant */}
-              {activeTab === "chat" && (
-                <div className="flex-1 flex flex-col min-h-0 space-y-4">
-                  {/* Chat Pane Header */}
-                  <div className="flex items-center justify-between pb-2.5 border-b border-zinc-100 shrink-0">
-                    <div className="flex items-center gap-2 text-xs text-zinc-600 font-medium font-normal">
-                      <Brain className="size-4 text-zinc-500" />
-                      <span>Academic Assistant Chat</span>
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-[300px]">
+                {history.length === 0 && !isGenerating ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-4 max-w-2xl mx-auto space-y-5">
+                    <div className="size-10 rounded-full bg-zinc-50 border flex items-center justify-center">
+                      <Brain className="size-5 text-primary" />
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2.5 text-xs text-zinc-500 hover:text-zinc-800 flex items-center gap-1.5 border border-zinc-200/60 rounded-lg hover:bg-zinc-50"
-                      onClick={() => setIsFullScreen(!isFullScreen)}
-                      title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-                    >
-                      {isFullScreen ? (
-                        <>
-                          <Minimize2 className="size-3.5" />
-                          <span>Exit Full Screen</span>
-                        </>
-                      ) : (
-                        <>
-                          <Maximize2 className="size-3.5" />
-                          <span>Full Screen</span>
-                        </>
-                      )}
-                    </Button>
+                    <div className="space-y-1">
+                      <h2 className="text-sm font-bold text-zinc-800">Academic Assistant Dashboard</h2>
+                      <p className="text-xs text-zinc-500 font-medium">
+                        Generate scoring rubrics, outlines, lesson reinforcements, or evaluate exam essays. Select a workspace or trigger a quick template workflow.
+                      </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 w-full text-left pt-2">
+                      {quickActionGroups.map((group, gIdx) => (
+                        <div key={gIdx} className="border border-zinc-150 rounded-xl p-3 bg-zinc-50/50 space-y-2">
+                          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider border-b border-zinc-200/50 pb-1">{group.title}</h4>
+                          <div className="space-y-1">
+                            {group.actions.map((act, aIdx) => (
+                              <button
+                                key={aIdx}
+                                onClick={act.onClick}
+                                className="w-full text-left hover:bg-white hover:border border-transparent p-1 px-1.5 rounded-lg text-xs transition-all flex flex-col"
+                              >
+                                <span className="font-semibold text-zinc-700 flex items-center gap-1 text-[11px]">
+                                  {act.name}
+                                </span>
+                                <span className="text-[9px] text-zinc-400">{act.description}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-
-                  <div className="flex-1 overflow-y-auto space-y-4 pr-1 min-h-[300px]">
-                    
-                    {history.length === 0 && !isGenerating ? (
-                      <div className="h-full flex flex-col items-center justify-center text-center p-6 max-w-4xl mx-auto space-y-6">
-                        <div className="size-12 rounded-full bg-zinc-50 border border-zinc-200 flex items-center justify-center">
-                          <Brain className="size-6 text-zinc-500" />
-                        </div>
-                        <div className="space-y-1.5">
-                          <h2 className="text-base font-semibold text-zinc-900">Academic Assistant Dashboard</h2>
-                          <p className="text-xs text-zinc-500 max-w-lg mx-auto">
-                            Generate rubrics, outline lessons, organize question sets, or evaluate responses. Choose a workspace or quick task to begin.
-                          </p>
-                        </div>
-
-                        {/* Quick Action Dashboard Grid */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full text-left pt-2">
-                          {quickActionGroups.map((group, gIdx) => (
-                            <div key={gIdx} className="border border-zinc-200 rounded-lg p-3.5 bg-zinc-50/50 space-y-2">
-                              <h3 className="text-xs font-semibold text-zinc-700 uppercase tracking-wide border-b border-zinc-200 pb-1.5">{group.title}</h3>
-                              <div className="space-y-1.5">
-                                {group.actions.map((act, aIdx) => (
-                                  <button
-                                    key={aIdx}
-                                    onClick={act.onClick}
-                                    className="w-full text-left hover:bg-zinc-100/80 p-1.5 rounded text-xs transition-colors flex flex-col"
-                                  >
-                                    <span className="font-medium text-zinc-800 flex items-center gap-1">
-                                      <span className="size-1 rounded-full bg-zinc-400"></span>
-                                      {act.name}
-                                    </span>
-                                    <span className="text-[10px] text-zinc-400 ml-2">{act.description}</span>
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-4 max-w-3xl mx-auto py-2">
-                        {history.map((msg, index) => (
-                          <div
-                            key={index}
-                            className={cn(
-                              "flex flex-col max-w-[85%] space-y-1 p-3.5 rounded-xl text-xs leading-relaxed whitespace-pre-wrap font-normal",
-                              msg.role === "user"
-                                ? "bg-zinc-800 text-white ml-auto rounded-tr-none"
-                                : "bg-zinc-50 border border-zinc-200/80 text-zinc-800 mr-auto rounded-tl-none text-left shadow-sm"
-                            )}
-                          >
-                            <div className="font-bold text-[9px] uppercase tracking-wider opacity-60">
-                              {msg.role === "user" ? "You" : "AI Assistant"}
-                            </div>
-                            <div>{msg.content}</div>
-                          </div>
-                        ))}
-
-                        {isGenerating && (
-                          <div className="flex items-center gap-2 text-xs font-medium text-zinc-400 animate-pulse max-w-[85%] mr-auto p-3 bg-zinc-50 border border-zinc-200 rounded-xl rounded-tl-none">
-                            <Sparkles className="size-4 animate-spin text-zinc-500" />
-                            Formulating draft recommendation...
-                          </div>
+                ) : (
+                  <div className="space-y-3 max-w-3xl mx-auto py-1">
+                    {history.map((msg, index) => (
+                      <div
+                        key={index}
+                        className={cn(
+                          "flex flex-col max-w-[85%] space-y-0.5 p-3 rounded-xl text-sm leading-normal whitespace-pre-wrap font-medium shadow-sm",
+                          msg.role === "user"
+                            ? "bg-zinc-800 text-white ml-auto rounded-tr-none"
+                            : "bg-zinc-50 border border-zinc-150 text-zinc-800 mr-auto rounded-tl-none text-left"
                         )}
-                        <div ref={messagesEndRef} />
+                      >
+                        <div className="font-bold text-[8px] uppercase tracking-wider opacity-60">
+                          {msg.role === "user" ? "You" : "AI Assistant"}
+                        </div>
+                        <div>{msg.content}</div>
+                      </div>
+                    ))}
+
+                    {isGenerating && (
+                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-400 animate-pulse max-w-[85%] mr-auto p-3 bg-zinc-50 border border-zinc-150 rounded-xl rounded-tl-none">
+                        <Sparkles className="size-4 animate-spin text-primary" />
+                        Formulating draft recommendation...
                       </div>
                     )}
+                    <div ref={messagesEndRef} />
                   </div>
+                )}
+              </div>
 
-                  {/* Input Chat Field */}
-                  <div className="p-4 border border-zinc-200 bg-white rounded-xl">
-                    <PureMultimodalInput
-                      chatId="lecturer-chat-ai"
-                      messages={history.map((msg, idx) => ({
-                        id: `msg-${idx}-${msg.role}`,
-                        content: msg.content,
-                        role: msg.role,
-                      }))}
-                      attachments={attachments}
-                      setAttachments={setAttachments}
-                      onSendMessage={handleChatSendMessage}
-                      onStopGenerating={() => setIsGenerating(false)}
-                      isGenerating={isGenerating}
-                      canSend={!isGenerating}
-                      selectedVisibilityType="private"
-                      suggestedActions={null}
-                      placeholder="Ask the assistant anything..."
-                      value={prompt}
-                      onChange={setPrompt}
-                    />
-                  </div>
-                </div>
-              )}
+              <div className="p-3 border border-zinc-150 bg-white rounded-xl shadow-inner">
+                <PureMultimodalInput
+                  chatId="lecturer-chat-ai"
+                  messages={history.map((msg, idx) => ({
+                    id: `msg-${idx}-${msg.role}`,
+                    content: msg.content,
+                    role: msg.role,
+                  }))}
+                  attachments={attachments}
+                  setAttachments={setAttachments}
+                  onSendMessage={handleChatSendMessage}
+                  onStopGenerating={() => setIsGenerating(false)}
+                  isGenerating={isGenerating}
+                  canSend={!isGenerating}
+                  selectedVisibilityType="private"
+                  suggestedActions={null}
+                  placeholder="Ask the assistant anything..."
+                  value={prompt}
+                  onChange={setPrompt}
+                />
+              </div>
+            </div>
+          )}
 
-              {/* Tab 2: Assessment Generator */}
-              {activeTab === "assessment" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
+          {/* Tab 2: Assessment Generator */}
+          {activeTab === "assessment" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <Layers className="size-4 text-primary shrink-0" /> Assessment Generator
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
                     <div className="space-y-1.5">
-                      <Label htmlFor="asmt-topic" className="text-xs font-medium text-zinc-700">Topic / Core Theme</Label>
+                      <Label htmlFor="asmt-topic" className="text-xs font-bold text-zinc-700">Topic / Core Theme</Label>
                       <Input
                         id="asmt-topic"
-                        placeholder="e.g. Database Normalization (1NF, 2NF, 3NF)"
+                        placeholder="e.g. Normalization (1NF, 2NF, 3NF)"
                         value={asmtTopic}
                         onChange={(e) => setAsmtTopic(e.target.value)}
-                        className="h-9 text-xs"
+                        className="h-8.5 text-xs bg-white"
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1.5">
-                        <Label htmlFor="asmt-style" className="text-xs font-medium text-zinc-700">Question Style</Label>
+                        <Label htmlFor="asmt-style" className="text-xs font-bold text-zinc-700">Style</Label>
                         <select
                           id="asmt-style"
                           value={asmtType}
                           onChange={(e) => setAsmtType(e.target.value)}
-                          className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2 bg-white outline-none text-zinc-700"
+                          className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2 bg-white text-zinc-700 outline-none"
                         >
-                          <option value="MCQ">Multiple Choice (MCQ)</option>
+                          <option value="MCQ">Multiple Choice</option>
                           <option value="True/False">True / False</option>
                           <option value="Matching">Matching</option>
                           <option value="Short Answer">Short Answer</option>
                           <option value="Essay">Essay Question</option>
-                          <option value="Case Study">Case Study Scenario</option>
+                          <option value="Case Study">Case Study</option>
                           <option value="Practical">Practical Challenge</option>
-                          <option value="Complete Assessment Draft">Complete Assessment Draft</option>
                         </select>
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label htmlFor="asmt-bloom" className="text-xs font-medium text-zinc-700">Bloom&apos;s Level</Label>
+                        <Label htmlFor="asmt-bloom" className="text-xs font-bold text-zinc-700">Bloom&apos;s Level</Label>
                         <select
                           id="asmt-bloom"
                           value={asmtBloomLevel}
                           onChange={(e) => setAsmtBloomLevel(e.target.value)}
-                          className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2 bg-white outline-none text-zinc-700"
+                          className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2 bg-white text-zinc-700 outline-none"
                         >
                           <option value="Remembering">Remembering</option>
                           <option value="Understanding">Understanding</option>
@@ -1125,14 +999,14 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1.5">
-                        <Label htmlFor="asmt-diff" className="text-xs font-medium text-zinc-700">Difficulty</Label>
+                        <Label htmlFor="asmt-diff" className="text-xs font-bold text-zinc-700">Difficulty</Label>
                         <select
                           id="asmt-diff"
                           value={asmtDifficulty}
                           onChange={(e) => setAsmtDifficulty(e.target.value)}
-                          className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2 bg-white outline-none text-zinc-700"
+                          className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2 bg-white text-zinc-700 outline-none"
                         >
                           <option value="Easy">Easy</option>
                           <option value="Medium">Medium</option>
@@ -1141,114 +1015,126 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                       </div>
 
                       <div className="space-y-1.5">
-                        <Label htmlFor="asmt-count" className="text-xs font-medium text-zinc-700">Question Count</Label>
+                        <Label htmlFor="asmt-count" className="text-xs font-bold text-zinc-700">Question Count</Label>
                         <select
                           id="asmt-count"
                           value={asmtQuestionCount}
                           onChange={(e) => setAsmtQuestionCount(e.target.value)}
-                          className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2 bg-white outline-none text-zinc-700"
+                          className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2 bg-white text-zinc-700 outline-none"
                         >
-                          <option value="3">3 Questions</option>
-                          <option value="5">5 Questions</option>
-                          <option value="10">10 Questions</option>
-                          <option value="15">15 Questions</option>
-                          <option value="20">20 Questions</option>
+                          <option value="3">3 Items</option>
+                          <option value="5">5 Items</option>
+                          <option value="10">10 Items</option>
+                          <option value="15">15 Items</option>
                         </select>
                       </div>
                     </div>
 
-                    <div className="flex gap-4 items-center justify-between py-1 border-y border-zinc-100">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="asmt-marks" className="text-xs font-medium text-zinc-700">Suggested Marks</Label>
+                    <div className="flex gap-4 items-center justify-between border-y py-2.5 my-1.5 border-zinc-200">
+                      <div className="space-y-1">
+                        <Label htmlFor="asmt-marks" className="text-xs font-bold text-zinc-700">Suggested Marks</Label>
                         <Input
                           id="asmt-marks"
                           type="number"
                           value={asmtMarks}
                           onChange={(e) => setAsmtMarks(e.target.value)}
-                          className="h-9 w-24 text-xs"
+                          className="h-8 w-20 text-xs bg-white text-center font-bold"
                         />
                       </div>
-                      <label className="flex items-center gap-2 text-xs font-medium text-zinc-700 cursor-pointer mt-4">
+                      <label className="flex items-center gap-1.5 text-xs font-bold text-zinc-600 cursor-pointer mt-4.5">
                         <input
                           type="checkbox"
                           checked={asmtIncludeRubrics}
                           onChange={(e) => setAsmtIncludeRubrics(e.target.checked)}
                           className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
                         />
-                        <span>Include Rubric Guidelines</span>
+                        <span>Include Rubrics</span>
                       </label>
                     </div>
 
                     <Button
                       onClick={handleGenerateAssessment}
                       disabled={isGenerating || !asmtTopic}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                      Generate Assessment Draft
+                      Generate Draft
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Draft Protocol:</strong> Generated questions are drafts for review. AI cannot publish or write questions directly to official question banks.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Draft Protocol: Generated questions are drafts for review. AI cannot write questions directly to official question banks without lecturer approval.
                     </div>
+                  </div>
 
-                    {/* Sources Used Indicators */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500 mb-2 font-medium">
-                      <span>Sources Used:</span>
-                      {useCourseNotes && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Course Notes</span>}
-                      {useLecturerMaterials && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Lecturer Materials</span>}
-                      {useAssessmentRubric && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Rubric Context</span>}
-                      {selectedMaterials.map(id => {
-                        const m = workspaceMaterials.find(x => x.id === id);
-                        return m ? <span key={id} className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded truncate max-w-[120px]">✓ {m.display_name || m.original_filename}</span> : null;
-                      })}
-                    </div>
-
-                    <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Editable Draft output</Label>
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Generated draft output</Label>
                     <Textarea
                       value={generatedContent}
                       onChange={(e) => setGeneratedContent(e.target.value)}
                       placeholder="Assessment details will generate here..."
-                      className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                      className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                     />
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Draft
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
 
-              {/* Tab 3: Content Assistant */}
-              {activeTab === "content" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Draft
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 3: Content Assistant */}
+          {activeTab === "content" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <BookOpen className="size-4 text-primary shrink-0" /> Learning Material Assistant
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
                     <div className="space-y-1.5">
-                      <Label htmlFor="content-topic" className="text-xs font-medium text-zinc-700">Topic Outline</Label>
+                      <Label htmlFor="content-topic" className="text-xs font-bold text-zinc-700">Topic Outline</Label>
                       <Input
                         id="content-topic"
                         placeholder="e.g. Introduction to Subnetting"
                         value={contentTopic}
                         onChange={(e) => setContentTopic(e.target.value)}
-                        className="h-9 text-xs"
+                        className="h-8.5 text-xs bg-white"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label htmlFor="content-type" className="text-xs font-medium text-zinc-700">Material Type</Label>
+                      <Label htmlFor="content-type" className="text-xs font-bold text-zinc-700">Material Type</Label>
                       <select
                         id="content-type"
                         value={contentType}
                         onChange={(e) => setContentType(e.target.value)}
-                        className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2 bg-white outline-none text-zinc-700"
+                        className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2 bg-white text-zinc-700 outline-none"
                       >
                         <option value="Lesson Summary">Lesson Summary</option>
                         <option value="Lecture Notes">Lecture Notes</option>
@@ -1256,271 +1142,318 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                         <option value="Revision Sheet">Revision Sheet</option>
                         <option value="Course Outline">Course Outline</option>
                         <option value="Learning Objectives">Learning Objectives</option>
-                        <option value="Topic Explanation">Topic Explanation</option>
                       </select>
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label htmlFor="content-outcomes" className="text-xs font-medium text-zinc-700">Learning Outcomes / Focus</Label>
+                      <Label htmlFor="content-outcomes" className="text-xs font-bold text-zinc-700">Learning Outcomes / Focus</Label>
                       <Textarea
                         id="content-outcomes"
-                        placeholder="e.g. Calculating network IDs, hosts range, and applying subnet masks..."
+                        placeholder="e.g. Calculating network IDs, hosts range..."
                         value={contentOutcomes}
                         onChange={(e) => setContentOutcomes(e.target.value)}
-                        className="h-24 text-xs font-normal"
+                        className="h-24 text-xs font-normal bg-white"
                       />
                     </div>
 
                     <Button
                       onClick={handleGenerateContent}
                       disabled={isGenerating || !contentTopic}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                      Generate Material Draft
+                      Generate Material
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Draft Protocol:</strong> Generated learning resources must be reviewed and manually approved by the lecturer before being published to student workspaces.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Draft Protocol: Generated learning resources must be reviewed and manually approved by the lecturer before being published to student workspaces.
                     </div>
+                  </div>
 
-                    {/* Sources Used Indicators */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500 mb-2 font-medium">
-                      <span>Sources Used:</span>
-                      {useCourseNotes && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Course Notes</span>}
-                      {useLecturerMaterials && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Lecturer Materials</span>}
-                      {useAssessmentRubric && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Rubric Context</span>}
-                      {selectedMaterials.map(id => {
-                        const m = workspaceMaterials.find(x => x.id === id);
-                        return m ? <span key={id} className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded truncate max-w-[120px]">✓ {m.display_name || m.original_filename}</span> : null;
-                      })}
-                    </div>
-
-                    <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Editable educational content</Label>
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Generated educational content</Label>
                     <Textarea
                       value={generatedContent}
                       onChange={(e) => setGeneratedContent(e.target.value)}
                       placeholder="Educational materials will generate here..."
-                      className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                      className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                     />
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Draft
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
 
-              {/* Tab 4: Review Assistant */}
-              {activeTab === "review" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Draft
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 4: Review Assistant */}
+          {activeTab === "review" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <BookOpenCheck className="size-4 text-primary shrink-0" /> Response Audit Assistant
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
                     <div className="space-y-1.5">
-                      <Label htmlFor="review-rubric" className="text-xs font-medium text-zinc-700">Grading Rubric / Model Answer</Label>
+                      <Label htmlFor="review-rubric" className="text-xs font-bold text-zinc-700">Rubric / Model Answer</Label>
                       <Textarea
                         id="review-rubric"
                         placeholder="Paste target grading schema or reference answers..."
                         value={gradingRubric}
                         onChange={(e) => setGradingRubric(e.target.value)}
-                        className="h-24 text-xs font-normal"
+                        className="h-20 text-xs font-normal bg-white"
                       />
                     </div>
 
                     <div className="space-y-1.5">
-                      <Label htmlFor="review-student" className="text-xs font-medium text-zinc-700">Student Response</Label>
+                      <Label htmlFor="review-student" className="text-xs font-bold text-zinc-700">Student Response</Label>
                       <Textarea
                         id="review-student"
                         placeholder="Paste the student's open-ended response here..."
                         value={studentResponse}
                         onChange={(e) => setStudentResponse(e.target.value)}
-                        className="h-32 text-xs font-normal"
+                        className="h-28 text-xs font-normal bg-white"
                       />
                     </div>
 
                     <Button
                       onClick={handleReviewSubmission}
                       disabled={isGenerating || !studentResponse}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
                       Analyze Response
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Grading Protocol:</strong> Suggested scores are advisory only. Final grading resides strictly with the lecturer. AI suggestions never update student records directly.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Grading Protocol: Suggested scores are advisory only. Final grading resides strictly with the lecturer. AI suggestions never update student records directly.
                     </div>
+                  </div>
 
-                    {parsedReview && parsedReview.score ? (
-                      <div className="space-y-4 flex-1 flex flex-col">
-                        <div className="grid grid-cols-2 gap-3">
-                          <div className="p-3 border rounded-lg bg-zinc-50 text-left">
-                            <span className="text-[10px] uppercase font-bold text-zinc-400">Suggested Score</span>
-                            <div className="text-xl font-bold text-zinc-800 mt-1">{parsedReview.score}</div>
-                          </div>
-                          <div className="p-3 border rounded-lg bg-zinc-50 text-left">
-                            <span className="text-[10px] uppercase font-bold text-zinc-400">Confidence Level</span>
-                            <div className="mt-1">
-                              <Badge variant="outline" className={cn(
-                                "h-5 text-[10px] px-2 font-semibold",
-                                parsedReview.confidence === "High" && "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
-                                parsedReview.confidence === "Medium" && "bg-amber-500/10 text-amber-700 border-amber-500/20",
-                                parsedReview.confidence === "Low" && "bg-red-500/10 text-red-700 border-red-500/20"
-                              )}>
-                                {parsedReview.confidence || "Unknown"}
-                              </Badge>
-                            </div>
-                          </div>
+                  {parsedReview && parsedReview.score ? (
+                    <div className="space-y-4 flex-1 flex flex-col">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="p-3 border border-zinc-150 rounded-xl bg-zinc-50 text-left">
+                          <span className="text-[9px] uppercase font-bold text-zinc-400">Suggested Score</span>
+                          <div className="text-lg font-bold text-zinc-800 mt-0.5">{parsedReview.score}</div>
                         </div>
-
-                        {parsedReview.missingConcepts.length > 0 && (
-                          <div className="border rounded-lg p-3 bg-red-50/20 border-red-100 text-left">
-                            <span className="text-[10px] uppercase font-bold text-red-500">Missing Concepts Identified</span>
-                            <ul className="list-disc list-inside text-xs mt-1.5 space-y-1 text-zinc-700 font-medium">
-                              {parsedReview.missingConcepts.map((item, idx) => (
-                                <li key={idx}>{item}</li>
-                              ))}
-                            </ul>
+                        <div className="p-3 border border-zinc-150 rounded-xl bg-zinc-50 text-left">
+                          <span className="text-[9px] uppercase font-bold text-zinc-400">Confidence Level</span>
+                          <div className="mt-0.5">
+                            <Badge variant="outline" className={cn(
+                              "h-5 text-[9px] px-2 font-bold uppercase",
+                              parsedReview.confidence === "High" && "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
+                              parsedReview.confidence === "Medium" && "bg-amber-500/10 text-amber-700 border-amber-500/20",
+                              parsedReview.confidence === "Low" && "bg-red-500/10 text-red-700 border-red-500/20"
+                            )}>
+                              {parsedReview.confidence || "Unknown"}
+                            </Badge>
                           </div>
-                        )}
-
-                        <div className="space-y-1 flex-1 flex flex-col">
-                          <Label className="text-xs font-semibold text-zinc-700 text-left">Scoring Rationale / Rubric Alignment</Label>
-                          <Textarea
-                            value={generatedContent}
-                            onChange={(e) => setGeneratedContent(e.target.value)}
-                            className="flex-1 min-h-[150px] p-3 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
-                          />
                         </div>
                       </div>
-                    ) : (
-                      <div className="flex-1 flex flex-col">
-                        <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Grading recommendations rationale</Label>
+
+                      {parsedReview.missingConcepts.length > 0 && (
+                        <div className="border border-red-100 rounded-xl p-3 bg-red-50/20 text-left">
+                          <span className="text-[9px] uppercase font-bold text-red-500">Missing Concepts Identified</span>
+                          <ul className="list-disc list-inside text-xs mt-1 space-y-0.5 text-zinc-700 font-semibold">
+                            {parsedReview.missingConcepts.map((item, idx) => (
+                              <li key={idx}>{item}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      <div className="space-y-1 flex-1 flex flex-col">
+                        <Label className="text-xs font-bold text-zinc-700 text-left ml-0.5">Scoring Rationale / Rubric Alignment</Label>
                         <Textarea
                           value={generatedContent}
                           onChange={(e) => setGeneratedContent(e.target.value)}
-                          placeholder="Suggested metrics and feedback rationales appear here..."
-                          className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                          className="flex-1 min-h-[150px] p-3 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                         />
                       </div>
-                    )}
+                    </div>
+                  ) : (
+                    <div className="flex-1 flex flex-col">
+                      <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Grading recommendation details</Label>
+                      <Textarea
+                        value={generatedContent}
+                        onChange={(e) => setGeneratedContent(e.target.value)}
+                        placeholder="Suggested metrics and feedback rationales appear here..."
+                        className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
+                      />
+                    </div>
+                  )}
 
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Rationale
-                        </Button>
-                      </div>
-                    )}
-                  </div>
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Rationale
+                      </Button>
+                    </div>
+                  )}
                 </div>
-              )}
+              </div>
+            </div>
+          )}
 
-              {/* Tab 5: Feedback Assistant */}
-              {activeTab === "feedback" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
+          {/* Tab 5: Feedback Assistant */}
+          {activeTab === "feedback" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <Award className="size-4 text-primary shrink-0" /> Feedback Assistant
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
                     <div className="space-y-1.5">
-                      <Label htmlFor="feedback-perf" className="text-xs font-medium text-zinc-700">Student Performance Summary</Label>
+                      <Label htmlFor="feedback-perf" className="text-xs font-bold text-zinc-700">Student Performance Summary</Label>
                       <Textarea
                         id="feedback-perf"
-                        placeholder="e.g. Scored 12/20. Showed understanding of indexing rules, but struggled with join complexity and nested subqueries."
+                        placeholder="e.g. Scored 12/20. Staggered join complexity but understands keys."
                         value={feedbackPerformance}
                         onChange={(e) => setFeedbackPerformance(e.target.value)}
-                        className="h-36 text-xs font-normal"
+                        className="h-32 text-xs font-normal bg-white"
                       />
                     </div>
 
                     <Button
                       onClick={handleGenerateFeedback}
                       disabled={isGenerating || !feedbackPerformance}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
                       Draft Student Feedback
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Feedback Protocol:</strong> Drafted feedback is editable. Lecturers are encouraged to adapt the tone and content before distributing feedback to students.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Feedback Protocol: Drafted feedback is editable. Lecturers are encouraged to adapt the tone and content before distributing feedback to students.
                     </div>
+                  </div>
 
-                    {/* Sources Used Indicators */}
-                    <div className="flex flex-wrap items-center gap-1.5 text-[10px] text-zinc-500 mb-2 font-medium">
-                      <span>Sources Used:</span>
-                      {useCourseNotes && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Course Notes</span>}
-                      {useLecturerMaterials && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Lecturer Materials</span>}
-                      {useAssessmentRubric && <span className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded">✓ Rubric Context</span>}
-                      {selectedMaterials.map(id => {
-                        const m = workspaceMaterials.find(x => x.id === id);
-                        return m ? <span key={id} className="bg-zinc-100 border border-zinc-200 text-zinc-600 px-1.5 py-0.5 rounded truncate max-w-[120px]">✓ {m.display_name || m.original_filename}</span> : null;
-                      })}
-                    </div>
-
-                    <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Editable Feedback Draft</Label>
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Generated Student Feedback</Label>
                     <Textarea
                       value={generatedContent}
                       onChange={(e) => setGeneratedContent(e.target.value)}
                       placeholder="Encouraging feedback drafts outlining strengths and deficiencies will generate here..."
-                      className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                      className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                     />
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Feedback
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
 
-              {/* Tab 6: Analytics Assistant */}
-              {activeTab === "analytics" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
-                    <Card className="shadow-none border border-zinc-200 rounded-lg bg-zinc-50/50">
-                      <CardHeader className="py-3">
-                        <CardTitle className="text-xs font-semibold text-zinc-800">Workspace Context Metrics</CardTitle>
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Feedback
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 6: Analytics Assistant */}
+          {activeTab === "analytics" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <BarChart2 className="size-4 text-primary shrink-0" /> Analytics Summary Assistant
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
+                    <Card className="shadow-none border border-zinc-200 rounded-lg bg-white">
+                      <CardHeader className="py-2.5 border-b">
+                        <CardTitle className="text-xs font-bold text-zinc-700 uppercase">Workspace metrics</CardTitle>
                       </CardHeader>
-                      <CardContent className="space-y-3 pt-0 text-xs font-medium text-zinc-600">
+                      <CardContent className="space-y-2.5 pt-3 text-xs font-semibold text-zinc-600">
                         {activeWorkspace ? (
                           <>
-                            <div className="flex justify-between border-b pb-1.5">
-                              <span>Class Average Score:</span>
-                              <span className="font-semibold text-zinc-800">{activeWorkspace.performance_avg}%</span>
+                            <div className="flex justify-between border-b pb-1">
+                              <span>Class Average:</span>
+                              <span className="font-bold text-zinc-800">{activeWorkspace.performance_avg}%</span>
                             </div>
-                            <div className="space-y-1.5">
-                              <div className="text-[10px] text-zinc-400 font-bold uppercase tracking-wider">Concept Mastery trends</div>
+                            <div className="space-y-1">
+                              <div className="text-[9px] text-zinc-400 font-bold uppercase tracking-wider">Concept mastery</div>
                               <div className="flex justify-between text-[11px]">
-                                <span>Database Normalization</span>
-                                <Badge variant="secondary" className="h-4 bg-emerald-500/10 text-emerald-700 font-normal border-emerald-500/20">Strong (82%)</Badge>
+                                <span>Normalization</span>
+                                <Badge variant="secondary" className="h-4 bg-emerald-500/10 text-emerald-700 font-bold border-emerald-500/20 text-[9px]">Strong (82%)</Badge>
                               </div>
                               <div className="flex justify-between text-[11px]">
                                 <span>SQL Indexing</span>
-                                <Badge variant="secondary" className="h-4 bg-amber-500/10 text-amber-700 font-normal border-amber-500/20">Weak (38%)</Badge>
+                                <Badge variant="secondary" className="h-4 bg-amber-500/10 text-amber-700 font-bold border-amber-500/20 text-[9px]">Weak (38%)</Badge>
                               </div>
                             </div>
                           </>
                         ) : (
-                          <div className="text-zinc-400 py-3 text-center">
-                            Select a workspace to bind class parameters.
+                          <div className="text-zinc-400 py-2 text-center italic text-[11px]">
+                            Select active workspace context.
                           </div>
                         )}
                       </CardContent>
@@ -1529,56 +1462,81 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                     <Button
                       onClick={handleAnalyzeClassPerformance}
                       disabled={isGenerating}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <BarChart2 className="size-3.5 mr-1.5" />}
-                      Analyze Class Performance
+                      Analyze Class
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Analytics Protocol:</strong> Analysis uses aggregated workspace metrics only. No direct student database access is permitted, respecting institutional policies.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Analytics Protocol: Analysis uses aggregated workspace metrics only. No direct student database access is permitted, respecting institutional policies.
                     </div>
+                  </div>
 
-                    <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Class Mastery & Difficult Topics Analysis</Label>
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Diagnostic Reports Output</Label>
                     <Textarea
                       value={generatedContent}
                       onChange={(e) => setGeneratedContent(e.target.value)}
                       placeholder="Class mastery analysis summaries and diagnostic reports will output here..."
-                      className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                      className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                     />
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Suggestions
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
 
-              {/* Tab 7: Teaching Insights */}
-              {activeTab === "insights" && (
-                <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start flex-1 min-h-0">
-                  <div className="lg:col-span-5 space-y-4 text-left">
-                    <Card className="shadow-none border border-zinc-200 rounded-lg bg-zinc-50/50">
-                      <CardHeader className="py-3">
-                        <CardTitle className="text-xs font-semibold text-zinc-800">Pedagogical Context</CardTitle>
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Suggestions
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab 7: Teaching Insights */}
+          {activeTab === "insights" && (
+            <div className="flex-1 flex flex-col space-y-4">
+              <div className="flex items-center justify-between border-b pb-2.5">
+                <h3 className="text-xs font-bold text-zinc-700 uppercase tracking-wide flex items-center gap-1">
+                  <Lightbulb className="size-4 text-primary shrink-0" /> Reinforcement Insights
+                </h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
+                  className="h-7 text-xs text-primary hover:bg-primary/5 flex items-center gap-1 border border-primary/20 rounded-lg"
+                >
+                  {isConfigExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
+                </Button>
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start flex-1 min-h-0">
+                {isConfigExpanded && (
+                  <div className="lg:col-span-4 space-y-4 text-left border border-zinc-150 p-4 rounded-xl bg-zinc-50/50 animate-in slide-in-from-left duration-200">
+                    <Card className="shadow-none border border-zinc-200 rounded-lg bg-white">
+                      <CardHeader className="py-2.5 border-b">
+                        <CardTitle className="text-xs font-bold text-zinc-700 uppercase">Workspace Parameters</CardTitle>
                       </CardHeader>
-                      <CardContent className="space-y-2 pt-0 text-xs font-medium text-zinc-600">
+                      <CardContent className="space-y-1 pt-3 text-xs font-semibold text-zinc-500">
                         {activeWorkspace ? (
-                          <div className="space-y-1 text-zinc-500">
-                            <div><strong>Course:</strong> {activeWorkspace.title}</div>
-                            <div><strong>Class Group:</strong> {activeWorkspace.class_name}</div>
-                            <div><strong>Average:</strong> {activeWorkspace.performance_avg}%</div>
-                          </div>
+                          <>
+                            <div>Course: {activeWorkspace.title}</div>
+                            <div>Class Group: {activeWorkspace.class_name}</div>
+                            <div>Average: {activeWorkspace.performance_avg}%</div>
+                          </>
                         ) : (
-                          <div className="text-zinc-400 text-center py-2">Select active workspace context.</div>
+                          <div className="text-zinc-400 text-center py-2 italic text-[11px]">Select active workspace context.</div>
                         )}
                       </CardContent>
                     </Card>
@@ -1586,44 +1544,250 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                     <Button
                       onClick={handleGenerateTeachingInsights}
                       disabled={isGenerating}
-                      className="w-full h-9 text-xs font-medium"
+                      className="w-full h-8.5 text-xs font-bold uppercase tracking-wider text-white bg-primary hover:bg-primary/95"
                     >
                       {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Lightbulb className="size-3.5 mr-1.5" />}
-                      Generate Teaching Insights
+                      Generate Insights
                     </Button>
                   </div>
+                )}
 
-                  <div className="lg:col-span-7 flex flex-col h-full min-h-[350px]">
-                    <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-lg flex items-start gap-2.5 mb-3 text-left">
-                      <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                      <div className="text-[11px] text-amber-900 leading-normal">
-                        <strong>Insights Protocol:</strong> AI suggestions are recommendations for guidance only. Lecturers remain responsible for all pedagogical and classroom choices.
-                      </div>
+                <div className={cn(
+                  "flex flex-col h-full min-h-[350px] space-y-3",
+                  isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12"
+                )}>
+                  <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl flex items-start gap-2.5 text-left">
+                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                    <div className="text-[10px] text-amber-900 leading-normal font-semibold">
+                      Insights Protocol: AI suggestions are recommendations for guidance only. Lecturers remain responsible for all pedagogical choices.
                     </div>
+                  </div>
 
-                    <Label className="text-xs font-medium text-zinc-700 mb-1.5 text-left">Actionable Teaching Improvements</Label>
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <Label className="text-xs font-bold text-zinc-700 mb-1 ml-0.5 text-left">Actionable Teaching Improvements</Label>
                     <Textarea
                       value={generatedContent}
                       onChange={(e) => setGeneratedContent(e.target.value)}
-                      placeholder="Suggested reinforcement topics, practical exercises, revision activities, and alternative methods..."
-                      className="flex-1 min-h-[300px] p-4 text-xs font-medium bg-zinc-50 border rounded-lg resize-none outline-none leading-relaxed text-zinc-700"
+                      placeholder="Suggested reinforcement topics, practical exercises, revision activities..."
+                      className="flex-1 min-h-[300px] p-4 text-sm font-semibold bg-zinc-50 border rounded-xl resize-none outline-none leading-relaxed text-zinc-700"
                     />
-                    {generatedContent && (
-                      <div className="flex gap-2 mt-3 justify-end">
-                        <Button variant="outline" size="sm" onClick={handleCopyDraft} className="text-xs font-semibold">
-                          <Copy className="size-3 mr-1" /> Copy Suggestions
-                        </Button>
-                      </div>
-                    )}
                   </div>
-                </div>
-              )}
 
+                  {generatedContent && (
+                    <div className="flex gap-2 justify-end shrink-0">
+                      <Button variant="outline" size="sm" onClick={handleCopyDraft} className="h-8 text-[10px] font-bold uppercase border-zinc-200 bg-white">
+                        <Copy className="size-3 mr-1" /> Copy Suggestions
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
-          </Card>
+          )}
+
         </div>
 
       </div>
+
+      {/* Slide-over Context Settings Sheet */}
+      <Sheet open={isContextSheetOpen} onOpenChange={setIsContextSheetOpen}>
+        <SheetContent className="w-full sm:max-w-md p-0 overflow-hidden rounded-l-xl bg-white border-l shadow-2xl flex flex-col">
+          <SheetHeader className="p-4 border-b bg-zinc-50/50">
+            <SheetTitle className="text-sm font-bold text-zinc-800">
+              Workspace Context Settings
+            </SheetTitle>
+            <SheetDescription className="text-[10px] text-zinc-400 font-medium">
+              Configure active workspaces, syllabus materials, and recent sessions.
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {/* Active Workspace */}
+            <div className="space-y-1.5">
+              <Label htmlFor="ws-select" className="text-xs font-bold text-zinc-700">Course Workspace</Label>
+              <select
+                id="ws-select"
+                value={selectedWorkspaceId}
+                onChange={(e) => setSelectedWorkspaceId(e.target.value)}
+                className="w-full h-8.5 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white text-zinc-700 outline-none"
+              >
+                {loadingWorkspaces ? (
+                  <option>Loading workspaces...</option>
+                ) : workspaces.length === 0 ? (
+                  <option>No workspaces found</option>
+                ) : (
+                  workspaces.map((ws) => (
+                    <option key={ws.id} value={ws.id}>
+                      {ws.code} - {ws.title}
+                    </option>
+                  ))
+                )}
+              </select>
+
+              {loadingWorkspaceDetail ? (
+                <div className="text-[10px] text-zinc-400 py-2 animate-pulse">Syncing parameters...</div>
+              ) : activeWorkspaceDetail ? (
+                <div className="p-3 bg-zinc-50 border border-zinc-150 rounded-xl text-[10px] font-semibold space-y-1.5 text-zinc-500">
+                  <div className="flex justify-between">
+                    <span>Institution:</span>
+                    <span className="text-zinc-800 font-bold truncate max-w-[160px]">{activeWorkspaceDetail.institution_name}</span>
+                  </div>
+                  {activeWorkspaceDetail.department_name && (
+                    <div className="flex justify-between">
+                      <span>Department:</span>
+                      <span className="text-zinc-800 font-bold truncate max-w-[160px]">{activeWorkspaceDetail.department_name}</span>
+                    </div>
+                  )}
+                  {activeWorkspaceDetail.option_name && (
+                    <div className="flex justify-between">
+                      <span>Program:</span>
+                      <span className="text-zinc-800 font-bold truncate max-w-[160px]">{activeWorkspaceDetail.option_name}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span>Class Group:</span>
+                    <span className="text-zinc-800 font-bold">{activeWorkspaceDetail.class_name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Academic Year:</span>
+                    <span className="text-zinc-800 font-bold">{activeWorkspaceDetail.academic_year}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total Students:</span>
+                    <span className="text-zinc-800 font-bold">{activeWorkspaceDetail.student_count} Enrolled</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Class Average:</span>
+                    <span className="text-primary font-bold">{activeWorkspaceDetail.performance_avg}% Avg</span>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <Separator className="bg-zinc-100" />
+
+            {/* Resource Context */}
+            <div className="space-y-2">
+              <Label className="text-xs font-bold text-zinc-700">Reference Sources</Label>
+              <div className="space-y-1.5 p-3 rounded-xl border border-zinc-150 bg-zinc-50/50">
+                <label className="flex items-center gap-2 text-xs font-semibold text-zinc-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useCourseNotes}
+                    onChange={(e) => setUseCourseNotes(e.target.checked)}
+                    className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
+                  />
+                  <span>Syllabus / Course Notes</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold text-zinc-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useLecturerMaterials}
+                    onChange={(e) => setUseLecturerMaterials(e.target.checked)}
+                    className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
+                  />
+                  <span>Lecturer Handouts</span>
+                </label>
+                <label className="flex items-center gap-2 text-xs font-semibold text-zinc-600 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={useAssessmentRubric}
+                    onChange={(e) => setUseAssessmentRubric(e.target.checked)}
+                    className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
+                  />
+                  <span>Assessment Rubric schema</span>
+                </label>
+              </div>
+
+              {workspaceMaterials.length > 0 && (
+                <div className="pt-1.5">
+                  <span className="text-[9px] font-bold text-zinc-400 uppercase tracking-wider block mb-1">Uploaded Handouts</span>
+                  <div className="space-y-1.5 max-h-32 overflow-y-auto pr-1 border border-zinc-150 rounded-xl p-2.5 bg-white">
+                    {workspaceMaterials.map((mat) => (
+                      <label key={mat.id} className="flex items-center gap-2 text-xs font-semibold text-zinc-600 cursor-pointer truncate" title={mat.display_name || mat.original_filename}>
+                        <input
+                          type="checkbox"
+                          checked={selectedMaterials.includes(mat.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedMaterials([...selectedMaterials, mat.id]);
+                            } else {
+                              setSelectedMaterials(selectedMaterials.filter(id => id !== mat.id));
+                            }
+                          }}
+                          className="rounded border-zinc-300 text-zinc-900 focus:ring-zinc-900 size-3.5"
+                        />
+                        <span className="truncate">{mat.display_name || mat.original_filename}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <Separator className="bg-zinc-100" />
+
+            {/* Session History */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-bold text-zinc-700">Recent Sessions</Label>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-6 w-6 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-lg"
+                  onClick={() => startNewSession("chat")}
+                  title="New Session"
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              </div>
+
+              <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                {sessions.length === 0 ? (
+                  <div className="text-xs text-zinc-400 py-4 text-center italic font-medium">No saved sessions.</div>
+                ) : (
+                  sessions.map((s) => (
+                    <div
+                      key={s.id}
+                      className={cn(
+                        "flex items-center justify-between p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-all",
+                        currentSessionId === s.id
+                          ? "border-primary bg-primary/[0.01] text-zinc-800 font-bold"
+                          : "border-zinc-150 text-zinc-600 bg-white"
+                      )}
+                      onClick={() => loadSession(s)}
+                    >
+                      <div className="truncate flex-1 text-left min-w-0 pr-2">
+                        <div className="truncate text-zinc-800 text-[11px]">{s.title}</div>
+                        <div className="text-[8px] text-zinc-400 uppercase font-black tracking-wider">{s.module}</div>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-6 w-6 text-zinc-400 hover:text-red-500 rounded-md hover:bg-red-50/50 shrink-0"
+                        onClick={(e) => deleteSession(s.id, e)}
+                      >
+                        <Trash2 className="size-3" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-4 border-t bg-zinc-50/50 flex justify-end">
+            <Button
+              size="sm"
+              className="h-8 px-4 font-bold text-[10px] uppercase rounded-lg text-white bg-primary hover:bg-primary/95"
+              onClick={() => setIsContextSheetOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
+        </SheetContent>
+      </Sheet>
+
     </div>
   );
 }

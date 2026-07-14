@@ -134,6 +134,14 @@ class RubricResponse(BaseModel):
     criteria: list[RubricCriterionResponse]
 
 
+class RubricAlignmentItem(BaseModel):
+    criterion: str
+    description: str
+    points_awarded: float
+    max_points: float
+    matched: bool
+
+
 class SubmissionGradeResponse(BaseModel):
     """Full grade detail for one response."""
     model_config = {"from_attributes": True}
@@ -169,6 +177,16 @@ class SubmissionGradeResponse(BaseModel):
     question_text: str | None = None
     student_answer: str | None = None
     rubric: RubricResponse | None = None
+
+    # Redesign specs
+    ai_review_status: str | None = None  # PENDING | PROCESSING | COMPLETED | FAILED
+    ai_started_at: datetime | None = None
+    ai_completed_at: datetime | None = None
+    ai_confidence_level: str | None = None  # HIGH | MEDIUM | LOW
+    rubric_alignment: list[RubricAlignmentItem] | None = None
+    detected_issues: list[str] | None = None
+    question_grading_mode: str | None = None  # AUTO | AI_ASSISTED | MANUAL
+
 
 
 class GradingQueueItemResponse(BaseModel):

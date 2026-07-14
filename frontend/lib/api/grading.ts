@@ -36,8 +36,8 @@ export const gradingApi = {
     apiClient(`/grading/assessment/${assessmentId}/stats/classes`),
   getClassAiSummary: (assessmentId: string, classId: string) => 
     apiClient(`/grading/assessment/${assessmentId}/class/${classId}/ai-summary`),
-  getAssessmentAnalytics: (assessmentId: string) => 
-    apiClient(`/grading/assessment/${assessmentId}/analytics`),
+  getAssessmentAnalytics: (assessmentId: string) =>
+    apiClient(`/analytics/assessment/${assessmentId}/ai-insights`),
   verifyAttemptGrades: (attemptId: string) => 
     apiClient(`/grading/attempt/${attemptId}/verify`),
   suggestChanges: (responseId: string, feedback: string) => 

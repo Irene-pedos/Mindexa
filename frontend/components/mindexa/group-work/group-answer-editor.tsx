@@ -61,18 +61,51 @@ export function GroupAnswerEditor({
   onSave, 
   currentUserId 
 }: GroupAnswerEditorProps) {
-  const [localContent, setLocalContent] = useState<any>(answer?.answer_content || "");
-  const [localNotes, setLocalNotes] = useState<any>(answer?.notes_content || "");
+  const getInitialContent = () => {
+    const raw = answer?.answer_content;
+    if (!raw) return "";
+    if (typeof raw === "object") {
+      return raw.selected_option_id || raw.text || raw.answer_text || "";
+    }
+    return raw;
+  };
+
+  const getInitialNotes = () => {
+    const raw = answer?.notes_content;
+    if (!raw) return "";
+    if (typeof raw === "object") {
+      return raw.text || "";
+    }
+    return raw;
+  };
+
+  const [localContent, setLocalContent] = useState<any>(getInitialContent());
+  const [localNotes, setLocalNotes] = useState<any>(getInitialNotes());
   const [isSaving, setIsSaving] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (answer?.answer_content !== undefined) {
-      setLocalContent(answer.answer_content);
+    if (answer?.answer_content !== undefined && answer.answer_content !== null) {
+      const raw = answer.answer_content;
+      if (typeof raw === "object") {
+        setLocalContent(raw.selected_option_id || raw.text || raw.answer_text || "");
+      } else {
+        setLocalContent(raw);
+      }
+    } else {
+      setLocalContent("");
     }
-    if (answer?.notes_content !== undefined) {
-      setLocalNotes(answer.notes_content);
+
+    if (answer?.notes_content !== undefined && answer.notes_content !== null) {
+      const rawNotes = answer.notes_content;
+      if (typeof rawNotes === "object") {
+        setLocalNotes(rawNotes.text || "");
+      } else {
+        setLocalNotes(rawNotes);
+      }
+    } else {
+      setLocalNotes("");
     }
   }, [answer]);
 

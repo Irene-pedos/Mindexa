@@ -20,6 +20,8 @@ import {
   ThumbsUp,
   ThumbsDown,
   HelpCircle,
+  Sparkles,
+  RefreshCcw,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
@@ -32,6 +34,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 interface AIReviewPanelProps {
   queueItemId?: string;
@@ -55,6 +58,8 @@ export function AIReviewPanel({
     "thumbs_up" | "thumbs_down" | null
   >(null);
   const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [pollCount, setPollCount] = useState(0);
+  const [pollTimeoutReached, setPollTimeoutReached] = useState(false);
 
   const loadDetails = useCallback(async () => {
     setLoading(true);
@@ -72,13 +77,46 @@ export function AIReviewPanel({
   }, [responseId]);
 
   useEffect(() => {
+    setPollCount(0);
+    setPollTimeoutReached(false);
     loadDetails();
   }, [loadDetails]);
+
+  useEffect(() => {
+    let intervalId: any = null;
+    const isPending = details?.ai_review_status === "PENDING" || details?.ai_review_status === "PROCESSING";
+    
+    if (isPending && !pollTimeoutReached) {
+      intervalId = setInterval(() => {
+        setPollCount((prevCount) => {
+          const nextCount = prevCount + 1;
+          if (nextCount >= 12) {
+            setPollTimeoutReached(true);
+            if (intervalId) clearInterval(intervalId);
+            return nextCount;
+          }
+          loadDetails();
+          return nextCount;
+        });
+      }, 5000);
+    }
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [details?.ai_review_status, pollTimeoutReached, loadDetails]);
 
   const handleRequestSuggestion = async () => {
     if (!queueItemId) {
       toast.error("Cannot request AI suggestion without a queue item ID.");
       return;
+    }
+
+    if (hasSuggestion) {
+      if (!confirm("This will discard your current edits and generate a new AI review. Do you want to continue?")) {
+        return;
+      }
     }
 
     setRequesting(true);
@@ -109,6 +147,22 @@ export function AIReviewPanel({
     }
   };
 
+  const getReviewDuration = () => {
+    if (!details?.ai_started_at || !details?.ai_completed_at) return null;
+    const start = new Date(details.ai_started_at).getTime();
+    const end = new Date(details.ai_completed_at).getTime();
+    if (isNaN(start) || isNaN(end)) return null;
+    return Math.max(1, Math.round((end - start) / 1000));
+  };
+
+  const durationSec = getReviewDuration();
+  
+  const confidenceLevel = details?.ai_confidence_level || (
+    details?.ai_confidence !== null && details?.ai_confidence !== undefined
+      ? (details.ai_confidence >= 0.8 ? "HIGH" : (details.ai_confidence >= 0.5 ? "MEDIUM" : "LOW"))
+      : null
+  );
+
   if (loading) {
     return (
       <Card className="shadow-none border border-dashed border-primary/20">
@@ -138,21 +192,21 @@ export function AIReviewPanel({
             {details?.ai_grading_basis === "RUBRIC" ? (
               <Badge
                 variant="outline"
-                className="text-[10px] font-bold uppercase bg-emerald-500/10 border-emerald-500/20 text-emerald-700 shadow-none"
+                className="text-[10px] font-medium uppercase bg-emerald-500/10 border-emerald-500/20 text-emerald-700 shadow-none"
               >
                 Rubric-Based
               </Badge>
             ) : details?.ai_grading_basis === "GENERAL_KNOWLEDGE" ? (
               <Badge
                 variant="outline"
-                className="text-[10px] font-bold uppercase bg-amber-500/10 border-amber-500/20 text-amber-700 shadow-none"
+                className="text-[10px] font-medium uppercase bg-amber-500/10 border-amber-500/20 text-amber-700 shadow-none"
               >
                 General Knowledge
               </Badge>
             ) : (
               <Badge
                 variant="outline"
-                className="text-[10px] font-bold uppercase bg-muted/10 border-border/20 text-muted-foreground shadow-none"
+                className="text-[10px] font-medium uppercase bg-muted/10 border-border/20 text-muted-foreground shadow-none"
               >
                 AI Basis Unavailable
               </Badge>
@@ -175,31 +229,116 @@ export function AIReviewPanel({
           </Alert>
         )}
 
-        {!hasSuggestion ? (
-          <div className="flex flex-col items-center justify-center py-6 text-center space-y-3">
-            <Loader2 className="size-6 text-primary/50 animate-spin mb-2" />
-            <p className="text-sm font-medium text-foreground">
-              AI Review in Progress
+        {pollTimeoutReached ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-amber-500/5 rounded-xl border border-dashed border-amber-500/20">
+            <AlertCircle className="size-8 text-amber-500" />
+            <p className="text-sm font-semibold text-amber-700">
+              AI Review taking longer than expected
             </p>
-            <p className="text-xs text-muted-foreground max-w-[250px]">
-              The AI grading assistant automatically processes submissions in
-              the background. Please check back shortly for the suggested score
-              and rationale.
+            <p className="text-xs text-amber-600/80 max-w-[280px] leading-relaxed font-medium">
+              The AI evaluation is still running on the server. You can check status again or restart.
             </p>
+            <div className="flex items-center gap-3 mt-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setPollCount(0);
+                  setPollTimeoutReached(false);
+                  loadDetails();
+                }}
+                className="rounded-lg font-semibold h-8 text-xs border-amber-500/20 hover:bg-amber-500/5 text-amber-700"
+              >
+                <RefreshCcw className="size-3 mr-1.5" /> Check Status Again
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => {
+                  setPollCount(0);
+                  setPollTimeoutReached(false);
+                  handleRequestSuggestion();
+                }}
+                className="rounded-lg font-semibold h-8 text-xs bg-amber-600 hover:bg-amber-700 text-white border-0"
+              >
+                <Sparkles className="size-3 mr-1.5" /> Restart Evaluation
+              </Button>
+            </div>
+          </div>
+        ) : requesting || details?.ai_review_status === "PENDING" || details?.ai_review_status === "PROCESSING" ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-muted/5 rounded-xl border border-dashed border-primary/20">
+            <Loader2 className="size-8 text-primary animate-spin" />
+            <p className="text-sm font-semibold text-foreground animate-pulse">
+              AI Review in Progress...
+            </p>
+            <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed font-medium">
+              The AI grading assistant is currently evaluating this response and mapping it to the rubric.
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={loadDetails}
+              className="mt-2 rounded-lg font-semibold flex items-center gap-1.5 h-8 text-xs border-primary/20 hover:bg-primary/5 text-primary"
+            >
+              <RefreshCcw className="size-3 animate-spin-reverse" /> Check Status
+            </Button>
+          </div>
+        ) : details?.ai_review_status === "FAILED" ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-rose-500/5 rounded-xl border border-dashed border-rose-500/20">
+            <AlertCircle className="size-8 text-rose-500" />
+            <p className="text-sm font-semibold text-rose-700">
+              AI Review Failed
+            </p>
+            <p className="text-xs text-rose-600/80 max-w-[280px] leading-relaxed font-medium">
+              The evaluation engine was unable to grade this response.
+            </p>
+            <Button
+              size="sm"
+              onClick={handleRequestSuggestion}
+              className="mt-2 rounded-lg font-semibold flex items-center gap-1.5 h-8 text-xs bg-rose-600 hover:bg-rose-700 text-white border-0"
+            >
+              <Sparkles className="size-3" /> Retry AI Review
+            </Button>
+          </div>
+        ) : !hasSuggestion ? (
+          <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-muted/5 rounded-xl border border-dashed">
+            <BrainCircuit className="size-8 text-muted-foreground/45" />
+            <p className="text-sm font-semibold text-foreground">
+              No AI Suggestion Generated Yet
+            </p>
+            <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed font-medium">
+              Generate an AI-suggested score and feedback rationale for this student response.
+            </p>
+            <Button
+              size="sm"
+              onClick={handleRequestSuggestion}
+              className="mt-2 rounded-lg font-semibold flex items-center gap-1.5 h-8 text-xs"
+            >
+              <Sparkles className="size-3" /> Generate AI Suggestion
+            </Button>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="space-y-4 animate-in fade-in duration-300">
             {details?.ai_grading_basis !== "RUBRIC" && (
               <Alert className="bg-amber-500/10 border-amber-500/20 text-amber-800 py-2 rounded-xl">
                 <AlertCircle className="size-4 text-amber-600" />
                 <AlertDescription className="text-[11px] font-semibold text-amber-800">
-                  ⚠ Graded from AI general knowledge — no rubric defined.
+                  Graded from AI general knowledge — no rubric defined.
                 </AlertDescription>
               </Alert>
             )}
+ 
+            <div className="py-2 px-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-[11px] text-emerald-700 font-semibold flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <CheckCircle2 className="size-3.5 text-emerald-600" /> AI Review Completed • Generated automatically
+              </span>
+              {durationSec !== null && (
+                <span className="text-[10px] opacity-80 font-mono">Review completed in {durationSec}s</span>
+              )}
+            </div>
+
             <div className="flex justify-between items-start">
               <div>
-                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
                   Suggested Score
                 </p>
                 <div className="text-2xl font-bold text-primary">
@@ -210,20 +349,32 @@ export function AIReviewPanel({
                 </div>
               </div>
 
-              {details.ai_confidence && (
+              {confidenceLevel && (
                 <div className="text-right flex items-center gap-1.5 justify-end">
                   <div>
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center justify-end gap-1">
-                      Confidence
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1 flex items-center justify-end gap-1">
+                      Confidence Level
                     </p>
-                    <Badge
-                      variant={
-                        details.ai_confidence > 0.8 ? "outline" : "secondary"
-                      }
-                      className="text-xs"
-                    >
-                      {(details.ai_confidence * 100).toFixed(0)}%
-                    </Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge
+                        variant="secondary"
+                        className={cn(
+                          "text-xs font-semibold px-2 py-0.5 uppercase border",
+                          confidenceLevel === "HIGH"
+                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                            : confidenceLevel === "MEDIUM"
+                              ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                              : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                        )}
+                      >
+                        {confidenceLevel}
+                      </Badge>
+                      {details.ai_confidence !== null && (
+                        <span className="text-[11px] font-mono text-muted-foreground/80">
+                          ({(details.ai_confidence * (details.ai_confidence <= 1.0 ? 100 : 1)).toFixed(0)}%)
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <TooltipProvider>
                     <Tooltip>
@@ -249,12 +400,12 @@ export function AIReviewPanel({
 
             <Separator className="bg-primary/10" />
 
-            {/* Why this score? Expandable section (Bug 15) */}
+            {/* Why this score? Expandable section */}
             <div className="border border-primary/10 rounded-lg overflow-hidden bg-background">
               <button
                 type="button"
                 onClick={() => setExplainOpen(!explainOpen)}
-                className="w-full flex items-center justify-between px-3 py-2 text-xs font-bold uppercase tracking-wider text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
+                className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider text-primary bg-primary/5 hover:bg-primary/10 transition-colors"
               >
                 <span>Why this score?</span>
                 <span className="text-[10px] normal-case font-medium text-muted-foreground">
@@ -264,7 +415,7 @@ export function AIReviewPanel({
               {explainOpen && (
                 <div className="p-3 space-y-3 text-[11px] leading-relaxed text-foreground/80 border-t border-primary/10 bg-muted/5">
                   <div>
-                    <span className="font-bold text-muted-foreground uppercase block mb-1">
+                    <span className="font-semibold text-muted-foreground uppercase block mb-1">
                       Grading Source Basis
                     </span>
                     <p>
@@ -284,7 +435,7 @@ export function AIReviewPanel({
                       {details.ai_feedback_strengths &&
                         details.ai_feedback_strengths.length > 0 && (
                           <div>
-                            <span className="font-bold text-emerald-700 uppercase block mb-0.5">
+                            <span className="font-semibold text-emerald-700 uppercase block mb-0.5">
                               Key Strengths Matched
                             </span>
                             <ul className="list-disc pl-4 space-y-0.5">
@@ -297,7 +448,7 @@ export function AIReviewPanel({
                       {details.ai_feedback_improvements &&
                         details.ai_feedback_improvements.length > 0 && (
                           <div>
-                            <span className="font-bold text-amber-700 uppercase block mb-0.5">
+                            <span className="font-semibold text-amber-700 uppercase block mb-0.5">
                               Concepts Needing Improvement
                             </span>
                             <ul className="list-disc pl-4 space-y-0.5">
@@ -312,7 +463,7 @@ export function AIReviewPanel({
                       {details.ai_feedback_suggestions &&
                         details.ai_feedback_suggestions.length > 0 && (
                           <div>
-                            <span className="font-bold text-sky-700 uppercase block mb-0.5">
+                            <span className="font-semibold text-sky-700 uppercase block mb-0.5">
                               Suggested Next Steps
                             </span>
                             <ul className="list-disc pl-4 space-y-0.5">
@@ -327,7 +478,7 @@ export function AIReviewPanel({
                     </div>
                   ) : (
                     <div>
-                      <span className="font-bold text-muted-foreground uppercase block mb-1">
+                      <span className="font-semibold text-muted-foreground uppercase block mb-1">
                         Evaluation Details
                       </span>
                       <p>
@@ -342,17 +493,49 @@ export function AIReviewPanel({
             </div>
 
             <div className="space-y-2">
-              <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Rationale
               </p>
-              <p className="text-sm leading-relaxed text-foreground/90">
+              <p className="text-sm leading-relaxed text-foreground/90 font-medium">
                 {details.ai_rationale}
               </p>
             </div>
 
-            {details.rubric_scores && details.rubric_scores.length > 0 && (
+            {/* Structured Rubric Alignment Checklist (B2 & A2 read-only report) */}
+            {details.rubric_alignment && details.rubric_alignment.length > 0 ? (
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
+                  <CheckCircle2 className="size-3.5 text-primary" /> AI Rubric Alignment Report
+                </p>
+                <div className="space-y-2">
+                  {details.rubric_alignment.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="bg-background rounded-xl border border-border/60 p-3 text-xs leading-normal space-y-1.5"
+                    >
+                      <div className="flex justify-between items-center font-medium">
+                        <span className="font-bold flex items-center gap-1.5">
+                          {item.matched ? (
+                            <CheckCircle2 className="size-3.5 text-emerald-500" />
+                          ) : (
+                            <AlertCircle className="size-3.5 text-rose-500" />
+                          )}
+                          {item.criterion}
+                        </span>
+                        <Badge variant="outline" className="font-mono text-[10px] bg-primary/5 text-primary">
+                          {item.points_awarded} / {item.max_points} pts
+                        </Badge>
+                      </div>
+                      {item.description && (
+                        <p className="text-muted-foreground font-medium pl-5">{item.description}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : details.rubric_scores && details.rubric_scores.length > 0 ? (
               <div className="space-y-2 pt-2">
-                <p className="text-xs font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                   Rubric Alignment
                 </p>
                 <div className="space-y-2">
@@ -374,9 +557,29 @@ export function AIReviewPanel({
                   ))}
                 </div>
               </div>
+            ) : null}
+
+            {/* Flagged Analysis Issues */}
+            {details.detected_issues && details.detected_issues.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <p className="text-xs font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1">
+                  <ShieldAlert className="size-3.5 text-rose-500" /> Flagged Analysis Issues
+                </p>
+                <div className="space-y-1.5">
+                  {details.detected_issues.map((issue, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 border border-rose-500/15 bg-rose-500/5 rounded-xl flex gap-2 items-start text-xs text-rose-700 leading-normal font-medium"
+                    >
+                      <AlertCircle className="size-3.5 shrink-0 text-rose-500 mt-0.5" />
+                      <span>{issue}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
 
-            {/* Structured feedback signals (Bug 16) */}
+            {/* Structured feedback signals */}
             <div className="pt-2.5 border-t border-primary/10 flex items-center justify-between gap-4">
               <span className="text-[11px] font-semibold text-muted-foreground">
                 Was this AI suggestion accurate?

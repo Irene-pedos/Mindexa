@@ -162,11 +162,11 @@ export default function StudentWorkspaceDetailPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/25 pb-4">
         <div className="flex items-center gap-3 min-w-0">
-          <Button variant="outline" size="icon" asChild className="h-9 w-9 rounded-lg shrink-0">
+          <Button variant="outline" size="icon" asChild className="h-9 w-9 rounded-lg shrink-0 border-border/60">
             <Link href="/student/courses">
               <ChevronLeft className="size-5 text-muted-foreground" />
             </Link>
@@ -174,13 +174,15 @@ export default function StudentWorkspaceDetailPage() {
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold tracking-tight text-foreground truncate">{workspace.title}</h1>
             <div className="flex items-center gap-2 mt-1">
-              <Badge variant="outline" className="text-[10px] font-medium px-1.5 h-5">{workspace.code}</Badge>
-              <span className="text-xs text-muted-foreground">{workspace.academic_year || "Global"}</span>
+              <Badge variant="outline" className="text-[10px] font-semibold px-1.5 h-5">{workspace.code}</Badge>
+              <span className="text-xs text-muted-foreground font-medium">{workspace.academic_year || "Global"}</span>
             </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="px-2.5 py-1 text-xs text-emerald-700 bg-emerald-50 border-emerald-200">Active</Badge>
+          <Badge variant="outline" className="px-2.5 py-1 text-xs text-success bg-success/10 border-success/20 inline-flex items-center gap-1.5">
+            <span className="size-1.5 rounded-full bg-success animate-pulse" /> Active
+          </Badge>
         </div>
       </div>
 
@@ -188,71 +190,71 @@ export default function StudentWorkspaceDetailPage() {
         {/* Main Area */}
         <div className="lg:col-span-9 space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <Card>
-              <CardContent className="p-5">
-                <div className="flex justify-between items-center mb-3">
-                  <span className="text-sm font-medium text-muted-foreground">Course Progress</span>
-                  <span className="text-2xl font-semibold tracking-tight text-primary">{workspace.progress}%</span>
+            <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+              <CardContent className="p-4 space-y-3">
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-xs font-semibold text-muted-foreground">Course Progress</span>
+                  <span className="text-xl font-bold tracking-tight text-primary">{workspace.progress}%</span>
                 </div>
-                <Progress value={workspace.progress} className="h-2 bg-muted" />
+                <Progress value={workspace.progress} className="h-1.5 bg-muted" />
               </CardContent>
             </Card>
 
-            <Card>
-              <CardContent className="p-5 grid grid-cols-2 divide-x">
-                <div className="space-y-1">
-                  <span className="text-xs text-muted-foreground block">Cohort Size</span>
-                  <span className="text-2xl font-semibold tracking-tight text-foreground/80">{workspace.enrolled} Students</span>
+            <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+              <CardContent className="p-4 grid grid-cols-2 divide-x divide-border/40">
+                <div className="space-y-0.5">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground block">Cohort Size</span>
+                  <span className="text-lg font-semibold tracking-tight text-foreground/80">{workspace.enrolled} Students</span>
                 </div>
-                <div className="space-y-1 pl-4">
-                  <span className="text-xs text-muted-foreground block">Assessments</span>
-                  <span className="text-2xl font-semibold tracking-tight text-foreground/80">{workspace.assessments} Total</span>
+                <div className="space-y-0.5 pl-4">
+                  <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground block">Assessments</span>
+                  <span className="text-lg font-semibold tracking-tight text-foreground/80">{workspace.assessments} Total</span>
                 </div>
               </CardContent>
             </Card>
           </div>
 
-          <Card>
-            <CardHeader className="pb-3">
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
               <CardTitle className="text-lg font-semibold">Course Description</CardTitle>
             </CardHeader>
-            <CardContent>
-              <p className="text-sm text-muted-foreground leading-relaxed">
+            <CardContent className="pb-4 px-5">
+              <p className="text-xs font-medium text-muted-foreground/90 leading-relaxed">
                 {workspace.description || "No description provided for this course."}
               </p>
             </CardContent>
           </Card>
 
           {/* Library / Course Materials */}
-          <Card>
-            <CardHeader className="pb-3">
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
               <CardTitle className="text-lg font-semibold flex items-center gap-2">
-                <BookOpen className="size-5 text-muted-foreground" /> Course Materials ({materials.length})
+                <BookOpen className="size-5 text-primary" /> Course Materials ({materials.length})
               </CardTitle>
-              <CardDescription>Lecture notes, slides, and study resources uploaded by your instructor.</CardDescription>
+              <CardDescription className="text-xs">Lecture notes, slides, and study resources uploaded by your instructor.</CardDescription>
             </CardHeader>
-            <CardContent className="p-0">
+            <CardContent className="p-0 border-t border-border/40">
               {materials.length > 0 ? (
-                <AttachmentGroup className="flex-col gap-2 p-4 border-t">
+                <AttachmentGroup className="flex-col gap-2 p-4">
                   {materials.map((m) => (
                     <Attachment
                       key={m.id}
-                      className="w-full justify-between hover:bg-accent/10 transition-all"
+                      className="w-full justify-between hover:bg-card/45 bg-card/10 border border-border/20 rounded-xl p-3.5 transition-all"
                     >
                       <AttachmentMedia>
                         <FileCodeIcon className="size-5 text-primary" />
                       </AttachmentMedia>
                       <AttachmentContent>
-                        <AttachmentTitle>{m.display_name || m.original_filename}</AttachmentTitle>
-                        <AttachmentDescription>
+                        <AttachmentTitle className="text-sm font-semibold">{m.display_name || m.original_filename}</AttachmentTitle>
+                        <AttachmentDescription className="text-[11px] font-medium text-muted-foreground mt-0.5">
                           {m.file_extension?.replace(".", "").toUpperCase() || "FILE"} · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)} MB · Version {m.version}
                         </AttachmentDescription>
                       </AttachmentContent>
                       <AttachmentActions>
-                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => handleView(m)}>
+                        <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg hover:bg-muted" onClick={() => handleView(m)}>
                           <Eye className="size-4" />
                         </Button>
-                        <Button variant="outline" size="sm" className="h-8 text-xs font-semibold rounded-lg" onClick={() => handleDownload(m)} disabled={downloadingId === m.id}>
+                        <Button variant="outline" size="sm" className="h-8 text-xs font-semibold rounded-lg border-border/60" onClick={() => handleDownload(m)} disabled={downloadingId === m.id}>
                           {downloadingId === m.id ? <Loader2 className="size-3.5 animate-spin" /> : <Download className="size-3.5 mr-2" />}
                           {downloadingId === m.id ? "Downloading..." : "Download"}
                         </Button>
@@ -261,9 +263,9 @@ export default function StudentWorkspaceDetailPage() {
                   ))}
                 </AttachmentGroup>
               ) : (
-                <div className="py-16 text-center border-t">
-                  <FileText className="size-12 text-muted-foreground mx-auto mb-4 opacity-20" />
-                  <p className="text-muted-foreground">No course materials uploaded yet.</p>
+                <div className="py-16 text-center">
+                  <FileText className="size-12 text-muted-foreground/30 mx-auto mb-4" />
+                  <p className="text-xs font-semibold text-muted-foreground">No course materials uploaded yet.</p>
                 </div>
               )}
             </CardContent>
@@ -272,17 +274,17 @@ export default function StudentWorkspaceDetailPage() {
 
         {/* Sidebar */}
         <div className="lg:col-span-3 space-y-6">
-          <Card className="bg-primary/5 border-primary/10">
+          <Card className="bg-primary/5 border border-primary/10 rounded-xl shadow-sm overflow-hidden">
             <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold text-primary">Quick Navigation</CardTitle>
+              <CardTitle className="text-xs uppercase font-bold tracking-wider text-primary">Quick Navigation</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button asChild className="w-full justify-between" size="sm">
+              <Button asChild className="w-full justify-between h-9 text-xs font-semibold rounded-lg shadow-none" size="sm">
                 <Link href="/student/assessments">
                   Assessments <ArrowRight className="size-4" />
                 </Link>
               </Button>
-              <Button asChild variant="outline" className="w-full" size="sm">
+              <Button asChild variant="outline" className="w-full h-9 text-xs font-semibold rounded-lg border-border/60" size="sm">
                 <Link href="/student/study" className="flex items-center gap-2 justify-center">
                   <BrainCircuit className="size-4" /> Study Agent
                 </Link>
@@ -290,16 +292,16 @@ export default function StudentWorkspaceDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardContent className="p-5 text-center space-y-4">
-              <div className="size-12 rounded-full bg-muted mx-auto flex items-center justify-center">
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardContent className="p-4 text-center space-y-4">
+              <div className="size-12 rounded-full bg-muted/65 mx-auto flex items-center justify-center border border-border/20">
                 <Users className="size-6 text-muted-foreground" />
               </div>
               <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Lead Instructor</p>
-                <p className="font-semibold text-foreground">{workspace.lecturer}</p>
+                <p className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Lead Instructor</p>
+                <p className="text-sm font-semibold text-foreground mt-0.5">{workspace.lecturer}</p>
               </div>
-              <Button variant="outline" size="sm" className="w-full">Contact Instructor</Button>
+              <Button variant="outline" size="sm" className="w-full h-8 text-xs font-semibold rounded-lg border-border/60">Contact Instructor</Button>
             </CardContent>
           </Card>
         </div>

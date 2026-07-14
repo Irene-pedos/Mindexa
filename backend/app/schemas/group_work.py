@@ -287,6 +287,7 @@ class GroupSubmissionGradeRequest(BaseModel):
     max_score: float = Field(..., gt=0)
     feedback: str | None = Field(default=None, max_length=5000)
     member_overrides: dict[str, float] | None = None
+    is_final: bool | None = Field(default=True)
 
     @model_validator(mode="after")
     def score_cannot_exceed_max(self) -> "GroupSubmissionGradeRequest":

@@ -20,20 +20,15 @@ import {
   Filter,
   Plus,
   ArrowRight,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import Link from "next/link";
 import { academicApi, TeachingAssignment } from "@/lib/api/academic";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { notificationApi } from "@/lib/api/notification";
 
 export default function LecturerAssignmentsPage() {
@@ -41,6 +36,7 @@ export default function LecturerAssignmentsPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("active");
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
 
   const loadAssignments = useCallback(async () => {
     setLoading(true);
@@ -89,18 +85,36 @@ export default function LecturerAssignmentsPage() {
     });
   }, [assignments, searchTerm, statusFilter]);
 
+  // Group assignments by Academic Year or Period
+  const groupedAssignments = useMemo(() => {
+    const groups: Record<string, TeachingAssignment[]> = {};
+    filteredAssignments.forEach((assignment) => {
+      const key = assignment.academic_year || "Ongoing Semesters";
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(assignment);
+    });
+    return groups;
+  }, [filteredAssignments]);
+
+  const toggleGroup = (groupName: string) => {
+    setCollapsedGroups((prev) => ({
+      ...prev,
+      [groupName]: !prev[groupName],
+    }));
+  };
+
   const activeCount = assignments.filter((a) => a.is_active !== false).length;
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto space-y-6 p-6">
+      <div className="w-full space-y-3.5 p-1 md:p-2">
         <div className="space-y-1">
-          <Skeleton className="h-8 w-48 rounded-md" />
+          <Skeleton className="h-7 w-48 rounded-md" />
           <Skeleton className="h-4 w-72 rounded-md" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton key={i} className="h-48 w-full rounded-xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+          {[1, 2, 3, 4].map((i) => (
+            <Skeleton key={i} className="h-40 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -108,38 +122,38 @@ export default function LecturerAssignmentsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 p-6">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-0.5">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground/90 flex items-center gap-2">
-            Official Assignments
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+      {/* Header section */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+            Teaching Assignments
           </h1>
-          <p className="text-muted-foreground text-[11px] font-semibold uppercase tracking-widest mt-0.5">
-            Institutional Registry of your teaching responsibilities
+          <p className="text-sm text-muted-foreground mt-1 font-medium">
+            Registry of institutional assignments and module deployments.
           </p>
         </div>
         <Button
           size="sm"
           asChild
-          className="h-9 px-5 font-semibold text-[10px] uppercase tracking-widest rounded-lg shadow-none"
+          className="h-8 px-4 font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-none text-white"
         >
           <Link href="/lecturer/courses/new">
-            <Plus className="mr-1.5 size-3.5" /> Initialize Workspace
+            <Plus className="mr-1.5 size-3.5" /> New Course
           </Link>
         </Button>
       </div>
 
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-muted/20 pb-4">
-        <div className="flex items-center gap-3">
-          <div className="relative w-64">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
-              placeholder="Filter by course name or code..."
-              className="pl-9 h-9 text-xs rounded-xl border-muted/30 bg-muted/5 focus:bg-background transition-all"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+      {/* Filter and Tabs bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-1.5 border-b border-zinc-100">
+        <div className="relative w-full md:w-72">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search by code or course..."
+            className="pl-9 h-8.5 text-xs rounded-lg border-zinc-200 bg-white"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
         </div>
 
         <Tabs
@@ -147,22 +161,22 @@ export default function LecturerAssignmentsPage() {
           onValueChange={setStatusFilter}
           className="w-full md:w-auto"
         >
-          <TabsList className="bg-muted/10 p-1 rounded-xl h-9 border border-muted/20 shadow-none">
+          <TabsList className="bg-zinc-100 p-1 rounded-lg h-8.5 border shadow-none">
             <TabsTrigger
               value="active"
-              className="text-[10px] font-semibold uppercase tracking-widest px-4 h-7"
+              className="text-[10px] font-bold uppercase tracking-wider px-3.5 h-6.5 data-[state=active]:bg-white data-[state=active]:text-primary"
             >
               Active ({activeCount})
             </TabsTrigger>
             <TabsTrigger
               value="archived"
-              className="text-[10px] font-semibold uppercase tracking-widest px-4 h-7"
+              className="text-[10px] font-bold uppercase tracking-wider px-3.5 h-6.5 data-[state=active]:bg-white data-[state=active]:text-primary"
             >
               Past
             </TabsTrigger>
             <TabsTrigger
               value="all"
-              className="text-[10px] font-semibold uppercase tracking-widest px-4 h-7"
+              className="text-[10px] font-bold uppercase tracking-wider px-3.5 h-6.5 data-[state=active]:bg-white data-[state=active]:text-primary"
             >
               All Time
             </TabsTrigger>
@@ -170,136 +184,140 @@ export default function LecturerAssignmentsPage() {
         </Tabs>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {/* Collapsible Assignment Groups */}
+      <div className="space-y-4">
         {filteredAssignments.length === 0 ? (
-          <Card className="col-span-full border-dashed bg-muted/5 rounded-2xl border-muted/20 shadow-none">
-            <CardContent className="py-24 text-center">
-              <div className="size-12 rounded-full bg-muted/30 flex items-center justify-center mx-auto mb-4 text-muted-foreground/30 border border-muted/40">
-                <Filter className="size-6" />
+          <Card className="border-dashed bg-zinc-50/50 rounded-xl border-zinc-200/80 shadow-none">
+            <CardContent className="py-16 text-center">
+              <div className="size-10 rounded-full bg-zinc-100 flex items-center justify-center mx-auto mb-3 text-muted-foreground/45 border border-zinc-200">
+                <Filter className="size-4.5" />
               </div>
-              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
-                No assignments found.
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                No teaching assignments found.
               </p>
-              <p className="text-xs text-muted-foreground/60 mt-1.5">
-                Adjust your filters or contact the institutional admin for
-                deployment.
+              <p className="text-xs text-muted-foreground/60 mt-1 font-medium">
+                Adjust search keywords or contact institutional admin for deployment.
               </p>
             </CardContent>
           </Card>
         ) : (
-          filteredAssignments.map((assignment) => (
-            <Card
-              key={assignment.id}
-              className={cn(
-                "hover:border-primary/20 transition-all group overflow-hidden shadow-none border rounded-2xl flex flex-col",
-                assignment.is_active === false
-                  ? "bg-muted/5 opacity-80"
-                  : "bg-white",
-              )}
-            >
-              <CardHeader
-                className={cn(
-                  "pb-3 px-5 pt-4 border-b border-muted/10",
-                  assignment.is_active !== false
-                    ? "bg-primary/[0.02]"
-                    : "bg-transparent",
-                )}
-              >
-                <div className="flex justify-between items-start gap-3">
-                  <div className="min-w-0">
-                    <CardTitle className="text-sm font-semibold truncate leading-tight text-foreground/90 group-hover:text-primary transition-colors">
-                      {assignment.course_name || "Unknown Module"}
-                    </CardTitle>
-                    <CardDescription className="font-mono text-[10px] font-bold text-primary/60 mt-1 flex items-center gap-1.5 uppercase tracking-wider">
-                      <Badge
-                        variant="outline"
-                        className="h-4 px-1.5 text-[8px] bg-primary/5 border-primary/20"
-                      >
-                        {assignment.course_code || "N/A"}
-                      </Badge>
-                      {assignment.academic_year || "Unknown Period"}
-                    </CardDescription>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      "rounded-full h-5 px-2.5 text-[9px] font-semibold uppercase border-none shrink-0",
-                      assignment.is_active !== false
-                        ? "bg-emerald-50 text-emerald-600"
-                        : "bg-muted text-muted-foreground",
+          Object.entries(groupedAssignments).map(([groupName, items]) => {
+            const isCollapsed = !!collapsedGroups[groupName];
+            return (
+              <div key={groupName} className="border border-zinc-150 rounded-xl overflow-hidden bg-white/40">
+                {/* Collapsible Group Header */}
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(groupName)}
+                  className="w-full flex items-center justify-between p-3.5 bg-zinc-50 border-b border-zinc-150 transition-colors hover:bg-zinc-100/70"
+                >
+                  <div className="flex items-center gap-2">
+                    {isCollapsed ? (
+                      <ChevronRight className="size-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="size-4 text-muted-foreground" />
                     )}
-                  >
-                    {assignment.is_active !== false ? "Active" : "Archived"}
-                  </Badge>
-                </div>
-              </CardHeader>
+                    <span className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
+                      {groupName}
+                    </span>
+                    <Badge variant="secondary" className="text-[9px] font-bold h-4 px-1.5 bg-zinc-200/60">
+                      {items.length} {items.length === 1 ? "Assignment" : "Assignments"}
+                    </Badge>
+                  </div>
+                </button>
 
-              <CardContent className="p-5 pt-4 flex-1 flex flex-col space-y-4">
-                <div className="space-y-3">
-                  <div className="flex items-start gap-2.5">
-                    <Building2 className="size-3.5 text-muted-foreground/60 mt-0.5" />
-                    <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Institution
-                      </p>
-                      <p className="text-xs font-medium text-foreground/80 truncate">
-                        {assignment.institution_name || "N/A"}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <Layers className="size-3.5 text-muted-foreground/60 mt-0.5" />
-                    <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Department & Target
-                      </p>
-                      <p className="text-xs font-medium text-foreground/80 truncate">
-                        {assignment.department_name || "Global Department"}
-                        {assignment.class_section_name
-                          ? ` • ${assignment.class_section_name}`
-                          : ""}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-2.5">
-                    <Users className="size-3.5 text-muted-foreground/60 mt-0.5" />
-                    <div>
-                      <p className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">
-                        Designated Role
-                      </p>
-                      <p className="text-xs font-medium text-primary uppercase tracking-tight">
-                        {assignment.role.replace("_", " ")}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                {/* Group Content Grid */}
+                {!isCollapsed && (
+                  <div className="p-4 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 animate-in fade-in duration-150">
+                    {items.map((assignment) => (
+                      <Card
+                        key={assignment.id}
+                        className={cn(
+                          "hover:border-primary/30 transition-all duration-200 group overflow-hidden shadow-none border rounded-xl flex flex-col bg-white",
+                          assignment.is_active === false && "opacity-75 bg-zinc-50/50"
+                        )}
+                      >
+                        <CardHeader className="pb-2.5 px-4 pt-3.5 border-b border-zinc-100 bg-zinc-50/30">
+                          <div className="flex justify-between items-start gap-2">
+                            <div className="min-w-0">
+                              <CardTitle className="text-xs font-bold truncate leading-snug text-zinc-900 group-hover:text-primary transition-colors">
+                                {assignment.course_name || "Unknown Module"}
+                              </CardTitle>
+                              <div className="flex items-center gap-1.5 mt-1 font-mono text-[9px] font-bold text-zinc-500 uppercase tracking-wide">
+                                <Badge
+                                  variant="outline"
+                                  className="h-4.5 px-1.5 text-[8px] font-bold bg-primary/5 border-primary/20 text-primary"
+                                >
+                                  {assignment.course_code || "N/A"}
+                                </Badge>
+                              </div>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "rounded-full h-4.5 px-2 text-[8px] font-bold uppercase border-none shrink-0",
+                                assignment.is_active !== false
+                                  ? "bg-emerald-50 text-emerald-600"
+                                  : "bg-zinc-100 text-zinc-500"
+                              )}
+                            >
+                              {assignment.is_active !== false ? "Active" : "Archived"}
+                            </Badge>
+                          </div>
+                        </CardHeader>
 
-                <div className="pt-4 mt-auto">
-                  {assignment.is_active !== false ? (
-                    <Button
-                      asChild
-                      size="sm"
-                      className="w-full h-9 text-[10px] font-semibold uppercase tracking-widest rounded-lg shadow-none justify-between px-4 bg-primary hover:bg-primary/90"
-                    >
-                      <Link href="/lecturer/courses/new">
-                        Initialize Workspace
-                        <ArrowRight className="size-3.5 opacity-60" />
-                      </Link>
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled
-                      className="w-full h-9 text-[10px] font-semibold uppercase tracking-widest rounded-lg shadow-none px-4"
-                    >
-                      Archived Assignment
-                    </Button>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          ))
+                        <CardContent className="p-4 flex-1 flex flex-col gap-3 justify-between">
+                          <div className="space-y-1.5 text-xs text-zinc-600 font-medium">
+                            <div className="flex items-center gap-2">
+                              <Building2 className="size-3.5 text-muted-foreground shrink-0" />
+                              <span className="truncate">{assignment.institution_name || "N/A"}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Layers className="size-3.5 text-muted-foreground shrink-0" />
+                              <span className="truncate">
+                                {assignment.department_name || "Global Dept"}
+                                {assignment.class_section_name ? ` • ${assignment.class_section_name}` : ""}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Users className="size-3.5 text-muted-foreground shrink-0" />
+                              <span className="text-primary text-[10px] font-bold uppercase tracking-wider">
+                                {assignment.role.replace("_", " ")}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="pt-2">
+                            {assignment.is_active !== false ? (
+                              <Button
+                                asChild
+                                size="sm"
+                                className="w-full h-7.5 text-[9px] font-bold uppercase tracking-wider rounded-lg shadow-none justify-between px-3 bg-primary hover:bg-primary/95 text-white"
+                              >
+                                <Link href="/lecturer/courses/new">
+                                  Initialize
+                                  <ArrowRight className="size-3 opacity-80" />
+                                </Link>
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                disabled
+                                className="w-full h-7.5 text-[9px] font-bold uppercase tracking-wider rounded-lg shadow-none px-3 bg-zinc-100 text-zinc-400"
+                              >
+                                Archived
+                              </Button>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })
         )}
       </div>
     </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -43,11 +43,7 @@ export function ResultReleasePanel({ assessmentId }: ResultReleasePanelProps) {
   const [results, setResults] = useState<any[]>([]);
   const [isReleasing, setIsReleasing] = useState(false);
 
-  useEffect(() => {
-    fetchResults();
-  }, [assessmentId]);
-
-  const fetchResults = async () => {
+  const fetchResults = useCallback(async () => {
     setLoading(true);
     try {
       const res = await resultApi.getAssessmentResults(assessmentId);
@@ -57,7 +53,11 @@ export function ResultReleasePanel({ assessmentId }: ResultReleasePanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [assessmentId]);
+
+  useEffect(() => {
+    fetchResults();
+  }, [fetchResults]);
 
   const handleReleaseAll = async () => {
     setIsReleasing(true);

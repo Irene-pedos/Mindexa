@@ -106,10 +106,99 @@ class GradingRepository:
         """
         from app.db.models.assessment import (Rubric, RubricCriterion,
                                               RubricCriterionLevel)
-        from app.db.models.attempt import StudentResponse
-        from app.db.models.question import Question
+        from app.db.models.attempt import StudentResponse, SubmissionGrade
+        from app.db.models.question import Question, AssessmentQuestion
         from sqlalchemy.orm import selectinload
 
+        # First, try to fetch SubmissionGrade by ID (in case the frontend passed the grade ID)
+        result = await self.db.execute(
+            select(SubmissionGrade)
+            .options(
+                selectinload(SubmissionGrade.student_response),
+                selectinload(SubmissionGrade.student_response).selectinload(StudentResponse.question)
+                .selectinload(Question.rubric)
+                .selectinload(Rubric.criteria)
+                .selectinload(RubricCriterion.levels)
+            )
+            .where(
+                SubmissionGrade.id == response_id,
+                SubmissionGrade.is_deleted.is_(False)
+            )
+        )
+        grade = result.scalar_one_or_none()
+        if grade:
+            return grade
+
+        # Next, try to fetch by response_id
+        result = await self.db.execute(
+            select(SubmissionGrade)
+            .options(
+                selectinload(SubmissionGrade.student_response),
+                selectinload(SubmissionGrade.student_response).selectinload(StudentResponse.question)
+                .selectinload(Question.rubric)
+                .selectinload(Rubric.criteria)
+                .selectinload(RubricCriterion.levels)
+            )
+            .where(
+                SubmissionGrade.response_id == response_id,
+                SubmissionGrade.is_deleted.is_(False)
+            )
+        )
+        grade = result.scalar_one_or_none()
+        if grade:
+            return grade
+
+        # Auto-create if response exists
+        resp_res = await self.db.execute(
+            select(StudentResponse)
+            .options(
+                selectinload(StudentResponse.attempt),
+                selectinload(StudentResponse.question)
+                .selectinload(Question.rubric)
+                .selectinload(Rubric.criteria)
+                .selectinload(RubricCriterion.levels)
+            )
+            .where(StudentResponse.id == response_id)
+        )
+        response = resp_res.scalar_one_or_none()
+        if not response:
+            return None
+
+        # Fetch assessment question marks or fallback to question marks
+        aq_res = await self.db.execute(
+            select(AssessmentQuestion)
+            .where(
+                AssessmentQuestion.assessment_id == response.attempt.assessment_id,
+                AssessmentQuestion.question_id == response.question_id
+            )
+        )
+        aq = aq_res.scalar_one_or_none()
+        max_score = float(
+            (aq.marks_override if aq and aq.marks_override is not None else response.question.marks) or 0.0
+        )
+
+        from app.db.enums import GradingMode
+        auto_gradables = {"MCQ", "TRUE_FALSE", "ORDERING", "MATCHING", "FILL_BLANK"}
+        q_type_str = response.question.question_type.value if hasattr(response.question.question_type, 'value') else str(response.question.question_type)
+        if q_type_str in auto_gradables:
+            grading_mode = GradingMode.AUTO.value if hasattr(GradingMode.AUTO, 'value') else str(GradingMode.AUTO)
+        else:
+            grading_mode = GradingMode.MANUAL.value if hasattr(GradingMode.MANUAL, 'value') else str(GradingMode.MANUAL)
+
+        # Create placeholder grade
+        grade = await self.create_grade(
+            response_id=response.id,
+            attempt_id=response.attempt_id,
+            assessment_id=response.attempt.assessment_id,
+            student_id=response.attempt.student_id,
+            question_id=response.question_id,
+            max_score=max_score,
+            grading_mode=grading_mode,
+            is_final=False,
+        )
+        await self.db.commit()
+
+        # Re-fetch with all options selectinloaded to ensure full detail is returned
         result = await self.db.execute(
             select(SubmissionGrade)
             .options(

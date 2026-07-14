@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Card,
   CardContent,
@@ -68,11 +68,7 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
   const [reason, setReason] = useState<string>("");
   const [isSubmitting, setIsSaving] = useState(false);
 
-  useEffect(() => {
-    fetchStats();
-  }, [questionId]);
-
-  const fetchStats = async () => {
+  const fetchStats = useCallback(async () => {
     setLoading(true);
     try {
       const res = await gradingApi.getModerationStats(questionId);
@@ -82,7 +78,11 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [questionId]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   const handleModerate = async () => {
     if (!selectedResponse || !newScore || reason.length < 10) {

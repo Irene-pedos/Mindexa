@@ -19,7 +19,10 @@ export interface NotificationListResponse {
   page_size: number;
 }
 
+import { NotificationType } from "./notification/notificationTypes";
+
 export const notificationApi = {
+  NotificationType,
   getNotifications: async (unreadOnly = false, page = 1, pageSize = 20): Promise<NotificationListResponse> => {
     return apiClient(`/notifications/me?unread_only=${unreadOnly}&page=${page}&page_size=${pageSize}`);
   },

@@ -116,6 +116,7 @@ class GroupWorkService:
         assessment_id: uuid.UUID,
         current_user: User,
         data: ManualGroupCreateRequest,
+        validate_full_roster: bool = True,
     ) -> list[StudentGroupResponse]:
         assessment = await self._get_assessment_for_edit(assessment_id, current_user)
         self._assert_draft_state(assessment)
@@ -140,7 +141,7 @@ class GroupWorkService:
                     raise ValidationError("A student cannot belong to more than one group.", code="DUPLICATE_GROUP_MEMBER")
                 assigned_students.add(member.student_id)
 
-        if assigned_students != eligible_students:
+        if validate_full_roster and assigned_students != eligible_students:
             missing = len(eligible_students - assigned_students)
             raise ValidationError(f"All targeted students must be assigned before groups can be saved. Missing: {missing}.", code="UNASSIGNED_STUDENTS")
 
@@ -344,7 +345,7 @@ class GroupWorkService:
         profiles = await self._get_user_profiles([member.student_id for member in group.members if not member.is_deleted])
         approval_map = {approval.student_id: approval.status for approval in approvals}
         participation_map: dict[uuid.UUID, int] = {}
-        question_title_map = {str(question.id): question.content for question in questions}
+        question_title_map = {str(question.id): question.text for question in questions}
 
         for entry in activity:
             participation_map[entry.student_id] = participation_map.get(entry.student_id, 0) + 1
@@ -931,6 +932,8 @@ class GroupWorkService:
             raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
         if submission.status not in {GroupSubmissionStatus.SUBMITTED, GroupSubmissionStatus.APPEALED, GroupSubmissionStatus.GRADED}:
             raise ConflictError("Only submitted group work can be graded.", code="GROUP_SUBMISSION_NOT_GRADABLE")
+        
+        status = GroupSubmissionStatus.GRADED if (data.is_final if data.is_final is not None else True) else GroupSubmissionStatus.SUBMITTED
         await self.submission_repo.set_grade(
             submission_id=submission_id,
             total_score=data.total_score,
@@ -938,6 +941,7 @@ class GroupWorkService:
             feedback=data.feedback,
             graded_by_id=current_user.id,
             member_overrides=data.member_overrides,
+            status=status,
         )
 
     async def release_group_result(
@@ -1143,7 +1147,7 @@ class GroupWorkService:
         appeal = await self.appeal_repo.get_active_by_submission(submission.id)
         questions = await self._list_workspace_questions(assessment, group.id)
         profiles = await self._get_user_profiles([member.student_id for member in group.members if not member.is_deleted])
-        question_title_map = {str(question.id): question.content for question in questions}
+        question_title_map = {str(question.id): question.text for question in questions}
 
         activity_responses = [
             GroupActivityLogResponse(
@@ -1172,7 +1176,7 @@ class GroupWorkService:
             workspace_members.append(
                 GroupWorkspaceMemberResponse(
                     student_id=member.student_id,
-                    student_name=profiles.get(member.student_id, member.student_name),
+                    student_name=profiles.get(member.student_id, str(member.student_id)),
                     group_role=member.group_role,
                     is_leader=member.is_leader,
                     participation_count=participation_map.get(member.student_id, 0),
@@ -1191,9 +1195,34 @@ class GroupWorkService:
             question_distribution_mode=assessment.question_distribution_mode,
             questions=questions,
             members=workspace_members,
-            materials=materials,
-            answers=[GroupSubmissionAnswerResponse.model_validate(a) for a in answers],
-            comments=[GroupSubmissionCommentResponse.model_validate(c) for c in comments],
+            materials=[GroupAssessmentMaterialResponse.model_validate(item) for item in materials],
+            answers=[
+                GroupSubmissionAnswerResponse(
+                    id=item.id,
+                    question_id=item.question_id,
+                    answer_content=item.answer_content,
+                    notes_content=item.notes_content,
+                    last_edited_by_id=item.last_edited_by_id,
+                    last_edited_at=item.last_edited_at,
+                    last_modified_by_id=item.last_edited_by_id,
+                    last_modified_by_name=profiles.get(item.last_edited_by_id) if item.last_edited_by_id else None,
+                    last_modified_at=item.last_edited_at,
+                )
+                for item in answers
+            ],
+            comments=[
+                GroupSubmissionCommentResponse(
+                    id=item.id,
+                    submission_id=item.submission_id,
+                    question_id=item.question_id,
+                    author_id=item.author_id,
+                    student_id=item.author_id,
+                    student_name=profiles.get(item.author_id, str(item.author_id)),
+                    body=item.body,
+                    created_at=item.created_at,
+                )
+                for item in comments
+            ],
             approvals=[GroupSubmissionApprovalResponse.model_validate(a) for a in approvals],
             activity_log=activity_responses,
             activities=activity_responses,

@@ -89,9 +89,22 @@ class AssessmentService:
             )
 
     def _assert_not_finalized(self, assessment) -> None:
-        if assessment.draft_is_complete:
+        """Block edits only when the assessment is truly immutable.
+
+        DRAFT / PUBLISHED assessments are always editable by their creator.
+        ACTIVE, CLOSED, and ARCHIVED assessments cannot be structurally changed.
+        """
+        from app.db.enums import AssessmentStatus as _Status
+        locked_statuses = {_Status.ACTIVE, _Status.CLOSED, _Status.ARCHIVED}
+        current_status = assessment.status
+        if isinstance(current_status, str):
+            try:
+                current_status = _Status(current_status)
+            except ValueError:
+                current_status = None
+        if current_status in locked_statuses:
             raise ConflictError(
-                "This assessment is finalized and cannot be modified.",
+                f"This assessment is {current_status.value.lower()} and cannot be modified.",
                 code="ASSESSMENT_FINALIZED",
             )
 
@@ -296,7 +309,14 @@ class AssessmentService:
         if data.target_student_ids is not None:
             update_fields["target_student_ids"] = data.target_student_ids
 
-        # Security/Integrity additions
+        # Timing fields
+        if data.window_start is not None:
+            update_fields["window_start"] = data.window_start
+        if data.window_end is not None:
+            update_fields["window_end"] = data.window_end
+        if data.result_release_at is not None:
+            update_fields["result_release_at"] = data.result_release_at
+
         if data.max_attempts is not None:
             update_fields["max_attempts"] = data.max_attempts
         if data.is_password_protected is not None:
@@ -746,7 +766,8 @@ class AssessmentService:
                 student_group_counts = {}
                 for group in groups:
                     for member in group.members:
-                        student_group_counts[member.student_id] = student_group_counts.get(member.student_id, 0) + 1
+                        if not member.is_deleted:
+                            student_group_counts[member.student_id] = student_group_counts.get(member.student_id, 0) + 1
 
                 # 1. Double assignment check
                 multiple_groups = [sid for sid, count in student_group_counts.items() if count > 1]
@@ -1063,7 +1084,11 @@ class AssessmentService:
     # ─── Internal Helpers ─────────────────────────────────────────────────────
 
     async def _get_and_validate(self, assessment_id: uuid.UUID, current_user: User):
-        """Load assessment and validate edit permission + not-finalized."""
+        """Load assessment and validate edit permission.
+
+        Allows editing DRAFT and PUBLISHED assessments.
+        Blocks edits on ACTIVE, CLOSED, and ARCHIVED assessments.
+        """
         assessment = await self._repo.get_by_id_simple(assessment_id)
         if not assessment:
             raise NotFoundError("Assessment not found.")
@@ -1082,7 +1107,12 @@ class AssessmentService:
         Creates an assessment and all its dependencies in one go.
         Used by the frontend single-page builder.
         """
-        assessment = await self._build_bulk_assessment(data, current_user)
+        assessment = await self._build_bulk_assessment(data, current_user, is_publish=True)
+
+        if assessment.is_group_assessment:
+            from app.services.group_work_service import GroupWorkService
+            group_svc = GroupWorkService(self.db)
+            await group_svc.lock_groups_for_publish(assessment_id=assessment.id, current_user=current_user)
 
         # We call the existing finalize logic to ensure all validations pass.
         return await self.finalize_assessment(assessment.id, current_user)
@@ -1102,6 +1132,7 @@ class AssessmentService:
         self,
         data: BulkAssessmentPublishRequest,
         current_user: User,
+        is_publish: bool = False,
     ):
         # Note: Frontend 'mode' maps to AssessmentType (e.g. 'CAT' -> 'CAT')
         mode_mapping = {
@@ -1544,7 +1575,7 @@ class AssessmentService:
                     created_by_id=current_user.id,
                     is_approved=True,
                     is_in_question_bank=False,
-                    source_type=QuestionSourceType.BANK_INSERT if is_bank_question else QuestionSourceType.MANUAL,
+                    source_type=QuestionSourceType.IMPORTED if is_bank_question else QuestionSourceType.MANUAL,
                     source_assessment_id=assessment.id,
                     parent_question_id=q_uuid if is_bank_question else None,
                     grading_mode=GradingMode.MANUAL if db_q_type in [
@@ -1725,7 +1756,8 @@ class AssessmentService:
             await group_svc.save_manual_groups(
                 assessment_id=assessment.id,
                 current_user=current_user,
-                data=manual_request
+                data=manual_request,
+                validate_full_roster=is_publish
             )
 
         return assessment

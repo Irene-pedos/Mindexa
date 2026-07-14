@@ -64,6 +64,11 @@ from app.db.enums import (
     UserRole,
     UserStatus,
     LocationType,
+    IntegrityEventType,
+    IntegrityFlagStatus,
+    IntegrityFlagRaisedBy,
+    RiskLevel,
+    WarningLevel,
 )
 from app.db.models import (
     AcademicPeriod,
@@ -79,6 +84,9 @@ from app.db.models import (
     Subject,
     User,
     UserProfile,
+    IntegrityEvent,
+    IntegrityWarning,
+    IntegrityFlag,
 )
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -172,7 +180,7 @@ async def seed_all(session: AsyncSession) -> None:
     _, lecturer_id, student_id = await seed_users(session)
 
     # Step 2 — Academic structure (course / subject / section / enrollment)
-    course_id, subject_id, section_id = await seed_academic_structure(
+    course_id, subject_id, section_id, workspace_id = await seed_academic_structure(
         session, lecturer_id=lecturer_id, student_id=student_id
     )
 
@@ -183,6 +191,7 @@ async def seed_all(session: AsyncSession) -> None:
         subject_id=subject_id,
         section_id=section_id,
         lecturer_id=lecturer_id,
+        workspace_id=workspace_id,
     )
 
     # Step 4 — Questions
@@ -199,6 +208,13 @@ async def seed_all(session: AsyncSession) -> None:
         assessment_id=assessment_id,
         student_id=student_id,
         question_ids=question_ids,
+    )
+
+    # Step 6 — Integrity logs
+    await seed_integrity_logs(
+        session,
+        assessment_id=assessment_id,
+        student_id=student_id,
     )
 
     logger.info("=" * 60)
@@ -304,11 +320,11 @@ async def seed_academic_structure(
     session: AsyncSession,
     lecturer_id: uuid.UUID,
     student_id: uuid.UUID,
-) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID]:
     """
     Create institution -> department -> period -> multiple courses -> sections -> enrollments.
 
-    Returns (primary_course_id, subject_id, primary_section_id).
+    Returns (primary_course_id, subject_id, primary_section_id, workspace_id).
     """
     # ── Institution ──────────────────────────────────────────────────────────
     inst_id = await _ensure_institution(session)
@@ -349,11 +365,55 @@ async def seed_academic_structure(
     se_section_id = await _ensure_class_section(session, cs_dept_id, "Y1 CS")
     await _ensure_lecturer_assignment(session, lecturer_id, se_course_id)
 
+    # ── TeachingAssignment & TeachingWorkspace for DB_COURSE ─────────────────────
+    from app.db.models.academic import TeachingAssignment, TeachingWorkspace
+
+    # Check if teaching assignment already exists
+    ta_stmt = select(TeachingAssignment).where(
+        TeachingAssignment.lecturer_id == lecturer_id,
+        TeachingAssignment.course_id == db_course_id,
+    )
+    ta_result = await session.execute(ta_stmt)
+    ta = ta_result.scalar_one_or_none()
+    if not ta:
+        ta = TeachingAssignment(
+            lecturer_id=lecturer_id,
+            institution_id=inst_id,
+            department_id=cs_dept_id,
+            course_id=db_course_id,
+            class_section_id=db_section_id,
+            academic_year="2025 - 2026",
+            academic_period_id=period_id,
+            role=LecturerAssignmentRole.MAIN_LECTURER,
+            is_active=True,
+        )
+        session.add(ta)
+        await session.flush()
+
+    # Check if workspace already exists
+    tw_stmt = select(TeachingWorkspace).where(
+        TeachingWorkspace.teaching_assignment_id == ta.id,
+    )
+    tw_result = await session.execute(tw_stmt)
+    tw = tw_result.scalar_one_or_none()
+    if not tw:
+        tw = TeachingWorkspace(
+            teaching_assignment_id=ta.id,
+            course_id=db_course_id,
+            class_section_id=db_section_id,
+            academic_period_id=period_id,
+            title="Database Systems (Section A)",
+            description="Operational pedagogical workspace for Database Systems",
+            status="ACTIVE",
+        )
+        session.add(tw)
+        await session.flush()
+
     await session.commit()
-    logger.info("  ✔  Academic structure ready (3 courses, 3 sections)")
+    logger.info("  ✔  Academic structure ready (3 courses, 3 sections, 1 workspace)")
     
     # Return DB course info for the assessment seed
-    return db_course_id, db_subject_id, db_section_id
+    return db_course_id, db_subject_id, db_section_id, tw.id
 
 
 async def _ensure_institution(session: AsyncSession) -> uuid.UUID:
@@ -437,6 +497,7 @@ async def _ensure_course(
     period_id: uuid.UUID,
     code: str,
     name: str,
+    academic_year: str = "2025 - 2026",
 ) -> uuid.UUID:
     """Upsert a course."""
     stmt = select(Course)
@@ -455,6 +516,7 @@ async def _ensure_course(
         academic_period_id=period_id,
         code=code,
         name=name,
+        academic_year=academic_year,
         is_active=True,
     )
     session.add(course)
@@ -496,7 +558,8 @@ async def _ensure_subject(
     subject = Subject(
         institution_id=institution_id,
         department_id=department_id,
-        title=title,
+        name=title,
+        code=code,
         is_active=True,
     )
     session.add(subject)
@@ -599,6 +662,7 @@ async def seed_assessment(
     subject_id: uuid.UUID,
     section_id: uuid.UUID,
     lecturer_id: uuid.UUID,
+    workspace_id: uuid.UUID,
 ) -> uuid.UUID:
     """
     Create a fully functional ACTIVE CAT assessment.
@@ -636,6 +700,8 @@ async def seed_assessment(
         ),
         passing_marks=15,
         duration_minutes=60,
+        teaching_workspace_id=workspace_id,
+        academic_year="2025 - 2026",
     )
 
     # Immediately set status to ACTIVE and publish timestamps
@@ -1211,6 +1277,107 @@ async def reset_seed_data(session: AsyncSession) -> None:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+async def seed_integrity_logs(
+    session: AsyncSession,
+    assessment_id: uuid.UUID,
+    student_id: uuid.UUID,
+) -> None:
+    """Seed realistic integrity events, warnings, and flags for testing."""
+    # Find the active attempt for this student & assessment
+    stmt = select(AssessmentAttempt).where(
+        AssessmentAttempt.student_id == student_id,
+        AssessmentAttempt.assessment_id == assessment_id,
+    )
+    result = await session.execute(stmt)
+    attempt = result.scalar_one_or_none()
+    if not attempt:
+        logger.info("  ⚠  Cannot seed integrity logs: no active student attempt found")
+        return
+
+    # Clear any existing integrity events, warnings, flags for this attempt
+    # (keeps it clean/idempotent)
+    await session.execute(
+        text("DELETE FROM integrity_event WHERE attempt_id = :aid"),
+        {"aid": str(attempt.id)}
+    )
+    await session.execute(
+        text("DELETE FROM integrity_warning WHERE attempt_id = :aid"),
+        {"aid": str(attempt.id)}
+    )
+    await session.execute(
+        text("DELETE FROM integrity_flag WHERE attempt_id = :aid"),
+        {"aid": str(attempt.id)}
+    )
+    await session.commit()
+
+    # 1. Create client-side browser events
+    evt1 = IntegrityEvent(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        event_type=IntegrityEventType.TAB_SWITCH,
+        metadata_json={"tab_count": 2, "duration_ms": 12500},
+    )
+    evt2 = IntegrityEvent(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        event_type=IntegrityEventType.FULLSCREEN_EXIT,
+        metadata_json={"duration_ms": 45000},
+    )
+    evt3 = IntegrityEvent(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        event_type=IntegrityEventType.COPY_ATTEMPT,
+        metadata_json={"content_length": 82},
+    )
+    session.add_all([evt1, evt2, evt3])
+    await session.flush()
+
+    # 2. Create warnings issued to student
+    warn1 = IntegrityWarning(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        warning_level=WarningLevel.WARNING_1,
+        message="Please return to full-screen mode immediately. Exiting full screen is flagged as a potential integrity violation.",
+        trigger_event_id=evt2.id,
+        issued_at=_utcnow() - timedelta(minutes=15),
+        acknowledged_at=_utcnow() - timedelta(minutes=14),
+    )
+    session.add(warn1)
+    await session.flush()
+
+    # 3. Create system-raised high risk flag
+    flag1 = IntegrityFlag(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        status=IntegrityFlagStatus.OPEN,
+        risk_level=RiskLevel.HIGH,
+        raised_by=IntegrityFlagRaisedBy.SYSTEM,
+        description="System flagged: Multiple browser focus changes. Tab switched (12s duration) and fullscreen exited for 45s.",
+        evidence_event_ids=[str(evt1.id), str(evt2.id)],
+    )
+    
+    # 4. Create supervisor manually-raised flag
+    flag2 = IntegrityFlag(
+        attempt_id=attempt.id,
+        assessment_id=assessment_id,
+        student_id=student_id,
+        status=IntegrityFlagStatus.OPEN,
+        risk_level=RiskLevel.MEDIUM,
+        raised_by=IntegrityFlagRaisedBy.SUPERVISOR,
+        raised_by_id=None, # System/Lecturer simulation
+        description="Supervisor flagged: Student showed abnormal eye movement patterns and glanced off-screen during proctoring stream check.",
+        evidence_event_ids=[str(evt3.id)],
+    )
+    session.add_all([flag1, flag2])
+    await session.commit()
+    logger.info("  ✔  Integrity events, warnings, and flags seeded successfully")
 
 
 def _print_credentials() -> None:

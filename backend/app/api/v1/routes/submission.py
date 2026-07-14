@@ -166,6 +166,28 @@ async def get_response_logs(
     repo = SubmissionRepository(db)
     response = await repo.get_response_by_id(response_id)
     if not response:
+        # Fallback: maybe response_id is actually a SubmissionGrade.id?
+        from app.db.models.attempt import SubmissionGrade
+        from sqlalchemy import select
+        grade_res = await db.execute(
+            select(SubmissionGrade).where(
+                SubmissionGrade.id == response_id,
+                SubmissionGrade.is_deleted.is_(False)
+            )
+        )
+        grade = grade_res.scalar_one_or_none()
+        if grade and grade.response_id:
+            response = await repo.get_response_by_id(grade.response_id)
+
+    if not response:
+        # Check if it is a GroupSubmissionAnswer ID
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from sqlalchemy import select
+        group_ans_res = await db.execute(
+            select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == response_id)
+        )
+        if group_ans_res.scalar_one_or_none():
+            return []
         raise NotFoundError("Response not found", code="RESPONSE_NOT_FOUND")
 
     # Get student name

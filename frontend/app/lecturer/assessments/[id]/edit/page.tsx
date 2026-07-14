@@ -2700,8 +2700,8 @@ export default function EditAssessmentPage() {
           console.error("Autosave queue error:", err);
         });
       return activeAutosavePromiseRef.current;
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [id, assessmentStatus],
   );
 
@@ -2778,6 +2778,19 @@ export default function EditAssessmentPage() {
       target_student_ids: m.target_student_ids,
     };
     return payload;
+  };
+
+  const getGroupSubmissionDeadline = (m: any): Date | null => {
+    if (!m.date || !m.endTime) return null;
+    try {
+      const [h, min] = m.endTime.split(":").map(Number);
+      const d = new Date(m.date);
+      d.setHours(h, min, 0, 0);
+      if (m.startTime && m.endTime < m.startTime) d.setDate(d.getDate() + 1);
+      return d;
+    } catch {
+      return null;
+    }
   };
 
   const preparePayload = (questionsOverride?: Question[]) => {
@@ -2933,6 +2946,14 @@ export default function EditAssessmentPage() {
   };
 
   const handleUpdate = async () => {
+    if (metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline) {
+      const deadline = new Date(metadata.peer_evaluation_deadline);
+      const submissionDeadline = getGroupSubmissionDeadline(metadata);
+      if (submissionDeadline && deadline <= submissionDeadline) {
+        toast.error("Peer evaluation deadline must be after the group submission deadline.");
+        return;
+      }
+    }
     setIsUpdating(true);
     setFieldErrors({});
     try {
@@ -2979,6 +3000,14 @@ export default function EditAssessmentPage() {
       return;
     }
     // Simple guards for editing
+    if (activeStep === 1 && metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline) {
+      const deadline = new Date(metadata.peer_evaluation_deadline);
+      const submissionDeadline = getGroupSubmissionDeadline(metadata);
+      if (submissionDeadline && deadline <= submissionDeadline) {
+        toast.error("Peer evaluation deadline must be after the group submission deadline.");
+        return;
+      }
+    }
     if (targetStep >= 2 && activeStep < 2 && !metadata.title) {
       toast.error("Title is required");
       return;
@@ -3981,9 +4010,10 @@ export default function EditAssessmentPage() {
           id: sg.id,
           name: sg.name,
           members: (sg.members || []).map((m: any) => {
-            const studentInfo = roster.find((r: any) => (r.id || r.student_id) === m.student_id);
+            const memberStudentId = m.id || m.student_id;
+            const studentInfo = roster.find((r: any) => (r.id || r.student_id) === memberStudentId);
             return {
-              id: m.student_id,
+              id: memberStudentId,
               name: m.name || studentInfo?.name || "Student",
               email: studentInfo?.email || "",
               is_leader: !!m.is_leader
@@ -3991,8 +4021,12 @@ export default function EditAssessmentPage() {
           })
         }));
         setGroups(mappedGroups);
-      } catch (err) {
-        console.error("Failed to load existing groups:", err);
+      } catch (err: any) {
+        if (err.message?.includes("is not configured as group work")) {
+          console.log("Assessment draft not yet configured as group work on the backend.");
+        } else {
+          console.warn("Failed to load existing groups:", err);
+        }
       }
     }
     fetchGroups();
@@ -4015,9 +4049,10 @@ export default function EditAssessmentPage() {
         id: sg.id,
         name: sg.name,
         members: (sg.members || []).map((m: any) => {
-          const studentInfo = roster.find(r => (r.id || r.student_id) === m.student_id);
+          const memberStudentId = m.id || m.student_id;
+          const studentInfo = roster.find(r => (r.id || r.student_id) === memberStudentId);
           return {
-            id: m.student_id,
+            id: memberStudentId,
             name: m.name || studentInfo?.name || "Student",
             email: studentInfo?.email || "",
             is_leader: !!m.is_leader
@@ -4427,6 +4462,15 @@ export default function EditAssessmentPage() {
                           type="datetime-local"
                           value={metadata.peer_evaluation_deadline || ""}
                           onChange={(e) => {
+                            const val = e.target.value;
+                            if (val) {
+                              const deadline = new Date(val);
+                              const submissionDeadline = getGroupSubmissionDeadline(metadata);
+                              if (submissionDeadline && deadline <= submissionDeadline) {
+                                toast.error("Peer evaluation deadline must be after the group submission deadline.");
+                                return;
+                              }
+                            }
                             const updated = {
                               ...metadata,
                               peer_evaluation_deadline: e.target.value,
@@ -4989,9 +5033,10 @@ export default function EditAssessmentPage() {
                             id: `group-csv-${index}-${Date.now()}`,
                             name: ig.name,
                             members: (ig.members || []).map((m: any) => {
-                              const studentInfo = roster.find(r => (r.id || r.student_id) === m.student_id);
+                              const memberStudentId = m.id || m.student_id;
+                              const studentInfo = roster.find(r => (r.id || r.student_id) === memberStudentId);
                               return {
-                                id: m.student_id,
+                                id: memberStudentId,
                                 name: studentInfo?.name || "Student",
                                 email: studentInfo?.email || "",
                                 is_leader: !!m.is_leader
@@ -5681,6 +5726,8 @@ export default function EditAssessmentPage() {
         const isUpdateDisabled =
           isUpdating ||
           currentMarks !== totalMarks ||
+          blueprint.length === 0 ||
+          questions.length === 0 ||
           (isGroupMode && groups.length === 0) ||
           (isGroupMode && unassignedCount > 0);
 
@@ -6139,34 +6186,42 @@ export default function EditAssessmentPage() {
 
   if (isLoading)
     return (
-      <div className="flex items-center justify-center h-[500px]">
-        <LoaderCircleIcon className="size-8 animate-spin text-primary" />
+      <div className="w-full space-y-4 p-2 md:p-4 animate-pulse">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div className="space-y-1">
+            <Skeleton variant="title" className="h-6 w-32" />
+            <Skeleton variant="title" className="h-4 w-64" />
+          </div>
+        </div>
+        <div className="flex items-center justify-center h-[300px]">
+          <LoaderCircleIcon className="size-6 animate-spin text-primary" />
+        </div>
       </div>
     );
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+      <div className="flex items-center justify-between border-b pb-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
             Edit Assessment
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Refine and update your assessment configuration
+          <p className="text-sm text-muted-foreground mt-1 font-medium">
+            Refine and update your assessment configuration.
           </p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {autosaveStatus === "saving" && (
-            <span className="text-xs text-muted-foreground animate-pulse flex items-center gap-1.5">
-              <LoaderCircleIcon className="size-3.5 animate-spin" /> Saving...
+            <span className="text-[10px] text-muted-foreground animate-pulse flex items-center gap-1.5 font-bold uppercase tracking-wider">
+              <LoaderCircleIcon className="size-3 animate-spin" /> Saving...
             </span>
           )}
           {autosaveStatus === "saved" && (
-            <span className="text-xs text-emerald-600 font-medium flex items-center gap-1.5">
-              <Check className="size-3.5" /> Saved
+            <span className="text-[10px] text-emerald-600 font-bold uppercase tracking-wider flex items-center gap-1.5">
+              <Check className="size-3" /> Saved
             </span>
           )}
-          <Badge variant="outline" className="h-9 px-4 font-semibold">
+          <Badge variant="outline" className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-zinc-100 border text-zinc-500">
             Step {activeStep} / 6
           </Badge>
         </div>

@@ -213,6 +213,18 @@ class AssessmentCreateRequest(BaseModel):
             raise ValueError(f"question_distribution_mode must be one of: {', '.join(sorted(allowed))}")
         return v
 
+    @model_validator(mode="after")
+    def validate_peer_evaluation_and_submission(self) -> "AssessmentCreateRequest":
+        if self.peer_evaluation_enabled:
+            if not self.peer_evaluation_deadline:
+                raise ValueError("peer_evaluation_deadline is required when peer_evaluation_enabled is True.")
+            if self.peer_evaluation_weight_percent is not None:
+                if not (0 < self.peer_evaluation_weight_percent <= 100):
+                    raise ValueError("peer_evaluation_weight_percent must be between 1 and 100.")
+            if not self.submission_mode:
+                raise ValueError("submission_mode is required when peer_evaluation_enabled is True.")
+        return self
+
     model_config = {"str_strip_whitespace": True}
 
 
@@ -296,6 +308,10 @@ class AssessmentGeneralUpdate(BaseModel):
     late_penalty_percent: float | None = Field(default=None, ge=0, le=100)
     grace_period_minutes: int | None = Field(default=None, ge=0, le=60)
 
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    result_release_at: datetime | None = None
+
     draft_step: int | None = Field(default=None, ge=1, le=6)
 
     teaching_workspace_id: uuid.UUID | None = None
@@ -304,6 +320,27 @@ class AssessmentGeneralUpdate(BaseModel):
     supervisor_ids: list[uuid.UUID] | None = None
     audience_type: str | None = None
     target_student_ids: list[uuid.UUID] | None = None
+
+    @model_validator(mode="after")
+    def validate_peer_evaluation_and_submission(self) -> "AssessmentGeneralUpdate":
+        enabled = self.peer_evaluation_enabled
+        deadline = self.peer_evaluation_deadline
+        weight = self.peer_evaluation_weight_percent
+        mode = self.submission_mode
+
+        if enabled:
+            if not deadline:
+                raise ValueError("peer_evaluation_deadline is required when peer_evaluation_enabled is True.")
+            if weight is not None:
+                if not (0 < weight <= 100):
+                    raise ValueError("peer_evaluation_weight_percent must be between 1 and 100.")
+            if mode is not None and not mode:
+                raise ValueError("submission_mode cannot be empty when peer_evaluation_enabled is True.")
+        else:
+            if weight is not None:
+                if not (0 < weight <= 100):
+                    raise ValueError("peer_evaluation_weight_percent must be between 1 and 100.")
+        return self
 
     model_config = {"str_strip_whitespace": True, "populate_by_name": True}
 
@@ -611,7 +648,8 @@ class BulkAssessmentMetadata(BaseModel):
         if self.peerEvaluationEnabled:
             if not self.peerEvaluationDeadline:
                 raise ValueError("peerEvaluationDeadline is required when peerEvaluationEnabled is True.")
-            if self.windowEnd and self.peerEvaluationDeadline <= self.windowEnd:
+            deadline_source = self.windowEnd or self.date
+            if deadline_source and self.peerEvaluationDeadline <= deadline_source:
                 raise ValueError("peerEvaluationDeadline must be after the group submission deadline.")
             if self.peerEvaluationWeightPercent is not None:
                 if not (0 < self.peerEvaluationWeightPercent <= 100):

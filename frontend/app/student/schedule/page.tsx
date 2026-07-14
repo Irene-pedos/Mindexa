@@ -57,7 +57,7 @@ export default function StudentSchedulePage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
         <div className="space-y-1">
             <Skeleton variant="title" className="h-8 w-48" />
             <Skeleton variant="title" className="h-4 w-72" />
@@ -76,20 +76,20 @@ export default function StudentSchedulePage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-0.5">
-        <h1 className="text-2xl font-semibold tracking-tight">
+    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
+      <div className="space-y-0.5 border-b border-border/25 pb-4">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
           Academic Schedule
         </h1>
-        <p className="text-muted-foreground text-xs font-medium">
+        <p className="text-xs text-muted-foreground font-medium">
           Registry for assessments, collaborative deadlines, and revision windows.
         </p>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
         {/* Interactive Calendar */}
-        <Card className="xl:col-span-5 shadow-none border">
-          <CardHeader className="border-b bg-muted/5 py-3 px-4">
+        <Card className="xl:col-span-5 bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
+          <CardHeader className="border-b border-border/45 bg-muted/5 py-3 px-4">
             <CardTitle className="flex items-center justify-between text-sm">
               {/* BUG-15 fix: previous/next month navigation */}
               <Button
@@ -145,7 +145,7 @@ export default function StudentSchedulePage() {
                       isToday && "border-primary bg-primary/5",
                       isSelected 
                         ? "border-primary bg-primary text-primary-foreground shadow-sm z-10" 
-                        : "bg-background border-transparent hover:bg-muted/50 hover:border-border"
+                        : "bg-card/25 border-transparent hover:bg-card/45 hover:border-border/45 text-foreground"
                     )}
                   >
                     <span
@@ -186,7 +186,7 @@ export default function StudentSchedulePage() {
                   {selectedEvents.map((event) => (
                     <div
                       key={event.id}
-                      className="flex gap-3 p-3 rounded-lg border bg-muted/20 transition-all hover:bg-muted/30"
+                      className="flex gap-3 p-3 rounded-lg border border-border/30 bg-card/20 transition-all hover:bg-card/40"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-xs truncate">
@@ -202,7 +202,7 @@ export default function StudentSchedulePage() {
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 bg-muted/5 rounded-lg border border-dashed text-muted-foreground text-[11px] font-medium">
+                <div className="text-center py-8 bg-card/10 rounded-xl border border-dashed border-border/30 text-muted-foreground text-[11px] font-semibold">
                   No records for this date.
                 </div>
               )}
@@ -210,11 +210,10 @@ export default function StudentSchedulePage() {
           </CardContent>
         </Card>
 
-        {/* Sidebar – Today + Upcoming */}
         <div className="xl:col-span-7 space-y-6">
-          {/* Today’s Card */}
-          <Card className="shadow-none border overflow-hidden">
-            <CardHeader className="bg-primary/5 border-b py-3 px-4">
+          {/* Today’s Agenda Card */}
+          <Card className="bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
+            <CardHeader className="bg-primary/5 border-b border-border/25 py-3 px-4">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
                 Live Agenda
               </CardTitle>
@@ -247,8 +246,8 @@ export default function StudentSchedulePage() {
                     </div>
                   ))
                 ) : (
-                  <div className="p-6 text-center bg-muted/10 rounded-xl border border-dashed">
-                    <p className="text-[11px] text-muted-foreground font-medium uppercase tracking-tight">
+                  <div className="p-6 text-center bg-card/10 rounded-xl border border-dashed border-border/30">
+                    <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-tight">
                         No critical tasks for today.
                     </p>
                   </div>
@@ -258,8 +257,8 @@ export default function StudentSchedulePage() {
           </Card>
 
           {/* Upcoming Deadlines */}
-          <Card className="shadow-none border">
-            <CardHeader className="border-b py-3 px-4">
+          <Card className="bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
+            <CardHeader className="border-b border-border/25 py-3 px-4">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 Sequential Activities
               </CardTitle>
@@ -270,7 +269,7 @@ export default function StudentSchedulePage() {
                 .filter((e) => new Date(e.start_at) >= today)
                 .slice(0, 5)
                 .map((event, i) => (
-                  <div key={i} className="flex justify-between items-center p-2 rounded hover:bg-muted/30 transition-colors border border-transparent hover:border-border">
+                  <div key={i} className="flex justify-between items-center p-2 rounded hover:bg-card/45 bg-card/10 transition-colors border border-border/20 mb-2">
                     <div className="flex-1 min-w-0 pr-4">
                       <div className="font-semibold text-xs truncate text-foreground/90">
                         {event.title}
@@ -289,8 +288,8 @@ export default function StudentSchedulePage() {
                 ))}
               </div>
 
-              <div className="pt-4 mt-3 border-t border-dashed">
-                <Button variant="outline" size="sm" className="w-full h-9 font-semibold text-[11px] uppercase tracking-wide gap-1.5 rounded-lg" asChild>
+              <div className="pt-4 mt-3 border-t border-dashed border-border/40">
+                <Button variant="outline" size="sm" className="w-full h-9 font-semibold text-[11px] uppercase tracking-wide gap-1.5 rounded-lg border-border/60" asChild>
                     <Link href="/student/assessments">
                     <LinkIcon className="size-3 text-primary" />
                     Registry Database

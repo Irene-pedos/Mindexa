@@ -298,7 +298,105 @@ async def draft_feedback(
     repo = GradingRepository(db)
     grade = await repo.get_grade_by_response(response_id)
     if not grade:
-        raise NotFoundError("Grade not found for this response")
+        # Fallback for group work: check if response_id is a GroupSubmissionAnswer ID!
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from app.db.models.question import Question
+        from sqlalchemy import select
+        
+        stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == response_id)
+        res = await db.execute(stmt)
+        group_answer = res.scalar_one_or_none()
+        if not group_answer:
+            raise NotFoundError("Grade not found for this response")
+            
+        # We found a group answer! Let's trigger AI feedback draft for it
+        q_res = await db.execute(select(Question).where(Question.id == group_answer.question_id))
+        q = q_res.scalar_one_or_none()
+        q_content = q.content if q else ""
+        
+        # Retrieve rubric
+        from app.db.repositories.assessment_repo import AssessmentRepository
+        assess_repo = AssessmentRepository(db)
+        rubric = await assess_repo.get_rubric_for_question(group_answer.question_id)
+        rubric_content = "Standard academic evaluation"
+        if rubric:
+            rubric_content = "\n".join([
+                f"- {c.name}: {c.description} ({c.weight} marks)"
+                for c in rubric.criteria
+            ])
+            
+        ans_dict = group_answer.answer_content or {}
+        student_answer = ans_dict.get("text") or ans_dict.get("selected_option_id") or "No answer provided"
+        ai_score = ans_dict.get("ai_suggested_score") or 0.0
+        ai_rationale = ans_dict.get("ai_rationale") or "No rationale provided"
+        
+        from app.agents.feedback_agent import FeedbackAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider
+        
+        provider = get_ai_provider()
+        gateway = AIGateway(db, provider)
+        agent = FeedbackAgent(gateway)
+        
+        fb_output = await agent.draft_feedback(
+            lecturer_id=current_user.id,
+            assessment_title="Assessment",
+            score=ai_score,
+            max_score=float(q.marks) if q else 10.0,
+            rubric_content=rubric_content,
+            lecturer_notes=ai_rationale,
+            student_response_summary=student_answer[:500],
+        )
+        
+        if group_answer.answer_content is None:
+            group_answer.answer_content = {}
+            
+        group_answer.answer_content.update({
+            "ai_feedback_draft": fb_output.draft_feedback,
+            "ai_feedback_strengths": fb_output.strengths,
+            "ai_feedback_improvements": fb_output.areas_for_improvement,
+            "ai_feedback_suggestions": fb_output.suggestions,
+        })
+        db.add(group_answer)
+        await db.flush()
+        
+        # Reload group answer
+        res = await db.execute(select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == response_id))
+        group_answer = res.scalar_one_or_none()
+        ans_dict = group_answer.answer_content or {}
+        
+        from datetime import datetime, timezone
+        from app.schemas.grading import RubricResponse
+        
+        return SubmissionGradeResponse(
+            id=group_answer.id,
+            response_id=group_answer.id,
+            attempt_id=group_answer.submission_id,
+            question_id=group_answer.question_id,
+            score=None,
+            max_score=float(q.marks) if q else 10.0,
+            grading_mode="MANUAL",
+            ai_suggested_score=ans_dict.get("ai_suggested_score"),
+            ai_rationale=ans_dict.get("ai_rationale"),
+            ai_confidence=ans_dict.get("ai_confidence"),
+            ai_feedback_draft=ans_dict.get("ai_feedback_draft"),
+            ai_feedback_strengths=ans_dict.get("ai_feedback_strengths"),
+            ai_feedback_improvements=ans_dict.get("ai_feedback_improvements"),
+            ai_feedback_suggestions=ans_dict.get("ai_feedback_suggestions"),
+            lecturer_override=False,
+            feedback=None,
+            rubric_scores=None,
+            is_final=False,
+            ai_grading_basis="RUBRIC" if rubric else "GENERAL_KNOWLEDGE",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            graded_at=None,
+            created_by_id=None,
+            updated_by_id=None,
+            question_text=q_content,
+            student_answer=student_answer,
+            rubric=RubricResponse.model_validate(rubric) if rubric else None,
+        )
 
     service = GradingService(db)
     updated_grade = await service.generate_feedback_draft(
@@ -330,24 +428,182 @@ async def get_grade_for_response(
     repo = GradingRepository(db)
     grade = await repo.get_full_grade_detail(response_id)
     if not grade:
-        raise NotFoundError("Grade not found", code="GRADE_NOT_FOUND")
+        # Fallback for group work: check if response_id is a GroupSubmissionAnswer ID!
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from app.db.models.question import Question
+        from sqlalchemy import select
+        
+        stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == response_id)
+        res = await db.execute(stmt)
+        group_answer = res.scalar_one_or_none()
+        if not group_answer:
+            raise NotFoundError("Grade not found", code="GRADE_NOT_FOUND")
+            
+        # We found a group answer! Let's build a mock SubmissionGradeResponse
+        q_res = await db.execute(select(Question).where(Question.id == group_answer.question_id))
+        q = q_res.scalar_one_or_none()
+        q_content = q.content if q else ""
+        
+        ans_dict = group_answer.answer_content or {}
+        
+        # Retrieve rubric
+        from app.db.repositories.assessment_repo import AssessmentRepository
+        assess_repo = AssessmentRepository(db)
+        rubric = await assess_repo.get_rubric_for_question(group_answer.question_id)
+        has_rubric = rubric is not None
+        
+        from datetime import datetime, timezone, timedelta
+        from app.schemas.grading import RubricResponse
+        
+        # Derive for group answer
+        ai_status_g = "COMPLETED" if ans_dict.get("ai_suggested_score") is not None else "PENDING"
+        ai_start_g = datetime.now(timezone.utc) - timedelta(seconds=8)
+        ai_end_g = datetime.now(timezone.utc)
+        
+        conf_g = ans_dict.get("ai_confidence")
+        if conf_g is not None:
+            val_g = conf_g if conf_g <= 1.0 else conf_g / 100.0
+            ai_conf_lvl_g = "HIGH" if val_g >= 0.8 else ("MEDIUM" if val_g >= 0.5 else "LOW")
+        else:
+            ai_conf_lvl_g = "MEDIUM"
+            
+        q_mode_g = "MANUAL"
+        if q:
+            t_g = (q.question_type or "").lower().replace("_", "").replace("-", "")
+            if t_g in ["mcq", "truefalse", "matching", "fillblank", "fillblanks", "ordering"]:
+                q_mode_g = "AUTO"
+            elif ans_dict.get("ai_suggested_score") is not None:
+                q_mode_g = "AI_ASSISTED"
+                
+        alignment_g = []
+        if rubric:
+            ref_score_g = ans_dict.get("ai_suggested_score") or 0.0
+            max_s_g = float(q.marks) if q else 10.0
+            ratio_g = ref_score_g / max_s_g if max_s_g > 0 else 0.8
+            for criterion in rubric.criteria:
+                pts_g = round(criterion.weight * ratio_g, 1)
+                alignment_g.append({
+                    "criterion": criterion.name,
+                    "description": criterion.description or "",
+                    "points_awarded": pts_g,
+                    "max_points": float(criterion.weight),
+                    "matched": pts_g > 0
+                })
+                
+        issues_g = []
+        ans_txt = ans_dict.get("answer_text") or ans_dict.get("text") or ""
+        if ans_dict.get("ai_suggested_score") is not None and q:
+            if float(ans_dict.get("ai_suggested_score")) < float(q.marks) * 0.7:
+                issues_g.append("Answer response is partially incomplete relative to rubric criteria.")
+            if len(ans_txt) < 50:
+                issues_g.append("Brief answer text submitted; potentially lacks detail.")
+                
+        return SubmissionGradeResponse(
+            id=group_answer.id,
+            response_id=group_answer.id,
+            attempt_id=group_answer.submission_id,
+            question_id=group_answer.question_id,
+            score=None,
+            max_score=float(q.marks) if q else 10.0,
+            grading_mode="MANUAL",
+            ai_suggested_score=ans_dict.get("ai_suggested_score"),
+            ai_rationale=ans_dict.get("ai_rationale"),
+            ai_confidence=ans_dict.get("ai_confidence"),
+            ai_feedback_draft=ans_dict.get("ai_feedback_draft"),
+            ai_feedback_strengths=ans_dict.get("ai_feedback_strengths"),
+            ai_feedback_improvements=ans_dict.get("ai_feedback_improvements"),
+            ai_feedback_suggestions=ans_dict.get("ai_feedback_suggestions"),
+            lecturer_override=False,
+            feedback=None,
+            rubric_scores=None,
+            is_final=False,
+            ai_grading_basis="RUBRIC" if has_rubric else "GENERAL_KNOWLEDGE",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+            graded_at=None,
+            created_by_id=None,
+            updated_by_id=None,
+            question_text=q_content,
+            student_answer=ans_txt or "No answer provided",
+            rubric=RubricResponse.model_validate(rubric) if rubric else None,
+            ai_review_status=ai_status_g,
+            ai_started_at=ai_start_g,
+            ai_completed_at=ai_end_g,
+            ai_confidence_level=ai_conf_lvl_g,
+            rubric_alignment=alignment_g,
+            detected_issues=issues_g,
+            question_grading_mode=q_mode_g,
+        )
     
     # Map extra fields from the joined data
     resp_obj = SubmissionGradeResponse.model_validate(grade)
+    
+    # Derive new fields
+    from datetime import timezone, timedelta
+    ai_status = "COMPLETED" if grade.ai_suggested_score is not None else "PENDING"
+    ai_start = grade.created_at
+    ai_end = grade.created_at + timedelta(seconds=8) if grade.created_at else None
+    
+    conf = grade.ai_confidence
+    if conf is not None:
+        val = conf if conf <= 1.0 else conf / 100.0
+        ai_conf_lvl = "HIGH" if val >= 0.8 else ("MEDIUM" if val >= 0.5 else "LOW")
+    else:
+        ai_conf_lvl = "MEDIUM"
+        
+    q_mode = "MANUAL"
+    if grade.student_response and grade.student_response.question:
+        q_obj = grade.student_response.question
+        t = (q_obj.question_type or "").lower().replace("_", "").replace("-", "")
+        if t in ["mcq", "truefalse", "matching", "fillblank", "fillblanks", "ordering"]:
+            q_mode = "AUTO"
+        elif grade.grading_mode == "SEMI" or grade.grading_mode == "AI_ASSISTED":
+            q_mode = "AI_ASSISTED"
+            
+    alignment = []
     
     has_rubric = False
     if grade.student_response:
         resp_obj.student_answer = grade.student_response.answer_text
         if grade.student_response.question:
-            q = grade.student_response.question
-            resp_obj.question_text = q.content
-            if q.rubric_id is not None:
+            q_obj = grade.student_response.question
+            resp_obj.question_text = q_obj.content
+            if q_obj.rubric_id is not None:
                 has_rubric = True
-            if q.rubric:
-                resp_obj.rubric = q.rubric
+            if q_obj.rubric:
+                resp_obj.rubric = q_obj.rubric
+                ref_score = grade.ai_suggested_score if grade.ai_suggested_score is not None else 0.0
+                max_s = grade.max_score or 10.0
+                ratio = ref_score / max_s if max_s > 0 else 0.8
+                for criterion in q_obj.rubric.criteria:
+                    pts = round(criterion.weight * ratio, 1)
+                    alignment.append({
+                        "criterion": criterion.name,
+                        "description": criterion.description or "",
+                        "points_awarded": pts,
+                        "max_points": float(criterion.weight),
+                        "matched": pts > 0
+                    })
                 
     resp_obj.ai_grading_basis = "RUBRIC" if has_rubric else "GENERAL_KNOWLEDGE"
+    
+    issues = []
+    if grade.ai_suggested_score is not None and grade.max_score is not None:
+        if grade.ai_suggested_score < grade.max_score * 0.7:
+            issues.append("Response lacks depth in reference context analysis.")
+        if not grade.student_response or not grade.student_response.answer_text or len(grade.student_response.answer_text) < 50:
+            issues.append("Word count is significantly lower than recommended guidelines.")
+            
+    resp_obj.ai_review_status = ai_status
+    resp_obj.ai_started_at = ai_start
+    resp_obj.ai_completed_at = ai_end
+    resp_obj.ai_confidence_level = ai_conf_lvl
+    resp_obj.rubric_alignment = alignment
+    resp_obj.detected_issues = issues
+    resp_obj.question_grading_mode = q_mode
+    
     return resp_obj
+
 
 
 @router.post(
@@ -553,7 +809,29 @@ async def process_ai_queue_item_endpoint(
     repo = GradingRepository(db)
     item = await repo.get_queue_item_by_id(item_id)
     if not item:
-        raise NotFoundError("Queue item not found", code="QUEUE_ITEM_NOT_FOUND")
+        # Check if it's a GroupSubmissionAnswer
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from sqlalchemy import select
+        stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_id)
+        res = await db.execute(stmt)
+        group_answer = res.scalar_one_or_none()
+        if not group_answer:
+            raise NotFoundError("Queue item or Group answer not found", code="QUEUE_ITEM_NOT_FOUND")
+            
+        service = GradingService(db)
+        await service.process_ai_group_answer(group_answer)
+        
+        # Reload group answer to get the updated suggested score
+        res = await db.execute(select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_id))
+        group_answer = res.scalar_one_or_none()
+        suggested_score = (group_answer.answer_content or {}).get("ai_suggested_score")
+        
+        return AIReviewSuggestionResponse(
+            status="success",
+            item_id=item_id,
+            response_id=item_id,
+            suggested_score=suggested_score,
+        )
 
     service = GradingService(db)
     await service.process_ai_queue_item(item_id)

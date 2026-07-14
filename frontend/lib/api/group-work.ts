@@ -123,7 +123,7 @@ export const groupWorkApi = {
     }),
 
   // LECTURER: GRADING & RESULTS
-  gradeSubmission: (assessmentId: string, submissionId: string, data: { total_score: number; max_score: number; feedback?: string; member_overrides?: Record<string, number> }) =>
+  gradeSubmission: (assessmentId: string, submissionId: string, data: { total_score: number; max_score: number; feedback?: string; member_overrides?: Record<string, number>; is_final?: boolean }) =>
     apiClient(`/group-work/submissions/${submissionId}/grade?assessment_id=${assessmentId}`, {
       method: "POST",
       body: JSON.stringify(data),

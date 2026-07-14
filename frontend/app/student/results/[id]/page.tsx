@@ -19,6 +19,9 @@ import {
 } from "lucide-react";
 
 import { resultApi } from "@/lib/api/result";
+import { attemptApi } from "@/lib/api/attempt";
+import { submissionApi } from "@/lib/api/submission";
+import { assessmentApi } from "@/lib/api/assessment";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -513,6 +516,10 @@ export default function ResultDetailPage() {
 
   const [loading, setLoading] = useState(true);
   const [result, setResult] = useState<AssessmentResultResponse | null>(null);
+  const [attempt, setAttempt] = useState<any | null>(null);
+  const [submissions, setSubmissions] = useState<any[]>([]);
+  const [assessment, setAssessment] = useState<any | null>(null);
+  const [isAwaitingReview, setIsAwaitingReview] = useState(false);
 
   useEffect(() => {
     async function loadResult() {
@@ -520,10 +527,31 @@ export default function ResultDetailPage() {
         const data = await resultApi.getResultByAttempt(attemptId);
         setResult(data);
       } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "";
-        if (!msg.toLowerCase().includes("available")) {
-          console.error("Failed to load results", err);
-          toast.error("Failed to load results.");
+        console.log("Result not released, loading raw attempt and submission data for student review");
+        try {
+          const attemptData = await attemptApi.getAttempt(attemptId);
+          setAttempt(attemptData);
+          if (attemptData) {
+            try {
+              const assessData = await assessmentApi.getAssessmentById(attemptData.assessment_id);
+              setAssessment(assessData);
+            } catch (aErr) {
+              console.error("Failed to load assessment title", aErr);
+            }
+
+            const hasOpen = attemptData.questions?.some((q: any) =>
+              isOpenEnded(q.type || "")
+            );
+            const isSubmitted = attemptData.status?.toUpperCase() === "SUBMITTED" || !!attemptData.submitted_at;
+            if (hasOpen && isSubmitted) {
+              setIsAwaitingReview(true);
+            }
+
+            const subsData = await submissionApi.getSubmissionsForAttempt(attemptId);
+            setSubmissions(subsData.submissions || []);
+          }
+        } catch (attemptErr) {
+          console.error("Failed to load attempt details", attemptErr);
         }
       } finally {
         setLoading(false);
@@ -535,7 +563,7 @@ export default function ResultDetailPage() {
   // ── Loading state ──────────────────────────────────────────────────────────
   if (loading) {
     return (
-      <div className="space-y-4">
+      <div className="space-y-4 w-full">
         <Skeleton className="h-8 w-28 rounded-lg" />
         <div className="border border-border/50 rounded-lg p-4 bg-card/30">
           <Skeleton className="h-4 w-48 mb-2 rounded" />
@@ -570,6 +598,160 @@ export default function ResultDetailPage() {
   }
 
   // ── Empty / not released state ─────────────────────────────────────────────
+  if (!result && attempt) {
+    const isSubmitted = attempt.status?.toUpperCase() === "SUBMITTED" || !!attempt.submitted_at;
+    const title = assessment?.title || "Assessment Submission";
+    const typeBadge = getAssessmentTypeBadge(title);
+    const dateLabel = attempt.submitted_at 
+      ? format(new Date(attempt.submitted_at), "MMM d, yyyy • HH:mm") 
+      : (attempt.started_at ? format(new Date(attempt.started_at), "MMM d, yyyy • HH:mm") : "Recent");
+
+    return (
+      <div className="space-y-4 w-full">
+        {/* Back button */}
+        <div className="flex items-center">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => router.push("/student/assessments")}
+            className="h-8 px-3 text-xs font-medium gap-1.5 border border-border/55 rounded-lg hover:bg-muted/50 transition-colors"
+          >
+            <ArrowLeft className="size-3.5" />
+            Back to Assessments
+          </Button>
+        </div>
+
+        {/* Header Zone */}
+        <div className="border border-border/40 rounded-2xl p-6 bg-card/45 shadow-sm backdrop-blur-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div className="space-y-1">
+              <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-bold text-primary uppercase tracking-wide">
+                {typeBadge}
+              </span>
+              <h1 className="text-xl font-semibold text-foreground leading-snug tracking-tight">
+                {title}
+              </h1>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground font-medium pt-1">
+                <span className="flex items-center gap-1.5">
+                  <Calendar className="size-3.5 opacity-70" />
+                  Submitted: {dateLabel}
+                </span>
+                <span className="text-muted-foreground/30">•</span>
+                <span>{attempt.questions?.length || 0} Questions</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
+                <CheckCircle2 className="size-3.5" /> Submitted
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Explain/Notification Banner */}
+        {isAwaitingReview ? (
+          <div className="p-5 rounded-2xl border border-amber-500/15 bg-amber-500/5 flex items-start gap-4 transition-all duration-300">
+            <div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+              <Clock className="size-5 text-amber-600 animate-pulse" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-amber-950 dark:text-amber-200">Lecturer Grading Pending</p>
+              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 leading-relaxed font-medium">
+                This assessment contains open-ended questions (such as essay or short answer questions) that require manual review and grading by your lecturer. Marks have not been published yet, but as soon as your lecturer publishes the results, they will appear here and we will let you know immediately!
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="p-5 rounded-2xl border border-primary/15 bg-primary/5 flex items-start gap-4 transition-all duration-300">
+            <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
+              <Clock className="size-5 text-primary" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-primary">Awaiting Results Release</p>
+              <p className="text-xs text-muted-foreground leading-relaxed font-medium">
+                Your submission was successful! The results for this assessment have not been released by your lecturer yet. Once released, your final score, grade breakdown, and feedback will be visible here.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Questions and Responses Review */}
+        {attempt.questions && attempt.questions.length > 0 && (
+          <div className="space-y-4">
+            <h2 className="text-base font-semibold text-foreground tracking-tight px-1">
+              Submitted Responses Review
+            </h2>
+            <div className="space-y-3">
+              {attempt.questions.map((q: any, idx: number) => {
+                const sub = submissions.find((s: any) => s.question_id === q.id);
+                const open = isOpenEnded(q.type || "");
+                
+                // Decode answer text or selected options
+                let studentAnsText = sub?.answer_text;
+                if (!open && sub?.selected_option_ids?.length > 0 && q.options) {
+                  const opt = q.options.find((o: any) => o.id === sub.selected_option_ids[0]);
+                  studentAnsText = opt?.text || sub.selected_option_ids[0];
+                }
+
+                return (
+                  <div key={q.id} className="border border-border/40 rounded-xl p-5 bg-card/30 space-y-4 hover:border-border/60 transition-colors shadow-sm">
+                    <div className="flex justify-between items-start gap-3">
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground font-semibold">Question {idx + 1}</p>
+                        <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-wider">
+                          {q.type?.replace(/_/g, " ")} · {q.marks} {q.marks === 1 ? "mark" : "marks"}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2.5 py-0.5 text-[10px] font-bold text-muted-foreground uppercase">
+                        {sub?.is_skipped ? "Skipped" : "Submitted"}
+                      </span>
+                    </div>
+
+                    <p className="text-sm text-foreground leading-relaxed font-medium">
+                      {q.text || q.content}
+                    </p>
+
+                    <div className="bg-muted/15 border border-border/30 rounded-xl p-4 space-y-1">
+                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                        Your Response
+                      </p>
+                      <div className="text-sm text-foreground font-medium leading-relaxed whitespace-pre-wrap">
+                        {sub?.is_skipped ? (
+                          <span className="text-muted-foreground italic">No response submitted</span>
+                        ) : (
+                          studentAnsText || <span className="text-muted-foreground italic font-normal">Submitted</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Actions Zone */}
+        <div className="border border-border/40 rounded-2xl p-5 bg-card/30 flex flex-wrap gap-3 justify-end items-center shadow-sm">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => router.push("/student/assessments")}
+            className="h-9 text-xs font-semibold px-4 rounded-xl border-border/60"
+          >
+            Back to Assessments
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => window.location.reload()}
+            className="h-9 text-xs font-semibold px-4 rounded-xl shadow-none gap-1.5"
+          >
+            <RefreshCw className="size-3.5" /> Refresh Status
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
   if (!result) {
     return (
       <div className="py-20 text-center space-y-3 px-4">

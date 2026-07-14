@@ -587,12 +587,12 @@ export default function AssessmentDetailsPage() {
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
+      <div className="w-full space-y-4 p-2 md:p-4 animate-pulse">
+        <div className="flex items-center gap-4 pb-3 border-b">
           <Skeleton variant="title" className="h-6 w-6 rounded-full" />
           <Skeleton variant="title" className="h-9 w-64 rounded-md" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <Skeleton variant="media" className="h-36 rounded-xl" />
           <Skeleton variant="media" className="h-36 rounded-xl" />
           <Skeleton variant="media" className="h-36 rounded-xl" />
@@ -604,11 +604,11 @@ export default function AssessmentDetailsPage() {
 
   if (!assessment) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center space-y-4">
+      <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
         <AlertTriangle className="size-12 text-destructive" />
-        <h2 className="text-xl font-bold">Assessment Not Found</h2>
-        <p className="text-muted-foreground">This assessment does not exist or has been deleted.</p>
-        <Button onClick={() => router.push("/lecturer/assessments")}>Back to Assessments</Button>
+        <h2 className="text-base font-bold text-zinc-800">Assessment Not Found</h2>
+        <p className="text-xs text-zinc-500 font-medium">This assessment does not exist or has been deleted.</p>
+        <Button size="sm" className="h-8 text-xs rounded-lg" onClick={() => router.push("/lecturer/assessments")}>Back to Assessments</Button>
       </div>
     );
   }
@@ -617,22 +617,22 @@ export default function AssessmentDetailsPage() {
   const isActive = assessment.status === "ACTIVE";
 
   return (
-    <div className="space-y-6">
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Header card with gradient header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+        <div className="flex items-center gap-3 min-w-0">
           <Button
-            variant="ghost"
+            variant="outline"
             size="icon"
             onClick={() => router.push("/lecturer/assessments")}
-            className="rounded-full h-9 w-9 border"
+            className="h-8 w-8 rounded-lg shrink-0 border-zinc-200 bg-white hover:bg-zinc-50"
           >
-            <ArrowLeft className="size-4" />
+            <ArrowLeft className="size-4 text-zinc-600" />
           </Button>
-          <div>
-            <h1 className="text-2xl font-bold tracking-tight">{assessment.title}</h1>
-            <p className="text-sm text-muted-foreground">
-              {assessment.course_name || "Course Not Linked"} • Created {format(new Date(assessment.created_at), "PPP")}
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 truncate">{assessment.title}</h1>
+            <p className="text-sm text-muted-foreground mt-1 font-medium">
+              {assessment.course_name || "Course Not Linked"} · Created {format(new Date(assessment.created_at), "PPP")}
             </p>
           </div>
         </div>
@@ -643,9 +643,9 @@ export default function AssessmentDetailsPage() {
             disabled={!isDraft && assessment.status !== "PUBLISHED" && assessment.status !== "SCHEDULED"}
             variant="outline"
             size="sm"
-            className="h-9 font-semibold"
+            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
           >
-            <Pencil className="size-4 mr-2" />
+            <Pencil className="size-3.5 mr-1.5" />
             Edit Settings
           </Button>
 

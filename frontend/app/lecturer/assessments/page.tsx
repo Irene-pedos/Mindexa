@@ -31,6 +31,12 @@ import {
   AlertTriangle,
   Cpu,
   RefreshCw,
+  Lock,
+  FileText,
+  Zap,
+  Sparkles,
+  CheckCircle,
+  UserCheck,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -115,29 +121,29 @@ function statusStyle(status: string): string {
   const m: Record<string, string> = {
     DRAFT: "bg-muted text-muted-foreground border-border/40",
     PUBLISHED: "bg-primary/10 text-primary border-primary/20",
-    SCHEDULED: "bg-violet-50 text-violet-700 border-violet-200",
-    ACTIVE: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    SCHEDULED: "bg-primary/5 text-primary border-primary/15",
+    ACTIVE: "bg-success/10 text-success border-success/20",
     CLOSED: "bg-muted text-foreground border-border",
     ARCHIVED: "bg-transparent text-muted-foreground border-border",
-    CANCELLED: "bg-red-50 text-red-600 border-red-200",
+    CANCELLED: "bg-destructive/10 text-destructive border-destructive/20",
   };
   return m[status] ?? "bg-muted text-muted-foreground";
 }
 
 function gradingModeStyle(mode: string): string {
   const m: Record<string, string> = {
-    AUTO: "bg-sky-50 text-sky-700 border-sky-200",
-    MANUAL: "bg-amber-50 text-amber-700 border-amber-200",
-    AI_ASSISTED: "bg-purple-50 text-purple-700 border-purple-200",
+    AUTO: "bg-secondary text-secondary-foreground border-border",
+    MANUAL: "bg-warning/10 text-warning border-warning/20",
+    AI_ASSISTED: "bg-primary/10 text-primary border-primary/20",
   };
   return m[mode?.toUpperCase()] ?? "bg-muted text-muted-foreground";
 }
 
 function releaseStyle(mode: string | null): string {
-  if (!mode) return "bg-muted text-muted-foreground";
-  if (mode === "IMMEDIATE") return "bg-emerald-50 text-emerald-700";
-  if (mode === "MANUAL") return "bg-amber-50 text-amber-700";
-  return "bg-muted text-muted-foreground";
+  if (!mode) return "bg-muted text-muted-foreground border-border";
+  if (mode === "IMMEDIATE") return "bg-success/10 text-success border-success/20";
+  if (mode === "MANUAL") return "bg-warning/10 text-warning border-warning/20";
+  return "bg-muted text-muted-foreground border-border";
 }
 
 function fmtDate(d: string | null): string {
@@ -508,19 +514,19 @@ export default function ManageAssessmentsPage() {
   ).length;
 
   return (
-    <div className="space-y-4">
+    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* ── Page header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Assessments</h1>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Manage, monitor, and govern your assessment registry
+          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Assessments</h1>
+          <p className="text-sm text-muted-foreground mt-1 font-medium">
+            Manage, monitor, and govern your assessment registry.
           </p>
         </div>
         <Button
           size="sm"
           asChild
-          className="h-8 rounded-full px-4 gap-1.5 shadow-none font-medium text-xs"
+          className="h-8 rounded-lg px-4 gap-1.5 shadow-none font-bold text-[10px] uppercase tracking-wider text-white"
         >
           <Link href="/lecturer/assessments/new">
             <Plus className="size-3.5" /> New Assessment
@@ -530,16 +536,16 @@ export default function ManageAssessmentsPage() {
 
       {/* ── Needs grading callout ── */}
       {!loading && needsGradingCount > 0 && (
-        <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-          <Cpu className="size-3.5 text-amber-600 shrink-0" />
-          <p className="text-xs text-amber-800 font-medium">
+        <div className="flex items-center gap-2 rounded-lg border border-warning/15 bg-warning/5 px-3 py-2">
+          <Cpu className="size-3.5 text-warning shrink-0" />
+          <p className="text-xs text-warning-foreground font-medium">
             {needsGradingCount} assessment{needsGradingCount !== 1 ? "s" : ""}{" "}
             currently open or closed require manual grading attention.
           </p>
           <Button
             variant="ghost"
             size="sm"
-            className="ml-auto h-6 px-2 text-[10px] text-amber-700 hover:bg-amber-100 rounded"
+            className="ml-auto h-6 px-2 text-[10px] text-warning hover:bg-warning/10 rounded-lg"
             onClick={() => setGradingFilter("MANUAL")}
           >
             Filter
@@ -705,22 +711,34 @@ export default function ManageAssessmentsPage() {
                           />
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9 min-w-[180px]">
-                          Assessment
+                          <span className="flex items-center gap-1.5">
+                            <FileText className="size-3 text-muted-foreground/60" /> Assessment
+                          </span>
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9">
-                          Course
+                          <span className="flex items-center gap-1.5">
+                            <BookOpen className="size-3 text-muted-foreground/60" /> Course
+                          </span>
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
-                          Type
+                          <span className="flex items-center justify-center gap-1.5">
+                            <Filter className="size-3 text-muted-foreground/60" /> Type
+                          </span>
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
-                          Release
+                          <span className="flex items-center justify-center gap-1.5">
+                            <Zap className="size-3 text-muted-foreground/60" /> Release
+                          </span>
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9">
-                          Metrics
+                          <span className="flex items-center gap-1.5">
+                            <BarChart2 className="size-3 text-muted-foreground/60" /> Metrics
+                          </span>
                         </TableHead>
                         <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
-                          Status
+                          <span className="flex items-center justify-center gap-1.5">
+                            <CheckSquare className="size-3 text-muted-foreground/60" /> Status
+                          </span>
                         </TableHead>
                         <TableHead className="text-right text-[9px] font-semibold uppercase tracking-wider pr-3 h-9">
                           Actions
@@ -800,8 +818,8 @@ export default function ManageAssessmentsPage() {
                                   )}
                                   {draftStep !== null &&
                                     draftStep !== undefined && (
-                                      <span className="text-[9px] px-1.5 py-0 rounded-full bg-violet-50 text-violet-600 border border-violet-100 font-medium">
-                                        Step {draftStep} of 6
+                                      <span className="text-[9px] px-1.5 py-0 rounded-full bg-primary/5 text-primary border border-primary/10 font-medium flex items-center gap-1">
+                                        <Edit className="size-2.5" /> Step {draftStep} of 6
                                       </span>
                                     )}
                                   {item.max_attempts > 1 && (
@@ -839,10 +857,12 @@ export default function ManageAssessmentsPage() {
                               <TableCell className="text-center">
                                 <span
                                   className={cn(
-                                    "text-[8px] font-bold uppercase tracking-tight px-1.5 py-0.5 rounded",
+                                    "text-[8px] font-bold uppercase tracking-tight px-1.5 py-0.5 rounded inline-flex items-center justify-center gap-1 border",
                                     releaseStyle(item.result_release_mode),
                                   )}
                                 >
+                                  {item.result_release_mode === "IMMEDIATE" && <Zap className="size-2.5" />}
+                                  {item.result_release_mode === "MANUAL" && <UserCheck className="size-2.5" />}
                                   {item.result_release_mode ?? "—"}
                                 </span>
                               </TableCell>
@@ -877,10 +897,15 @@ export default function ManageAssessmentsPage() {
                                 <Badge
                                   variant="outline"
                                   className={cn(
-                                    "text-[8px] font-bold uppercase tracking-tight h-4 px-1.5 rounded-full",
+                                    "text-[8px] font-bold uppercase tracking-tight h-5 px-2 rounded-full inline-flex items-center gap-1 border w-fit mx-auto",
                                     statusStyle(item.status),
                                   )}
                                 >
+                                  {item.status === "ACTIVE" && <span className="size-1.5 rounded-full bg-success animate-pulse shrink-0" />}
+                                  {item.status === "PUBLISHED" && <CheckCircle className="size-2.5 shrink-0" />}
+                                  {item.status === "DRAFT" && <FileText className="size-2.5 shrink-0" />}
+                                  {item.status === "SCHEDULED" && <Clock className="size-2.5 shrink-0" />}
+                                  {item.status === "CLOSED" && <Lock className="size-2.5 shrink-0" />}
                                   {item.status}
                                 </Badge>
                               </TableCell>
@@ -933,14 +958,14 @@ export default function ManageAssessmentsPage() {
                                       <Button
                                         variant="ghost"
                                         size="icon"
-                                        className="h-6 w-6 rounded hover:bg-emerald-50"
+                                        className="h-6 w-6 rounded hover:bg-success/10"
                                         title="Finalize & Publish"
                                         disabled={finalizingId === item.id}
                                         onClick={() => handleFinalize(item.id)}
                                       >
                                         <CheckSquare
                                           className={cn(
-                                            "size-3 text-emerald-600",
+                                            "size-3 text-success",
                                             finalizingId === item.id &&
                                               "animate-pulse",
                                           )}
@@ -984,13 +1009,13 @@ export default function ManageAssessmentsPage() {
                                       variant="ghost"
                                       size="icon"
                                       asChild
-                                      className="h-6 w-6 rounded hover:bg-sky-50"
+                                      className="h-6 w-6 rounded hover:bg-primary/10"
                                       title="Live Supervision"
                                     >
                                       <Link
                                         href={`/lecturer/supervision?assessment=${item.id}`}
                                       >
-                                        <MonitorPlay className="size-3 text-sky-600" />
+                                        <MonitorPlay className="size-3 text-primary" />
                                       </Link>
                                     </Button>
                                   )}

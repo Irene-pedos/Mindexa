@@ -5,6 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { toast } from "sonner";
 import {
   LayoutDashboard,
   BookOpen,
@@ -14,7 +15,10 @@ import {
   AlertTriangle,
   Bot,
   Eye,
-  Briefcase
+  Briefcase,
+  BarChart3,
+  Unlock,
+  ChevronRight
 } from "lucide-react";
 
 import {
@@ -28,10 +32,20 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
 import { notificationApi } from "@/lib/api/notification";
+import { NotificationType } from "@/lib/api/notification/notificationTypes";
+import { User } from "@/lib/types/user";
 
 const mainNav = [
   { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard },
@@ -45,8 +59,15 @@ const mainNav = [
   },
 ];
 
+const gradingNav = [
+  { title: "Review Queue", url: "/lecturer/grading", icon: Users },
+  { title: "Batch Review", url: "/lecturer/grading/batch", icon: ClipboardList },
+  { title: "Quality Assurance", url: "/lecturer/grading/moderation", icon: AlertTriangle },
+  { title: "Result Release Center", url: "/lecturer/grading/release", icon: Unlock },
+  { title: "Assessment Analytics", url: "/lecturer/grading/analytics", icon: BarChart3 },
+];
+
 const managementNav = [
-  { title: "Grading Queue", url: "/lecturer/grading", icon: Users },
   { title: "Live Supervision", url: "/lecturer/supervision", icon: Eye },
   { title: "AI Assistant", url: "/lecturer/ai-assistant", icon: Bot },
   {
@@ -60,7 +81,7 @@ export function LecturerSidebar({
   ...props
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
-  const { user } = useAuth();
+  const { user } = useAuth() as { user: User | null };
   const [hasNewAssignments, setHasNewAssignments] = React.useState(false);
 
   React.useEffect(() => {
@@ -69,31 +90,43 @@ export function LecturerSidebar({
       try {
         const res = await notificationApi.getNotifications(true);
         const hasAssignmentNotif = res.items.some(
-          n => n.notification_type === "TEACHING_ASSIGNMENT_CREATED"
+          n => n.notification_type === NotificationType.TEACHING_ASSIGNMENT_CREATED
         );
         setHasNewAssignments(hasAssignmentNotif);
       } catch (err) {
         console.error("Failed to check notifications", err);
+        toast.error("Failed to check notifications");
       }
     }
-    
+
     checkNotifications();
     // Refresh every 2 minutes
     const interval = setInterval(checkNotifications, 120000);
-    return () => clearInterval(interval);
+    
+    // Pause polling when tab is inactive
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        checkNotifications();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [user]);
 
   const displayName =
-    (user?.profile as any)?.display_name ||
-    ((user?.profile as any)?.first_name
-      ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}`
+    user?.profile?.display_name ||
+    (user?.profile?.first_name
+      ? `${user.profile.first_name} ${user.profile.last_name}`
       : "Lecturer");
 
   const userData = {
     name: displayName,
-    email: (user as any)?.email || "",
-    avatar:
-      (user?.profile as any)?.avatar_url || "/avatars/user avatar.png",
+    email: user?.email || "",
+    avatar: user?.profile?.avatar_url || "/avatars/user avatar.png",
   };
 
   return (
@@ -108,7 +141,6 @@ export function LecturerSidebar({
                 alt="Mindexa"
                 fill
                 className="object-contain"
-                priority
               />
             </div>
           </div>
@@ -121,7 +153,6 @@ export function LecturerSidebar({
                 alt="Mindexa"
                 fill
                 className="object-contain"
-                priority
               />
             </div>
           </div>
@@ -138,8 +169,8 @@ export function LecturerSidebar({
             {mainNav.map((item) => {
               const isActive =
                 pathname === item.url || pathname.startsWith(item.url + "/");
-              const showBadge = item.badge && hasNewAssignments;
-              
+              const showBadge = item.badge === true && hasNewAssignments;
+
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
@@ -148,11 +179,11 @@ export function LecturerSidebar({
                     isActive={isActive}
                   >
                     <Link href={item.url} className="relative">
-                      <item.icon className="size-5" />
+                      <item.icon className="size-5" aria-hidden="true" />
                       <span>{item.title}</span>
                       {showBadge && (
                         <span className="absolute right-2 top-1/2 -translate-y-1/2 flex h-2 w-2">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 motion-reduce:hidden"></span>
                           <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
                         </span>
                       )}
@@ -161,6 +192,46 @@ export function LecturerSidebar({
                 </SidebarMenuItem>
               );
             })}
+          </SidebarMenu>
+        </SidebarGroup>
+
+        {/* Grading Center Navigation */}
+        <SidebarGroup>
+          <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+            Grading Center
+          </SidebarGroupLabel>
+          <SidebarMenu>
+            <Collapsible
+              asChild
+              defaultOpen={pathname.startsWith("/lecturer/grading")}
+              className="group/collapsible"
+            >
+              <SidebarMenuItem>
+                <CollapsibleTrigger asChild>
+                  <SidebarMenuButton tooltip="Grading Center">
+                     <Users className="size-5" aria-hidden="true" />
+                     <span>Grading Center</span>
+                     <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+                  </SidebarMenuButton>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    {gradingNav.map((subItem) => {
+const isActive = pathname === subItem.url || pathname.startsWith(subItem.url + "/");
+                      return (
+                        <SidebarMenuSubItem key={subItem.title}>
+                          <SidebarMenuSubButton asChild isActive={isActive}>
+                             <Link href={subItem.url}>
+                               <span>{subItem.title}</span>
+                             </Link>
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </SidebarMenuItem>
+            </Collapsible>
           </SidebarMenu>
         </SidebarGroup>
 
@@ -181,8 +252,8 @@ export function LecturerSidebar({
                     isActive={isActive}
                   >
                     <Link href={item.url}>
-                      <item.icon className="size-5" />
-                      <span>{item.title}</span>
+                       <item.icon className="size-5" aria-hidden="true" />
+                       <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

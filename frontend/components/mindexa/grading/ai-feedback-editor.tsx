@@ -85,11 +85,31 @@ export function AIFeedbackEditor({
       <CardContent className="p-4 space-y-4">
         {!draftText ? (
           <div className="flex flex-col items-center justify-center py-8 text-center space-y-3">
-            <Loader2 className="size-6 text-primary/50 animate-spin mb-2" />
-            <p className="text-sm font-medium text-foreground">AI Feedback Generation in Progress</p>
-            <p className="text-xs text-muted-foreground max-w-sm">
-              The AI agent is automatically drafting professional, constructive feedback based on the rubric alignment and final score. Please check back shortly.
-            </p>
+            {drafting ? (
+              <>
+                <Loader2 className="size-6 text-primary animate-spin mb-2" />
+                <p className="text-sm font-medium text-foreground">AI Feedback Generation in Progress</p>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  The AI agent is drafting professional, constructive feedback. This may take up to 15 seconds.
+                </p>
+              </>
+            ) : (
+              <>
+                <BrainCircuit className="size-8 text-muted-foreground/40 mb-1" />
+                <p className="text-sm font-medium text-foreground">No AI Feedback Drafted Yet</p>
+                <p className="text-xs text-muted-foreground max-w-sm">
+                  Generate professional, constructive feedback based on the student&apos;s submission and grading evaluation.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={handleGenerateDraft}
+                  disabled={drafting}
+                  className="mt-2 rounded-lg font-semibold"
+                >
+                  Generate AI Feedback
+                </Button>
+              </>
+            )}
           </div>
         ) : (
           <div className="space-y-4">
