@@ -62,8 +62,6 @@ const mainNav = [
 const gradingNav = [
   { title: "Review Queue", url: "/lecturer/grading", icon: Users },
   { title: "Batch Review", url: "/lecturer/grading/batch", icon: ClipboardList },
-  { title: "Quality Assurance", url: "/lecturer/grading/moderation", icon: AlertTriangle },
-  { title: "Result Release Center", url: "/lecturer/grading/release", icon: Unlock },
   { title: "Assessment Analytics", url: "/lecturer/grading/analytics", icon: BarChart3 },
 ];
 
@@ -95,7 +93,6 @@ export function LecturerSidebar({
         setHasNewAssignments(hasAssignmentNotif);
       } catch (err) {
         console.error("Failed to check notifications", err);
-        toast.error("Failed to check notifications");
       }
     }
 
@@ -123,35 +120,31 @@ export function LecturerSidebar({
       ? `${user.profile.first_name} ${user.profile.last_name}`
       : "Lecturer");
 
-  const userData = {
-    name: displayName,
-    email: user?.email || "",
-    avatar: user?.profile?.avatar_url || "/avatars/user avatar.png",
-  };
-
   return (
     <Sidebar collapsible="icon" {...props}>
       <SidebarHeader>
         <div className="relative flex h-14 w-full items-center overflow-hidden px-2 py-2">
-          {/* Expanded: Full horizontal logo */}
+          {/* Expanded: Full logo */}
           <div className="absolute left-2 flex origin-left items-center gap-3 transition-all duration-300 ease-in-out group-data-[collapsible=icon]:pointer-events-none group-data-[collapsible=icon]:scale-90 group-data-[collapsible=icon]:opacity-0">
             <div className="relative h-9 w-30 flex-shrink-0">
               <Image
                 src="/icons/logo/mindexa-logo.svg"
                 alt="Mindexa"
                 fill
+                priority
                 className="object-contain"
               />
             </div>
           </div>
 
-          {/* Collapsed: Icon only (smaller and centered) */}
+          {/* Collapsed: Icon only */}
           <div className="absolute left-1/2 top-1/2 flex h-9 w-9 -translate-x-1/2 -translate-y-1/2 scale-50 items-center justify-center opacity-0 transition-all duration-300 ease-in-out group-data-[collapsible=icon]:scale-100 group-data-[collapsible=icon]:opacity-100">
             <div className="relative h-4 w-4 flex-shrink-0">
               <Image
                 src="/icons/logo/mindexa-icon.svg"
                 alt="Mindexa"
                 fill
+                priority
                 className="object-contain"
               />
             </div>
@@ -217,7 +210,7 @@ export function LecturerSidebar({
                 <CollapsibleContent>
                   <SidebarMenuSub>
                     {gradingNav.map((subItem) => {
-const isActive = pathname === subItem.url || pathname.startsWith(subItem.url + "/");
+                      const isActive = pathname === subItem.url || pathname.startsWith(subItem.url + "/");
                       return (
                         <SidebarMenuSubItem key={subItem.title}>
                           <SidebarMenuSubButton asChild isActive={isActive}>

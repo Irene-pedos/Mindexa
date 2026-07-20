@@ -31,7 +31,7 @@ async def test_review_agent_returns_validated_output():
     )
     
     agent = ReviewAgent(gateway)
-    output = await agent.review_response(
+    output, raw_completion = await agent.review_response(
         question_text="Explain SQL normalization.",
         student_answer="SQL normalization is about reducing redundancy...",
         rubric_content="Accuracy: 5 marks, Depth: 5 marks",
@@ -40,6 +40,7 @@ async def test_review_agent_returns_validated_output():
     )
     
     assert isinstance(output, ReviewAgentOutput)
+    assert isinstance(raw_completion, AICompletionResponse)
     assert output.suggested_score == 8.5
     assert output.confidence == 0.9
     assert len(output.rubric_alignment) == 2

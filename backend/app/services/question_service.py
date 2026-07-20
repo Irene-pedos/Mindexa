@@ -30,18 +30,15 @@ def infer_grading_mode(question_type: str, override: str | None = None) -> str:
     if override:
         return override
 
-    type_to_mode = {
-        QuestionType.MCQ.value: GradingMode.AUTO.value,
-        QuestionType.TRUE_FALSE.value: GradingMode.AUTO.value,
-        QuestionType.MATCHING.value: GradingMode.AUTO.value,
-        QuestionType.ORDERING.value: GradingMode.AUTO.value,
-        QuestionType.FILL_BLANK.value: GradingMode.AUTO.value,
-        QuestionType.SHORT_ANSWER.value: GradingMode.SEMI.value,
-        QuestionType.COMPUTATIONAL.value: GradingMode.SEMI.value,
-        QuestionType.ESSAY.value: GradingMode.SEMI.value,
-        QuestionType.CASE_STUDY.value: GradingMode.SEMI.value,
-    }
-    return type_to_mode.get(question_type, GradingMode.MANUAL.value)
+    try:
+        qt = QuestionType(question_type)
+        if qt.is_auto_gradable:
+            return GradingMode.AUTO.value
+        if qt.is_open_ended:
+            return GradingMode.SEMI.value
+    except ValueError:
+        pass
+    return GradingMode.MANUAL.value
 
 
 class QuestionService:

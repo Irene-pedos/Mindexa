@@ -1,7 +1,10 @@
 // frontend/components/sections/TestimonialsSection.tsx
-import { TypographyH2, TypographyP } from "@/components/ui/typography";
+"use client";
+
+import React from "react";
+import { Sparkles } from "lucide-react";
 import { TestimonialCard, TestimonialAuthor } from "@/components/ui/testimonial-card";
-import { InView } from "@/components/ui/in-view";
+import { motion } from "motion/react";
 
 const testimonials: Array<{
   author: TestimonialAuthor;
@@ -65,44 +68,130 @@ const testimonials: Array<{
   },
 ];
 
+const row1Testimonials = testimonials;
+const row2Testimonials = [
+  testimonials[3],
+  testimonials[4],
+  testimonials[5],
+  testimonials[6],
+  testimonials[0],
+  testimonials[1],
+  testimonials[2],
+];
+
 export default function TestimonialsSection() {
+  const [isRow1Hovered, setIsRow1Hovered] = React.useState(false);
+  const [isRow2Hovered, setIsRow2Hovered] = React.useState(false);
+
   return (
-    <section className="py-16 bg-background">
-      <div className="container mx-auto px-6 max-w-7xl">
+    <section id="testimonials" className="py-20 md:py-28 bg-background overflow-hidden relative">
+      {/* Subtle ambient light gradient background */}
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_110%,rgba(30,50,90,0.02),transparent_70%)] dark:bg-[radial-gradient(circle_at_50%_110%,rgba(120,119,198,0.04),transparent_70%)] pointer-events-none" />
+
+      <div className="container mx-auto px-6 max-w-7xl relative z-10">
         
         {/* Header */}
-        <div className="text-center mb-12">
-          <InView>
-            <TypographyH2 className="text-foreground tracking-tight">
-              Trusted by Academic Communities
-            </TypographyH2>
-          </InView>
-          <TypographyP className="mt-4 text-muted-foreground max-w-2xl mx-auto text-base">
-            Lecturers and students from partner institutions highlight Mindexa’s clarity, fairness, and reliability in managing assessments and academic workflows.
-          </TypographyP>
-        </div>
-
-        {/* Infinite Marquee */}
-        <div className="relative overflow-hidden group">
-          <div className="flex overflow-hidden p-2 [--gap:1.25rem] [gap:var(--gap)] flex-row [--duration:45s]">
-            <div className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row hover:[animation-play-state:paused] group-hover:[animation-play-state:paused]">
-              {[...Array(3)].map((_, setIndex) => (
-                testimonials.map((testimonial, i) => (
-                  <TestimonialCard
-                    key={`${setIndex}-${i}`}
-                    author={testimonial.author}
-                    text={testimonial.text}
-                  />
-                ))
-              ))}
-            </div>
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="text-center mb-16"
+        >
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-normal border border-primary/20 mb-3">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Community Voice</span>
           </div>
-
-          {/* Fade edges */}
-          <div className="pointer-events-none absolute inset-y-0 left-0 w-1/4 bg-gradient-to-r from-background to-transparent" />
-          <div className="pointer-events-none absolute inset-y-0 right-0 w-1/4 bg-gradient-to-l from-background to-transparent" />
-        </div>
+          
+          <h2 className="text-3xl md:text-5xl font-semibold tracking-tight text-foreground leading-tight">
+            Trusted by Academic Communities
+          </h2>
+          <p className="text-sm md:text-base text-muted-foreground mt-3 max-w-2xl mx-auto font-normal leading-relaxed">
+            Lecturers and students from partner institutions highlight Mindexa’s clarity, fairness, and reliability in managing assessments and academic workflows.
+          </p>
+        </motion.div>
       </div>
+
+      {/* Double Row Infinite Marquee Scroll */}
+      <div className="relative flex w-full flex-col gap-6 items-center justify-center overflow-hidden py-4">
+        
+        {/* Row 1 - Anticlockwise (Right to Left) */}
+        <div 
+          onMouseEnter={() => setIsRow1Hovered(true)}
+          onMouseLeave={() => setIsRow1Hovered(false)}
+          className="group flex overflow-hidden w-full [--gap:1.5rem] [gap:var(--gap)] flex-row [--duration:75s]"
+        >
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ animationPlayState: isRow1Hovered ? "paused" : "running" }}
+          >
+            {row1Testimonials.map((testimonial, i) => (
+              <TestimonialCard
+                key={`row1-1-${i}`}
+                author={testimonial.author}
+                text={testimonial.text}
+              />
+            ))}
+          </div>
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row" 
+            style={{ animationPlayState: isRow1Hovered ? "paused" : "running" }}
+            aria-hidden="true"
+          >
+            {row1Testimonials.map((testimonial, i) => (
+              <TestimonialCard
+                key={`row1-2-${i}`}
+                author={testimonial.author}
+                text={testimonial.text}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Row 2 - Clockwise (Left to Right) */}
+        <div 
+          onMouseEnter={() => setIsRow2Hovered(true)}
+          onMouseLeave={() => setIsRow2Hovered(false)}
+          className="group flex overflow-hidden w-full [--gap:1.5rem] [gap:var(--gap)] flex-row [--duration:75s]"
+        >
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ 
+              animationPlayState: isRow2Hovered ? "paused" : "running",
+              animationDirection: "reverse"
+            }}
+          >
+            {row2Testimonials.map((testimonial, i) => (
+              <TestimonialCard
+                key={`row2-1-${i}`}
+                author={testimonial.author}
+                text={testimonial.text}
+              />
+            ))}
+          </div>
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ 
+              animationPlayState: isRow2Hovered ? "paused" : "running",
+              animationDirection: "reverse"
+            }}
+            aria-hidden="true"
+          >
+            {row2Testimonials.map((testimonial, i) => (
+              <TestimonialCard
+                key={`row2-2-${i}`}
+                author={testimonial.author}
+                text={testimonial.text}
+              />
+            ))}
+          </div>
+        </div>
+
+        {/* Elegant side fades */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-background via-background/80 to-transparent z-10" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-background via-background/80 to-transparent z-10" />
+      </div>
+
     </section>
   );
 }

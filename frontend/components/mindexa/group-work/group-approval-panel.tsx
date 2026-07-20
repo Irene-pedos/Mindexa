@@ -27,7 +27,7 @@ import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
 
 interface GroupApprovalPanelProps {
-  myStatus: "PENDING" | "APPROVED" | "REJECTED";
+  myStatus: "PENDING" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
   approvalCount: number;
   totalMembers: number;
   onApprove: (note?: string) => Promise<void>;

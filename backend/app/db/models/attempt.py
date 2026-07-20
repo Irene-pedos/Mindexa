@@ -1369,6 +1369,39 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         sa_column=Column(JSONB, nullable=True),
     )
 
+    ai_grading_basis: Optional[str] = Field(default=None, nullable=True)
+    ai_context_sources: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    rag_chunk_ids: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    rubric_id_used: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), nullable=True),
+    )
+    fallback_reason: Optional[str] = Field(default=None, nullable=True)
+    rag_used: Optional[bool] = Field(default=None, nullable=True)
+    rag_source_labels: Optional[list] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    model: Optional[str] = Field(default=None, nullable=True)
+    tokens: Optional[int] = Field(default=None, nullable=True)
+    cost: Optional[float] = Field(default=None, nullable=True)
+    ai_started_at: Optional[datetime] = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),
+        nullable=True,
+    )
+    ai_completed_at: Optional[datetime] = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),
+        nullable=True,
+    )
+
     internal_notes: Optional[str] = Field(default=None, nullable=True)
     rubric_scores: Optional[list] = Field(
         default=None,

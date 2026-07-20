@@ -32,6 +32,7 @@ from app.schemas.result import (
     ResultListResponse,
     ResultReleaseResponse,
     ResultSummary,
+    ReleaseQueueResponse,
 )
 from app.services.result_service import ResultService
 
@@ -153,6 +154,7 @@ async def get_result_for_lecturer(
 )
 async def list_results_for_assessment(
     assessment_id: uuid.UUID,
+    class_section_id: uuid.UUID | None = Query(default=None),
     is_released: bool | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -162,6 +164,7 @@ async def list_results_for_assessment(
     repo = ResultRepository(db)
     items, total = await repo.list_by_assessment(
         assessment_id=assessment_id,
+        class_section_id=class_section_id,
         is_released=is_released,
         page=page,
         page_size=page_size,
@@ -225,6 +228,7 @@ async def release_results(
         assessment_id=body.assessment_id,
         released_by_id=current_user.id,
         attempt_ids=body.attempt_ids,
+        class_section_id=body.class_section_id,
     )
     return ResultReleaseResponse(**release_data)
 
@@ -337,3 +341,164 @@ async def clear_integrity_hold(
         "result_id": str(result_id),
         "cleared_by": str(current_user.id),
     }
+
+
+@router.get(
+    "/assessment/{assessment_id}/release-queue",
+    response_model=ReleaseQueueResponse,
+    summary="Get results release readiness queue for an assessment by class section",
+)
+async def get_release_readiness_queue(
+    assessment_id: uuid.UUID,
+    class_section_id: uuid.UUID = Query(...),
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ReleaseQueueResponse:
+    from app.db.models.academic import StudentEnrollment
+    from app.db.models.auth import User as DBUser, UserProfile
+    from app.db.models.attempt import AssessmentAttempt, StudentResponse, SubmissionGrade
+    from app.db.models.result import AssessmentResult
+    from sqlalchemy import select, func
+
+    # 1. Fetch active enrollments with user display names
+    stmt = (
+        select(
+            DBUser.id,
+            DBUser.email,
+            UserProfile.display_name,
+            UserProfile.first_name,
+            UserProfile.last_name,
+        )
+        .outerjoin(UserProfile, UserProfile.user_id == DBUser.id)
+        .join(StudentEnrollment, StudentEnrollment.student_id == DBUser.id)
+        .where(
+            StudentEnrollment.class_section_id == class_section_id,
+            StudentEnrollment.is_deleted == False
+        )
+    )
+    res = await db.execute(stmt)
+    students = res.all()
+
+    if not students:
+        return ReleaseQueueResponse(items=[], class_fully_graded=True)
+
+    student_ids = [s[0] for s in students]
+
+    # 2. Pre-fetch attempts
+    attempt_stmt = (
+        select(AssessmentAttempt)
+        .where(
+            AssessmentAttempt.assessment_id == assessment_id,
+            AssessmentAttempt.student_id.in_(student_ids),
+            AssessmentAttempt.is_deleted == False
+        )
+    )
+    attempt_res = await db.execute(attempt_stmt)
+    attempts = {a.student_id: a for a in attempt_res.scalars().all()}
+
+    # 3. Pre-fetch results
+    result_stmt = (
+        select(AssessmentResult)
+        .where(
+            AssessmentResult.assessment_id == assessment_id,
+            AssessmentResult.student_id.in_(student_ids),
+            AssessmentResult.is_deleted == False
+        )
+    )
+    result_res = await db.execute(result_stmt)
+    results = {r.student_id: r for r in result_res.scalars().all()}
+
+    # 4. Pre-fetch count of responses per attempt
+    resp_count_stmt = (
+        select(StudentResponse.attempt_id, func.count(StudentResponse.id))
+        .join(AssessmentAttempt, AssessmentAttempt.id == StudentResponse.attempt_id)
+        .where(
+            AssessmentAttempt.assessment_id == assessment_id,
+            AssessmentAttempt.student_id.in_(student_ids),
+            AssessmentAttempt.is_deleted == False,
+            StudentResponse.is_deleted == False
+        )
+        .group_by(StudentResponse.attempt_id)
+    )
+    resp_counts_res = await db.execute(resp_count_stmt)
+    resp_counts = dict(resp_counts_res.all())
+
+    # 5. Pre-fetch count of finalized grades per attempt
+    final_count_stmt = (
+        select(SubmissionGrade.attempt_id, func.count(SubmissionGrade.id))
+        .join(AssessmentAttempt, AssessmentAttempt.id == SubmissionGrade.attempt_id)
+        .where(
+            AssessmentAttempt.assessment_id == assessment_id,
+            AssessmentAttempt.student_id.in_(student_ids),
+            SubmissionGrade.is_final == True,
+            AssessmentAttempt.is_deleted == False,
+            SubmissionGrade.is_deleted == False
+        )
+        .group_by(SubmissionGrade.attempt_id)
+    )
+    final_counts_res = await db.execute(final_count_stmt)
+    final_counts = dict(final_counts_res.all())
+
+    # Check if all attempts are fully graded
+    class_fully_graded = True
+    for s in students:
+        student_id = s[0]
+        attempt = attempts.get(student_id)
+        if attempt:
+            tot = resp_counts.get(attempt.id, 0)
+            fin = final_counts.get(attempt.id, 0)
+            if fin < tot:
+                class_fully_graded = False
+
+    # Populate response items list
+    items = []
+    for s in students:
+        student_id = s[0]
+        email = s[1]
+        display_name = s[2]
+        first_name = s[3]
+        last_name = s[4]
+
+        full_name = f"{first_name or ''} {last_name or ''}".strip()
+        student_name = display_name or full_name or email or f"Student {student_id}"
+
+        attempt = attempts.get(student_id)
+        result = results.get(student_id)
+
+        attempt_id = attempt.id if attempt else None
+        tot = resp_counts.get(attempt_id, 0) if attempt_id else 0
+        fin = final_counts.get(attempt_id, 0) if attempt_id else 0
+
+        integrity_hold = result.integrity_hold if result else False
+        is_released = result.is_released if result else False
+
+        total_score = result.total_score if result else None
+        max_score = result.max_score if result else None
+        percentage = result.percentage if result else None
+        letter_grade = result.letter_grade.value if (result and result.letter_grade) else None
+
+        # Can release only if class is fully graded, attempt exists, not released, and no hold
+        has_attempt = attempt_id is not None
+        can_release = (
+            class_fully_graded and
+            has_attempt and
+            not is_released and
+            not integrity_hold
+        )
+
+        items.append({
+            "student_id": student_id,
+            "student_name": student_name,
+            "attempt_id": attempt_id,
+            "graded_question_count": fin,
+            "total_question_count": tot,
+            "integrity_hold": integrity_hold,
+            "is_released": is_released,
+            "can_release": can_release,
+            "total_score": total_score,
+            "max_score": max_score,
+            "percentage": percentage,
+            "letter_grade": letter_grade,
+        })
+
+    return ReleaseQueueResponse(items=items, class_fully_graded=class_fully_graded)

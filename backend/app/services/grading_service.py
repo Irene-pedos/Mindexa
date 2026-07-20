@@ -50,22 +50,9 @@ from sqlalchemy.orm import selectinload
 
 logger = get_logger("mindexa.grading_service")
 
-# AUTO-GRADABLE question types (can be fully graded by code)
-AUTO_GRADABLE = {
-    QuestionType.MCQ,
-    QuestionType.TRUE_FALSE,
-    QuestionType.ORDERING,
-    QuestionType.MATCHING,
-    QuestionType.FILL_BLANK,
-}
-
-# Requires human or AI review (open-ended)
-OPEN_ENDED = {
-    QuestionType.SHORT_ANSWER,
-    QuestionType.ESSAY,
-    QuestionType.COMPUTATIONAL,
-    QuestionType.CASE_STUDY,
-}
+# Centrally managed question taxonomy from QuestionType
+AUTO_GRADABLE = {qt for qt in QuestionType if qt.is_auto_gradable}
+OPEN_ENDED = {qt for qt in QuestionType if qt.is_open_ended}
 
 
 class GradingService:
@@ -186,10 +173,9 @@ class GradingService:
             priority=priority,
         )
 
-        # Trigger AI grading job if applicable
-        if grading_mode == GradingMode.SEMI: # AI_ASSISTED
-            from app.workers.tasks import process_ai_grading_job
-            process_ai_grading_job.delay(str(item.id))
+        # Always trigger AI grading job to pre-populate suggestions for open-ended questions
+        from app.workers.tasks import process_ai_grading_job
+        process_ai_grading_job.delay(str(item.id))
 
         return item
 
@@ -236,12 +222,72 @@ class GradingService:
 
         rubric = await self.assessment_repo.get_rubric_for_question(response.question_id)
         rubric_content = "Generic academic standards"
+        rubric_id_used = None
         if rubric:
+            rubric_id_used = rubric.id
             # Format rubric for AI context
             rubric_content = "\n".join([
                 f"- {c.name}: {c.description} ({c.weight} marks)"
                 for c in rubric.criteria
             ])
+
+        # Fetch assessment details to get teaching_workspace_id
+        assessment = await self.assessment_repo.get_by_id_simple(item.assessment_id)
+        
+        # 3.5. RAG Retrieval for Course Materials
+        course_context = ""
+        rag_chunk_ids = []
+        ai_context_sources = []
+        
+        if assessment and assessment.teaching_workspace_id:
+            from app.services.rag_service import RAGService
+            rag_service = RAGService(self.db)
+            try:
+                # We retrieve chunks matching the question content to inject into instructions
+                course_context = await rag_service.retrieve_context_for_lecturer(
+                    topic=question.content,
+                    teaching_workspace_id=assessment.teaching_workspace_id,
+                    top_k=4
+                )
+                
+                # Perform a direct vector query to fetch chunk IDs and display names for durable auditing
+                query_embedding = await rag_service._embed_question(question.content)
+                embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+                
+                from sqlalchemy import text
+                stmt = text("""
+                    SELECT rc.id, lm.display_name
+                    FROM resource_chunks rc
+                    JOIN lecturer_materials lm ON lm.id = rc.lecturer_material_id
+                    WHERE lm.teaching_workspace_id = :ws_id
+                      AND lm.is_deleted = false
+                    ORDER BY rc.embedding <=> :embed::vector
+                    LIMIT 4
+                """).bindparams(ws_id=assessment.teaching_workspace_id, embed=embedding_literal)
+                
+                rag_res = await self.db.execute(stmt)
+                for chunk_uuid, doc_name in rag_res.all():
+                    rag_chunk_ids.append(str(chunk_uuid))
+                    if doc_name not in ai_context_sources:
+                        ai_context_sources.append(doc_name)
+            except Exception as e:
+                logger.warning("RAG retrieval failed inside grading service: %s", str(e))
+
+        # Determine AI grading basis cascade
+        ai_grading_basis = "GENERAL_KNOWLEDGE"
+        fallback_reason = None
+        
+        if rubric and course_context:
+            ai_grading_basis = "RAG_AND_RUBRIC"
+        elif rubric:
+            ai_grading_basis = "RUBRIC"
+            fallback_reason = "No matching course materials found in RAG."
+        elif course_context:
+            ai_grading_basis = "RAG_CONTEXT"
+            fallback_reason = "No rubric configured for this question."
+        else:
+            ai_grading_basis = "GENERAL_KNOWLEDGE"
+            fallback_reason = "Neither rubric nor matching course materials found in RAG."
 
         # 4. Call AI Review Agent
         from app.agents.review_agent import ReviewAgent
@@ -256,7 +302,10 @@ class GradingService:
         student_answer = response.answer_text or "No answer provided"
 
         try:
-            ai_output = await agent.review_response(
+            from datetime import UTC, datetime
+            ai_started_at = datetime.now(UTC)
+
+            ai_output, raw_completion = await agent.review_response(
                 question_text=question.content,
                 student_answer=student_answer,
                 rubric_content=rubric_content,
@@ -264,22 +313,47 @@ class GradingService:
                 question_type=question.question_type,
                 attempt_id=item.attempt_id,
                 response_id=response.id,
+                course_context=course_context,
             )
 
-            # 5. Apply suggestion
-            await self.apply_ai_grading(
+            ai_completed_at = datetime.now(UTC)
+
+            # calculate token cost
+            p_price = 5.0 / 1_000_000
+            c_price = 15.0 / 1_000_000
+            p_tokens = raw_completion.prompt_tokens or 0
+            c_tokens = raw_completion.completion_tokens or 0
+            tot_tokens = raw_completion.total_tokens or (p_tokens + c_tokens)
+            if "3.5" in raw_completion.model or "mini" in raw_completion.model or "llama3" in raw_completion.model:
+                p_price = 0.5 / 1_000_000
+                c_price = 1.5 / 1_000_000
+            cost = (p_tokens * p_price) + (c_tokens * c_price)
+
+            # 5. Apply suggestion — returns the updated SubmissionGrade, no need to re-fetch
+            grade = await self.apply_ai_grading(
                 response_id=response.id,
                 ai_suggested_score=ai_output.suggested_score,
                 ai_rationale=ai_output.rationale,
                 ai_confidence=ai_output.confidence,
                 max_score=float(question.marks),
                 graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+                ai_grading_basis=ai_grading_basis,
+                ai_context_sources=ai_context_sources,
+                rag_chunk_ids=rag_chunk_ids,
+                rubric_id_used=rubric_id_used,
+                fallback_reason=fallback_reason,
+                rag_used=bool(course_context),
+                rag_source_labels=ai_context_sources,
+                model=raw_completion.model,
+                tokens=tot_tokens,
+                cost=cost,
+                ai_started_at=ai_started_at,
+                ai_completed_at=ai_completed_at,
             )
 
-            # 5.5 Automatically generate feedback draft
+            # 5.5 Automatically generate feedback draft (grade returned above, no extra SELECT needed)
             from app.agents.feedback_agent import FeedbackAgent
             feedback_agent = FeedbackAgent(gateway)
-            grade = await self.grading_repo.get_grade_by_response(response.id)
             if grade:
                 fb_output = await feedback_agent.draft_feedback(
                     lecturer_id=uuid.UUID(int=0),  # System
@@ -443,6 +517,65 @@ class GradingService:
         if not auth_res.scalars().first():
             raise AuthorizationError("You are not authorized to grade responses for this course")
 
+        # Fetch assessment details to get teaching_workspace_id
+        assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
+
+        # 3.5. RAG Retrieval for Course Materials
+        course_context = ""
+        rag_chunk_ids = []
+        ai_context_sources = []
+        rubric_id_used = rubric.id if rubric else None
+
+        if assessment and assessment.teaching_workspace_id:
+            from app.services.rag_service import RAGService
+            rag_service = RAGService(self.db)
+            try:
+                # We retrieve chunks matching the question content to inject into instructions
+                course_context = await rag_service.retrieve_context_for_lecturer(
+                    topic=question.content,
+                    teaching_workspace_id=assessment.teaching_workspace_id,
+                    top_k=4
+                )
+
+                # Perform a direct vector query to fetch chunk IDs and display names for durable auditing
+                query_embedding = await rag_service._embed_question(question.content)
+                embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+
+                from sqlalchemy import text
+                stmt = text("""
+                    SELECT rc.id, lm.display_name
+                    FROM resource_chunks rc
+                    JOIN lecturer_materials lm ON lm.id = rc.lecturer_material_id
+                    WHERE lm.teaching_workspace_id = :ws_id
+                      AND lm.is_deleted = false
+                    ORDER BY rc.embedding <=> :embed::vector
+                    LIMIT 4
+                """).bindparams(ws_id=assessment.teaching_workspace_id, embed=embedding_literal)
+
+                rag_res = await self.db.execute(stmt)
+                for chunk_uuid, doc_name in rag_res.all():
+                    rag_chunk_ids.append(str(chunk_uuid))
+                    if doc_name not in ai_context_sources:
+                        ai_context_sources.append(doc_name)
+            except Exception as e:
+                logger.warning("RAG retrieval failed inside grading service: %s", str(e))
+
+        # Determine AI grading basis cascade
+        ai_grading_basis = "GENERAL_KNOWLEDGE"
+        fallback_reason = None
+
+        if rubric and course_context:
+            ai_grading_basis = "RAG_AND_RUBRIC"
+        elif rubric:
+            ai_grading_basis = "RUBRIC"
+            fallback_reason = "No matching course materials found in RAG."
+        elif course_context:
+            ai_grading_basis = "RAG_CONTEXT"
+            fallback_reason = "No rubric configured for this question."
+        else:
+            ai_grading_basis = "GENERAL_KNOWLEDGE"
+            fallback_reason = "Neither rubric nor matching course materials found in RAG."
+
         # Call AI Review Agent with lecturer feedback
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
@@ -454,7 +587,10 @@ class GradingService:
 
         student_answer = response.answer_text or "No answer provided"
 
-        ai_output = await agent.review_response(
+        from datetime import UTC, datetime
+        ai_started_at = datetime.now(UTC)
+
+        ai_output, raw_completion = await agent.review_response(
             question_text=question.content,
             student_answer=student_answer,
             rubric_content=rubric_content,
@@ -463,7 +599,21 @@ class GradingService:
             response_id=response.id,
             lecturer_feedback=feedback,
             lecturer_id=lecturer_id,
+            course_context=course_context,
         )
+
+        ai_completed_at = datetime.now(UTC)
+
+        # calculate token cost
+        p_price = 5.0 / 1_000_000
+        c_price = 15.0 / 1_000_000
+        p_tokens = raw_completion.prompt_tokens or 0
+        c_tokens = raw_completion.completion_tokens or 0
+        tot_tokens = raw_completion.total_tokens or (p_tokens + c_tokens)
+        if "3.5" in raw_completion.model or "mini" in raw_completion.model or "llama3" in raw_completion.model:
+            p_price = 0.5 / 1_000_000
+            c_price = 1.5 / 1_000_000
+        cost = (p_tokens * p_price) + (c_tokens * c_price)
 
         # Apply suggestion
         await self.apply_ai_grading(
@@ -473,6 +623,18 @@ class GradingService:
             ai_confidence=ai_output.confidence,
             max_score=float(question.marks),
             graded_by_ai_id=uuid.UUID(int=0),  # System AI ID
+            ai_grading_basis=ai_grading_basis,
+            ai_context_sources=ai_context_sources,
+            rag_chunk_ids=rag_chunk_ids,
+            rubric_id_used=rubric_id_used,
+            fallback_reason=fallback_reason,
+            rag_used=bool(course_context),
+            rag_source_labels=ai_context_sources,
+            model=raw_completion.model,
+            tokens=tot_tokens,
+            cost=cost,
+            ai_started_at=ai_started_at,
+            ai_completed_at=ai_completed_at,
         )
 
         # Regenerate feedback draft
@@ -530,6 +692,18 @@ class GradingService:
         ai_confidence: float,
         max_score: float,
         graded_by_ai_id: uuid.UUID | None = None,
+        ai_grading_basis: str | None = None,
+        ai_context_sources: list[str] | None = None,
+        rag_chunk_ids: list[str] | None = None,
+        rubric_id_used: uuid.UUID | None = None,
+        fallback_reason: str | None = None,
+        rag_used: bool | None = None,
+        rag_source_labels: list[str] | None = None,
+        model: str | None = None,
+        tokens: int | None = None,
+        cost: float | None = None,
+        ai_started_at: datetime | None = None,
+        ai_completed_at: datetime | None = None,
     ) -> SubmissionGrade:
         """
         Store an AI-generated grading suggestion.
@@ -567,6 +741,18 @@ class GradingService:
             max_score=max_score,
             is_final=False,
             score=None,
+            ai_grading_basis=ai_grading_basis,
+            ai_context_sources=ai_context_sources,
+            rag_chunk_ids=rag_chunk_ids,
+            rubric_id_used=rubric_id_used,
+            fallback_reason=fallback_reason,
+            rag_used=rag_used,
+            rag_source_labels=rag_source_labels,
+            model=model,
+            tokens=tokens,
+            cost=cost,
+            ai_started_at=ai_started_at,
+            ai_completed_at=ai_completed_at,
         )
 
         # Mark queue item as AI pre-graded
@@ -1039,46 +1225,52 @@ class GradingService:
     ) -> dict[str, Any]:
         """
         Compute class-level grading statistics for an assessment.
+        Uses explicit joins instead of ORM relationships (SQLModel Relationship
+        is not compatible with SQLAlchemy selectinload).
         """
         from app.db.enums import EnrollmentStatus, GradingQueueStatus
-        from app.db.models.academic import StudentEnrollment
+        from app.db.models.academic import ClassSection, StudentEnrollment, TeachingWorkspace
         from app.db.models.assessment import (Assessment,
                                               AssessmentTargetSection)
         from app.db.models.attempt import AssessmentAttempt, GradingQueueItem
         from app.db.models.result import AssessmentResult
-        from sqlalchemy import func, select
+        from sqlalchemy import func, select, join
 
-        # 1. Load assessment
-        assessment = await self.db.get(
-            Assessment,
-            assessment_id,
-            options=[selectinload(Assessment.workspace)]
-        )
+        # 1. Load assessment (without ORM relationship — use plain get)
+        assessment = await self.db.get(Assessment, assessment_id)
         if not assessment:
              raise NotFoundError("Assessment", str(assessment_id))
 
-        # 2. Find target sections
-        stmt = select(AssessmentTargetSection).where(
-            AssessmentTargetSection.assessment_id == assessment_id
-        ).options(selectinload(AssessmentTargetSection.class_section))
-        res = await self.db.execute(stmt)
-        targets = res.scalars().all()
+        workspace_title = "N/A"
+        if assessment.teaching_workspace_id:
+            ws = await self.db.get(TeachingWorkspace, assessment.teaching_workspace_id)
+            if ws:
+                workspace_title = ws.title
+
+        # 2. Find target sections — join ClassSection directly
+        targets_stmt = (
+            select(AssessmentTargetSection.class_section_id, ClassSection.name)
+            .join(
+                ClassSection,
+                ClassSection.id == AssessmentTargetSection.class_section_id
+            )
+            .where(AssessmentTargetSection.assessment_id == assessment_id)
+        )
+        targets_res = await self.db.execute(targets_stmt)
+        targets = targets_res.all()  # list of (class_section_id, class_name)
 
         classes_stats = []
-        for target in targets:
-            section = target.class_section
-            if not section: continue
-
+        for section_id, section_name in targets:
             # Sub-query for students in this section
             section_students_stmt = select(StudentEnrollment.student_id).where(
-                StudentEnrollment.class_section_id == section.id,
+                StudentEnrollment.class_section_id == section_id,
                 StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
                 StudentEnrollment.is_deleted == False
             )
 
             # Total Students
             student_count_stmt = select(func.count(StudentEnrollment.id)).where(
-                StudentEnrollment.class_section_id == section.id,
+                StudentEnrollment.class_section_id == section_id,
                 StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
                 StudentEnrollment.is_deleted == False
             )
@@ -1119,10 +1311,10 @@ class GradingService:
             latest_at = (await self.db.execute(latest_sub_stmt)).scalar()
 
             classes_stats.append({
-                "class_id": section.id,
-                "class_name": section.name,
+                "class_id": section_id,
+                "class_name": section_name,
                 "workspace_id": assessment.teaching_workspace_id,
-                "workspace_title": assessment.workspace.title if assessment.workspace else "N/A",
+                "workspace_title": workspace_title,
                 "total_students": total_students,
                 "submitted_count": submitted_count,
                 "not_submitted_count": max(0, total_students - submitted_count),
@@ -1628,7 +1820,7 @@ class GradingService:
         ans_dict = group_answer.answer_content or {}
         student_answer = ans_dict.get("text") or ans_dict.get("selected_option_id") or "No answer provided"
 
-        ai_output = await agent.review_response(
+        ai_output, raw_completion = await agent.review_response(
             question_text=question.content,
             student_answer=student_answer,
             rubric_content=rubric_content,

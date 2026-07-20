@@ -26,7 +26,7 @@ from app.core.logger import get_logger, set_request_context
 logger = get_logger("mindexa.http")
 
 # Paths to skip from access logging (health checks, metrics)
-_SILENT_PATHS = frozenset({"/health", "/metrics", "/favicon.ico", "/"})
+_SILENT_PATHS = frozenset({"/health", "/metrics", "/favicon.ico", "/", "/api/v1/notifications/me", "/api/v1/auth/me"})
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

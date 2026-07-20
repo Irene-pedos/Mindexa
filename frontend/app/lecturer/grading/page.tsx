@@ -33,7 +33,6 @@ import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 import { useDebounce } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
-import { useRouter } from "next/navigation";
 import { Eye } from "lucide-react";
 
 import {
@@ -63,6 +62,7 @@ import {
   Award,
   Lock,
   FileText,
+  Send,
 } from "lucide-react";
 
 import { gradingApi } from "@/lib/api/grading";
@@ -73,8 +73,9 @@ import { submissionApi } from "@/lib/api/submission";
 import { integrityApi } from "@/lib/api/integrity";
 import { groupWorkApi } from "@/lib/api/group-work";
 import { aiGradingApi } from "@/lib/api/ai-grading";
+import { resultApi } from "@/lib/api/result";
 
-import { Skeleton } from "@/components/ui/interfaces-skeleton";
+import { Skeleton } from "@/components/ui/skeleton";
 import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
@@ -101,6 +102,21 @@ import {
 // Unify magic-number fallbacks as file-level constants
 const DEFAULT_QUESTION_MAX_MARKS = 10;
 const DEFAULT_ASSESSMENT_TOTAL_MARKS = 100;
+
+interface ReleaseQueueItem {
+  student_id: string;
+  student_name: string;
+  attempt_id: string | null;
+  graded_question_count: number;
+  total_question_count: number;
+  integrity_hold: boolean;
+  is_released: boolean;
+  can_release: boolean;
+  total_score: number | null;
+  max_score: number | null;
+  percentage: number | null;
+  letter_grade: string | null;
+}
 
 export function isQuestionAutoGraded(q?: {
   type: string;
@@ -224,6 +240,16 @@ export default function LecturerGradingQueue() {
   );
   const [classStats, setClassStats] = useState<ClassStatRecord[]>([]);
 
+  // Filter assessments by selected workspace
+  const filteredAssessments = useMemo(() => {
+    if (!selectedWorkspace) return [];
+    return assessments.filter(
+      (a: any) =>
+        a.teaching_workspace_id === selectedWorkspace.id ||
+        a.workspace_id === selectedWorkspace.id
+    );
+  }, [assessments, selectedWorkspace]);
+
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(false);
   const PAGE_SIZE = 50;
@@ -250,14 +276,24 @@ export default function LecturerGradingQueue() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [overrideScore, setOverrideScore] = useState<string>("");
   const [finalFeedback, setFinalFeedback] = useState<string>("");
+  const [aiFeedbackDraft, setAiFeedbackDraft] = useState<string>("");
+  const [aiStrengths, setAiStrengths] = useState<string[]>([]);
+  const [aiImprovements, setAiImprovements] = useState<string[]>([]);
+  const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [rubricScores, setRubricScores] = useState<RubricScore[]>([]);
   const [reviewStartedAt, setReviewStartedAt] = useState<Date | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isGroupEditing, setIsGroupEditing] = useState(false);
-  const [reviewTab, setReviewTab] = useState<
-    "question" | "integrity" | "reassessment" | "audit"
-  >("question");
+  const [isLeftSidebarOpen, setIsLeftSidebarOpen] = useState(true);
+  const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isAiAccepted, setIsAiAccepted] = useState(false);
+  const [showIntegrityLiftDialog, setShowIntegrityLiftDialog] = useState(false);
+  const [isReleasing, setIsReleasing] = useState(false);
+  const [releaseQueue, setReleaseQueue] = useState<ReleaseQueueItem[]>([]);
+  const [releaseQueueLoading, setReleaseQueueLoading] = useState(false);
+  const [releaseQueueClassFullyGraded, setReleaseQueueClassFullyGraded] =
+    useState(false);
   const [maxAttempts, setMaxAttempts] = useState<number>(3);
   const [passMark, setPassMark] = useState<number>(50);
 
@@ -295,14 +331,102 @@ export default function LecturerGradingQueue() {
     Record<string, string>
   >({});
 
+  // Group individual submissions queue by attempt_id
+  const groupedSubmissions = useMemo(() => {
+    const groups: Record<string, GradingQueueItem[]> = {};
+    data.forEach((item) => {
+      if (!item.attempt_id) return;
+      if (!groups[item.attempt_id]) {
+        groups[item.attempt_id] = [];
+      }
+      groups[item.attempt_id].push(item);
+    });
+    return Object.values(groups);
+  }, [data]);
+
+  const releasableResults = useMemo(
+    () => releaseQueue.filter((item) => item.can_release && item.attempt_id),
+    [releaseQueue],
+  );
+
+  const submittedResultCount = useMemo(
+    () => releaseQueue.filter((item) => item.attempt_id).length,
+    [releaseQueue],
+  );
+
+  const pendingResultReviewCount = useMemo(
+    () =>
+      releaseQueue.filter(
+        (item) =>
+          item.attempt_id &&
+          item.total_question_count > 0 &&
+          item.graded_question_count < item.total_question_count,
+      ).length,
+    [releaseQueue],
+  );
+
+  const handleReleaseAll = async () => {
+    if (!selectedAssessment) return;
+    setIsReleasing(true);
+    try {
+      const releaseData = await resultApi.releaseResults(
+        selectedAssessment.id,
+        undefined,
+        selectedAssessment.is_group_assessment
+          ? undefined
+          : selectedClass?.class_id,
+      );
+      toast.success(
+        `${releaseData.released_count ?? 0} result${
+          releaseData.released_count === 1 ? "" : "s"
+        } released successfully.`,
+      );
+      if (selectedAssessment.is_group_assessment) {
+        fetchGroupQueue(selectedAssessment.id);
+      } else {
+        fetchSubmissions();
+        if (selectedClass) {
+          fetchReleaseQueue();
+          fetchClassStats(selectedAssessment.id);
+        }
+      }
+    } catch (e) {
+      toast.error("Failed to release grades.");
+    } finally {
+      setIsReleasing(false);
+    }
+  };
+
+  const handleReleaseStudent = async (attemptId: string) => {
+    if (!selectedAssessment) return;
+    setIsReleasing(true);
+    try {
+      const releaseData = await resultApi.releaseResults(selectedAssessment.id, [attemptId]);
+      toast.success("Student grade released successfully.");
+      if (releaseData.held_count > 0) {
+        toast.warning("This result is still held for integrity review.");
+      }
+      fetchSubmissions();
+      fetchReleaseQueue();
+      fetchClassStats(selectedAssessment.id);
+    } catch (e) {
+      toast.error("Failed to release grade.");
+    } finally {
+      setIsReleasing(false);
+    }
+  };
+
   // Fetch initial metadata
   const fetchMetadata = async () => {
     try {
       const [asmtRes, wsRes] = await Promise.all([
-        assessmentApi.getAssessments({ status: "PUBLISHED" }),
+        assessmentApi.getAssessments(),
         lecturerApi.getWorkspaces(),
       ]);
-      setAssessments(asmtRes.items || []);
+      const validAssessments = (asmtRes.items || []).filter(
+        (a: any) => a.status !== "DRAFT" && a.status !== "ARCHIVED"
+      );
+      setAssessments(validAssessments);
       setWorkspaces(wsRes || []);
     } catch (error: unknown) {
       console.error(error);
@@ -330,9 +454,12 @@ export default function LecturerGradingQueue() {
       if (debouncedSearch) params.q = debouncedSearch;
 
       const response = await gradingApi.getGradingQueue(params);
-      setData(response.items || []);
-      setTotal(response.total || 0);
-      setHasMore((response.items?.length ?? 0) === PAGE_SIZE);
+      
+      const filteredItems = response.items || [];
+      
+      setData(filteredItems);
+      setTotal(filteredItems.length);
+      setHasMore((filteredItems.length ?? 0) === PAGE_SIZE);
     } catch (error: unknown) {
       toast.error(
         error instanceof Error ? error.message : "Queue trace failure",
@@ -359,6 +486,41 @@ export default function LecturerGradingQueue() {
       fetchSubmissions();
     }
   }, [selectedAssessment, selectedClass, fetchSubmissions, currentPage]);
+
+  const fetchReleaseQueue = useCallback(async () => {
+    if (!selectedAssessment || !selectedClass) {
+      setReleaseQueue([]);
+      setReleaseQueueClassFullyGraded(false);
+      return;
+    }
+
+    setReleaseQueueLoading(true);
+    try {
+      const res = await resultApi.getReleaseQueue(
+        selectedAssessment.id,
+        selectedClass.class_id,
+      );
+      setReleaseQueue(res.items || []);
+      setReleaseQueueClassFullyGraded(!!res.class_fully_graded);
+    } catch (error: unknown) {
+      toast.error("Failed to load result release queue");
+    } finally {
+      setReleaseQueueLoading(false);
+    }
+  }, [selectedAssessment, selectedClass]);
+
+  useEffect(() => {
+    if (
+      selectedAssessment &&
+      !selectedAssessment.is_group_assessment &&
+      selectedClass
+    ) {
+      fetchReleaseQueue();
+    } else {
+      setReleaseQueue([]);
+      setReleaseQueueClassFullyGraded(false);
+    }
+  }, [selectedAssessment, selectedClass, fetchReleaseQueue]);
 
   // Fetch group grading queue
   const fetchGroupQueue = useCallback(async (asmtId: string) => {
@@ -416,7 +578,6 @@ export default function LecturerGradingQueue() {
       } else {
         setActiveQuestionIndex(idx >= 0 ? idx : 0);
       }
-
       setAllowReassessment(false);
       setReviewStartedAt(new Date());
     } catch (error: unknown) {
@@ -486,12 +647,20 @@ export default function LecturerGradingQueue() {
 
       // Member overrides
       const overrides: Record<string, string> = {};
+      const isIndividualScoring =
+        selectedAssessment?.individual_member_scoring ||
+        selectedAssessment?.individual_weighting_enabled;
       const hasOverrides =
         res.member_overrides && Object.keys(res.member_overrides).length > 0;
-      setIsOverrideEnabled(hasOverrides);
+      const overrideEnabled = isIndividualScoring !== undefined ? !!isIndividualScoring : hasOverrides;
+      setIsOverrideEnabled(overrideEnabled);
       if (hasOverrides) {
         Object.entries(res.member_overrides).forEach(([k, v]: any) => {
           overrides[k] = v.toString();
+        });
+      } else if (overrideEnabled) {
+        res.members?.forEach((m: any) => {
+          overrides[m.student_id] = "";
         });
       }
       setMemberScoreOverrides(overrides);
@@ -504,8 +673,6 @@ export default function LecturerGradingQueue() {
 
   const handleSelectQuestion = (idx: number) => {
     setActiveQuestionIndex(idx);
-    setOverrideScore("");
-    setFinalFeedback("");
     setRubricScores([]);
     setReviewStartedAt(new Date());
     setIsEditing(false);
@@ -545,6 +712,10 @@ export default function LecturerGradingQueue() {
       setOverrideScore("");
       setFinalFeedback("");
     }
+    setAiFeedbackDraft("");
+    setAiStrengths([]);
+    setAiImprovements([]);
+    setAiSuggestions([]);
     setIsEditing(false);
     if (activeSubmission?.id) {
       fetchResponseLogs(activeSubmission.id);
@@ -619,12 +790,16 @@ export default function LecturerGradingQueue() {
 
       if (isFinal) {
         // Auto-navigate to next pending manual question
-        const nextPendingIdx = activeAttempt.questions.findIndex((q: any, idx: number) => {
-          if (idx <= activeQuestionIndex) return false;
-          if (isQuestionAutoGraded(q)) return false;
-          const sub = subRes.submissions?.find((s: any) => s.question_id === q.id);
-          return !sub || !sub.is_final;
-        });
+        const nextPendingIdx = activeAttempt.questions.findIndex(
+          (q: any, idx: number) => {
+            if (idx <= activeQuestionIndex) return false;
+            if (isQuestionAutoGraded(q)) return false;
+            const sub = subRes.submissions?.find(
+              (s: any) => s.question_id === q.id,
+            );
+            return !sub || !sub.is_final;
+          },
+        );
 
         if (nextPendingIdx >= 0) {
           handleSelectQuestion(nextPendingIdx);
@@ -632,6 +807,7 @@ export default function LecturerGradingQueue() {
           setActiveAttempt(null);
           setSelectedStudent(null);
           fetchSubmissions();
+          fetchReleaseQueue();
         }
       }
     } catch (error: unknown) {
@@ -642,7 +818,7 @@ export default function LecturerGradingQueue() {
   };
 
   const handleSaveAndNextIndividual = async () => {
-    await submitGrade(true, false);
+    await submitGrade(true, isAiAccepted);
   };
 
   // Reassessment rejection modal triggers
@@ -769,6 +945,7 @@ export default function LecturerGradingQueue() {
     // 3. Consolidate question-level feedback comments
     const feedbackParts: string[] = [];
     selectedGroupSubmission.questions.forEach((q: any, idx: number) => {
+      if (isQuestionAutoGraded(q)) return;
       const fb = finalFeedbackMap[q.id];
       if (fb && fb.trim().length > 0) {
         feedbackParts.push(`Q${idx + 1}: ${fb.trim()}`);
@@ -854,6 +1031,8 @@ export default function LecturerGradingQueue() {
     try {
       await attemptApi.grantReassessment(activeAttempt.id, {
         window_days: parseInt(reassessmentWindow),
+        max_attempts: maxAttempts,
+        pass_mark: passMark,
       });
       toast.success(
         "Reassessment granted. Student is authorized for a new attempt.",
@@ -863,27 +1042,8 @@ export default function LecturerGradingQueue() {
     }
   };
 
-  const handleLiftIntegrityHold = async () => {
-    if (!activeAttempt) return;
-    if (
-      !confirm(
-        "Are you sure you want to lift the academic integrity hold on this attempt? This action is logged.",
-      )
-    )
-      return;
-    setIsSaving(true);
-    try {
-      await integrityApi.liftHold(activeAttempt.id);
-      toast.success(
-        "Integrity hold lifted. Student result is now eligible for release.",
-      );
-      const updated = await attemptApi.getAttempt(activeAttempt.id);
-      setActiveAttempt(updated);
-    } catch (error: unknown) {
-      toast.error("Failed to lift integrity hold");
-    } finally {
-      setIsSaving(false);
-    }
+  const handleLiftIntegrityHold = () => {
+    setShowIntegrityLiftDialog(true);
   };
 
   // Flag toggle updates state queue list locally immediately to keep table data in sync (Issue 16)
@@ -998,11 +1158,9 @@ export default function LecturerGradingQueue() {
   // ─── RENDERING PATH 2: INDIVIDUAL SPEEDGRADER ─────────────────────────────
   if (activeAttempt) {
     const currentQuestion = activeAttempt.questions?.[activeQuestionIndex];
-    const currentSubmission = activeSubmissions.find(
-      (s) => s.question_id === currentQuestion?.id,
-    );
-    const isAutoGraded = isQuestionAutoGraded(currentQuestion);
+    const isAutoGraded = ["MCQ", "TRUE_FALSE", "MATCHING", "ORDERING", "FILL_BLANK"].includes(currentQuestion?.type || "");
     const maxMarks = currentQuestion?.marks || DEFAULT_QUESTION_MAX_MARKS;
+    const currentSubmission = activeSubmissions.find((s: any) => s.question_id === currentQuestion?.id);
 
     return (
       <div className="min-h-screen bg-background flex flex-col font-sans text-foreground animate-in fade-in duration-300">
@@ -1027,8 +1185,7 @@ export default function LecturerGradingQueue() {
                 Grading Workspace: {selectedStudent?.student_name}
               </h1>
               <p className="text-xs text-muted-foreground mt-1 font-medium">
-                {selectedStudent?.assessment_title} • Attempt #
-                {activeAttempt.attempt_number}
+                {selectedStudent?.assessment_title} • Attempt #{activeAttempt.attempt_number}
               </p>
             </div>
           </div>
@@ -1045,488 +1202,477 @@ export default function LecturerGradingQueue() {
               <div className="flex items-center gap-1.5">
                 <span
                   className={cn(
-                    "size-2 rounded-full",
-                    activeAttempt.integrity_risk_score > 70
-                      ? "bg-red-500"
-                      : activeAttempt.integrity_risk_score > 30
-                        ? "bg-amber-500"
-                        : "bg-emerald-500",
+                    "h-2 w-2 rounded-full",
+                    (activeAttempt.status as string) === "COMPLETED"
+                      ? "bg-emerald-500"
+                      : (activeAttempt.status as string) === "IN_PROGRESS"
+                        ? "bg-amber-500 animate-pulse"
+                        : "bg-zinc-400",
                   )}
                 />
-                <span className="text-foreground/80">
-                  Integrity Risk: {activeAttempt.integrity_risk_score || 0}%
+                <span className="font-mono uppercase tracking-wider text-[10px] text-foreground/80">
+                  {activeAttempt.status || "UNKNOWN"}
                 </span>
               </div>
             </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 text-xs font-semibold border-emerald-500/20 bg-emerald-500/5 text-emerald-600 hover:bg-emerald-500/10 rounded-lg shadow-sm"
-              onClick={async () => {
-                const openQs = activeAttempt.questions.filter(
-                  (q: AttemptQuestion) => !isQuestionAutoGraded(q),
-                );
-                const ungraded = openQs.filter((q: AttemptQuestion) => {
-                  const sub = activeSubmissions.find(
-                    (s: SubmissionRecord) => s.question_id === q.id,
-                  );
-                  return !sub || !sub.is_final;
-                });
-                if (ungraded.length > 0) {
-                  toast.error(
-                    `Cannot finalize. ${ungraded.length} manually graded questions are not finalized yet.`,
-                  );
-                } else {
-                  toast.success("All validations passed! Ready for release.");
-                }
-              }}
-            >
-              Verify Marks
-            </Button>
           </div>
         </div>
 
-        {/* Sub-Header / Top Navigation bar */}
-        <div className="border-b bg-background/50 backdrop-blur-sm">
-          <div className="px-6 py-3 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs font-semibold rounded-lg bg-background"
-                onClick={() => setIsQuestionNavOpen(!isQuestionNavOpen)}
-              >
-                <Menu className="size-3.5 mr-1.5" /> Questions
-              </Button>
-              <span className="text-xs font-medium text-muted-foreground">
-                Question {activeQuestionIndex + 1} of{" "}
-                {activeAttempt.questions?.length || 0} • {maxMarks} pts max
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() =>
-                  setReviewMode(
-                    reviewMode === "focus" ? "detailed" : "focus",
-                  )
-                }
-                className="h-8 text-xs font-semibold hover:bg-muted/50 rounded-lg text-primary flex items-center gap-1.5"
-              >
-                <Eye className="size-3.5" />{" "}
-                {reviewMode === "detailed"
-                  ? "Standard View"
-                  : "Detailed Context"}
-              </Button>
-            </div>
-          </div>
-
-          {isQuestionNavOpen && (
-            <div className="px-6 py-4 bg-background border-t border-border/10 grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2 animate-in slide-in-from-top duration-200">
-              {activeAttempt.questions?.map(
-                (q: AttemptQuestion, idx: number) => {
-                  const sub = activeSubmissions.find(
-                    (s) => s.question_id === q.id,
-                  );
+        {/* 3-Pane collapsible layout */}
+        <div className="flex-1 flex overflow-hidden h-[calc(100vh-80px)]">
+          {/* Left Sidebar - Question Navigation */}
+          {isLeftSidebarOpen ? (
+            <div className="w-64 border-r bg-muted/5 flex flex-col shrink-0 animate-in slide-in-from-left duration-200">
+              <div className="p-4 border-b flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Questions List
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 rounded-lg"
+                  onClick={() => setIsLeftSidebarOpen(false)}
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                {activeAttempt.questions?.map((q: AttemptQuestion, idx: number) => {
+                  const sub = activeSubmissions.find((s: SubmissionRecord) => s.question_id === q.id);
                   const isAuto = isQuestionAutoGraded(q);
                   return (
                     <button
                       key={q.id}
-                      onClick={() => {
-                        handleSelectQuestion(idx);
-                        setIsQuestionNavOpen(false);
-                      }}
+                      onClick={() => handleSelectQuestion(idx)}
                       className={cn(
-                        "p-2.5 rounded-lg border text-left text-xs transition-all relative group",
+                        "w-full p-3 rounded-xl border text-left text-xs transition-all relative flex items-center justify-between",
                         activeQuestionIndex === idx
                           ? "border-primary bg-primary/[0.02] text-primary font-bold shadow-sm"
                           : "border-border/60 bg-background text-foreground hover:bg-muted/10",
                       )}
                     >
-                      <div className="font-bold mb-0.5">Q{idx + 1}</div>
-                      <div className="text-[10px] text-muted-foreground/80 truncate">
-                        {q.marks || 0} pts
-                      </div>
-                      {isAuto && (
-                        <span
-                          className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-emerald-500"
-                          title="Auto-Graded"
-                        />
-                      )}
-                      {!isAuto && sub?.is_final && (
-                        <span
-                          className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-emerald-500"
-                          title="Finalized"
-                        />
-                      )}
-                      {!isAuto && sub && !sub.is_final && (
-                        <span
-                          className="absolute top-1.5 right-1.5 size-1.5 rounded-full bg-indigo-500"
-                          title="Reviewed"
-                        />
-                      )}
-                    </button>
-                  );
-                },
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Bento Grid workspace */}
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 overflow-y-auto p-6 bg-background/50">
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start max-w-7xl mx-auto">
-              {/* Left Side (2 cols) */}
-              <div className="lg:col-span-2 space-y-6">
-                {/* Bento Item 1: Prompt */}
-                <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-3 transition-all duration-300 hover:shadow-md hover:border-border">
-                  <div className="flex items-center justify-between border-b pb-2">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
-                        Question Prompt
-                      </span>
-                      {isAutoGraded && (
-                        <Badge className="bg-amber-500/10 text-amber-600 border border-amber-500/20 text-[9px] font-bold uppercase py-0.5 px-1.5 flex items-center gap-1">
-                          <Award className="size-3" /> System Auto-Graded
-                        </Badge>
-                      )}
-                    </div>
-                    <Badge variant="outline" className="text-[10px] font-bold">
-                      Q{activeQuestionIndex + 1} Prompt
-                    </Badge>
-                  </div>
-                  <div className="text-xs sm:text-sm leading-relaxed text-foreground whitespace-pre-wrap font-medium">
-                    {currentQuestion?.text || currentQuestion?.content}
-                  </div>
-                </div>
-
-                {/* Bento Item 2: Answer */}
-                <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-3 transition-all duration-300 hover:shadow-md hover:border-border">
-                  <div className="flex items-center justify-between border-b pb-2">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
-                      Student Answer
-                    </span>
-                    {currentSubmission?.answer_type === "FILE" &&
-                      currentSubmission?.file_url && (
-                        <Badge
-                          variant="secondary"
-                          className="text-[9px] font-bold flex items-center gap-1"
-                        >
-                          <FileText className="size-3" /> File Attachment
-                        </Badge>
-                      )}
-                  </div>
-                  {currentSubmission?.answer_type === "FILE" &&
-                    currentSubmission?.file_url && (
-                      <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.02] flex items-center justify-between mb-3">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <FileText className="size-5 text-primary shrink-0" />
-                          <div className="min-w-0 font-medium">
-                            <p className="text-xs font-semibold text-foreground truncate max-w-[200px] md:max-w-xs">
-                              {currentSubmission.file_url.split("/").pop() ||
-                                "deliverable_file"}
-                            </p>
-                            <a
-                              href={currentSubmission.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-[10px] font-semibold text-primary hover:underline"
-                            >
-                              Download Deliverable File
-                            </a>
-                          </div>
+                      <div className="space-y-0.5 min-w-0">
+                        <div className="font-bold truncate">Q{idx + 1}</div>
+                        <div className="text-[10px] text-muted-foreground/80 font-medium truncate">
+                          {q.type?.replace(/_/g, " ") || "Essay"} • {q.marks} pts
                         </div>
                       </div>
-                    )}
-                  <div className="text-xs sm:text-sm font-mono leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[400px] overflow-y-auto bg-muted/10 p-3.5 rounded-xl border border-border/40 font-medium">
-                    {currentSubmission?.answer_text || (
-                      <span className="italic text-muted-foreground/60 font-sans font-medium">
-                        No response recorded for this question node.
-                      </span>
+                      <div>
+                        {isAuto ? (
+                          <Badge variant="secondary" className="text-[8px] font-bold bg-zinc-100 text-zinc-600 border-zinc-200 px-1 py-0 shadow-none uppercase font-mono">Auto</Badge>
+                        ) : sub?.is_final ? (
+                          <Badge className="text-[8px] font-bold bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-1 py-0 shadow-none uppercase font-mono">Graded</Badge>
+                        ) : sub && !sub.is_final ? (
+                          <Badge className="text-[8px] font-bold bg-indigo-500/10 text-indigo-600 border-indigo-500/20 px-1 py-0 shadow-none uppercase font-mono">Reviewing</Badge>
+                        ) : (
+                          <Badge className="text-[8px] font-bold bg-amber-500/10 text-amber-600 border-amber-500/20 px-1 py-0 shadow-none uppercase font-mono">Pending</Badge>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={() => setIsLeftSidebarOpen(true)}
+              className="w-10 border-r bg-muted/5 flex flex-col items-center pt-4 hover:bg-muted/10 transition-colors"
+              title="Open Questions Navigation"
+            >
+              <Menu className="size-4 text-muted-foreground mb-4" />
+              <div className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground [writing-mode:vertical-lr] select-none">
+                Questions
+              </div>
+            </button>
+          )}
+
+          {/* Center Pane - Main Workspace */}
+          <div className="flex-1 overflow-y-auto p-6 bg-background/50 flex flex-col">
+            <div className="max-w-4xl mx-auto w-full space-y-6">
+              {/* Question prompt block */}
+              <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
+                      Question Prompt
+                    </span>
+                    {isAutoGraded && (
+                      <Badge className="bg-amber-500/10 text-amber-600 border border-amber-500/20 text-[9px] font-bold uppercase py-0.5 px-1.5 flex items-center gap-1">
+                        <Award className="size-3" /> System Auto-Graded
+                      </Badge>
                     )}
                   </div>
+                  <Badge variant="outline" className="text-[10px] font-bold">
+                    Q{activeQuestionIndex + 1} Prompt ({maxMarks} pts)
+                  </Badge>
+                </div>
+                
+                {currentQuestion?.caseStudyContext && (
+                  <div className="p-4 bg-muted/10 border rounded-xl space-y-1.5 mb-3 text-xs leading-relaxed">
+                    <span className="text-[9px] font-bold uppercase tracking-widest text-primary">Case Study Scenario</span>
+                    <p className="text-foreground/85 whitespace-pre-wrap font-semibold">{currentQuestion.caseStudyContext}</p>
+                  </div>
+                )}
+                
+                <div className="text-xs sm:text-sm leading-relaxed text-foreground whitespace-pre-wrap font-medium">
+                  {currentQuestion?.text || currentQuestion?.content}
                 </div>
               </div>
 
-              {/* Right Side (1 col) */}
-              <div className="lg:col-span-1 space-y-6">
-                {/* Bento Item 3: AI Review Assistant */}
-                {!isAutoGraded && currentSubmission && (
-                  <div className="space-y-4">
-                    <AIReviewPanel
-                      queueItemId={selectedStudent?.id}
-                      responseId={currentSubmission.id}
-                      maxScore={maxMarks}
-                      onSuggestionApplied={(score) => {
-                        setOverrideScore(score.toString());
-                        setIsEditing(true);
-                      }}
-                    />
-
-                    <AIFeedbackEditor
-                      responseId={currentSubmission.id}
-                      initialDraft={
-                        currentSubmission.ai_feedback_draft || undefined
-                      }
-                      onDraftApplied={(text) => {
-                        setFinalFeedback(text);
-                        setIsEditing(true);
-                      }}
-                    />
+              {/* Student Answer block */}
+              <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-3">
+                <div className="flex items-center justify-between border-b pb-2">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
+                    Student Answer
+                  </span>
+                  {currentSubmission?.answer_type === "FILE" && currentSubmission?.file_url && (
+                    <Badge variant="secondary" className="text-[9px] font-bold flex items-center gap-1">
+                      <FileText className="size-3" /> File Attachment
+                    </Badge>
+                  )}
+                </div>
+                
+                {currentSubmission?.answer_type === "FILE" && currentSubmission?.file_url && (
+                  <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.02] flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <FileText className="size-5 text-primary shrink-0" />
+                      <div className="min-w-0 font-medium">
+                        <p className="text-xs font-semibold text-foreground truncate max-w-xs">
+                          {currentSubmission.file_url.split("/").pop() || "deliverable_file"}
+                        </p>
+                        <a
+                          href={currentSubmission.file_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-[10px] font-semibold text-primary hover:underline"
+                        >
+                          Download Deliverable File
+                        </a>
+                      </div>
+                    </div>
                   </div>
                 )}
-
-                {/* Bento Item 4: Lecturer Decision (Compact Auto-Graded card or Decision Panel) */}
-                {isAutoGraded ? (
-                  <div className="border border-border/50 bg-muted/10 rounded-2xl p-5 shadow-sm space-y-3 transition-all duration-300">
-                    <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
-                      <CheckCircle2 className="size-4 text-emerald-500" />{" "}
-                      Auto-Graded Question
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-                      This question is automatically scored by the system based
-                      on predefined deterministic rules. No AI evaluation or
-                      manual grading actions are required.
-                    </p>
-                    <div className="p-3 bg-background border rounded-xl flex justify-between items-center text-xs font-medium">
-                      <span className="font-semibold text-muted-foreground">
-                        Recorded Score
-                      </span>
-                      <span className="font-mono font-bold text-emerald-600">
-                        {currentSubmission?.score !== null &&
-                        currentSubmission?.score !== undefined
-                          ? `${currentSubmission.score} / ${maxMarks} pts`
-                          : `Pending / ${maxMarks} pts`}
-                      </span>
-                    </div>
-                  </div>
-                ) : currentSubmission ? (
-                  <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-4 transition-all duration-300 hover:shadow-md hover:border-border">
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
-                        Lecturer Decision
-                      </span>
-                    </div>
-
-                    <div className="space-y-4">
-                      <div className="space-y-1.5">
-                        <Label
-                          htmlFor="individual-score-input"
-                          className="text-xs font-semibold text-muted-foreground"
-                        >
-                          Final Score (max {maxMarks} pts)
-                        </Label>
-                        <Input
-                          id="individual-score-input"
-                          type="number"
-                          min={0}
-                          max={maxMarks}
-                          step="any"
-                          placeholder="Enter score..."
-                          value={overrideScore}
-                          disabled={!isEditing}
-                          onChange={(e) => setOverrideScore(e.target.value)}
-                          className="h-9 text-xs rounded-lg font-mono font-bold w-full bg-background"
-                        />
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label
-                          htmlFor="individual-feedback-input"
-                          className="text-xs font-semibold text-muted-foreground"
-                        >
-                          Feedback Comments
-                        </Label>
-                        <Textarea
-                          id="individual-feedback-input"
-                          placeholder="Provide feedback comments..."
-                          value={finalFeedback}
-                          disabled={!isEditing}
-                          onChange={(e) => setFinalFeedback(e.target.value)}
-                          className="min-h-[80px] text-xs rounded-lg w-full font-medium bg-background"
-                        />
-                      </div>
-
-                      <div className="border-t border-border/30 pt-4 flex flex-col gap-3">
-                        {!isEditing ? (
-                          <div className="space-y-2">
-                            {currentSubmission.ai_suggested_score !== null &&
-                            currentSubmission.ai_suggested_score !==
-                              undefined ? (
-                              <div className="flex flex-col gap-2">
-                                <Button
-                                  onClick={() => {
-                                    const aiScore =
-                                      currentSubmission.ai_suggested_score;
-                                    const aiFb =
-                                      currentSubmission.ai_feedback_draft || "";
-                                    setOverrideScore(aiScore!.toString());
-                                    setFinalFeedback(aiFb);
-                                    setIsEditing(true);
-                                    toast.success(
-                                      "AI suggestion copied. Review the fields and finalize or modify.",
-                                    );
-                                  }}
-                                  disabled={isSaving}
-                                  className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
-                                >
-                                  <CheckCircle2 className="size-4" /> Accept AI
-                                  Review
-                                </Button>
-                                <div className="grid grid-cols-2 gap-3">
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => setIsEditing(true)}
-                                    disabled={isSaving}
-                                    className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
-                                  >
-                                    Modify Review
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    onClick={() => {
-                                      setOverrideScore("");
-                                      setFinalFeedback("");
-                                      setIsEditing(true);
-                                    }}
-                                    disabled={isSaving}
-                                    className="h-9 text-xs font-bold rounded-xl border-red-500/20 text-red-600 hover:bg-red-500/5"
-                                  >
-                                    Reject AI Review
-                                  </Button>
-                                </div>
-                              </div>
-                            ) : (
-                              <Button
-                                onClick={() => setIsEditing(true)}
-                                disabled={isSaving}
-                                className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
-                              >
-                                Enter Manual Grade
-                              </Button>
-                            )}
-                          </div>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-2 gap-3">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={isSaving}
-                                onClick={() => submitGrade(false, false)}
-                                className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
-                              >
-                                Save Draft
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={isSaving}
-                                onClick={() => setIsEditing(false)}
-                                className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                            <Button
-                              onClick={() => submitGrade(true, false)}
-                              disabled={isSaving}
-                              className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
-                            >
-                              {isSaving ? (
-                                <Loader2 className="size-3.5 animate-spin" />
-                              ) : (
-                                <CheckCircle2 className="size-4" />
-                              )}
-                              Finalize Grade
-                            </Button>
+                
+                <div className="text-xs sm:text-sm font-mono leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[400px] overflow-y-auto bg-muted/10 p-3.5 rounded-xl border border-border/40 font-medium">
+                  {currentSubmission?.answer_text || (
+                    <span className="italic text-muted-foreground/60 font-sans font-medium">
+                      No response recorded for this question node.
+                    </span>
+                  )}
+                </div>
+                
+                {currentQuestion?.sub_questions && currentQuestion.sub_questions.length > 0 && (
+                  <div className="mt-4 pt-4 border-t space-y-3">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground block">
+                      Sub-Questions Response Detail
+                    </span>
+                    {currentQuestion.sub_questions.map((sq: any, idx: number) => (
+                      <div key={sq.id || idx} className="p-3 border rounded-xl bg-background/80 space-y-2 text-xs">
+                        <div className="flex justify-between font-bold">
+                          <span>Sub-Q {idx + 1}: {sq.text}</span>
+                          <span className="text-primary font-mono">{sq.marks} pts</span>
+                        </div>
+                        {sq.student_answer && (
+                          <div className="p-2.5 bg-muted/5 border rounded-lg font-mono leading-relaxed whitespace-pre-wrap">
+                            {sq.student_answer}
                           </div>
                         )}
                       </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {currentQuestion?.rubric && (
+                <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-3">
+                  <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                    Rubric Criteria Reference
+                  </span>
+                  <div className="space-y-3">
+                    {currentQuestion.rubric.criteria.map((c: any) => (
+                      <div key={c.id} className="space-y-1.5 text-xs border-b last:border-b-0 pb-2.5 last:pb-0">
+                        <div className="flex items-center justify-between font-bold">
+                          <span>{c.title}</span>
+                          <span className="text-primary font-mono">{c.max_marks} pts</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-normal">{c.description}</p>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mt-2">
+                          {c.levels?.map((lvl: any) => (
+                            <div key={lvl.id} className="p-2 border rounded-lg bg-muted/5 text-[10px] leading-normal space-y-0.5">
+                              <div className="font-bold flex justify-between">
+                                <span>{lvl.title}</span>
+                                <span className="text-primary">{lvl.marks} pts</span>
+                              </div>
+                              <p className="text-muted-foreground/90">{lvl.description}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {isAutoGraded ? (
+                <div className="border border-border/50 bg-muted/10 rounded-2xl p-5 shadow-sm space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-700">
+                    <CheckCircle2 className="size-4 text-emerald-500" /> Auto-Graded Question
+                  </div>
+                  <p className="text-xs text-muted-foreground leading-relaxed font-medium">
+                    This question is automatically scored by the system based on predefined deterministic rules.
+                  </p>
+                  <div className="p-3 bg-background border rounded-xl flex justify-between items-center text-xs font-medium">
+                    <span className="font-semibold text-muted-foreground">Recorded Score</span>
+                    <span className="font-mono font-bold text-emerald-600">
+                      {currentSubmission?.score !== null && currentSubmission?.score !== undefined
+                        ? `${currentSubmission.score} / ${maxMarks} pts`
+                        : `Pending / ${maxMarks} pts`}
+                    </span>
+                  </div>
+                </div>
+              ) : currentSubmission ? (
+                <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b pb-2">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-primary">
+                      Lecturer Decision
+                    </span>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="individual-score-input" className="text-xs font-semibold text-muted-foreground">
+                        Final Score (max {maxMarks} pts)
+                      </Label>
+                      <Input
+                        id="individual-score-input"
+                        type="number"
+                        min={0}
+                        max={maxMarks}
+                        step="any"
+                        placeholder="Enter score..."
+                        value={overrideScore}
+                        disabled={!isEditing}
+                        onChange={(e) => {
+                          setOverrideScore(e.target.value);
+                          setIsAiAccepted(false);
+                        }}
+                        className="h-9 text-xs rounded-lg font-mono font-bold w-full bg-background"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="individual-feedback-input" className="text-xs font-semibold text-muted-foreground">
+                        Feedback Comments
+                      </Label>
+                      <Textarea
+                        id="individual-feedback-input"
+                        placeholder="Provide feedback comments..."
+                        value={finalFeedback}
+                        disabled={!isEditing}
+                        onChange={(e) => {
+                          setFinalFeedback(e.target.value);
+                          setIsAiAccepted(false);
+                        }}
+                        className="min-h-[80px] text-xs rounded-lg w-full font-medium bg-background"
+                      />
+                      <span className="text-[10px] text-muted-foreground block italic font-semibold">
+                        * This feedback will be shown to the student.
+                      </span>
+                    </div>
+
+                    <div className="border-t border-border/30 pt-4 flex flex-col gap-3">
+                      {!isEditing ? (
+                        <div className="space-y-2">
+                          {currentSubmission.ai_suggested_score !== null && currentSubmission.ai_suggested_score !== undefined ? (
+                            <div className="flex flex-col gap-2">
+                              <Button
+                                onClick={() => {
+                                  const aiScore = currentSubmission.ai_suggested_score;
+                                  const aiFb = currentSubmission.ai_feedback_draft || "";
+                                  setOverrideScore(aiScore!.toString());
+                                  setFinalFeedback(aiFb);
+                                  setIsAiAccepted(true);
+                                  setIsEditing(true);
+                                  toast.success("AI suggestion copied. Review the fields and finalize or modify.");
+                                }}
+                                disabled={isSaving}
+                                className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
+                              >
+                                <CheckCircle2 className="size-4" /> Accept AI Review
+                              </Button>
+                              <div className="grid grid-cols-2 gap-3">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    setIsEditing(true);
+                                    setIsAiAccepted(false);
+                                  }}
+                                  disabled={isSaving}
+                                  className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
+                                >
+                                  Modify Review
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  onClick={() => {
+                                    setOverrideScore("");
+                                    setFinalFeedback("");
+                                    setIsEditing(true);
+                                    setIsAiAccepted(false);
+                                  }}
+                                  disabled={isSaving}
+                                  className="h-9 text-xs font-bold rounded-xl border-red-500/20 text-red-600 hover:bg-red-500/5"
+                                >
+                                  Reject AI Review
+                                </Button>
+                              </div>
+                            </div>
+                          ) : (
+                            <Button
+                              onClick={() => {
+                                setIsEditing(true);
+                                setIsAiAccepted(false);
+                              }}
+                              disabled={isSaving}
+                              className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
+                            >
+                              Enter Manual Grade
+                            </Button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-3">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isSaving}
+                              onClick={() => submitGrade(false, isAiAccepted)}
+                              className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
+                            >
+                              Save Draft
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={isSaving}
+                              onClick={() => setIsEditing(false)}
+                              className="h-9 text-xs font-bold rounded-xl border-border/80 text-foreground hover:bg-muted/50"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                          <Button
+                            onClick={() => submitGrade(true, isAiAccepted)}
+                            disabled={isSaving}
+                            className="w-full h-10 text-xs font-bold rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-sm"
+                          >
+                            {isSaving ? (
+                              <Loader2 className="size-3.5 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="size-4" />
+                            )}
+                            Finalize Grade
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
-          {/* Right Sidebar - Individual Context Drawers */}
-          {reviewMode === "detailed" && (
-            <div className="w-80 border-l border-border/40 bg-muted/5 p-4 space-y-4 overflow-y-auto animate-in slide-in-from-right duration-300">
-              {/* Question Details / Rubric */}
+          {/* Right Sidebar - Collapsible AI/Rubric Context */}
+          {isRightSidebarOpen ? (
+            <div className="w-80 border-l border-border/40 bg-muted/5 p-4 space-y-4 overflow-y-auto shrink-0 animate-in slide-in-from-right duration-200">
+              <div className="flex items-center justify-between border-b pb-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                  <BrainCircuit className="size-4" /> AI Review & Audit
+                </span>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 rounded-lg"
+                  onClick={() => setIsRightSidebarOpen(false)}
+                >
+                  <ChevronRight className="size-4" />
+                </Button>
+              </div>
+              
+              {!isAutoGraded && currentSubmission ? (
+                <div className="space-y-4">
+                  {currentSubmission.ai_suggested_score === null && activeAttempt.status === "IN_PROGRESS" ? (
+                    <div className="p-5 border rounded-xl bg-card space-y-3 flex flex-col items-center justify-center text-center">
+                      <BrainCircuit className="size-8 text-primary animate-pulse" />
+                      <p className="text-xs font-bold text-foreground">AI Grading in Progress</p>
+                      <p className="text-[10px] text-muted-foreground leading-normal">
+                        BrainCircuit AI is currently compiling metrics and drafting suggestions.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <AIReviewPanel
+                        queueItemId={selectedStudent?.id}
+                        responseId={currentSubmission.id}
+                        maxScore={maxMarks}
+                        onSuggestionApplied={(score, feedback) => {
+                          setOverrideScore(score.toString());
+                          if (feedback) setFinalFeedback(feedback);
+                          setIsAiAccepted(true);
+                          setIsEditing(true);
+                        }}
+                        onSuggestionLoaded={(draft, strengths, improvements, suggestions) => {
+                          setAiFeedbackDraft(draft);
+                          setAiStrengths(strengths);
+                          setAiImprovements(improvements);
+                          setAiSuggestions(suggestions);
+                        }}
+                      />
+
+                      <AIFeedbackEditor
+                        responseId={currentSubmission.id}
+                        initialDraft={aiFeedbackDraft || undefined}
+                        initialStrengths={aiStrengths}
+                        initialImprovements={aiImprovements}
+                        initialSuggestions={aiSuggestions}
+                        onDraftApplied={(text) => {
+                          setFinalFeedback(text);
+                          setIsAiAccepted(true);
+                          setIsEditing(true);
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              ) : (
+                <div className="p-4 rounded-xl border border-dashed text-center text-xs text-muted-foreground italic leading-normal">
+                  No AI panel available for auto-graded questions.
+                </div>
+              )}
+
               <CollapsibleDrawerSection
-                title="Question & Rubric"
-                icon={Scale}
+                title="Integrity Flags"
+                icon={ShieldAlert}
                 defaultOpen={true}
               >
-                {currentQuestion?.rubric ? (
-                  <RubricGradingPanel
-                    rubric={currentQuestion.rubric}
-                    currentScores={rubricScores}
-                    onScoresChange={handleRubricChange}
-                  />
-                ) : (
-                  <div className="py-4 text-center text-xs text-muted-foreground/60 italic font-medium">
-                    No explicit rubric criteria configured.
-                  </div>
-                )}
-              </CollapsibleDrawerSection>
-
-              {/* Integrity Incidents */}
-              <CollapsibleDrawerSection
-                title="Integrity Review"
-                icon={ShieldAlert}
-                defaultOpen={false}
-              >
-                <div className="space-y-4">
-                  {activeAttempt.status === "AUTO_SUBMITTED" && (
-                    <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-2.5 text-red-700 text-xs">
-                      <AlertTriangle className="size-4.5 shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-bold">Forced Auto-Submission</p>
-                        <p className="text-[11px] mt-0.5 leading-relaxed">
-                          Assessment expired or terminated by security
-                          enforcement.
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
+                <div className="space-y-3 leading-normal">
                   <div className="grid grid-cols-2 gap-2 text-xs">
                     <div className="p-2.5 border rounded-xl bg-background space-y-0.5">
-                      <div className="text-[9px] uppercase font-bold text-muted-foreground">
-                        Tab Switches
-                      </div>
-                      <div className="text-sm font-bold text-foreground">
-                        {activeAttempt.tab_switch_count || 0}
-                      </div>
+                      <div className="text-[9px] uppercase font-bold text-muted-foreground">Tab Switches</div>
+                      <div className="text-sm font-bold text-foreground">{activeAttempt.tab_switch_count || 0}</div>
                     </div>
                     <div className="p-2.5 border rounded-xl bg-background space-y-0.5">
-                      <div className="text-[9px] uppercase font-bold text-muted-foreground">
-                        FS Exits
-                      </div>
-                      <div className="text-sm font-bold text-foreground">
-                        {activeAttempt.fullscreen_exit_count || 0}
-                      </div>
+                      <div className="text-[9px] uppercase font-bold text-muted-foreground">FS Exits</div>
+                      <div className="text-sm font-bold text-foreground">{activeAttempt.fullscreen_exit_count || 0}</div>
                     </div>
                     <div className="p-2.5 border rounded-xl bg-background space-y-0.5">
-                      <div className="text-[9px] uppercase font-bold text-muted-foreground">
-                        Copys
-                      </div>
-                      <div className="text-sm font-bold text-foreground">
-                        {activeAttempt.copy_attempt_count || 0}
-                      </div>
+                      <div className="text-[9px] uppercase font-bold text-muted-foreground">Copy Events</div>
+                      <div className="text-sm font-bold text-foreground">{activeAttempt.copy_attempt_count || 0}</div>
                     </div>
                     <div className="p-2.5 border rounded-xl bg-background space-y-0.5">
-                      <div className="text-[9px] uppercase font-bold text-muted-foreground">
-                        Drops
-                      </div>
-                      <div className="text-sm font-bold text-foreground">
-                        {activeAttempt.reconnect_count || 0}
-                      </div>
+                      <div className="text-[9px] uppercase font-bold text-muted-foreground">Drops</div>
+                      <div className="text-sm font-bold text-foreground">{activeAttempt.reconnect_count || 0}</div>
                     </div>
                   </div>
 
@@ -1537,15 +1683,14 @@ export default function LecturerGradingQueue() {
                         <div>
                           <p className="font-bold">Integrity Hold Active</p>
                           <p className="text-[11px] mt-0.5 leading-normal">
-                            {activeAttempt.integrity_hold_reason ||
-                              "Placed on security hold."}
+                            {activeAttempt.integrity_hold_reason || "Placed on security hold."}
                           </p>
                         </div>
                       </div>
                       <Button
                         size="sm"
                         variant="outline"
-                        className="w-full h-8 text-[11px] border-red-500/20 bg-red-500/5 text-red-700 hover:bg-red-500/10 rounded-lg"
+                        className="w-full h-8 text-[11px] border-red-500/20 bg-red-500/5 text-red-700 hover:bg-red-500/10 rounded-lg font-bold"
                         onClick={handleLiftIntegrityHold}
                         disabled={isSaving}
                       >
@@ -1555,16 +1700,14 @@ export default function LecturerGradingQueue() {
                   )}
 
                   <div className="pt-2 border-t flex items-center justify-between text-xs">
-                    <span className="font-bold text-foreground/80">
-                      Manual Review Flag
-                    </span>
+                    <span className="font-bold text-foreground/80">Manual Review Flag</span>
                     <Button
                       size="sm"
                       variant="outline"
                       className={cn(
                         "h-8 text-xs font-semibold rounded-lg",
                         selectedStudent?.is_flagged
-                          ? "border-amber-500/20 bg-amber-500/5 text-amber-700"
+                          ? "border-amber-500/20 bg-amber-500/5 text-amber-700 font-bold"
                           : "border-border/60",
                       )}
                       onClick={handleToggleManualFlag}
@@ -1575,130 +1718,33 @@ export default function LecturerGradingQueue() {
                   </div>
                 </div>
               </CollapsibleDrawerSection>
-
-              {/* Reassessment */}
-              <CollapsibleDrawerSection
-                title="Reassessment Window"
+            </div>
+          ) : (
+            <div className="w-12 border-l border-border/40 bg-muted/10 flex flex-col items-center py-4 gap-4 shrink-0">
+              <DrawerIconButton
+                icon={BrainCircuit}
+                label="AI Review"
+                active={false}
+                onClick={() => setIsRightSidebarOpen(true)}
+              />
+              <DrawerIconButton
+                icon={ShieldAlert}
+                label="Integrity Flags"
+                active={false}
+                onClick={() => setIsRightSidebarOpen(true)}
+              />
+              <DrawerIconButton
                 icon={RefreshCcw}
-                defaultOpen={false}
-              >
-                <div className="space-y-3 text-xs leading-normal">
-                  <p className="text-muted-foreground text-[11px]">
-                    Authorize a new timing window. Preserves all historical
-                    attempts and files.
-                  </p>
-
-                  <div className="flex items-center justify-between p-2.5 bg-muted/10 border rounded-xl">
-                    <span className="font-bold">Enable Reassessment</span>
-                    <input
-                      type="checkbox"
-                      checked={allowReassessment}
-                      onChange={(e) => setAllowReassessment(e.target.checked)}
-                      className="size-4 text-primary accent-primary rounded border cursor-pointer"
-                    />
-                  </div>
-
-                  {allowReassessment && (
-                    <div className="space-y-3 p-3 border rounded-xl bg-background animate-fade-in">
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-semibold text-muted-foreground">
-                          Attempts Allowed
-                        </Label>
-                        <Input
-                          type="number"
-                          value={maxAttempts}
-                          onChange={(e) =>
-                            setMaxAttempts(parseInt(e.target.value))
-                          }
-                          className="h-8 text-xs font-mono font-bold"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-semibold text-muted-foreground">
-                          Pass Mark Requirement (%)
-                        </Label>
-                        <Input
-                          type="number"
-                          value={passMark}
-                          onChange={(e) =>
-                            setPassMark(parseInt(e.target.value))
-                          }
-                          className="h-8 text-xs font-mono font-bold"
-                        />
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-[10px] font-semibold text-muted-foreground">
-                          Window Length
-                        </Label>
-                        <Select
-                          value={reassessmentWindow}
-                          onValueChange={setReassessmentWindow}
-                        >
-                          <SelectTrigger className="h-8 text-xs bg-background">
-                            <SelectValue placeholder="Days" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="3">3 Days</SelectItem>
-                            <SelectItem value="7">7 Days</SelectItem>
-                            <SelectItem value="14">14 Days</SelectItem>
-                            <SelectItem value="30">30 Days</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <Button
-                        onClick={handleGrantReassessment}
-                        className="w-full h-8 text-[11px] font-bold mt-1"
-                      >
-                        Grant Reassessment
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </CollapsibleDrawerSection>
-
-              {/* Audit Logs */}
-              <CollapsibleDrawerSection
-                title="Audit Trail"
+                label="Reassessment"
+                active={false}
+                onClick={() => setIsRightSidebarOpen(true)}
+              />
+              <DrawerIconButton
                 icon={History}
-                defaultOpen={false}
-              >
-                <div className="space-y-2 max-h-60 overflow-y-auto">
-                  {auditLoading ? (
-                    <div className="py-4 flex justify-center">
-                      <Loader2 className="size-4 animate-spin text-primary" />
-                    </div>
-                  ) : auditLogs.length === 0 ? (
-                    <div className="py-4 text-center text-xs text-muted-foreground/60 italic font-medium">
-                      No actions recorded.
-                    </div>
-                  ) : (
-                    auditLogs.map((log: AuditLog) => (
-                      <div
-                        key={log.id}
-                        className="p-2 border rounded-xl bg-background text-[11px] space-y-1"
-                      >
-                        <div className="flex justify-between items-center text-[9px] font-bold uppercase">
-                          <span className="text-primary">
-                            {log.change_type}
-                          </span>
-                          <span className="text-muted-foreground">
-                            {new Date(log.created_at).toLocaleDateString()}
-                          </span>
-                        </div>
-                        {log.new_value && (
-                          <div className="font-semibold text-foreground/80 leading-normal">
-                            Score:{" "}
-                            {log.new_value.override_score ??
-                              log.new_value.score ??
-                              "N/A"}{" "}
-                            pts
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </CollapsibleDrawerSection>
+                label="Audit Trail"
+                active={false}
+                onClick={() => setIsRightSidebarOpen(true)}
+              />
             </div>
           )}
         </div>
@@ -1921,19 +1967,26 @@ export default function LecturerGradingQueue() {
                   <AIReviewPanel
                     responseId={activeAns.id}
                     maxScore={maxMarks}
-                    onSuggestionApplied={(score) => {
+                    onSuggestionApplied={(score, feedback) => {
                       setGroupScore(score.toString());
+                      const nextFeedback = feedback || "";
+                      setGroupFeedback(nextFeedback);
                       if (activeQ) {
-                        const updated = {
+                        const updatedScores = {
                           ...groupQuestionScores,
                           [activeQ.id]: score.toString(),
                         };
-                        setGroupQuestionScores(updated);
+                        const updatedFeedback = {
+                          ...groupQuestionFeedback,
+                          [activeQ.id]: nextFeedback,
+                        };
+                        setGroupQuestionScores(updatedScores);
+                        setGroupQuestionFeedback(updatedFeedback);
                         localStorage.setItem(
                           `group_grades_${selectedGroupSubmission.submission_id}`,
                           JSON.stringify({
-                            scores: updated,
-                            feedback: groupQuestionFeedback,
+                            scores: updatedScores,
+                            feedback: updatedFeedback,
                           }),
                         );
                       }
@@ -2214,7 +2267,7 @@ export default function LecturerGradingQueue() {
                               ) : (
                                 <CheckCircle2 className="size-4" />
                               )}
-                              Finalize & Next Group
+                              Finalize & Next
                             </Button>
                           </div>
                         )}
@@ -2304,7 +2357,7 @@ export default function LecturerGradingQueue() {
                                           0,
                                         ),
                                       )) *
-                                      105,
+                                      100,
                                   )}%`,
                                 }}
                               />
@@ -2429,7 +2482,7 @@ export default function LecturerGradingQueue() {
         {reviewMode === "focus" && activeDrawerSection && (
           <div className="fixed inset-y-0 right-12 w-72 bg-background border-l border-border shadow-2xl z-[100] p-4 space-y-4 overflow-y-auto animate-in slide-in-from-right duration-200">
             <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-xs font-bold uppercase tracking-widest text-primary flex items-center gap-1.5 animate-pulse">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-primary flex items-center gap-1.5">
                 {activeDrawerSection === "members" && (
                   <>
                     <Users className="size-4" /> Group Details
@@ -2524,7 +2577,7 @@ export default function LecturerGradingQueue() {
                                         0,
                                       ),
                                     )) *
-                                    105,
+                                    100,
                                 )}%`,
                               }}
                             />
@@ -2663,6 +2716,54 @@ export default function LecturerGradingQueue() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Lift Integrity Hold Confirm Dialog */}
+        <Dialog open={showIntegrityLiftDialog} onOpenChange={setShowIntegrityLiftDialog}>
+          <DialogContent className="max-w-md bg-background border rounded-2xl shadow-xl p-6 text-left col-span-full">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-foreground font-bold">
+                <ShieldAlert className="size-5 text-red-500" />
+                Lift Academic Integrity Hold
+              </DialogTitle>
+              <DialogDescription className="text-xs text-muted-foreground mt-1 leading-normal">
+                Are you sure you want to lift the academic integrity hold on this attempt? This action is logged.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="mt-4 flex justify-end gap-3 border-t pt-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowIntegrityLiftDialog(false)}
+                className="text-xs rounded-xl h-9 font-semibold"
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                disabled={isSaving}
+                onClick={async () => {
+                  if (!activeAttempt) return;
+                  setIsSaving(true);
+                  setShowIntegrityLiftDialog(false);
+                  try {
+                    await integrityApi.liftHold((activeAttempt as any).id);
+                    toast.success("Integrity hold lifted. Student result is now eligible for release.");
+                    const updated = await attemptApi.getAttempt((activeAttempt as any).id);
+                    setActiveAttempt(updated);
+                  } catch (err) {
+                    toast.error("Failed to lift integrity hold");
+                  } finally {
+                    setIsSaving(false);
+                  }
+                }}
+                className="text-xs rounded-xl h-9 bg-primary hover:bg-primary/95 text-primary-foreground font-semibold"
+              >
+                Confirm Lift
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -2671,13 +2772,20 @@ export default function LecturerGradingQueue() {
   return (
     <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Precision Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-zinc-100">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
             Review & Grading Queue
+            {data.some((item) => item.status === "PENDING" || item.status === "AI_SUGGESTED") && (
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
+              </span>
+            )}
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 font-medium">
-            Select course workspaces and assessments to review, grade, and finalize scores.
+          <p className="text-sm text-muted-foreground mt-1">
+            Select course workspaces and assessments to review, grade, and
+            finalize scores.
           </p>
         </div>
       </div>
@@ -2785,7 +2893,7 @@ export default function LecturerGradingQueue() {
                     </Badge>
                   </TableCell>
                   <TableCell className="py-2">
-                    <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors font-mono">
+                    <span className="text-sm font-bold text-foreground group-hover:text-primary transition-colors">
                       {ws.title}
                     </span>
                   </TableCell>
@@ -2865,7 +2973,7 @@ export default function LecturerGradingQueue() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {assessments.map((asmt: AssessmentSummary) => (
+              {filteredAssessments.map((asmt: AssessmentSummary) => (
                 <TableRow
                   onClick={() => {
                     setSelectedAssessment(asmt);
@@ -2931,7 +3039,7 @@ export default function LecturerGradingQueue() {
                   </TableCell>
                 </TableRow>
               ))}
-              {assessments.length === 0 && (
+              {filteredAssessments.length === 0 && (
                 <TableRow>
                   <TableCell
                     colSpan={6}
@@ -2949,109 +3057,112 @@ export default function LecturerGradingQueue() {
         </div>
       ) : /* STEP C (GROUP): GROUP WORK SUBMISSIONS QUEUE */
       selectedAssessment.is_group_assessment ? (
-        <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none animate-in fade-in duration-300">
+        <div className="space-y-4 animate-in fade-in duration-300">
           {groupQueueLoading ? (
-            <div className="py-20 text-center space-y-3">
+            <div className="py-20 text-center space-y-3 bg-card/30 border border-border/50 rounded-xl">
               <Loader2 className="size-8 text-primary animate-spin mx-auto" />
               <p className="text-xs text-muted-foreground font-semibold">
                 Loading group submissions...
               </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader className="bg-muted/15 border-b border-border/40">
-                <TableRow className="h-10 hover:bg-transparent border-none">
-                  <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">
-                    Group Name
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Members
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
-                    Approvals
-                  </TableHead>
-                  <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
-                    Status
-                  </TableHead>
-                  <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {groupQueue.map((item: any) => (
-                  <TableRow
-                    onClick={() => openGroupSubmission(item.id)}
-                    key={item.id}
-                    className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
-                  >
-                    <TableCell className="px-6 py-2">
-                      <span className="text-sm font-bold text-foreground">
-                        {item.group_name}
-                      </span>
-                    </TableCell>
-                    <TableCell className="py-2 text-xs font-semibold text-foreground/80">
-                      {item.member_count} Members
-                    </TableCell>
-                    <TableCell className="py-2 text-center">
-                      <div className="flex flex-col items-center gap-1 font-semibold">
-                        <span className="text-[10px] font-bold text-muted-foreground font-mono">
-                          {item.approved_member_count} / {item.member_count}{" "}
-                          Approved
-                        </span>
-                        <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-emerald-500 transition-all duration-300"
-                            style={{
-                              width: `${item.member_count ? (item.approved_member_count / item.member_count) * 100 : 0}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-2 text-center">
-                      <Badge
-                        className={cn(
-                          "text-[9px] font-bold uppercase tracking-wider border font-mono",
-                          item.status === "GRADED"
-                            ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                            : "bg-amber-500/10 text-amber-600 border-amber-500/20",
-                        )}
-                      >
-                        {item.status === "GRADED"
-                          ? `Graded (${item.score}/${item.max_score || 100})`
-                          : "Needs Review"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right pr-6 py-2">
-                      <Button
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openGroupSubmission(item.id);
-                        }}
-                        className="h-8 font-bold rounded-lg text-xs"
-                      >
-                        Open Group
-                      </Button>
-                    </TableCell>
+            <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
+              <Table>
+                <TableHeader className="bg-muted/15 border-b border-border/40">
+                  <TableRow className="h-10 hover:bg-transparent border-none">
+                    <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">
+                      Group Name
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                      Members
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                      Approvals
+                    </TableHead>
+                    <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                      Status
+                    </TableHead>
+                    <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">
+                      Actions
+                    </TableHead>
                   </TableRow>
-                ))}
-                {groupQueue.length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="h-44 text-center text-sm font-medium text-muted-foreground font-semibold"
+                </TableHeader>
+                <TableBody>
+                  {groupQueue.map((item: any) => (
+                    <TableRow
+                      onClick={() => openGroupSubmission(item.id)}
+                      key={item.id}
+                      className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
                     >
-                      <div className="flex flex-col items-center justify-center gap-3">
-                        <Users className="size-8 opacity-20" />
-                        <p>No submitted groups found for this assessment.</p>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+                      <TableCell className="px-6 py-2">
+                        <span className="text-sm font-bold text-foreground">
+                          {item.group_name}
+                        </span>
+                      </TableCell>
+                      <TableCell className="py-2 text-xs font-semibold text-foreground/80">
+                        {item.member_count} Members
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <div className="flex flex-col items-center gap-1 font-semibold">
+                          <span className="text-[10px] font-bold text-muted-foreground font-mono">
+                            {item.approved_member_count} / {item.member_count} Approved
+                          </span>
+                          <div className="w-24 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-emerald-500 transition-all duration-300"
+                              style={{
+                                width: `${item.member_count ? (item.approved_member_count / item.member_count) * 100 : 0}%`,
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="py-2 text-center">
+                        <Badge
+                          className={cn(
+                            "text-[9px] font-bold uppercase tracking-wider border font-mono",
+                            item.status === "GRADED"
+                              ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                              : "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                          )}
+                        >
+                          {item.status === "GRADED"
+                            ? `Graded (${item.score}/${item.max_score || 100})`
+                            : "Needs Review"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right pr-6 py-2">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openGroupSubmission(item.id);
+                            }}
+                            className="h-8 font-bold rounded-lg text-xs"
+                          >
+                            Open Group
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  {groupQueue.length === 0 && (
+                    <TableRow>
+                      <TableCell
+                        colSpan={5}
+                        className="h-44 text-center text-sm font-medium text-muted-foreground font-semibold"
+                      >
+                        <div className="flex flex-col items-center justify-center gap-3">
+                          <Users className="size-8 opacity-20" />
+                          <p>No submitted groups found for this assessment.</p>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
           )}
         </div>
       ) : /* STEP C (INDIVIDUAL): CLASS SECTIONS LIST */
@@ -3105,13 +3216,16 @@ export default function LecturerGradingQueue() {
                     {c.released_count}
                   </TableCell>
                   <TableCell className="text-right pr-6 py-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <ChevronRight className="size-4" />
-                    </Button>
+                    <div className="flex items-center justify-end" onClick={(e) => e.stopPropagation()}>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSelectedClass(c)}
+                        className="h-8 w-8 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <ChevronRight className="size-4" />
+                      </Button>
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -3134,6 +3248,176 @@ export default function LecturerGradingQueue() {
       ) : (
         /* STEP D (INDIVIDUAL): INDIVIDUAL STUDENT SUBMISSIONS QUEUE */
         <div className="space-y-4 animate-in fade-in duration-200">
+          <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
+            <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-border/40 bg-muted/10">
+              <div className="space-y-1">
+                <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Unlock className="size-4 text-primary" />
+                  Publish Results
+                </h2>
+                <p className="text-[11px] text-muted-foreground font-medium">
+                  {submittedResultCount} submitted of {releaseQueue.length || selectedClass.total_students} enrolled students.
+                  {releaseQueue.length > submittedResultCount
+                    ? " Students without submissions are listed but are not publishable."
+                    : ""}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                disabled={
+                  releaseQueueLoading ||
+                  isReleasing ||
+                  releasableResults.length === 0
+                }
+                onClick={handleReleaseAll}
+                className="h-8 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700"
+              >
+                {isReleasing ? (
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Send className="size-3.5 mr-1.5" />
+                )}
+                Publish Ready ({releasableResults.length})
+              </Button>
+            </div>
+
+            {releaseQueueLoading ? (
+              <div className="py-10 text-center space-y-2">
+                <Loader2 className="size-5 text-primary animate-spin mx-auto" />
+                <p className="text-xs text-muted-foreground font-semibold">
+                  Checking result release readiness...
+                </p>
+              </div>
+            ) : releaseQueue.length === 0 ? (
+              <div className="py-10 text-center text-xs text-muted-foreground font-semibold">
+                No enrolled students found for this class section.
+              </div>
+            ) : (
+              <>
+                {!releaseQueueClassFullyGraded && pendingResultReviewCount > 0 && (
+                  <div className="p-3 border-b border-amber-200 bg-amber-50 text-amber-800 flex items-start gap-2">
+                    <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                    <p className="text-[11px] font-medium leading-normal">
+                      {pendingResultReviewCount} submitted student
+                      {pendingResultReviewCount === 1 ? "" : "s"} still need
+                      grading before those results can be published.
+                    </p>
+                  </div>
+                )}
+
+                <Table>
+                  <TableHeader className="bg-muted/15 border-b border-border/40">
+                    <TableRow className="h-10 hover:bg-transparent border-none">
+                      <TableHead className="text-xs font-semibold px-6 text-muted-foreground uppercase tracking-wider">
+                        Student
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                        Score
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                        Grading
+                      </TableHead>
+                      <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">
+                        Action
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {releaseQueue.map((item) => {
+                      const hasSubmission = !!item.attempt_id;
+                      const isFullyGraded =
+                        hasSubmission &&
+                        item.total_question_count > 0 &&
+                        item.graded_question_count >= item.total_question_count;
+                      const scoreText =
+                        item.total_score !== null &&
+                        item.total_score !== undefined
+                          ? `${item.total_score} / ${item.max_score || 0}`
+                          : "N/A";
+
+                      return (
+                        <TableRow key={item.student_id} className="h-12 border-border/10">
+                          <TableCell className="px-6 py-2">
+                            <span className="text-sm font-bold text-foreground">
+                              {item.student_name}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-2 text-center text-xs font-bold font-mono text-foreground/80">
+                            {scoreText}
+                            {item.percentage !== null &&
+                              item.percentage !== undefined && (
+                                <span className="ml-1 text-muted-foreground">
+                                  ({item.percentage}%)
+                                </span>
+                              )}
+                          </TableCell>
+                          <TableCell className="py-2 text-center">
+                            {hasSubmission ? (
+                              <span className="text-[10px] font-bold font-mono text-muted-foreground">
+                                {item.graded_question_count} / {item.total_question_count}
+                              </span>
+                            ) : (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] font-bold uppercase bg-muted/10 text-muted-foreground border-border/50"
+                              >
+                                No Submission
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-2 text-center">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[9px] font-bold uppercase tracking-wider font-mono",
+                                item.is_released
+                                  ? "bg-indigo-500/5 text-indigo-600 border-indigo-500/25"
+                                  : item.integrity_hold
+                                    ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                                    : item.can_release
+                                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                      : isFullyGraded
+                                        ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                        : "bg-muted/10 text-muted-foreground border-border/50",
+                              )}
+                            >
+                              {item.is_released
+                                ? "Published"
+                                : item.integrity_hold
+                                  ? "Integrity Hold"
+                                  : item.can_release
+                                    ? "Ready"
+                                    : hasSubmission
+                                      ? "Not Ready"
+                                      : "No Submission"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="text-right pr-6 py-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={!item.can_release || !item.attempt_id || isReleasing}
+                              onClick={() =>
+                                item.attempt_id &&
+                                handleReleaseStudent(item.attempt_id)
+                              }
+                              className="h-7 text-[10px] font-bold rounded-lg"
+                            >
+                              Publish
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </>
+            )}
+          </div>
+
           {/* Submissions Filter row */}
           <div className="flex flex-wrap items-center justify-between gap-4 p-4 border border-border/50 bg-card/20 rounded-xl backdrop-blur-sm">
             <div className="flex items-center gap-3 flex-1 min-w-[240px] flex-wrap">
@@ -3147,20 +3431,17 @@ export default function LecturerGradingQueue() {
                 />
               </div>
 
-              {/* Status Select with full backend lifecycles supported (Issue 14) */}
               <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger className="w-36 h-9 text-xs rounded-lg">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Submissions</SelectItem>
-                  <SelectItem value="PENDING">Pending Review</SelectItem>
-                  <SelectItem value="AI_SUGGESTED">AI Suggested</SelectItem>
+                  <SelectItem value="PENDING">Awaiting Review</SelectItem>
+                  <SelectItem value="AI_SUGGESTED">AI Graded - Needs Review</SelectItem>
                   <SelectItem value="COMPLETED">Graded</SelectItem>
                   <SelectItem value="UNDER_REVIEW">Under Review</SelectItem>
-                  <SelectItem value="PENDING_RELEASE">
-                    Pending Release
-                  </SelectItem>
+                  <SelectItem value="PENDING_RELEASE">Pending Release</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -3173,6 +3454,7 @@ export default function LecturerGradingQueue() {
                   <SelectItem value="ESSAY">Essay</SelectItem>
                   <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
                   <SelectItem value="CASE_STUDY">Case Study</SelectItem>
+                  <SelectItem value="COMPUTATIONAL">Computational</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -3189,7 +3471,7 @@ export default function LecturerGradingQueue() {
             </div>
 
             <div className="text-xs text-muted-foreground font-semibold">
-              Showing {data.length} of {total} submissions
+              Showing {groupedSubmissions.length} student attempts
             </div>
           </div>
 
@@ -3210,13 +3492,13 @@ export default function LecturerGradingQueue() {
                         Student Name
                       </TableHead>
                       <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                        Status
+                        Overall Status
                       </TableHead>
                       <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
-                        AI Marks
+                        AI Score Suggestions
                       </TableHead>
                       <TableHead className="text-xs font-semibold text-muted-foreground uppercase tracking-wider text-center">
-                        Integrity Risk
+                        Avg Integrity Risk
                       </TableHead>
                       <TableHead className="text-right text-xs font-semibold pr-6 text-muted-foreground uppercase tracking-wider">
                         Actions
@@ -3224,86 +3506,83 @@ export default function LecturerGradingQueue() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {data.map((item: GradingQueueItem) => (
-                      <TableRow
-                        onClick={() => handleOpenReview(item)}
-                        key={item.id}
-                        className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
-                      >
-                        <TableCell className="px-6 py-2">
-                          <span className="text-sm font-bold text-foreground">
-                            {item.student_name}
-                          </span>
-                        </TableCell>
-                        <TableCell className="py-2">
-                          {/* Lifecycle Status Badges (Issue 14) */}
-                          <Badge
-                            className={cn(
-                              "text-[9px] font-bold uppercase tracking-wider border font-mono",
-                              item.status === "COMPLETED"
-                                ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                                : item.status === "AI_SUGGESTED"
-                                  ? "bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse"
-                                  : item.status === "UNDER_REVIEW"
-                                    ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                                    : item.status === "PENDING_RELEASE"
-                                      ? "bg-indigo-500/10 text-indigo-600 border-indigo-500/20"
-                                      : "bg-amber-500/10 text-amber-600 border-amber-500/20",
-                            )}
-                          >
-                            {item.status === "COMPLETED"
-                              ? "Graded"
-                              : item.status === "AI_SUGGESTED"
-                                ? "AI Suggested"
-                                : item.status === "UNDER_REVIEW"
-                                  ? "Under Review"
-                                  : item.status === "PENDING_RELEASE"
-                                    ? "Pending Release"
-                                    : "Pending"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="py-2 text-center">
-                          {item.ai_suggested_score !== null ? (
-                            <Badge
-                              variant="secondary"
-                              className="font-mono text-xs bg-primary/10 text-primary border-primary/20"
-                            >
-                              {item.ai_suggested_score} /{" "}
-                              {item.max_score || DEFAULT_QUESTION_MAX_MARKS} pts
-                            </Badge>
-                          ) : (
-                            <span className="text-muted-foreground/45 text-[10px] italic">
-                              N/A
+                    {groupedSubmissions.map((group: GradingQueueItem[]) => {
+                      const firstItem = group[0];
+                      const allCompleted = group.every(item => (item.status as any) === "COMPLETED" || (item.status as any) === "RELEASED");
+                      const anyInProgress = group.some(item => (item.status as any) === "IN_PROGRESS");
+                      const anySuggested = group.some(item => (item.status as any) === "AI_SUGGESTED" || item.ai_suggested_score !== null);
+                      
+                      let groupStatusText = "AI Graded - Needs Review";
+                      let groupStatusClass = "bg-primary/10 text-primary border-primary/20";
+                      
+                      if (allCompleted) {
+                        const anyReleased = group.some(item => (item.status as any) === "RELEASED");
+                        if (anyReleased) {
+                          groupStatusText = "Released";
+                          groupStatusClass = "bg-indigo-500/10 text-indigo-600 border-indigo-500/20";
+                        } else {
+                          groupStatusText = "Graded";
+                          groupStatusClass = "bg-emerald-500/10 text-emerald-600 border-emerald-500/20";
+                        }
+                      } else if (anyInProgress) {
+                        groupStatusText = "AI Grading...";
+                        groupStatusClass = "bg-blue-500/10 text-blue-600 border-blue-500/20 animate-pulse";
+                      }
+                      
+                      const avgRisk = Math.round(group.reduce((acc, curr) => acc + curr.integrity_risk_score, 0) / group.length);
+                      
+                      return (
+                        <TableRow
+                          onClick={() => handleOpenReview(firstItem)}
+                          key={firstItem.attempt_id}
+                          className="group hover:bg-primary/[0.03] h-14 border-border/10 transition-all cursor-pointer"
+                        >
+                          <TableCell className="px-6 py-2">
+                            <span className="text-sm font-bold text-foreground">
+                              {firstItem.student_name}
                             </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="py-2 text-center">
-                          <span
-                            className={cn(
-                              "text-xs font-bold font-mono",
-                              item.integrity_risk_score > 50
-                                ? "text-red-500"
-                                : "text-emerald-500",
-                            )}
-                          >
-                            {item.integrity_risk_score}%
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right pr-6 py-2">
-                          <Button
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleOpenReview(item);
-                            }}
-                            className="h-8 font-bold rounded-lg text-xs"
-                          >
-                            Grade Submission
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                    {data.length === 0 && (
+                          </TableCell>
+                          <TableCell className="py-2">
+                            <Badge className={cn("text-[9px] font-bold uppercase tracking-wider border font-mono", groupStatusClass)}>
+                              {groupStatusText}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="py-2 text-center">
+                            <div className="flex flex-col gap-1 items-center">
+                              {group.map((item, idx) => (
+                                <div key={item.id} className="flex items-center gap-1.5 text-[10px]">
+                                  <span className="text-muted-foreground font-semibold">Q{idx + 1}:</span>
+                                  {item.ai_suggested_score !== null ? (
+                                    <Badge variant="secondary" className="font-mono text-[9px] px-1 py-0 bg-primary/5 text-primary border-primary/15">
+                                      {item.ai_suggested_score} pts
+                                    </Badge>
+                                  ) : (
+                                    <span className="text-muted-foreground/45">N/A</span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </TableCell>
+                          <TableCell className="py-2 text-center">
+                            <span className={cn("text-xs font-bold font-mono", avgRisk > 50 ? "text-red-500" : "text-emerald-500")}>
+                              {avgRisk}%
+                            </span>
+                          </TableCell>
+                           <TableCell className="text-right pr-6 py-2">
+                            <div className="flex justify-end gap-2" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                onClick={() => handleOpenReview(firstItem)}
+                                className="h-8 font-bold rounded-lg text-xs"
+                              >
+                                Grade Student
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {groupedSubmissions.length === 0 && (
                       <TableRow>
                         <TableCell
                           colSpan={5}
@@ -3330,7 +3609,7 @@ export default function LecturerGradingQueue() {
                     onClick={() =>
                       setCurrentPage((prev) => Math.max(1, prev - 1))
                     }
-                    className="text-xs rounded-lg h-8"
+                    className="text-xs rounded-lg h-8 font-semibold"
                   >
                     <ChevronLeft className="size-4 mr-1" /> Previous
                   </Button>
@@ -3342,7 +3621,7 @@ export default function LecturerGradingQueue() {
                     size="sm"
                     disabled={!hasMore}
                     onClick={() => setCurrentPage((prev) => prev + 1)}
-                    className="text-xs rounded-lg h-8"
+                    className="text-xs rounded-lg h-8 font-semibold"
                   >
                     Next <ChevronRight className="size-4 ml-1" />
                   </Button>

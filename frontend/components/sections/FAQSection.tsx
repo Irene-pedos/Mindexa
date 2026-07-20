@@ -1,14 +1,17 @@
 // frontend/components/sections/FAQSection.tsx
+"use client";
+
+import React from "react";
 import {
   Accordion,
   AccordionContent,
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
-import { TypographyH3, TypographyP } from "@/components/ui/typography";
 import Link from "next/link";
-import { InView } from "@/components/ui/in-view";
-import { BlurredStagger } from "@/components/text-reveal-faqs"; // adjust path if needed
+import { HelpCircle, ChevronRight } from "lucide-react";
+import { motion } from "motion/react";
+import { BlurredStagger } from "@/components/text-reveal-faqs";
 
 const faqItems = [
   {
@@ -45,44 +48,63 @@ const faqItems = [
 
 export default function FAQSection() {
   return (
-    <section className="py-6 bg-background">
-      <div className="container mx-auto px-6 max-w-7xl">
-        <div className="grid gap-12 md:grid-cols-5">
+    <section id="faq" className="py-20 md:py-28 bg-background overflow-hidden relative border-t border-border">
+      {/* Subtle ambient light gradient background */}
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_90%,rgba(30,50,90,0.02),transparent_70%)] dark:bg-[radial-gradient(circle_at_20%_90%,rgba(120,119,198,0.05),transparent_70%)] pointer-events-none" />
+
+      <div className="container mx-auto px-6 max-w-7xl relative z-10">
+        <div className="grid gap-12 lg:grid-cols-5 items-start">
           
           {/* Left Column - Heading + Intro */}
-          <div className="md:col-span-2">
-            <InView>
-              <TypographyH3 className="text-foreground tracking-tight text-3xl">
-                Address concerns, reduce uncertainty, and establish trust.
-              </TypographyH3>
-            </InView>
+          <motion.div 
+            initial={{ opacity: 0, y: 15 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ duration: 0.5, ease: "easeOut" }}
+            className="lg:col-span-2 text-left space-y-4"
+          >
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-normal border border-primary/20">
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Common Questions</span>
+            </div>
 
-            <TypographyP className="mt-6 text-muted-foreground text-[15px] leading-relaxed">
+            <h2 className="text-3xl md:text-4xl font-semibold tracking-tight text-foreground leading-tight">
+              Address concerns, reduce uncertainty, and establish trust.
+            </h2>
+
+            <p className="text-sm md:text-base text-muted-foreground leading-relaxed font-normal">
               Mindexa Platform is a modern, secure, and intelligent academic assessment and learning platform designed to solve critical challenges faced by colleges and universities in the digital education era.
-            </TypographyP>
-
-            <p className="mt-8 hidden md:block text-sm text-muted-foreground">
-              Can’t find what you’re looking for? Reach out to our{" "}
-              <Link href="#" className="text-primary font-medium hover:underline">
-                support team
-              </Link>{" "}
-              for assistance.
             </p>
-          </div>
+
+            <div className="pt-4 hidden lg:block">
+              <p className="text-xs md:text-sm text-muted-foreground">
+                Can’t find what you’re looking for? Reach out to our{" "}
+                <Link href="#" className="text-primary font-medium hover:underline inline-flex items-center gap-0.5">
+                  support team <ChevronRight className="w-3 h-3" />
+                </Link>
+              </p>
+            </div>
+          </motion.div>
 
           {/* Right Column - Accordion */}
-          <div className="md:col-span-3">
-            <Accordion type="single" collapsible className="w-full">
+          <motion.div 
+            initial={{ opacity: 0, x: 20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true, amount: 0.2 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="lg:col-span-3 w-full"
+          >
+            <Accordion type="single" collapsible className="w-full border-none">
               {faqItems.map((item) => (
                 <AccordionItem
                   key={item.id}
                   value={item.id}
-                  className="border-b border-border"
+                  className="border-b border-border/80"
                 >
-                  <AccordionTrigger className="text-left text-base font-medium py-5 hover:no-underline">
+                  <AccordionTrigger className="cursor-pointer text-left text-sm md:text-base font-medium py-4 px-2 hover:no-underline hover:text-primary transition-all duration-200">
                     {item.question}
                   </AccordionTrigger>
-                  <AccordionContent className="text-muted-foreground text-[15px] leading-relaxed pb-6">
+                  <AccordionContent className="text-muted-foreground text-xs md:text-sm leading-relaxed px-2 pb-4">
                     <BlurredStagger text={item.answer} />
                   </AccordionContent>
                 </AccordionItem>
@@ -90,13 +112,14 @@ export default function FAQSection() {
             </Accordion>
 
             {/* Mobile support link */}
-            <p className="mt-8 md:hidden text-sm text-muted-foreground">
+            <p className="mt-6 lg:hidden text-xs md:text-sm text-muted-foreground text-left">
               Can’t find what you’re looking for? Contact our{" "}
-              <Link href="#" className="text-primary font-medium hover:underline">
-                support team
+              <Link href="#" className="text-primary font-medium hover:underline inline-flex items-center gap-0.5">
+                support team <ChevronRight className="w-3.5 h-3.5" />
               </Link>
             </p>
-          </div>
+          </motion.div>
+
         </div>
       </div>
     </section>

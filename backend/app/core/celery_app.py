@@ -20,6 +20,8 @@ BEAT SCHEDULE (periodic tasks):
 USAGE:
     # Start a worker (from project root):
     celery -A app.core.celery_app.celery worker -Q default,grading,email -l info
+    # On Windows (solo pool):
+    MINDEXA_RUNTIME=celery celery -A app.core.celery_app.celery worker --pool=solo -Q default,grading,email -l info
 
     # Start beat scheduler:
     celery -A app.core.celery_app.celery beat -l info
@@ -141,12 +143,12 @@ def create_celery() -> Celery:
             "schedule": crontab(hour=2, minute=0),
             "options": {"queue": "cleanup"},
         },
-        # Grading reminder every 12 hours
-        "grading-reminder": {
-            "task": "app.workers.tasks.grading_reminder",
-            "schedule": 43200.0,  # seconds
-            "options": {"queue": "cleanup"},
-        },
+        # TODO: Implement and re-enable grading_reminder task
+        # "grading-reminder": {
+        #     "task": "app.workers.tasks.grading_reminder",
+        #     "schedule": 43200.0,
+        #     "options": {"queue": "cleanup"},
+        # },
     }
 
     return app

@@ -16,7 +16,7 @@ import {
   Clock, 
   Activity,
   ShieldCheck,
-  Circle
+  AlertCircle
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,7 +26,7 @@ interface GroupMember {
   avatar_url?: string;
   is_leader: boolean;
   participation_count: number;
-  approval_status: "PENDING" | "APPROVED" | "REJECTED";
+  approval_status: "PENDING" | "APPROVED" | "REJECTED" | "CHANGES_REQUESTED";
   is_online?: boolean;
 }
 
@@ -96,9 +96,9 @@ export function GroupMembersPanel({ members, requireApproval }: GroupMembersPane
                       <CheckCircle2 className="size-3" />
                       <span className="hidden sm:inline uppercase">Approved</span>
                     </div>
-                  ) : member.approval_status === "REJECTED" ? (
+                  ) : (member.approval_status === "REJECTED" || member.approval_status === "CHANGES_REQUESTED") ? (
                     <div className="flex items-center gap-1 text-[10px] font-bold text-destructive">
-                      <Circle className="size-3 fill-destructive/10" />
+                      <AlertCircle className="size-3 text-destructive" />
                       <span className="hidden sm:inline uppercase tracking-tight">Changes Requested</span>
                     </div>
                   ) : (

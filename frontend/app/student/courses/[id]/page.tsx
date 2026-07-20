@@ -23,6 +23,7 @@ import {
   CheckCircle2
 } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { studentApi, StudentCourseDetail } from "@/lib/api/student";
 import { LecturerMaterialResponse } from "@/lib/api/lecturer";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -332,7 +333,14 @@ export default function StudentWorkspaceDetailPage() {
                 <iframe src={`${previewUrl}#toolbar=0`} className="w-full h-full border-none" title="Material Preview" />
               ) : viewingMaterial?.mime_type?.startsWith("image/") ? (
                 <div className="w-full h-full flex items-center justify-center p-6 overflow-auto">
-                  <img src={previewUrl} alt="Asset Preview" className="max-w-full max-h-full object-contain rounded-md shadow-lg border bg-white" />
+                  <Image
+                    src={previewUrl}
+                    alt="Asset Preview"
+                    width={1200}
+                    height={900}
+                    unoptimized
+                    className="max-w-full max-h-full object-contain rounded-md shadow-lg border bg-white w-auto h-auto"
+                  />
                 </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">

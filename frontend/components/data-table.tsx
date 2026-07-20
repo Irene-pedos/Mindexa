@@ -357,6 +357,9 @@ export function DataTable({
     [data]
   )
 
+  // TanStack Table returns unstable function identities by design; React Compiler
+  // cannot safely memoize around it. Keep the table API as the library intends.
+  // eslint-disable-next-line react-hooks/incompatible-library -- useReactTable API
   const table = useReactTable({
     data,
     columns,

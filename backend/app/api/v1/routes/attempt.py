@@ -280,8 +280,8 @@ async def get_attempt(
                             "id": str(opt.id),
                             "text": opt.content,
                             "option_text": opt.content,
-                            "match_value": opt.match_value,
-                            "option_text_right": opt.match_value,
+                            "match_value": None if getattr(q.question_type, 'value', str(q.question_type)).upper() == "CASE_STUDY" else opt.match_value,
+                            "option_text_right": None if getattr(q.question_type, 'value', str(q.question_type)).upper() == "CASE_STUDY" else opt.match_value,
                             "order_index": opt.order_index
                         }
                         for opt in (q.options or [])

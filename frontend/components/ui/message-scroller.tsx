@@ -1,6 +1,14 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useRef, useState } from "react";
+import React, {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { ArrowDownIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -21,7 +29,7 @@ export function MessageScrollerProvider({ children }: { children: React.ReactNod
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
 
-  const scrollToBottom = (behavior: ScrollBehavior = "smooth") => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (viewportRef.current) {
       viewportRef.current.scrollTo({
         top: viewportRef.current.scrollHeight,
@@ -30,19 +38,22 @@ export function MessageScrollerProvider({ children }: { children: React.ReactNod
       setIsAtBottom(true);
       setShowScrollButton(false);
     }
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({
+      viewportRef,
+      isAtBottom,
+      setIsAtBottom,
+      scrollToBottom,
+      showScrollButton,
+      setShowScrollButton,
+    }),
+    [isAtBottom, scrollToBottom, showScrollButton]
+  );
 
   return (
-    <MessageScrollerContext.Provider
-      value={{
-        viewportRef,
-        isAtBottom,
-        setIsAtBottom,
-        scrollToBottom,
-        showScrollButton,
-        setShowScrollButton,
-      }}
-    >
+    <MessageScrollerContext.Provider value={value}>
       {children}
     </MessageScrollerContext.Provider>
   );
@@ -105,13 +116,13 @@ export function MessageScrollerContent({
   className?: string;
   "aria-busy"?: boolean;
 }) {
-  const { viewportRef, isAtBottom, scrollToBottom } = useMessageScroller();
-  
+  const { isAtBottom, scrollToBottom } = useMessageScroller();
+
   useEffect(() => {
     if (isAtBottom) {
       scrollToBottom("auto");
     }
-  }, [children]);
+  }, [children, isAtBottom, scrollToBottom]);
 
   return (
     <div

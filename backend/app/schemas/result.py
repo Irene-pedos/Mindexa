@@ -28,6 +28,10 @@ class ReleaseResultsRequest(BaseModel):
         default=None,
         description="If None, releases results for ALL attempts in the assessment",
     )
+    class_section_id: uuid.UUID | None = Field(
+        default=None,
+        description="If provided, releases results only for this class section",
+    )
 
 
 class AssessmentReleasePolicyRequest(BaseModel):
@@ -119,6 +123,7 @@ class ResultSummary(BaseModel):
     id: uuid.UUID
     attempt_id: uuid.UUID
     student_id: uuid.UUID
+    student_name: str | None = None
     assessment_id: uuid.UUID
     assessment_title: str | None = None
     academic_year: str | None = None
@@ -145,6 +150,24 @@ class ResultReleaseResponse(BaseModel):
     held_count: int
     held_attempt_ids: list[uuid.UUID]
     message: str
+
+class ReleaseQueueItem(BaseModel):
+    student_id: uuid.UUID
+    student_name: str
+    attempt_id: uuid.UUID | None = None
+    graded_question_count: int
+    total_question_count: int
+    integrity_hold: bool
+    is_released: bool
+    can_release: bool
+    total_score: float | None = None
+    max_score: float | None = None
+    percentage: float | None = None
+    letter_grade: str | None = None
+
+class ReleaseQueueResponse(BaseModel):
+    items: list[ReleaseQueueItem]
+    class_fully_graded: bool
 
 # Rebuild models
 ReleaseResultsRequest.model_rebuild()

@@ -81,10 +81,27 @@ def register_exception_handlers(app: FastAPI) -> None:
             path=str(request.url),
             request_id=request_id,
         )
+        
+        message = exc.detail
+        detail_lower = (exc.detail or "").lower()
+        if any(
+            pattern in detail_lower
+            for pattern in [
+                "getaddrinfo failed",
+                "errno 11001",
+                "connecterror",
+                "nameorpolicynotknown",
+                "connection refused",
+                "socket.gaierror",
+                "all configured ai providers failed",
+            ]
+        ):
+            message = "Network problem: Unable to connect to AI services. Please check your internet connection and try again."
+
         response = _error_response(
             status_code=exc.status_code,
             error_code=exc.code,
-            message=exc.detail,
+            message=message,
             request_id=request_id,
         )
         headers = getattr(exc, "headers", None)

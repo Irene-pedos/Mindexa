@@ -956,6 +956,7 @@ class AssessmentService:
         current_user: User,
         status: str | None = None,
         assessment_type: str | None = None,
+        workspace_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -985,6 +986,7 @@ class AssessmentService:
             items, total = await self._repo.list_all(
                 status=db_status,
                 assessment_type=db_type,
+                workspace_id=workspace_id,
                 page=page,
                 page_size=page_size,
                 sort=sort,
@@ -994,6 +996,7 @@ class AssessmentService:
                 created_by_id=current_user.id,
                 status=db_status,
                 assessment_type=db_type,
+                workspace_id=workspace_id,
                 page=page,
                 page_size=page_size,
                 sort=sort,

@@ -3,6 +3,8 @@ import { apiClient } from "./client";
 
 export const resultApi = {
   getResultByAttempt: (attemptId: string) => apiClient(`/results/attempt/${attemptId}`),
+  getReleaseQueue: (assessmentId: string, classSectionId: string) => 
+    apiClient(`/results/assessment/${assessmentId}/release-queue?class_section_id=${classSectionId}`),
   getStudentResults: () => apiClient("/results/me"),
   getMyResults: (params: { page?: number; page_size?: number } = {}) => {
     const searchParams = new URLSearchParams();
@@ -18,9 +20,9 @@ export const resultApi = {
     });
     return apiClient(`/results/assessment/${assessmentId}?${searchParams.toString()}`);
   },
-  releaseResults: (assessmentId: string, attemptIds?: string[]) => apiClient(`/results/release`, {
+  releaseResults: (assessmentId: string, attemptIds?: string[], classSectionId?: string) => apiClient(`/results/release`, {
     method: "POST",
-    body: JSON.stringify({ assessment_id: assessmentId, attempt_ids: attemptIds })
+    body: JSON.stringify({ assessment_id: assessmentId, attempt_ids: attemptIds, class_section_id: classSectionId })
   }),
   clearHold: (resultId: string, reason: string) => apiClient(`/results/${resultId}/clear-hold`, {
     method: "POST",

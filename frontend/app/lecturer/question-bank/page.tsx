@@ -44,6 +44,7 @@ import {
   ArrowRight,
   Upload,
 } from "lucide-react";
+import Image from "next/image";
 import {
   questionApi,
   QuestionBankItem,
@@ -394,11 +395,13 @@ export default function LecturerQuestionBank() {
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-3 flex-1 min-w-0">
                     {q.image_url && (
-                      <div className="size-12 rounded-lg border bg-zinc-50 overflow-hidden flex-shrink-0">
-                        <img
+                      <div className="size-12 rounded-lg border bg-zinc-50 overflow-hidden flex-shrink-0 relative">
+                        <Image
                           src={q.image_url}
                           alt="Resource prompt"
-                          className="size-full object-cover"
+                          fill
+                          unoptimized
+                          className="object-cover"
                         />
                       </div>
                     )}
@@ -526,10 +529,13 @@ export default function LecturerQuestionBank() {
                         </div>
                         {previewData.image_url && (
                           <div className="p-1.5 border rounded-xl bg-zinc-50 inline-block shadow-sm overflow-hidden max-w-full">
-                            <img
+                            <Image
                               src={previewData.image_url}
                               alt="Prompt Media Link"
-                              className="max-h-60 rounded-lg object-contain"
+                              width={800}
+                              height={600}
+                              unoptimized
+                              className="max-h-60 rounded-lg object-contain w-auto h-auto"
                             />
                           </div>
                         )}
@@ -774,10 +780,12 @@ export default function LecturerQuestionBank() {
                           <div className="flex items-center gap-4">
                             {formData.image_url ? (
                               <div className="relative group size-16 rounded-xl border bg-white p-1 overflow-hidden">
-                                <img
+                                <Image
                                   src={formData.image_url}
                                   alt="Media Upload"
-                                  className="size-full object-contain rounded-lg"
+                                  fill
+                                  unoptimized
+                                  className="object-contain rounded-lg p-1"
                                 />
                                 <button
                                   type="button"

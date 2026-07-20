@@ -17,6 +17,7 @@ import { format } from "date-fns"
 import { toast } from "sonner"
 import { studentApi, StudentResourceResponse } from "@/lib/api/student"
 import { Skeleton } from "@/components/ui/skeleton";
+import Image from "next/image";
 
 interface UploadingFile {
   id: number
@@ -310,7 +311,14 @@ export default function StudentResourcesPage() {
                    />
                 ) : viewingResource?.mime_type?.startsWith("image/") ? (
                    <div className="w-full h-full flex items-center justify-center p-4">
-                      <img src={previewUrl} alt="Preview" className="max-w-full max-h-full object-contain shadow-lg" />
+                      <Image
+                        src={previewUrl}
+                        alt="Preview"
+                        width={1200}
+                        height={900}
+                        unoptimized
+                        className="max-w-full max-h-full object-contain shadow-lg w-auto h-auto"
+                      />
                    </div>
                 ) : (
                    <div className="absolute inset-0 flex items-center justify-center">

@@ -1,39 +1,81 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckCircle2, Loader2, Scale, Unlock } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { 
+  AlertTriangle, 
+  CheckCircle2, 
+  Loader2, 
+  Scale, 
+  Unlock, 
+  Users, 
+  ChevronRight, 
+  FileText, 
+  FolderOpen, 
+  ShieldAlert, 
+  Calendar,
+  Send
+} from "lucide-react";
 import { assessmentApi } from "@/lib/api/assessment";
+import { gradingApi } from "@/lib/api/grading";
 import { resultApi } from "@/lib/api/result";
-import { ResultReleasePanel } from "@/components/mindexa/grading/result-release-panel";
 import { toast } from "sonner";
 import { AssessmentSummary } from "../types";
+
+interface ClassStatRecord {
+  class_id: string;
+  class_name: string;
+  total_students: number;
+  submitted_count: number;
+  pending_review_count: number;
+  reviewed_count: number;
+  released_count: number;
+}
+
+interface StudentResultSummary {
+  id: string;
+  attempt_id: string;
+  student_id: string;
+  student_name: string;
+  total_score: number;
+  max_score: number;
+  percentage: number;
+  letter_grade: string | null;
+  is_passing: boolean;
+  is_released: boolean;
+  integrity_hold: boolean;
+}
 
 export default function ResultReleasePage() {
   const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [releaseAssessmentId, setReleaseAssessmentId] = useState<string>("all");
-  const [isSaving, setIsSaving] = useState(false);
-  const [releasePolicy, setReleasePolicy] = useState<"immediate" | "scheduled" | "hold">("hold");
-  const [releaseDate, setReleaseDate] = useState("");
-  const [releaseValidation, setReleaseValidation] = useState({
-    valid: true,
-    errors: [] as string[],
-    gradedCount: 0,
-    totalCount: 0
-  });
+  
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("all");
+  const [classStats, setClassStats] = useState<ClassStatRecord[]>([]);
+  const [classStatsLoading, setClassStatsLoading] = useState(false);
+  
+  const [selectedClass, setSelectedClass] = useState<ClassStatRecord | null>(null);
+  const [studentResults, setStudentResults] = useState<StudentResultSummary[]>([]);
+  const [resultsLoading, setResultsLoading] = useState(false);
+  const [selectedResultIds, setSelectedResultIds] = useState<string[]>([]);
+  
+  const [isReleasing, setIsReleasing] = useState(false);
 
+  // Load all published assessments
   useEffect(() => {
     async function loadAssessments() {
       try {
         const res = await assessmentApi.getAssessments({ status: "PUBLISHED" });
         setAssessments(res.items || []);
       } catch (err: any) {
-        toast.error("Failed to load assessments context");
+        toast.error("Failed to load assessments");
       } finally {
         setLoading(false);
       }
@@ -41,264 +83,406 @@ export default function ResultReleasePage() {
     loadAssessments();
   }, []);
 
-  const runReleaseValidation = useCallback(async (asmtId: string) => {
-    try {
-      const res = await resultApi.getAssessmentResults(asmtId);
-      const items = res.items || [];
-      const errorsList: string[] = [];
-      let gradedQ = 0;
-      let totalQ = 0;
-
-      items.forEach(
-        (r: {
-          student_name: string;
-          graded_question_count: number;
-          total_question_count: number;
-          integrity_hold: boolean;
-        }) => {
-          gradedQ += r.graded_question_count || 0;
-          totalQ += r.total_question_count || 0;
-          if (r.graded_question_count < r.total_question_count) {
-            errorsList.push(
-              `${r.student_name}: ${r.total_question_count - r.graded_question_count} questions remaining ungraded.`
-            );
-          }
-          if (r.integrity_hold) {
-            errorsList.push(
-              `${r.student_name}: Unresolved active integrity hold.`
-            );
-          }
-        }
-      );
-
-      setReleaseValidation({
-        valid: errorsList.length === 0,
-        errors: errorsList,
-        gradedCount: gradedQ,
-        totalCount: totalQ
-      });
-    } catch (error: unknown) {
-      console.error("Failed to run validation", error);
-    }
-  }, []);
-
+  // Fetch Class stats when selected assessment changes
   useEffect(() => {
-    if (releaseAssessmentId !== "all") {
-      runReleaseValidation(releaseAssessmentId);
+    async function fetchClasses() {
+      if (selectedAssessmentId === "all") {
+        setClassStats([]);
+        setSelectedClass(null);
+        setStudentResults([]);
+        return;
+      }
+      setClassStatsLoading(true);
+      setSelectedClass(null);
+      setStudentResults([]);
+      try {
+        const res = await gradingApi.getAssessmentClassStats(selectedAssessmentId);
+        setClassStats(res.classes || []);
+      } catch (err: any) {
+        toast.error("Failed to fetch class sections stats");
+      } finally {
+        setClassStatsLoading(false);
+      }
+    }
+    fetchClasses();
+  }, [selectedAssessmentId]);
+
+  // Load student results when class selection changes
+  useEffect(() => {
+    async function fetchResults() {
+      if (!selectedClass || selectedAssessmentId === "all") {
+        setStudentResults([]);
+        setSelectedResultIds([]);
+        return;
+      }
+      setResultsLoading(true);
+      setSelectedResultIds([]);
+      try {
+        const res = await resultApi.getReleaseQueue(selectedAssessmentId, selectedClass.class_id);
+        setStudentResults(res.items || []);
+      } catch (err: any) {
+        toast.error("Failed to load student results");
+      } finally {
+        setResultsLoading(false);
+      }
+    }
+    fetchResults();
+  }, [selectedClass, selectedAssessmentId]);
+
+  // Toggle selection for student-by-student release
+  const handleSelectResult = (attemptId: string) => {
+    setSelectedResultIds(prev => 
+      prev.includes(attemptId) 
+        ? prev.filter(id => id !== attemptId)
+        : [...prev, attemptId]
+    );
+  };
+
+  const handleSelectAllResults = (checked: boolean) => {
+    if (checked) {
+      // Only select unreleased, non-hold graded students
+      const eligible = studentResults
+        .filter(r => !r.is_released && !r.integrity_hold && r.attempt_id)
+        .map(r => r.attempt_id as string);
+      setSelectedResultIds(eligible);
     } else {
-      setReleaseValidation({
-        valid: true,
-        errors: [],
-        gradedCount: 0,
-        totalCount: 0
-      });
-    }
-  }, [releaseAssessmentId, runReleaseValidation]);
-
-  const handleSaveReleasePolicy = async (asmtId: string) => {
-    try {
-      await resultApi.updateReleasePolicy(asmtId, {
-        policy: releasePolicy,
-        release_date: releasePolicy === "scheduled" ? releaseDate : null
-      });
-      toast.success("Release policy saved successfully");
-    } catch (error: unknown) {
-      toast.error("Failed to save release policy");
+      setSelectedResultIds([]);
     }
   };
 
-  const handleTriggerImmediateRelease = async (asmtId: string) => {
-    setIsSaving(true);
+  // Perform class-level release (releases all graded submissions in class)
+  const handleReleaseClass = async (classId: string, className: string) => {
+    if (selectedAssessmentId === "all") return;
+    setIsReleasing(true);
     try {
-      await resultApi.triggerImmediateRelease(asmtId);
-      toast.success("Results released to students immediately.");
-      runReleaseValidation(asmtId);
-    } catch (error: unknown) {
-      toast.error("Failed to trigger immediate release");
+      await resultApi.releaseResults(selectedAssessmentId, undefined, classId);
+      toast.success(`Results for ${className} released successfully.`);
+      // Refresh class stats
+      const res = await gradingApi.getAssessmentClassStats(selectedAssessmentId);
+      setClassStats(res.classes || []);
+      // Reset selected class
+      setSelectedClass(null);
+    } catch (e) {
+      toast.error("Failed to release class results.");
     } finally {
-      setIsSaving(false);
+      setIsReleasing(false);
     }
   };
+
+  // Release selected student results
+  const handleReleaseSelected = async () => {
+    if (selectedAssessmentId === "all" || selectedResultIds.length === 0) return;
+    setIsReleasing(true);
+    
+    // Filter out null/undefined values just in case
+    const selectedAttempts = selectedResultIds.filter(Boolean);
+
+    try {
+      await resultApi.releaseResults(selectedAssessmentId, selectedAttempts);
+      toast.success(`Released results for ${selectedAttempts.length} students.`);
+      
+      // Refresh results
+      if (selectedClass) {
+        const res = await resultApi.getReleaseQueue(selectedAssessmentId, selectedClass.class_id);
+        setStudentResults(res.items || []);
+        
+        // Also refresh class stats
+        const classRes = await gradingApi.getAssessmentClassStats(selectedAssessmentId);
+        setClassStats(classRes.classes || []);
+      }
+      setSelectedResultIds([]);
+    } catch (e) {
+      toast.error("Failed to release selected results.");
+    } finally {
+      setIsReleasing(false);
+    }
+  };
+
+  const selectedAssessment = assessments.find(a => a.id === selectedAssessmentId);
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Result Release Center</h1>
+        <h1 className="text-xl font-bold tracking-tight text-foreground">Result Review & Release Queue</h1>
         <p className="text-xs text-muted-foreground">
-          Audit grading completion, configure release policies, and publish results to students.
+          Audit grading completion by class section, run release validations, and publish results to students.
         </p>
       </div>
 
       {loading ? (
         <div className="py-20 text-center space-y-3">
           <Loader2 className="size-8 text-primary animate-spin mx-auto" />
-          <p className="text-xs text-muted-foreground font-medium">Loading release details...</p>
+          <p className="text-xs text-muted-foreground font-medium">Loading assessments...</p>
         </div>
       ) : (
-        <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm">
-          <CardHeader className="p-4 border-b border-border/30 bg-muted/10 space-y-1.5">
-            <Label className="text-xs font-semibold text-muted-foreground/80">
-              Select Release Assessment Context
-            </Label>
-            <Select
-              value={releaseAssessmentId}
-              onValueChange={setReleaseAssessmentId}
-            >
-              <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
-                <SelectValue placeholder="Choose assessment..." />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Choose an assessment...</SelectItem>
-                {assessments.map((a: AssessmentSummary) => (
-                  <SelectItem key={a.id} value={a.id}>
-                    {a.title}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </CardHeader>
-          <CardContent className="p-5 space-y-6">
-            {releaseAssessmentId === "all" ? (
-              <div className="py-20 text-center text-sm font-medium text-muted-foreground">
-                <p className="italic">Awaiting release context selection.</p>
-              </div>
-            ) : (
-              <div className="space-y-6">
-                {/* Validation checklist */}
-                <div className="p-4 border rounded-xl bg-background space-y-3">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                    <Scale className="size-4 text-primary" /> Result Release
-                    Validation Audit
-                  </h4>
+        <div className="space-y-6">
+          {/* STEP 1: SELECT ASSESSMENT */}
+          <Card className="shadow-none border border-border/50 bg-card/30 backdrop-blur-sm rounded-xl">
+            <CardHeader className="p-4 border-b border-border/30 bg-muted/10">
+              <Label className="text-xs font-semibold text-muted-foreground/80 mb-1.5 block">
+                Select Assessment
+              </Label>
+              <Select
+                value={selectedAssessmentId}
+                onValueChange={setSelectedAssessmentId}
+              >
+                <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                  <SelectValue placeholder="Choose assessment..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Choose an assessment...</SelectItem>
+                  {assessments.map((a: AssessmentSummary) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </CardHeader>
+          </Card>
 
-                  {releaseValidation.errors.length > 0 ? (
-                    <div className="space-y-2">
-                      <div className="p-3 bg-red-500/10 border border-red-500/15 rounded-xl flex items-start gap-2.5 text-red-700">
-                        <AlertTriangle className="size-4 shrink-0 mt-0.5" />
-                        <div className="space-y-1 text-xs">
-                          <p className="font-bold">
-                            Validation Errors Detected
-                          </p>
-                          <ul className="list-disc pl-4 space-y-1">
-                            {releaseValidation.errors.map(
-                              (err: string, i: number) => (
-                                <li key={i}>{err}</li>
-                              ),
-                            )}
-                          </ul>
-                        </div>
+          {selectedAssessmentId === "all" ? (
+            <div className="py-24 text-center border border-dashed rounded-xl bg-muted/5 flex flex-col items-center justify-center gap-3">
+              <FileText className="size-8 text-muted-foreground/35" />
+              <p className="text-xs text-muted-foreground italic">Select an assessment context to audit and release results.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              
+              {/* STEP 2: CLASS SECTIONS LIST */}
+              <div className="lg:col-span-1 space-y-6">
+                <Card className="shadow-none border border-border/50 bg-card/30 backdrop-blur-sm rounded-xl overflow-hidden">
+                  <CardHeader className="p-4 border-b bg-muted/10 border-border/30">
+                    <CardTitle className="text-sm font-bold flex items-center gap-2">
+                      <Users className="size-4 text-primary" /> Class Sections Queue
+                    </CardTitle>
+                    <CardDescription className="text-[10px]">
+                      Select a class section to view and release student-by-student.
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {classStatsLoading ? (
+                      <div className="py-12 text-center">
+                        <Loader2 className="size-5 text-primary animate-spin mx-auto" />
                       </div>
-                    </div>
-                  ) : (
-                    <div className="p-3 bg-emerald-500/10 border border-emerald-500/15 rounded-xl flex items-center gap-2.5 text-emerald-700 text-xs font-bold">
-                      <CheckCircle2 className="size-4 shrink-0" />
-                      All validations passed! Ready for final released state.
-                    </div>
-                  )}
-                </div>
+                    ) : classStats.length === 0 ? (
+                      <div className="p-8 text-center text-xs text-muted-foreground italic">
+                        No class sections assigned to this assessment.
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-border/20">
+                        {classStats.map((c) => {
+                          const isFullyGraded = c.pending_review_count === 0 && c.reviewed_count > 0;
+                          const isSelected = selectedClass?.class_id === c.class_id;
+                          
+                          return (
+                            <div
+                              key={c.class_id}
+                              onClick={() => setSelectedClass(c)}
+                              className={`p-4 flex flex-col gap-2.5 transition-colors cursor-pointer hover:bg-primary/[0.02] ${
+                                isSelected ? "bg-primary/[0.04]" : ""
+                              }`}
+                            >
+                              <div className="flex justify-between items-start">
+                                <div className="space-y-0.5">
+                                  <p className="text-xs font-bold text-foreground">{c.class_name}</p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    Submissions: {c.submitted_count} / {c.total_students}
+                                  </p>
+                                </div>
+                                <Badge
+                                  variant="outline"
+                                  className={`text-[9px] font-bold ${
+                                    isFullyGraded 
+                                      ? "bg-emerald-500/5 text-emerald-600 border-emerald-500/20"
+                                      : "bg-amber-500/5 text-amber-600 border-amber-500/20"
+                                  }`}
+                                >
+                                  {isFullyGraded ? "Grading Completed" : "Grading In Progress"}
+                                </Badge>
+                              </div>
 
-                {/* Release settings policy form */}
-                <div className="p-4 border rounded-xl bg-background space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
-                    Release Configuration
-                  </h4>
+                              <div className="flex items-center justify-between gap-2 mt-1">
+                                <div className="flex gap-3 text-[10px] font-mono text-muted-foreground">
+                                  <span>Pending: <strong className="text-rose-500">{c.pending_review_count}</strong></span>
+                                  <span>Released: <strong className="text-indigo-500">{c.released_count}</strong></span>
+                                </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold text-muted-foreground">
-                        Release Policy
-                      </Label>
-                      <Select
-                        value={releasePolicy}
-                        onValueChange={(
-                          val: "immediate" | "scheduled" | "hold",
-                        ) => setReleasePolicy(val)}
-                      >
-                        <SelectTrigger className="h-9 text-xs rounded-lg">
-                          <SelectValue placeholder="Policy" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="immediate">
-                            Release Immediately
-                          </SelectItem>
-                          <SelectItem value="scheduled">
-                            Release On Specific Date
-                          </SelectItem>
-                          <SelectItem value="hold">Hold Results</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {releasePolicy === "scheduled" && (
-                      <div className="space-y-1.5">
-                        <Label className="text-xs font-semibold text-muted-foreground">
-                          Scheduled Date
-                        </Label>
-                        <Input
-                          type="datetime-local"
-                          value={releaseDate}
-                          onChange={(e) => setReleaseDate(e.target.value)}
-                          className="h-9 text-xs rounded-lg"
-                        />
+                                <Button
+                                  size="xs"
+                                  variant="outline"
+                                  disabled={!isFullyGraded || isReleasing}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReleaseClass(c.class_id, c.class_name);
+                                  }}
+                                  className="h-7 text-[10px] font-bold rounded-lg border-indigo-500/20 text-indigo-600 hover:bg-indigo-500/5"
+                                >
+                                  Release Class
+                                </Button>
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
-
-                    <div className="flex items-end">
-                      <Button
-                        onClick={() =>
-                          handleSaveReleasePolicy(releaseAssessmentId)
-                        }
-                        className="w-full h-9 text-xs font-semibold rounded-lg"
-                      >
-                        Save Release Policy
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                {releasePolicy === "immediate" && releaseValidation.valid && (
-                  <div className="p-4 border border-emerald-500/20 bg-emerald-500/5 rounded-xl flex items-center justify-between gap-4">
-                    <div className="space-y-0.5">
-                      <p className="text-xs font-bold text-emerald-700 uppercase tracking-wider">
-                        Ready to Release
-                      </p>
-                      <p className="text-[11px] text-emerald-700/80">
-                        All validations passed. Click to immediately publish
-                        results to students.
-                      </p>
-                    </div>
-                    <Button
-                      className="h-9 text-xs font-semibold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shrink-0"
-                      onClick={() =>
-                        handleTriggerImmediateRelease(releaseAssessmentId)
-                      }
-                      disabled={isSaving}
-                    >
-                      {isSaving ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <>
-                          <Unlock className="size-3.5 mr-1.5" /> Release
-                          Results Now
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                )}
-
-                {releasePolicy === "immediate" &&
-                  !releaseValidation.valid && (
-                    <div className="p-4 border border-red-500/20 bg-red-500/5 rounded-xl text-xs text-red-700 font-semibold">
-                      Cannot release: resolve all validation errors above
-                      before triggering release.
-                    </div>
-                  )}
-
-                <ResultReleasePanel assessmentId={releaseAssessmentId} />
+                  </CardContent>
+                </Card>
               </div>
-            )}
-          </CardContent>
-        </Card>
+
+              {/* STEP 3: STUDENTS RESULT VIEW */}
+              <div className="lg:col-span-2 space-y-6">
+                {!selectedClass ? (
+                  <div className="py-24 text-center border border-dashed rounded-xl bg-muted/5 flex flex-col items-center justify-center gap-3 h-full">
+                    <Users className="size-8 text-muted-foreground/35" />
+                    <p className="text-xs text-muted-foreground italic">Select a class section to view grading details and release results student-by-student.</p>
+                  </div>
+                ) : (
+                  <Card className="shadow-none border border-border/50 bg-card/30 backdrop-blur-sm rounded-xl overflow-hidden">
+                    <CardHeader className="p-4 border-b bg-muted/10 border-border/30 flex flex-row items-center justify-between">
+                      <div className="space-y-1">
+                        <CardTitle className="text-sm font-bold flex items-center gap-2">
+                          <CheckCircle2 className="size-4 text-primary" /> Students List: {selectedClass.class_name}
+                        </CardTitle>
+                        <CardDescription className="text-[10px]">
+                          Select individual students to release results or release the entire class list.
+                        </CardDescription>
+                      </div>
+                      
+                      {selectedClass.pending_review_count > 0 && (
+                        <Badge variant="outline" className="bg-amber-500/5 text-amber-600 border-amber-500/20 text-[9px] font-bold py-1 flex items-center gap-1.5">
+                          <AlertTriangle className="size-3" /> Grading In Progress
+                        </Badge>
+                      )}
+                    </CardHeader>
+                    <CardContent className="p-0">
+                      {resultsLoading ? (
+                        <div className="py-24 text-center">
+                          <Loader2 className="size-7 text-primary animate-spin mx-auto" />
+                          <p className="text-xs text-muted-foreground mt-2">Loading results...</p>
+                        </div>
+                      ) : studentResults.length === 0 ? (
+                        <div className="py-20 text-center text-xs text-muted-foreground italic">
+                          No student submissions found for this class section.
+                        </div>
+                      ) : (
+                        <div>
+                          {selectedClass.pending_review_count > 0 && (
+                            <div className="p-3.5 bg-amber-50 border-b border-amber-100 flex items-start gap-2.5 text-amber-800">
+                              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                              <p className="text-[11px] leading-normal font-medium">
+                                Results cannot be released because there are still <strong>{selectedClass.pending_review_count}</strong> unreviewed submissions. All student submissions must be reviewed and graded before result release is allowed.
+                              </p>
+                            </div>
+                          )}
+
+                          <Table>
+                            <TableHeader className="bg-muted/5 border-b border-border/30">
+                              <TableRow className="hover:bg-transparent">
+                                <TableHead className="w-12 text-center px-4">
+                                  <Checkbox
+                                    checked={
+                                      selectedResultIds.length > 0 && 
+                                      selectedResultIds.length === studentResults.filter(r => !r.is_released && !r.integrity_hold && r.attempt_id).length
+                                    }
+                                    onCheckedChange={handleSelectAllResults}
+                                    disabled={selectedClass.pending_review_count > 0 || isReleasing}
+                                  />
+                                </TableHead>
+                                <TableHead className="text-xs font-semibold text-muted-foreground">Student Name</TableHead>
+                                <TableHead className="text-xs font-semibold text-muted-foreground text-center">Score</TableHead>
+                                <TableHead className="text-xs font-semibold text-muted-foreground text-center">Percentage</TableHead>
+                                <TableHead className="text-xs font-semibold text-muted-foreground text-center">Integrity Hold</TableHead>
+                                <TableHead className="text-xs font-semibold text-muted-foreground text-right pr-6">Status</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {studentResults.map((r) => {
+                                const isEligible = !r.is_released && !r.integrity_hold && selectedClass.pending_review_count === 0 && r.attempt_id;
+                                const isSelected = r.attempt_id ? selectedResultIds.includes(r.attempt_id) : false;
+
+                                return (
+                                  <TableRow key={r.student_id} className="h-12 border-border/10">
+                                    <TableCell className="text-center px-4">
+                                      <Checkbox
+                                        checked={isSelected}
+                                        onCheckedChange={() => r.attempt_id && handleSelectResult(r.attempt_id)}
+                                        disabled={!isEligible || isReleasing}
+                                      />
+                                    </TableCell>
+                                    <TableCell className="text-xs font-bold text-foreground">
+                                      {r.student_name}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-mono font-bold text-foreground/80 text-center">
+                                      {r.total_score !== null && r.total_score !== undefined ? `${r.total_score} / ${r.max_score || 0} pts` : "N/A"}
+                                    </TableCell>
+                                    <TableCell className="text-xs font-mono font-bold text-foreground/70 text-center">
+                                      {r.percentage !== null && r.percentage !== undefined ? `${r.percentage}%` : "N/A"} {r.letter_grade && `(${r.letter_grade})`}
+                                    </TableCell>
+                                    <TableCell className="text-center">
+                                      {r.integrity_hold ? (
+                                        <Badge className="bg-rose-500/10 text-rose-600 border border-rose-500/20 text-[9px] font-bold font-mono">
+                                          <ShieldAlert className="size-3 mr-1" /> HOLD
+                                        </Badge>
+                                      ) : (
+                                        <span className="text-[10px] text-muted-foreground/45 font-medium">None</span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="text-right pr-6">
+                                      <Badge
+                                        variant="outline"
+                                        className={`text-[9px] font-bold uppercase tracking-wider font-mono ${
+                                          r.is_released
+                                            ? "bg-indigo-500/5 text-indigo-600 border-indigo-500/25"
+                                            : "bg-muted/10 text-muted-foreground border-border/50"
+                                        }`}
+                                      >
+                                        {r.is_released ? "Released" : "Unreleased"}
+                                      </Badge>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      )}
+                    </CardContent>
+                    
+                    {selectedClass.pending_review_count === 0 && studentResults.length > 0 && (
+                      <CardFooter className="p-4 border-t border-border/30 bg-muted/10 flex justify-between gap-3">
+                        <span className="text-[10px] text-muted-foreground font-semibold font-mono">
+                          Selected: {selectedResultIds.length} / {studentResults.filter(r => !r.is_released && !r.integrity_hold && r.attempt_id).length} Eligible
+                        </span>
+
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={selectedResultIds.length === 0 || isReleasing}
+                            onClick={handleReleaseSelected}
+                            className="h-8 text-xs font-bold rounded-lg"
+                          >
+                            <Send className="size-3.5 mr-1.5" /> Release Selected
+                          </Button>
+                          <Button
+                            size="sm"
+                            disabled={studentResults.every(r => r.is_released) || isReleasing}
+                            onClick={() => handleReleaseClass(selectedClass.class_id, selectedClass.class_name)}
+                            className="h-8 text-xs font-bold rounded-lg"
+                          >
+                            <Unlock className="size-3.5 mr-1.5" /> Release All Graded
+                          </Button>
+                        </div>
+                      </CardFooter>
+                    )}
+                  </Card>
+                )}
+              </div>
+
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

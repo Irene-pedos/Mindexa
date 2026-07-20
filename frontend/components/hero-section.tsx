@@ -34,7 +34,7 @@ function BottomLeftCard() {
       initial={{ x: -20, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.8, delay: 0.2 }}
-      className="absolute bottom-28 right-4 left-auto md:left-6 md:right-auto md:bottom-6 lg:bottom-10 lg:left-10 p-3 md:p-4 lg:p-5 rounded-[1.2rem] md:rounded-[1.5rem] lg:rounded-[2.2rem] bg-white/30 backdrop-blur-xl flex flex-col gap-2 lg:gap-3 min-w-[140px] md:min-w-[150px] lg:min-w-[180px] w-fit"
+      className="hidden md:flex absolute md:bottom-6 lg:bottom-10 md:left-6 lg:left-10 p-4 lg:p-5 rounded-[1.5rem] lg:rounded-[2.2rem] bg-white/30 backdrop-blur-xl flex flex-col gap-2 lg:gap-3 min-w-[150px] lg:min-w-[180px] w-fit"
     >
       {/* Stats */}
       <div className="flex flex-col">
@@ -76,7 +76,7 @@ function BottomRightCorner() {
       initial={{ y: 20, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.8, delay: 0.4 }}
-      className="absolute bottom-0 right-0 p-3 pt-5 pl-8 sm:p-4 sm:pt-6 sm:pl-10 md:p-6 md:pt-8 md:pl-14 bg-[#f0f0f0] rounded-tl-[1.5rem] sm:rounded-tl-[2rem] md:rounded-tl-[3.5rem] flex items-center gap-3 sm:gap-4 md:gap-6"
+      className="hidden md:flex absolute bottom-0 right-0 p-4 pt-6 pl-10 md:p-6 md:pt-8 md:pl-14 bg-[#f0f0f0] rounded-tl-[2rem] md:rounded-tl-[3.5rem] flex items-center gap-4 md:gap-6"
     >
       {/* Top intersection corner mask */}
       <div className="absolute -top-[1.5rem] sm:-top-[2rem] md:-top-[3.5rem] right-0 w-[1.5rem] sm:w-[2rem] md:w-[3.5rem] h-[1.5rem] sm:h-[2rem] md:h-[3.5rem] pointer-events-none">
@@ -153,7 +153,7 @@ export default function HeroSection() {
           {/* ── Content layer ── */}
           <div className="relative z-10 w-full h-full flex flex-col items-center">
             {/* Navbar placeholder — HeroHeader is fixed/absolute, sits above */}
-            <div className="w-full pt-45" />
+            <div className="w-full pt-20 sm:pt-28 md:pt-36 lg:pt-45" />
 
             {/* ── Text container ── */}
             <div className="w-full flex flex-col items-center pt-8 px-6 text-center max-w-4xl">

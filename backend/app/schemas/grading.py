@@ -166,6 +166,15 @@ class SubmissionGradeResponse(BaseModel):
     rubric_scores: list[dict[str, Any]] | None
     is_final: bool
     ai_grading_basis: str | None = None
+    ai_context_sources: list[str] | None = None
+    rag_chunk_ids: list[str] | None = None
+    rubric_id_used: uuid.UUID | None = None
+    fallback_reason: str | None = None
+    rag_used: bool | None = None
+    rag_source_labels: list[str] | None = None
+    model: str | None = None
+    tokens: int | None = None
+    cost: float | None = None
     is_individually_reviewed: bool = False
     graded_at: datetime | None
     created_by_id: uuid.UUID | None

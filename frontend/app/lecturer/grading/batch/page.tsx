@@ -10,20 +10,48 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { BrainCircuit, Loader2, Save, Sparkles, Layers } from "lucide-react";
+import { BrainCircuit, Loader2, Save, Sparkles, Layers, Eye } from "lucide-react";
 import { assessmentApi } from "@/lib/api/assessment";
 import { gradingApi } from "@/lib/api/grading";
 import { aiGradingApi } from "@/lib/api/ai-grading";
+import { lecturerApi } from "@/lib/api/lecturer";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { AssessmentSummary, GradingQueueItem, BatchGradeItemState, BatchReviewDetails } from "../types";
 
+function ExpandableAnswer({ answer }: { answer: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = answer.length > 100;
+
+  return (
+    <div className="text-xs">
+      <p className={cn("font-mono text-muted-foreground leading-relaxed whitespace-pre-wrap", !expanded && "line-clamp-2")}>
+        {answer}
+      </p>
+      {isLong && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded(!expanded);
+          }}
+          className="text-[10px] text-primary font-bold uppercase tracking-widest mt-1 hover:underline block"
+        >
+          {expanded ? "Show Less" : "View Full Answer"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function BatchGradingPage() {
+  const [workspaces, setWorkspaces] = useState<any[]>([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>("all");
   const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("all");
   const [queueData, setQueueData] = useState<GradingQueueItem[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
-  const [selectedBatchQuestionTitle, setSelectedBatchQuestionTitle] = useState<string>("all");
+  const [selectedBatchQuestionId, setSelectedBatchQuestionId] = useState<string>("all");
 
   const [batchGradeState, setBatchGradeState] = useState<Record<string, BatchGradeItemState>>({});
   const [showBatchReviewModal, setShowBatchReviewModal] = useState(false);
@@ -31,21 +59,53 @@ export default function BatchGradingPage() {
   const [batchReviewDetails, setBatchReviewDetails] = useState<BatchReviewDetails | null>(null);
   const [batchReviewLoading, setBatchReviewLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // Cache for loaded AI details
+  const [aiDetailsCache, setAiDetailsCache] = useState<Record<string, any>>({});
 
+  // Load Workspaces on mount
   useEffect(() => {
-    async function loadAssessments() {
+    async function loadWorkspaces() {
       try {
-        const res = await assessmentApi.getAssessments({ status: "PUBLISHED" });
-        setAssessments(res.items || []);
+        const wsRes = await lecturerApi.getWorkspaces();
+        setWorkspaces(wsRes || []);
       } catch (err: any) {
-        toast.error("Failed to load assessments context");
+        toast.error("Failed to load workspaces context");
       } finally {
         setLoading(false);
       }
     }
-    loadAssessments();
+    loadWorkspaces();
   }, []);
 
+  // Fetch assessments filtered by workspace
+  useEffect(() => {
+    async function loadAssessments() {
+      try {
+        const params: Record<string, any> = {};
+        if (selectedWorkspaceId !== "all") {
+          params.workspace_id = selectedWorkspaceId;
+        }
+        const res = await assessmentApi.getAssessments(params);
+        const validItems = (res.items || []).filter(
+          (a: any) => a.status !== "DRAFT" && a.status !== "ARCHIVED"
+        );
+        setAssessments(validItems);
+        
+        // Reset selected assessment if not in the new list
+        if (selectedAssessmentId !== "all" && !res.items?.some((a: any) => a.id === selectedAssessmentId)) {
+          setSelectedAssessmentId("all");
+          setQueueData([]);
+        }
+      } catch (err: any) {
+        toast.error("Failed to load assessments for the selected workspace");
+      }
+    }
+    loadAssessments();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedWorkspaceId]);
+
+  // Fetch submissions queue
   const fetchQueue = useCallback(async (asmtId: string) => {
     setQueueLoading(true);
     try {
@@ -54,7 +114,7 @@ export default function BatchGradingPage() {
         page_size: 100 // large page size for batch mode
       });
       setQueueData(response.items || []);
-      setSelectedBatchQuestionTitle("all");
+      setSelectedBatchQuestionId("all");
     } catch (error: unknown) {
       console.error("Queue trace failure", error);
       toast.error("Failed to fetch submissions queue");
@@ -68,33 +128,86 @@ export default function BatchGradingPage() {
       fetchQueue(selectedAssessmentId);
     } else {
       setQueueData([]);
-      setSelectedBatchQuestionTitle("all");
+      setSelectedBatchQuestionId("all");
     }
   }, [selectedAssessmentId, fetchQueue]);
 
-  // Group queue items by question title
+  // Group queue items by question id
   const groupedBatchQuestions = useMemo(() => {
     const map: Record<string, GradingQueueItem[]> = {};
     queueData.forEach((item) => {
-      if (!item.question_title) return;
-      if (!map[item.question_title]) {
-        map[item.question_title] = [];
+      if (!item.question_id) return;
+      if (!map[item.question_id]) {
+        map[item.question_id] = [];
       }
-      map[item.question_title].push(item);
+      map[item.question_id].push(item);
     });
     return map;
   }, [queueData]);
 
-  // AI Details loader for batch review modal
+  // Load AI details helper for batch review modal and inline view
+  const loadAiDetailsForQuestion = useCallback(async (items: GradingQueueItem[]) => {
+    const pendingIds = items
+      .filter(item => !aiDetailsCache[item.response_id] && item.ai_suggested_score !== null)
+      .map(item => item.response_id);
+
+    if (pendingIds.length === 0) return;
+
+    const promises = pendingIds.map(async (responseId) => {
+      try {
+        const details = await aiGradingApi.getGradeDetails(responseId);
+        return { responseId, details };
+      } catch (e) {
+        console.error("Failed to load AI details for", responseId, e);
+        return { responseId, details: null };
+      }
+    });
+
+    const results = await Promise.all(promises);
+    setAiDetailsCache(prev => {
+      const next = { ...prev };
+      results.forEach(res => {
+        if (res.details) next[res.responseId] = res.details;
+      });
+      return next;
+    });
+  }, [aiDetailsCache]);
+
+  // Trigger loading AI details when selected question changes
+  useEffect(() => {
+    if (selectedBatchQuestionId !== "all") {
+      const items = groupedBatchQuestions[selectedBatchQuestionId] || [];
+      loadAiDetailsForQuestion(items);
+      
+      // Seed initial local input state with already saved grades
+      const nextState: Record<string, BatchGradeItemState> = {};
+      items.forEach(item => {
+        nextState[item.response_id] = {
+          score: item.score !== null && item.score !== undefined ? item.score.toString() : "",
+          feedback: item.feedback || ""
+        };
+      });
+      setBatchGradeState(nextState);
+    }
+  }, [selectedBatchQuestionId, groupedBatchQuestions, loadAiDetailsForQuestion]);
+
+  // AI Details loader for specific modal item
   useEffect(() => {
     let active = true;
     async function loadDetails() {
       if (!batchReviewItem) return;
+      // If already cached, just use that
+      if (aiDetailsCache[batchReviewItem.response_id]) {
+        setBatchReviewDetails(aiDetailsCache[batchReviewItem.response_id]);
+        return;
+      }
+      
       setBatchReviewLoading(true);
       try {
         const data = await aiGradingApi.getGradeDetails(batchReviewItem.response_id);
         if (active) {
           setBatchReviewDetails(data);
+          setAiDetailsCache(prev => ({ ...prev, [batchReviewItem.response_id]: data }));
         }
       } catch (err) {
         console.error("Failed to load AI details in batch mode", err);
@@ -108,7 +221,7 @@ export default function BatchGradingPage() {
     return () => {
       active = false;
     };
-  }, [batchReviewItem]);
+  }, [batchReviewItem, aiDetailsCache]);
 
   const getBatchItem = (responseId: string): BatchGradeItemState =>
     batchGradeState[responseId] ?? { score: "", feedback: "" };
@@ -124,13 +237,33 @@ export default function BatchGradingPage() {
     }));
   };
 
-  const handleBatchApplyAi = async (responseId: string, score: number) => {
+  const handleBatchApplyAi = (responseId: string, score: number) => {
     setBatchItem(responseId, "score", score.toString());
-    // Auto-populate feedback if feedback draft is available
-    if (batchReviewDetails?.ai_feedback_draft) {
-      setBatchItem(responseId, "feedback", batchReviewDetails.ai_feedback_draft);
+    const details = aiDetailsCache[responseId];
+    if (details?.ai_feedback_draft) {
+      setBatchItem(responseId, "feedback", details.ai_feedback_draft);
     }
-    toast.success("AI suggested grade applied locally. Click Save to submit.");
+    toast.success("AI suggestion loaded. Click Save to finalize.");
+  };
+
+  const handleApplyAiToAll = () => {
+    const items = groupedBatchQuestions[selectedBatchQuestionId] || [];
+    const nextState = { ...batchGradeState };
+    let appliedCount = 0;
+
+    items.forEach(item => {
+      if (item.ai_suggested_score !== null) {
+        const details = aiDetailsCache[item.response_id];
+        nextState[item.response_id] = {
+          score: item.ai_suggested_score.toString(),
+          feedback: details?.ai_feedback_draft || details?.ai_rationale || ""
+        };
+        appliedCount++;
+      }
+    });
+
+    setBatchGradeState(nextState);
+    toast.success(`Applied AI suggestions locally for ${appliedCount} items. Click Save All to upload.`);
   };
 
   const handleSaveBatchGrade = async (
@@ -138,7 +271,7 @@ export default function BatchGradingPage() {
     scoreVal: string,
     feedbackVal: string
   ) => {
-    if (!scoreVal || isNaN(Number(scoreVal))) {
+    if (scoreVal === "" || isNaN(Number(scoreVal))) {
       toast.error("Please enter a valid numeric grade.");
       return;
     }
@@ -149,11 +282,11 @@ export default function BatchGradingPage() {
         feedback: feedbackVal || null,
         is_final: true
       });
+      
+      // Optimistically update status to COMPLETED locally
+      setQueueData(prev => prev.map(q => q.response_id === responseId ? { ...q, score: Number(scoreVal), feedback: feedbackVal, status: "COMPLETED" } : q));
+      
       toast.success("Grade submitted successfully.");
-      // Refresh queue
-      if (selectedAssessmentId !== "all") {
-        fetchQueue(selectedAssessmentId);
-      }
     } catch (err: any) {
       toast.error("Failed to save grade");
     } finally {
@@ -161,10 +294,66 @@ export default function BatchGradingPage() {
     }
   };
 
+  const handleSaveAllBatchGrades = async () => {
+    const items = groupedBatchQuestions[selectedBatchQuestionId] || [];
+    const modifiedItems = items.filter(item => {
+      const state = batchGradeState[item.response_id];
+      // Only save if dirty
+      return state && (state.score !== (item.score?.toString() ?? "") || state.feedback !== (item.feedback ?? ""));
+    });
+
+    if (modifiedItems.length === 0) {
+      toast.info("No modifications to save.");
+      return;
+    }
+
+    setIsSaving(true);
+    let successCount = 0;
+    let failCount = 0;
+
+    await Promise.all(modifiedItems.map(async (item) => {
+      const state = batchGradeState[item.response_id];
+      if (state.score === "" || isNaN(Number(state.score))) {
+        failCount++;
+        return;
+      }
+      try {
+        await gradingApi.saveGrade(item.response_id, {
+          score: Number(state.score),
+          feedback: state.feedback || null,
+          is_final: true
+        });
+        
+        // Optimistically update
+        setQueueData(prev => prev.map(q => q.response_id === item.response_id ? { ...q, score: Number(state.score), feedback: state.feedback, status: "COMPLETED" } : q));
+        successCount++;
+      } catch (e) {
+        failCount++;
+      }
+    }));
+
+    setIsSaving(false);
+    if (successCount > 0) toast.success(`Saved ${successCount} grades.`);
+    if (failCount > 0) toast.error(`Failed to save ${failCount} grades.`);
+  };
+
+  // Get metadata details for the currently selected question
+  const selectedQuestionItems = groupedBatchQuestions[selectedBatchQuestionId] || [];
+  const firstItem = selectedQuestionItems[0];
+  const selectedQuestionTitle = firstItem?.question_title || "";
+  const selectedQuestionType = firstItem?.question_type || "";
+  const selectedQuestionMaxMarks = firstItem?.max_score || 0;
+  
+  const completedCount = selectedQuestionItems.filter(item => item.status === "COMPLETED").length;
+  const totalCount = selectedQuestionItems.length;
+  const aiSuggestionsReadyCount = selectedQuestionItems.filter(
+    item => item.ai_suggested_score !== null || item.status === "AI_SUGGESTED" || item.status === "COMPLETED"
+  ).length;
+
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div className="w-full space-y-4 p-1 md:p-2 animate-in fade-in duration-200">
       <div className="border-b pb-2">
-        <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+        <h1 className="text-2xl font-bold tracking-tight text-foreground">
           Batch Grading Center
         </h1>
         <p className="text-sm text-muted-foreground mt-1 font-medium">
@@ -179,7 +368,29 @@ export default function BatchGradingPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          <Card className="shadow-none border border-zinc-150 bg-white rounded-xl p-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <Card className="shadow-none border border-border bg-card/30 rounded-xl p-4 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground/80 block mb-1.5">
+                Filter by Workspace
+              </Label>
+              <Select
+                value={selectedWorkspaceId}
+                onValueChange={setSelectedWorkspaceId}
+              >
+                <SelectTrigger className="h-9 text-xs rounded-lg border-border bg-background">
+                  <SelectValue placeholder="All Workspaces" />
+                </SelectTrigger>
+                <SelectContent className="rounded-lg shadow-lg">
+                  <SelectItem value="all" className="text-xs">All Workspaces</SelectItem>
+                  {workspaces.map((ws: any) => (
+                    <SelectItem key={ws.id} value={ws.id} className="text-xs">
+                      {ws.title}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div>
               <Label className="text-xs font-semibold text-muted-foreground/80 block mb-1.5">
                 Select Assessment
@@ -188,7 +399,7 @@ export default function BatchGradingPage() {
                 value={selectedAssessmentId}
                 onValueChange={setSelectedAssessmentId}
               >
-                <SelectTrigger className="h-9 text-xs rounded-lg border-zinc-200 bg-white">
+                <SelectTrigger className="h-9 text-xs rounded-lg border-border bg-background">
                   <SelectValue placeholder="Choose assessment..." />
                 </SelectTrigger>
                 <SelectContent className="rounded-lg shadow-lg">
@@ -208,19 +419,22 @@ export default function BatchGradingPage() {
                   Select Question to Batch Grade
                 </Label>
                 <Select
-                  value={selectedBatchQuestionTitle}
-                  onValueChange={setSelectedBatchQuestionTitle}
+                  value={selectedBatchQuestionId}
+                  onValueChange={setSelectedBatchQuestionId}
                 >
-                  <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+                  <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background hover:bg-background/80 transition-colors">
                     <SelectValue placeholder="Choose question..." />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Choose a question node...</SelectItem>
-                    {Object.keys(groupedBatchQuestions).map((title, idx) => (
-                      <SelectItem key={idx} value={title}>
-                        Q{idx + 1}: {title.substring(0, 50)}...
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="all">Choose a question...</SelectItem>
+                    {Object.entries(groupedBatchQuestions).map(([qId, items], idx) => {
+                      const qTitle = items[0]?.question_title || "Unknown Question";
+                      return (
+                        <SelectItem key={qId} value={qId}>
+                          Q{idx + 1}: {qTitle.length > 50 ? `${qTitle.substring(0, 50)}...` : qTitle}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>
@@ -236,136 +450,220 @@ export default function BatchGradingPage() {
             <Card className="p-12 text-center text-sm text-muted-foreground italic border border-dashed rounded-xl bg-card/20">
               Please select an assessment to begin batch grading.
             </Card>
-          ) : selectedBatchQuestionTitle === "all" ? (
+          ) : selectedBatchQuestionId === "all" ? (
             <Card className="p-12 text-center text-sm text-muted-foreground italic border border-dashed rounded-xl bg-card/20">
-              Please select a question node to grade.
+              Please select a question to grade.
             </Card>
           ) : (
-            <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm p-4">
-              <div className="space-y-4">
-                <div className="bg-muted/15 border border-border/30 p-3 rounded-lg">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground block mb-1">
-                    Batch Question Prompt
-                  </h4>
-                  <p className="text-xs text-foreground/80 leading-relaxed font-semibold">
-                    {selectedBatchQuestionTitle}
-                  </p>
+            <Card className="shadow-none border border-border/50 bg-card/25 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm p-4 space-y-4 animate-in fade-in duration-300">
+              {/* BS3: Question Prompt Context Box */}
+              <div className="bg-muted/15 border border-border/30 p-4 rounded-xl space-y-2">
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-primary/10 text-primary border-primary/20 text-[10px] font-bold uppercase tracking-wider">
+                    {selectedQuestionType.replace(/_/g, " ")}
+                  </Badge>
+                  <Badge variant="outline" className="text-[10px] font-bold">
+                    Max Marks: {selectedQuestionMaxMarks} pts
+                  </Badge>
                 </div>
+                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                  Batch Question Prompt
+                </h4>
+                <p className="text-sm text-foreground/80 leading-relaxed font-semibold whitespace-pre-wrap">
+                  {selectedQuestionTitle}
+                </p>
+              </div>
 
-                <div className="border border-border/40 rounded-xl overflow-hidden bg-background shadow-sm">
-                  <Table>
-                    <TableHeader className="bg-muted/15 border-b border-border/40">
-                      <TableRow className="h-10 hover:bg-transparent">
-                        <TableHead className="text-[10px] font-bold uppercase w-1/5 pl-4">
-                          Student Name
-                        </TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase w-1/3">
-                          Answer Preview
-                        </TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase text-center w-1/6">
-                          AI Suggested
-                        </TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase w-1/8 text-center">
-                          Grade
-                        </TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase w-1/4">
-                          Feedback Comment
-                        </TableHead>
-                        <TableHead className="text-[10px] font-bold uppercase text-right pr-4 w-1/10">
-                          Action
-                        </TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody className="text-xs">
-                      {groupedBatchQuestions[selectedBatchQuestionTitle]?.map((item, idx) => {
-                        const localState = getBatchItem(item.response_id);
-                        return (
-                          <TableRow key={idx} className="h-14 hover:bg-muted/5 transition-colors border-border/10">
-                            <TableCell className="font-bold pl-4">
-                              {item.student_name}
-                            </TableCell>
-                            <TableCell className="font-mono text-muted-foreground leading-normal max-w-[250px] truncate">
-                              {item.student_answer || (
-                                <span className="italic text-muted-foreground/50">
-                                  No response.
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              {item.ai_suggested_score !== null ? (
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <Badge variant="secondary" className="font-mono font-bold bg-primary/10 text-primary border-primary/20">
+              {/* Progress & Bulk actions bar */}
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-card border border-border/50 p-3 rounded-xl">
+                <div className="flex flex-col gap-1 text-xs font-semibold text-muted-foreground">
+                  <div>
+                    Progress: <span className="font-bold text-foreground font-mono">{completedCount}</span> of <span className="font-bold text-foreground font-mono">{totalCount}</span> student submissions graded
+                  </div>
+                  <div className="text-[10px] text-muted-foreground/80 flex items-center gap-1">
+                    <Sparkles className="size-3 text-indigo-500" />
+                    AI suggestions ready: <span className="font-bold text-foreground font-mono">{aiSuggestionsReadyCount}</span> of <span className="font-bold text-foreground font-mono">{totalCount}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleApplyAiToAll}
+                    className="h-8 text-xs font-bold text-primary border-primary/20 bg-primary/5 hover:bg-primary/10 rounded-lg"
+                  >
+                    <Sparkles className="size-3.5 mr-1.5" /> Apply AI to All
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveAllBatchGrades}
+                    disabled={isSaving}
+                    className="h-8 text-xs font-bold rounded-lg"
+                  >
+                    {isSaving && <Loader2 className="size-3 animate-spin mr-1.5" />}
+                    <Save className="size-3.5 mr-1.5" /> Save All Reviewed
+                  </Button>
+                </div>
+              </div>
+
+              {/* Submissions table */}
+              <div className="border border-border/40 rounded-xl overflow-hidden bg-background shadow-sm">
+                <Table>
+                  <TableHeader className="bg-muted/15 border-b border-border/40">
+                    <TableRow className="h-10 hover:bg-transparent">
+                      <TableHead className="text-[10px] font-bold uppercase w-1/5 pl-4">
+                        Student Name & Status
+                      </TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase w-1/4">
+                        Answer Response
+                      </TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase w-1/5">
+                        AI suggestion & Draft
+                      </TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase w-1/10 text-center">
+                        Grade
+                      </TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase w-1/4">
+                        Feedback Comment
+                      </TableHead>
+                      <TableHead className="text-[10px] font-bold uppercase text-right pr-4 w-1/12">
+                        Action
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="text-xs">
+                    {selectedQuestionItems.map((item, idx) => {
+                      const localState = getBatchItem(item.response_id);
+                      const aiDetails = aiDetailsCache[item.response_id];
+                      
+                      // Calculate row status
+                      const itemStatus = item.status as any;
+                      
+                      return (
+                        <TableRow key={idx} className="h-16 hover:bg-muted/5 transition-colors border-border/10">
+                          <TableCell className="font-bold pl-4">
+                            <div className="space-y-1">
+                              <p className="text-sm font-bold text-foreground">{item.student_name}</p>
+                              <Badge
+                                className={cn(
+                                  "text-[8px] font-bold uppercase tracking-wider px-1.5 py-0 border font-mono shadow-none",
+                                  itemStatus === "COMPLETED"
+                                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                    : itemStatus === "AI_SUGGESTED"
+                                      ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                                      : itemStatus === "IN_PROGRESS"
+                                        ? "bg-amber-500/10 text-amber-600 border-amber-500/20 animate-pulse"
+                                        : "bg-zinc-500/10 text-zinc-600 border-zinc-500/20"
+                                )}
+                              >
+                                {itemStatus === "COMPLETED"
+                                  ? "Graded"
+                                  : itemStatus === "AI_SUGGESTED"
+                                    ? "AI Suggested"
+                                    : itemStatus === "IN_PROGRESS"
+                                      ? "AI Grading..."
+                                      : "Not Started"}
+                              </Badge>
+                            </div>
+                          </TableCell>
+                          
+                          <TableCell className="py-2">
+                            <ExpandableAnswer answer={item.student_answer || ""} />
+                          </TableCell>
+                          
+                          <TableCell className="py-2">
+                            {item.ai_suggested_score !== null ? (
+                              <div className="space-y-1 text-xs">
+                                <div className="flex items-center gap-1.5">
+                                  <Badge variant="secondary" className="font-mono font-bold bg-primary/10 text-primary border-primary/20 text-[10px]">
                                     {item.ai_suggested_score} pts
                                   </Badge>
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="size-7 text-primary hover:bg-primary/5 rounded-full"
+                                    className="size-6 text-primary hover:bg-primary/5 rounded-full"
                                     onClick={() => {
                                       setBatchReviewItem(item);
                                       setShowBatchReviewModal(true);
                                     }}
+                                    title="View full AI rationale modal"
                                   >
-                                    <Sparkles className="size-3.5" />
+                                    <Eye className="size-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-6 text-[9px] font-bold border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-md px-1.5 flex items-center gap-1"
+                                    onClick={() => handleBatchApplyAi(item.response_id, item.ai_suggested_score!)}
+                                  >
+                                    <Sparkles className="size-2.5" /> Apply
                                   </Button>
                                 </div>
-                              ) : (
-                                <span className="text-muted-foreground/40 text-[10px] italic">
-                                  N/A
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-center">
-                              <Input
-                                placeholder="--"
-                                className="h-8 w-16 text-center font-mono font-bold mx-auto border-border/80 rounded-lg text-xs"
-                                value={localState.score}
-                                onChange={(e) =>
-                                  setBatchItem(item.response_id, "score", e.target.value)
-                                }
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Textarea
-                                placeholder="Provide optional batch feedback..."
-                                className="h-8 min-h-[32px] max-h-16 py-1 px-2 text-xs border-border/80 rounded-lg"
-                                value={localState.feedback}
-                                onChange={(e) =>
-                                  setBatchItem(item.response_id, "feedback", e.target.value)
-                                }
-                              />
-                            </TableCell>
-                            <TableCell className="text-right pr-4">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-8 text-xs font-semibold rounded-lg"
-                                disabled={isSaving}
-                                onClick={async () => {
-                                  const s = getBatchItem(item.response_id);
-                                  await handleSaveBatchGrade(
-                                    item.response_id,
-                                    s.score,
-                                    s.feedback
-                                  );
-                                }}
-                              >
-                                <Save className="size-3 mr-1" /> Save
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </div>
+                                {aiDetails?.ai_feedback_draft && (
+                                  <p className="text-[10px] text-muted-foreground font-medium italic line-clamp-2 max-w-[220px]" title={aiDetails.ai_feedback_draft}>
+                                    {aiDetails.ai_feedback_draft}
+                                  </p>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-muted-foreground/40 text-[10px] italic">
+                                N/A (No AI suggestion)
+                              </span>
+                            )}
+                          </TableCell>
+                          
+                          <TableCell className="text-center py-2">
+                            <Input
+                              placeholder="--"
+                              className="h-8 w-16 text-center font-mono font-bold mx-auto border-border/80 rounded-lg text-xs"
+                              value={localState.score}
+                              onChange={(e) =>
+                                setBatchItem(item.response_id, "score", e.target.value)
+                              }
+                            />
+                          </TableCell>
+                          
+                          <TableCell className="py-2">
+                            <Textarea
+                              placeholder="Provide feedback comment..."
+                              className="min-h-[60px] w-full py-1 px-2 text-xs border-border/80 rounded-lg resize-none"
+                              value={localState.feedback}
+                              onChange={(e) =>
+                                setBatchItem(item.response_id, "feedback", e.target.value)
+                              }
+                            />
+                          </TableCell>
+                          
+                          <TableCell className="text-right pr-4 py-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs font-semibold rounded-lg"
+                              disabled={isSaving}
+                              onClick={async () => {
+                                const s = getBatchItem(item.response_id);
+                                await handleSaveBatchGrade(
+                                  item.response_id,
+                                  s.score,
+                                  s.feedback
+                                );
+                              }}
+                            >
+                              <Save className="size-3 mr-1" /> Save
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               </div>
             </Card>
           )}
         </div>
       )}
 
-      {/* Single Batch AI Grade Review Modal */}
+      {/* Single Batch AI Grade Review Modal (Optional expanded detail) */}
       <Dialog
         open={showBatchReviewModal}
         onOpenChange={setShowBatchReviewModal}
@@ -508,12 +806,15 @@ export default function BatchGradingPage() {
             <Button
               variant="default"
               size="sm"
-              disabled={batchReviewLoading || !batchReviewItem}
-              onClick={() => {
+              disabled={batchReviewLoading || !batchReviewItem || isSaving}
+              onClick={async () => {
                 if (batchReviewItem) {
-                  handleBatchApplyAi(
+                  const details = aiDetailsCache[batchReviewItem.response_id];
+                  const feedbackVal = details?.ai_feedback_draft || details?.ai_rationale || "";
+                  await handleSaveBatchGrade(
                     batchReviewItem.response_id,
-                    batchReviewItem.ai_suggested_score!
+                    batchReviewItem.ai_suggested_score!.toString(),
+                    feedbackVal
                   );
                   setShowBatchReviewModal(false);
                 }

@@ -103,14 +103,16 @@ class GradingRepository:
     async def get_full_grade_detail(self, response_id: uuid.UUID) -> SubmissionGrade | None:
         """
         Fetch grade with response, question, and rubric details.
+        Accepts either a SubmissionGrade.id or a SubmissionGrade.response_id.
         """
         from app.db.models.assessment import (Rubric, RubricCriterion,
                                               RubricCriterionLevel)
         from app.db.models.attempt import StudentResponse, SubmissionGrade
         from app.db.models.question import Question, AssessmentQuestion
         from sqlalchemy.orm import selectinload
+        from sqlalchemy import or_
 
-        # First, try to fetch SubmissionGrade by ID (in case the frontend passed the grade ID)
+        # Single query accepting either grade.id or grade.response_id
         result = await self.db.execute(
             select(SubmissionGrade)
             .options(
@@ -121,28 +123,13 @@ class GradingRepository:
                 .selectinload(RubricCriterion.levels)
             )
             .where(
-                SubmissionGrade.id == response_id,
+                or_(
+                    SubmissionGrade.id == response_id,
+                    SubmissionGrade.response_id == response_id,
+                ),
                 SubmissionGrade.is_deleted.is_(False)
             )
-        )
-        grade = result.scalar_one_or_none()
-        if grade:
-            return grade
-
-        # Next, try to fetch by response_id
-        result = await self.db.execute(
-            select(SubmissionGrade)
-            .options(
-                selectinload(SubmissionGrade.student_response),
-                selectinload(SubmissionGrade.student_response).selectinload(StudentResponse.question)
-                .selectinload(Question.rubric)
-                .selectinload(Rubric.criteria)
-                .selectinload(RubricCriterion.levels)
-            )
-            .where(
-                SubmissionGrade.response_id == response_id,
-                SubmissionGrade.is_deleted.is_(False)
-            )
+            .limit(1)
         )
         grade = result.scalar_one_or_none()
         if grade:
@@ -399,6 +386,16 @@ class GradingRepository:
         from sqlalchemy.orm import aliased
 
         filters = [GradingQueueItem.is_deleted == False]
+        # Enforce manual/AI grading eligibility: open-ended question types only
+        from app.db.enums import QuestionType
+        open_ended_types = [
+            QuestionType.SHORT_ANSWER.value,
+            QuestionType.ESSAY.value,
+            QuestionType.COMPUTATIONAL.value,
+            QuestionType.CASE_STUDY.value
+        ]
+        filters.append(Question.question_type.in_(open_ended_types))
+
         if assessment_ids:
             filters.append(GradingQueueItem.assessment_id.in_(assessment_ids))
         if statuses:
@@ -456,7 +453,8 @@ class GradingRepository:
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             # Link to SubmissionGrade for AI info
             .outerjoin(SubmissionGrade, GradingQueueItem.response_id == SubmissionGrade.response_id)
-            # Resolve class section (assumes active enrollment in the course's section)
+            # Resolve class section — filter by course to avoid row multiplication
+            # when a student is enrolled in multiple sections across different courses.
             .outerjoin(StudentEnrollment, and_(
                 StudentEnrollment.student_id == GradingQueueItem.student_id,
                 StudentEnrollment.is_deleted == False
@@ -493,6 +491,7 @@ class GradingRepository:
                 StudentEnrollment.student_id == GradingQueueItem.student_id,
                 StudentEnrollment.is_deleted == False
             ))
+            .outerjoin(ClassSection, StudentEnrollment.class_section_id == ClassSection.id)
             .where(*filters)
         )
         total = count_result.scalar_one()

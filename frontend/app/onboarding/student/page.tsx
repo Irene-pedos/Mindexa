@@ -35,6 +35,7 @@ import { academicApi } from "@/lib/api/academic";
 import { authApi } from "@/lib/api/auth";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import Image from "next/image";
 import { 
   InstitutionResponse as AcademicInstitution, 
   CampusResponse as AcademicCampus, 
@@ -453,9 +454,9 @@ export default function StudentOnboarding() {
                     {activeStep === 3 && (
                         <div className="space-y-8 flex flex-col items-center animate-in fade-in duration-300">
                             <div className="relative group">
-                                <div className="size-28 rounded-2xl border border-muted/30 overflow-hidden bg-muted/5 flex items-center justify-center">
+                                <div className="size-28 rounded-2xl border border-muted/30 overflow-hidden bg-muted/5 flex items-center justify-center relative">
                                     {profilePic ? (
-                                        <img src={profilePic} alt="Profile" className="size-full object-cover" />
+                                        <Image src={profilePic} alt="Profile" fill unoptimized className="object-cover" />
                                     ) : (
                                         <div className="text-muted-foreground flex flex-col items-center gap-1 opacity-40">
                                             <GraduationCap className="size-8" />

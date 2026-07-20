@@ -288,8 +288,10 @@ function useAssessmentTimer({
   const [timeLeft, setTimeLeft] = useState(0);
   const warned10mRef = useRef(false);
   const warned5mRef = useRef(false);
+  const hasAutoSubmittedRef = useRef(false);
 
   useEffect(() => {
+    hasAutoSubmittedRef.current = false;
     if (stage !== "taking" || !expiresAt) return;
     const calculateTimeRemaining = () => {
       const expiry = new Date(expiresAt);
@@ -316,7 +318,10 @@ function useAssessmentTimer({
           "Critical: 5 minutes remaining! Your attempt will auto-finalize on expiry.",
         );
       }
-      if (remaining <= 0) onAutoSubmit();
+      if (remaining <= 0 && !hasAutoSubmittedRef.current) {
+        hasAutoSubmittedRef.current = true;
+        onAutoSubmit();
+      }
     };
     calculateTimeRemaining();
     const timer = setInterval(calculateTimeRemaining, 1000);
@@ -737,10 +742,12 @@ function DroppableMatchTarget({
 
 function MatchingDnd({
   q,
+  attemptId,
   currentVal,
   setAnswers,
 }: {
   q: AssessmentQuestion;
+  attemptId: string | null;
   currentVal: Record<string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
@@ -758,13 +765,13 @@ function MatchingDnd({
       (o: QuestionOption) =>
         o.option_text_right || o.match_value || o.text || o.option_text,
     );
-    return Array.from(new Set(raw))
-      .filter(Boolean)
-      .map((text, i) => ({
-        id: `resp-${i}`,
-        text: text as string,
-      }));
-  }, [q.options]);
+    const uniqueRaw = Array.from(new Set(raw)).filter(Boolean);
+    const shuffled = seededShuffle(uniqueRaw, `${attemptId || ""}-${q.id}`);
+    return shuffled.map((text, i) => ({
+      id: `resp-${i}`,
+      text: text as string,
+    }));
+  }, [q.options, attemptId, q.id]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -946,10 +953,12 @@ function DroppableBlank({
 
 function FillInTheBlanksDnd({
   q,
+  attemptId,
   currentVal,
   setAnswers,
 }: {
   q: AssessmentQuestion;
+  attemptId: string | null;
   currentVal: Record<number, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
@@ -959,11 +968,12 @@ function FillInTheBlanksDnd({
   const [isDragging, setIsDragging] = useState(false);
 
   const pool = useMemo(() => {
-    return (q.options || []).map((o: QuestionOption, i: number) => ({
+    const raw = (q.options || []).map((o: QuestionOption, i: number) => ({
       id: o.id || `pool-${i}`,
       text: o.option_text || o.text || "",
     }));
-  }, [q.options]);
+    return seededShuffle(raw, `${attemptId || ""}-${q.id}`);
+  }, [q.options, attemptId, q.id]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
@@ -1101,7 +1111,7 @@ function SortableOrderItem({
       <div className="flex-1 text-sm font-medium text-foreground/80">
         {text}
       </div>
-      <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
         <Button
           variant="ghost"
           size="icon"
@@ -1127,20 +1137,28 @@ function SortableOrderItem({
 
 function OrderingQuestion({
   q,
+  attemptId,
   currentVal,
   setAnswers,
+  onInteract,
 }: {
   q: AssessmentQuestion;
+  attemptId: string | null;
   currentVal: string[] | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+  onInteract?: () => void;
 }) {
-  const currentOrder =
-    currentVal || q.options?.map((o: QuestionOption) => o.id) || [];
+  const currentOrder = useMemo(() => {
+    if (currentVal && currentVal.length > 0) return currentVal;
+    const rawIds = q.options?.map((o: QuestionOption) => o.id) || [];
+    return seededShuffle(rawIds, `${attemptId || ""}-${q.id}`);
+  }, [currentVal, q.options, attemptId, q.id]);
   const moveItem = (from: number, to: number) => {
     const newOrder = [...currentOrder];
     const [removed] = newOrder.splice(from, 1);
     newOrder.splice(to, 0, removed);
     setAnswers((prev: Answers) => ({ ...prev, [q.id]: newOrder }));
+    onInteract?.();
   };
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -1157,6 +1175,7 @@ function OrderingQuestion({
         ...prev,
         [q.id]: arrayMove(currentOrder, oldIndex, newIndex),
       }));
+      onInteract?.();
     }
   };
 
@@ -1222,6 +1241,59 @@ const formatTime = (seconds: number): string => {
   return `${m}:${s.toString().padStart(2, "0")}`;
 };
 
+function seededShuffle<T>(array: T[], seed: string): T[] {
+  const result = [...array];
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) {
+    h = Math.imul(31, h) + seed.charCodeAt(i) | 0;
+  }
+  const lcg = () => {
+    h = Math.imul(h, 1664525) + 1013904223 | 0;
+    return (h >>> 0) / 0xffffffff;
+  };
+  for (let i = result.length - 1; i > 0; i--) {
+    const j = Math.floor(lcg() * (i + 1));
+    const temp = result[i];
+    result[i] = result[j];
+    result[j] = temp;
+  }
+  return result;
+}
+
+const getAnswerType = (questionType: string): AnswerType => {
+  const normalized = (questionType || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "");
+
+  const map: Record<string, AnswerType> = {
+    mcq: "SINGLE_OPTION",
+    truefalse: "SINGLE_OPTION",
+    true_false: "SINGLE_OPTION",
+    singleoption: "SINGLE_OPTION",
+    matching: "MATCH_PAIRS",
+    ordering: "ORDERED_LIST",
+    fillblank: "FILL_BLANKS",
+    fillblanks: "FILL_BLANKS",
+    fill_blank: "FILL_BLANKS",
+    multiplechoice: "SINGLE_OPTION",
+    multiple_choice: "SINGLE_OPTION",
+    multichoice: "SINGLE_OPTION",
+    multiselect: "MULTI_OPTION",
+    multicorrect: "MULTI_OPTION",
+    multi_correct: "MULTI_OPTION",
+    checkbox: "MULTI_OPTION",
+    shortanswer: "TEXT",
+    short_answer: "TEXT",
+    essay: "TEXT",
+    casestudy: "TEXT",
+    case_study: "TEXT",
+    computational: "FILE",
+    computationalreasoning: "FILE",
+    practical: "FILE",
+  };
+  return map[normalized] ?? "TEXT";
+};
+
 export default function TakeAssessmentPage() {
   const params = useParams();
   const router = useRouter();
@@ -1252,6 +1324,31 @@ export default function TakeAssessmentPage() {
   const [questions, setQuestions] = useState<AssessmentQuestion[]>([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [answers, setAnswers] = useState<Answers>({});
+  const answersRef = useRef<Answers>(answers);
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+  const shuffledOptionsMap = useMemo(() => {
+    const map: Record<string, QuestionOption[]> = {};
+    const shuffleEnabled = !!(
+      (assessment as any)?.randomise_options ||
+      (assessment as any)?.randomize_options ||
+      (assessment as any)?.shuffleOptions
+    );
+    
+    questions.forEach((q) => {
+      const type = (q.type || q.question_type || "").toString().toLowerCase().replace(/[^a-z0-9_]/g, "");
+      const isMCQ = type === "mcq" || type === "multiplechoice" || type === "multiple_choice" || type === "multichoice" || type === "singleoption";
+      const isMulti = getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+      
+      if ((isMCQ || isMulti) && shuffleEnabled) {
+        map[q.id] = seededShuffle(q.options || [], `${attemptId || ""}-${q.id}`);
+      } else {
+        map[q.id] = q.options || [];
+      }
+    });
+    return map;
+  }, [questions, attemptId, assessment]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
@@ -1265,15 +1362,27 @@ export default function TakeAssessmentPage() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
   const [readinessChecked, setReadinessChecked] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [manualSubmitError, setManualSubmitError] = useState<string | null>(null);
+  const [interactedQuestions, setInteractedQuestions] = useState<Record<string, boolean>>({});
   const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
+
+  useEffect(() => {
+    if (!showSubmitConfirm) {
+      setManualSubmitError(null);
+    }
+  }, [showSubmitConfirm]);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [attemptNumber, setAttemptNumber] = useState<number>(1);
 
   useEffect(() => {
-    if (stage === "submitted" && attemptId) {
-      router.push(`/student/results/${attemptId}`);
-    } else if (stage === "submitted" && !attemptId) {
-      router.push("/student/results");
+    if (stage === "submitted") {
+      const redirect = () => {
+        router.push(attemptId ? `/student/results/${attemptId}` : "/student/results");
+      };
+      redirect();
+      const timer = setTimeout(redirect, 10000);
+      return () => clearTimeout(timer);
     }
   }, [stage, attemptId, router]);
 
@@ -1311,6 +1420,7 @@ export default function TakeAssessmentPage() {
       ) => Promise<void>)
     | null
   >(null);
+  const saveAllPendingAnswersRef = useRef<(() => Promise<void>) | undefined>(undefined);
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -1351,17 +1461,23 @@ export default function TakeAssessmentPage() {
           return val.trim() !== "";
         }
         if (typeof val === "object" && val !== null) {
-          return Object.values(val).some((entry) =>
-            typeof entry === "string" ? entry.trim() !== "" : false,
-          );
+          const opts = q.options || [];
+          if (opts.length === 0) return false;
+          return opts.every((opt: any) => {
+            const entry = val[opt.id];
+            return typeof entry === "string" && entry.trim() !== "";
+          });
         }
         return false;
       }
       if (answerType === "SINGLE_OPTION") {
         return typeof val === "string" && val !== "";
       }
-      if (answerType === "MULTI_OPTION" || answerType === "ORDERED_LIST") {
+      if (answerType === "MULTI_OPTION") {
         return Array.isArray(val) && val.length > 0;
+      }
+      if (answerType === "ORDERED_LIST") {
+        return Array.isArray(val) && val.length > 0 && !!interactedQuestions[q.id];
       }
       if (answerType === "MATCH_PAIRS") {
         return typeof val === "object" && Object.keys(val).length > 0;
@@ -1385,7 +1501,7 @@ export default function TakeAssessmentPage() {
       }
       return false;
     },
-    [],
+    [interactedQuestions],
   );
 
   const currentQ = questions[currentQuestionIndex];
@@ -1398,43 +1514,12 @@ export default function TakeAssessmentPage() {
     [assessment],
   );
 
-  const getAnswerType = (questionType: string): AnswerType => {
-    const normalized = (questionType || "")
-      .toLowerCase()
-      .replace(/[^a-z0-9_]/g, "");
-
-    const map: Record<string, AnswerType> = {
-      mcq: "SINGLE_OPTION",
-      truefalse: "SINGLE_OPTION",
-      true_false: "SINGLE_OPTION",
-      singleoption: "SINGLE_OPTION",
-      matching: "MATCH_PAIRS",
-      ordering: "ORDERED_LIST",
-      fillblank: "FILL_BLANKS",
-      fillblanks: "FILL_BLANKS",
-      fill_blank: "FILL_BLANKS",
-      multiplechoice: "SINGLE_OPTION",
-      multiple_choice: "SINGLE_OPTION",
-      multichoice: "SINGLE_OPTION",
-      multiselect: "MULTI_OPTION",
-      multicorrect: "MULTI_OPTION",
-      multi_correct: "MULTI_OPTION",
-      checkbox: "MULTI_OPTION",
-      shortanswer: "TEXT",
-      short_answer: "TEXT",
-      essay: "TEXT",
-      casestudy: "TEXT",
-      case_study: "TEXT",
-      computational: "FILE",
-      computationalreasoning: "FILE",
-      practical: "FILE",
-    };
-    return map[normalized] ?? "TEXT";
-  };
-
   const autoSubmit = useCallback(async () => {
     if (!attemptId || !attemptToken) return;
     try {
+      if (saveAllPendingAnswersRef.current) {
+        await saveAllPendingAnswersRef.current();
+      }
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
       toast.info("Responses preserved.");
     } catch (err: unknown) {
@@ -1560,12 +1645,19 @@ export default function TakeAssessmentPage() {
       };
 
       if (answerType === "TEXT") {
-        payload.answer_text =
-          typeof answerVal === "string"
-            ? answerVal
-            : answerVal === null || answerVal === undefined
-              ? ""
-              : JSON.stringify(answerVal);
+        const isCS = (qType || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
+        if (isCS) {
+          payload.answer_text = typeof answerVal === "object" && answerVal !== null
+            ? JSON.stringify(answerVal)
+            : JSON.stringify({});
+        } else {
+          payload.answer_text =
+            typeof answerVal === "string"
+              ? answerVal
+              : answerVal === null || answerVal === undefined
+                ? ""
+                : JSON.stringify(answerVal);
+        }
       } else if (answerType === "FILE") {
         if (typeof answerVal === "object" && answerVal !== null) {
           payload.file_url = (answerVal as any).file_url || "";
@@ -1622,7 +1714,9 @@ export default function TakeAssessmentPage() {
     [attemptId, attemptToken, queueLocalSave, skippedQuestions],
   );
 
-  saveAnswerRef.current = saveAnswer;
+  useEffect(() => {
+    saveAnswerRef.current = saveAnswer;
+  }, [saveAnswer]);
 
   // Sync / Load logic: Detect existing attempt on mount (Resume attempt support)
   const syncSavedSubmissions = async (attId: string) => {
@@ -1644,8 +1738,10 @@ export default function TakeAssessmentPage() {
           savedAnswers[s.question_id] = s.match_pairs_json || {};
         else if (s.answer_type === "FILL_BLANKS")
           savedAnswers[s.question_id] = s.fill_blank_answers || {};
-        else if (s.answer_type === "ORDERED_LIST")
+        else if (s.answer_type === "ORDERED_LIST") {
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
+          setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
+        }
         else if (s.answer_type === "FILE")
           savedAnswers[s.question_id] = {
             file_url: s.file_url || "",
@@ -1661,15 +1757,16 @@ export default function TakeAssessmentPage() {
             (q.type || q.question_type || "")
               .toLowerCase()
               .replace(/[^a-z0-9_]/g, "") === "casestudy";
-          if (
-            isCaseStudy &&
-            typeof s.answer_text === "string" &&
-            s.answer_text.trim().startsWith("{")
-          ) {
-            try {
-              savedAnswers[s.question_id] = JSON.parse(s.answer_text);
-            } catch {
-              savedAnswers[s.question_id] = s.answer_text;
+          if (isCaseStudy) {
+            if (typeof s.answer_text === "string") {
+              try {
+                savedAnswers[s.question_id] = JSON.parse(s.answer_text);
+              } catch {
+                const subId = q.options?.[0]?.id || "default";
+                savedAnswers[s.question_id] = { [subId]: s.answer_text };
+              }
+            } else {
+              savedAnswers[s.question_id] = s.answer_text || {};
             }
           } else {
             savedAnswers[s.question_id] = s.answer_text;
@@ -1682,7 +1779,8 @@ export default function TakeAssessmentPage() {
           getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" &&
           !savedAnswers[q.id]
         ) {
-          savedAnswers[q.id] = q.options?.map((o) => o.id) || [];
+          const rawIds = q.options?.map((o) => o.id) || [];
+          savedAnswers[q.id] = seededShuffle(rawIds, `${attemptId}-${q.id}`);
         }
       });
       setAnswers(savedAnswers);
@@ -1877,7 +1975,12 @@ export default function TakeAssessmentPage() {
 
         socket.onclose = () => {
           if (stageRef.current === "taking") {
-            reconnectTimeout = window.setTimeout(connectWs, 5000);
+            reconnectTimeout = window.setTimeout(() => {
+              reconnectTimeout = null;
+              if (stageRef.current === "taking") {
+                connectWs();
+              }
+            }, 5000);
           }
         };
       } catch (err) {
@@ -1897,7 +2000,7 @@ export default function TakeAssessmentPage() {
   const saveAllPendingAnswers = useCallback(async () => {
     if (!attemptId || !attemptToken || !questions.length) return;
     for (const q of questions) {
-      const currentAnswer = answers[q.id];
+      const currentAnswer = answersRef.current[q.id];
       if (
         currentAnswer !== undefined &&
         JSON.stringify(currentAnswer) !==
@@ -1911,10 +2014,12 @@ export default function TakeAssessmentPage() {
         }
       }
     }
-  }, [attemptId, attemptToken, questions, answers, saveAnswer]);
+  }, [attemptId, attemptToken, questions, saveAnswer]);
 
   const handleAutoSubmit = useCallback(async () => {
     setSubmitting(true);
+    setSubmitError(null);
+    toast.info("Time expired! Automatically submitting your assessment as-is.");
     try {
       await saveAllPendingAnswers();
       await attemptApi.submitAttempt(attemptId!, attemptToken!, true);
@@ -1922,11 +2027,29 @@ export default function TakeAssessmentPage() {
       if (attemptId && attemptToken) {
         startPollingScore(attemptId, attemptToken);
       }
-    } catch (err: unknown) {
+    } catch (err: any) {
+      setStage("submitted");
+      setSubmitError(err.message || "Failed to submit assessment automatically. Please check your network connection.");
+      if (attemptId && attemptToken) {
+        startPollingScore(attemptId, attemptToken);
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }, [attemptId, attemptToken, saveAllPendingAnswers, startPollingScore]);
+
+  const handleRetryAutoSubmit = useCallback(async () => {
+    setSubmitting(true);
+    setSubmitError(null);
+    try {
+      await saveAllPendingAnswers();
+      await attemptApi.submitAttempt(attemptId!, attemptToken!, true);
       setStage("submitted");
       if (attemptId && attemptToken) {
         startPollingScore(attemptId, attemptToken);
       }
+    } catch (err: any) {
+      setSubmitError(err.message || "Failed to submit assessment. Please check your network connection.");
     } finally {
       setSubmitting(false);
     }
@@ -2071,6 +2194,7 @@ export default function TakeAssessmentPage() {
   const submitAssessment = useCallback(async () => {
     if (!attemptId || !attemptToken) return;
     setSubmitting(true);
+    setManualSubmitError(null);
     try {
       await saveAllPendingAnswers();
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
@@ -2079,11 +2203,12 @@ export default function TakeAssessmentPage() {
       setStage("submitted");
       toast.success("Submitted successfully.");
       startPollingScore(attemptId, attemptToken);
-    } catch (err: unknown) {
+      setShowSubmitConfirm(false);
+    } catch (err: any) {
+      setManualSubmitError(err.message || "Failed to submit assessment. Please check your network connection and try again.");
       toast.error("Submission failed.");
     } finally {
       setSubmitting(false);
-      setShowSubmitConfirm(false);
     }
   }, [attemptId, attemptToken, saveAllPendingAnswers, startPollingScore]);
 
@@ -2111,6 +2236,10 @@ export default function TakeAssessmentPage() {
     setIsVerifyingPassword(true);
     setPasswordError(null);
     try {
+      if (attemptId && attemptToken) {
+        setStage("readiness");
+        return;
+      }
       const data = await attemptApi.startAttempt({
         assessment_id: assessmentId,
         password: passwordInput,
@@ -2127,6 +2256,11 @@ export default function TakeAssessmentPage() {
 
   const handleReadinessConfirm = async () => {
     if (!readinessChecked) return;
+    if (attemptId && attemptToken && questions.length > 0) {
+      setStage("taking");
+      if (assessment?.fullscreen_required) enterFullscreen();
+      return;
+    }
     readinessAbortControllerRef.current?.abort();
     const controller = new AbortController();
     readinessAbortControllerRef.current = controller;
@@ -2142,6 +2276,7 @@ export default function TakeAssessmentPage() {
       if (controller.signal.aborted) return;
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
+      setPendingAttemptStartData(null);
       sessionStorage.setItem(`attempt_token_${data.id}`, data.access_token);
       setExpiresAt(data.expires_at);
 
@@ -2172,8 +2307,10 @@ export default function TakeAssessmentPage() {
             savedAnswers[s.question_id] = s.match_pairs_json || {};
           else if (s.answer_type === "FILL_BLANKS")
             savedAnswers[s.question_id] = s.fill_blank_answers || {};
-          else if (s.answer_type === "ORDERED_LIST")
+          else if (s.answer_type === "ORDERED_LIST") {
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
+            setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
+          }
           else if (s.answer_type === "FILE")
             savedAnswers[s.question_id] = {
               file_url: s.file_url || "",
@@ -2191,15 +2328,16 @@ export default function TakeAssessmentPage() {
               (q.type || q.question_type || "")
                 .toLowerCase()
                 .replace(/[^a-z0-9_]/g, "") === "casestudy";
-            if (
-              isCaseStudy &&
-              typeof s.answer_text === "string" &&
-              s.answer_text.trim().startsWith("{")
-            ) {
-              try {
-                savedAnswers[s.question_id] = JSON.parse(s.answer_text);
-              } catch {
-                savedAnswers[s.question_id] = s.answer_text;
+            if (isCaseStudy) {
+              if (typeof s.answer_text === "string") {
+                try {
+                  savedAnswers[s.question_id] = JSON.parse(s.answer_text);
+                } catch {
+                  const subId = q.options?.[0]?.id || "default";
+                  savedAnswers[s.question_id] = { [subId]: s.answer_text };
+                }
+              } else {
+                savedAnswers[s.question_id] = s.answer_text || {};
               }
             } else {
               savedAnswers[s.question_id] = s.answer_text;
@@ -2212,7 +2350,8 @@ export default function TakeAssessmentPage() {
             getAnswerType(q.type || q.question_type || "") === "ORDERED_LIST" &&
             !savedAnswers[q.id]
           ) {
-            savedAnswers[q.id] = q.options?.map((o: any) => o.id) || [];
+            const rawIds = q.options?.map((o: any) => o.id) || [];
+            savedAnswers[q.id] = seededShuffle(rawIds, `${data.id}-${q.id}`);
           }
         });
         setAnswers(savedAnswers);
@@ -2307,7 +2446,7 @@ export default function TakeAssessmentPage() {
           }
           className="grid gap-3"
         >
-          {q.options?.map((opt: QuestionOption) => {
+          {(shuffledOptionsMap[q.id] || []).map((opt: QuestionOption) => {
             const isSelected =
               currentVal === opt.id ||
               (Array.isArray(currentVal) && currentVal.includes(opt.id));
@@ -2348,7 +2487,7 @@ export default function TakeAssessmentPage() {
 
       return (
         <div className="grid gap-3">
-          {q.options?.map((opt: QuestionOption) => {
+          {(shuffledOptionsMap[q.id] || []).map((opt: QuestionOption) => {
             const isSelected = selectedIds.includes(opt.id);
             return (
               <div
@@ -2445,6 +2584,7 @@ export default function TakeAssessmentPage() {
       return (
         <FillInTheBlanksDnd
           q={q}
+          attemptId={attemptId}
           currentVal={
             currentVal &&
             typeof currentVal === "object" &&
@@ -2462,6 +2602,7 @@ export default function TakeAssessmentPage() {
       return (
         <MatchingDnd
           q={q}
+          attemptId={attemptId}
           currentVal={
             currentVal &&
             typeof currentVal === "object" &&
@@ -2514,6 +2655,7 @@ export default function TakeAssessmentPage() {
         minWords !== undefined &&
         minWords !== null &&
         minWords > 0 &&
+        wordCount > 0 &&
         wordCount < minWords;
       const isTooLong =
         maxWords !== undefined &&
@@ -2592,7 +2734,11 @@ export default function TakeAssessmentPage() {
             <div className="space-y-6">
               {q.options.map((opt: any, idx: number) => {
                 const marksVal =
-                  opt.match_key || opt.match_value || opt.order_index || 0;
+                  opt.match_key !== undefined && opt.match_key !== null
+                    ? opt.match_key
+                    : opt.match_value !== undefined && opt.match_value !== null
+                      ? opt.match_value
+                      : 5;
                 const subAnswer = answersObj[opt.id] || "";
                 return (
                   <div
@@ -2864,8 +3010,12 @@ export default function TakeAssessmentPage() {
       return (
         <OrderingQuestion
           q={q}
+          attemptId={attemptId}
           currentVal={Array.isArray(currentVal) ? currentVal : undefined}
           setAnswers={setAnswers}
+          onInteract={() =>
+            setInteractedQuestions((prev) => ({ ...prev, [q.id]: true }))
+          }
         />
       );
     }
@@ -2945,6 +3095,56 @@ export default function TakeAssessmentPage() {
     );
 
   if (stage === "submitted") {
+    if (submitError) {
+      return (
+        <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 space-y-4">
+          <Card className="max-w-md w-full border-destructive/30 shadow-lg">
+            <CardHeader className="text-center pb-2">
+              <div className="mx-auto size-12 rounded-full bg-destructive/10 flex items-center justify-center mb-3">
+                <AlertTriangle className="size-6 text-destructive" />
+              </div>
+              <CardTitle className="text-base text-destructive font-bold">Submission Failed</CardTitle>
+              <CardDescription className="text-xs">
+                We couldn&apos;t submit your assessment to the server automatically.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-center">
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                Your answers are saved locally on this device. Please check your internet connection and click the button below to retry.
+              </p>
+              <div className="p-3 bg-destructive/[0.03] border border-destructive/10 rounded-lg text-left">
+                <p className="font-mono text-[10px] text-destructive leading-normal break-all">
+                  {submitError}
+                </p>
+              </div>
+              <div className="flex flex-col gap-2 pt-2">
+                <Button
+                  onClick={handleRetryAutoSubmit}
+                  disabled={submitting}
+                  className="w-full h-9 text-xs font-semibold bg-destructive hover:bg-destructive/90 text-white"
+                >
+                  {submitting ? (
+                    <>
+                      <Loader2 className="mr-2 size-3 animate-spin" /> Submitting...
+                    </>
+                  ) : (
+                    "Retry Submission"
+                  )}
+                </Button>
+                <Button
+                  onClick={() => router.push(attemptId ? `/student/results/${attemptId}` : "/student/results")}
+                  variant="outline"
+                  className="w-full h-9 text-xs font-medium"
+                >
+                  Go to Results Page
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
         <Loader2 className="size-8 animate-spin text-primary mb-2" />
@@ -3399,7 +3599,7 @@ export default function TakeAssessmentPage() {
                         <SheetTrigger asChild>
                           <Button
                             variant="outline"
-                            size="xs"
+                            size="sm"
                             className="h-7 text-[11px] font-semibold gap-1 rounded-lg border-border hover:bg-muted/50"
                           >
                             <Menu className="size-3.5" /> Navigate
@@ -4021,12 +4221,13 @@ export default function TakeAssessmentPage() {
         <DialogContent
           className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background"
           role="alertdialog"
+          aria-describedby="warning-desc"
         >
           <AlertTriangle className="size-10 text-destructive mx-auto mb-3" />
           <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
             Integrity Protocols Alert
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground mt-1">
+          <DialogDescription id="warning-desc" className="text-xs text-muted-foreground mt-1">
             An integrity warning has been flagged on your session. You must
             acknowledge this notice to return to the exam.
           </DialogDescription>
@@ -4150,6 +4351,16 @@ export default function TakeAssessmentPage() {
                   <span className="block mt-1 font-bold text-destructive/80">
                     Questions: {unansweredOptionalNums.join(", ")}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {manualSubmitError && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-left flex items-start gap-2.5">
+                <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-red-700 leading-relaxed">
+                  <span className="font-semibold block mb-0.5">Submission Failed</span>
+                  {manualSubmitError}
                 </div>
               </div>
             )}

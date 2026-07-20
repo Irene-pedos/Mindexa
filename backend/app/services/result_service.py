@@ -228,6 +228,7 @@ class ResultService:
         assessment_id: uuid.UUID,
         released_by_id: uuid.UUID | None = None,
         attempt_ids: list[uuid.UUID] | None = None,
+        class_section_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Release results to students.
@@ -245,9 +246,24 @@ class ResultService:
                 message: str,
             }
         """
+        from sqlalchemy import select
+        
         if attempt_ids:
             # Load specific results
             results = await self.result_repo.list_by_attempt_ids(attempt_ids)
+        elif class_section_id:
+            from app.db.models.academic import StudentEnrollment
+            from app.db.enums import EnrollmentStatus
+            student_ids_stmt = select(StudentEnrollment.student_id).where(
+                StudentEnrollment.class_section_id == class_section_id,
+                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                StudentEnrollment.is_deleted == False
+            )
+            res = await self.db.execute(student_ids_stmt)
+            section_student_ids = set(res.scalars().all())
+            
+            all_results = await self.result_repo.list_unreleased_without_hold(assessment_id)
+            results = [r for r in all_results if r.student_id in section_student_ids]
         else:
             results = await self.result_repo.list_unreleased_without_hold(assessment_id)
 

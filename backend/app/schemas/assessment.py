@@ -368,6 +368,7 @@ class AssessmentSummaryResponse(BaseModel):
     draft_step: int | None
     created_by_id: uuid.UUID
     subject: str | None = None
+    teaching_workspace_id: uuid.UUID | None = None
     course_name: str | None = None
     course_code: str | None = None
     target_class: str | None = None

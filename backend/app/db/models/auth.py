@@ -107,15 +107,15 @@ class User(BaseModel, table=True):
     )
     refresh_tokens: List["RefreshToken"] = Relationship(
         back_populates="user",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     password_reset_tokens: List["PasswordResetToken"] = Relationship(
         back_populates="user",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
     notifications: List["Notification"] = Relationship(
         back_populates="recipient",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan", "lazy": "selectin"}
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
 
 

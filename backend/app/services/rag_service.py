@@ -273,14 +273,29 @@ class RAGService:
             "input": [question]
         }
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            if response.status_code != 200:
-                logger.error("Jina embedding failed", status=response.status_code, text=response.text)
-                raise Exception("Failed to generate embedding")
-            
-            data = response.json()
-            return data["data"][0]["embedding"]
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(url, headers=headers, json=payload)
+                if response.status_code != 200:
+                    logger.error("Jina embedding failed", status=response.status_code, text=response.text)
+                    raise Exception("Failed to generate embedding")
+                
+                data = response.json()
+                return data["data"][0]["embedding"]
+        except (httpx.ConnectTimeout, httpx.TimeoutException) as e:
+            logger.error("Jina embedding timeout", error=str(e))
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=504,
+                detail="Internet issue: Connection to external embedding service timed out. Please check your network connection."
+            )
+        except httpx.RequestError as e:
+            logger.error("Jina embedding network error", error=str(e))
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=503,
+                detail="Internet issue: Connection to external embedding service failed. Please check your network connection."
+            )
 
     async def _get_allowed_resource_ids(self, student_id: uuid.UUID) -> List[uuid.UUID]:
         """

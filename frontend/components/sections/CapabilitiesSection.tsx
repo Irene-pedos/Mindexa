@@ -1,17 +1,10 @@
-'use client';
-
 // frontend/components/sections/CapabilitiesSection.tsx
-import { TypographyH2, TypographyP } from "@/components/ui/typography";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Carousel,
-  CarouselContent,
-  CarouselItem,
-} from "@/components/ui/carousel";
-import Autoplay from "embla-carousel-autoplay";
-import { InView } from "@/components/ui/in-view";
-import { Shield, BookOpen, Scale, Users, Award, Eye } from "lucide-react";
-import { ChevronRight } from "lucide-react";
+"use client";
+
+import React from "react";
+import { Shield, BookOpen, Scale, Users, Award, Eye, Sparkles, ChevronRight } from "lucide-react";
+import Image from "next/image";
+import { motion } from "motion/react";
 
 const capabilities = [
   {
@@ -46,75 +39,158 @@ const capabilities = [
   },
 ];
 
-export default function CapabilitiesSection() {
+const row1Capabilities = capabilities;
+const row2Capabilities = [
+  capabilities[3],
+  capabilities[4],
+  capabilities[5],
+  capabilities[0],
+  capabilities[1],
+  capabilities[2],
+];
+
+interface CapabilityCardProps {
+  cap: typeof capabilities[number];
+}
+
+function CapabilityCard({ cap }: CapabilityCardProps) {
   return (
-    <section id="capabilities" className="py-15 bg-background">
-      <div className="container mx-auto px-6 max-w-7xl">
+    <div className="w-[280px] md:w-[320px] shrink-0 p-5 rounded-xl border border-border/85 bg-card hover:border-primary/30 transition-all duration-300 flex flex-col gap-3">
+      <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+        <cap.icon className="h-4.5 w-4.5" />
+      </div>
+      <div className="space-y-1">
+        <h4 className="text-sm font-semibold text-foreground leading-tight tracking-tight">
+          {cap.title}
+        </h4>
+        <p className="text-xs text-muted-foreground leading-relaxed font-normal">
+          {cap.description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+export default function CapabilitiesSection() {
+  const [isRow1Hovered, setIsRow1Hovered] = React.useState(false);
+  const [isRow2Hovered, setIsRow2Hovered] = React.useState(false);
+
+  return (
+    <section id="capabilities" className="py-20 md:py-28 bg-background overflow-hidden relative">
+      {/* Subtle ambient light gradient background */}
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_-10%,rgba(30,50,90,0.02),transparent_70%)] dark:bg-[radial-gradient(circle_at_50%_-10%,rgba(120,119,198,0.04),transparent_70%)] pointer-events-none" />
+
+      <div className="container mx-auto px-6 max-w-7xl relative z-10">
         
         {/* Title */}
-        <div className="mb-6">
-          <InView>
-            <TypographyH2 className="text-foreground tracking-tight">
-              Core Capabilities of Mindexa Platform
-            </TypographyH2>
-          </InView>
+        <motion.div 
+          initial={{ opacity: 0, y: 15 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
+          className="mb-12 text-left"
+        >
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-normal border border-primary/20 mb-3">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Platform Capabilities</span>
+          </div>
+          
+          <h2 className="text-3xl md:text-5xl font-semibold tracking-tight text-foreground leading-tight">
+            Core Capabilities of Mindexa
+          </h2>
+          <p className="text-sm md:text-base text-muted-foreground mt-3 max-w-2xl font-normal leading-relaxed">
+            Explore the advanced toolset engineered to defend assessment integrity, simplify academic operations, and deliver institutional clarity.
+          </p>
+        </motion.div>
+      </div>
+
+      {/* Double Row Infinite Marquee Scroll */}
+      <div className="relative flex w-full flex-col gap-6 items-center justify-center overflow-hidden py-4">
+        
+        {/* Row 1 - Anticlockwise (Right to Left) */}
+        <div 
+          onMouseEnter={() => setIsRow1Hovered(true)}
+          onMouseLeave={() => setIsRow1Hovered(false)}
+          className="group flex overflow-hidden w-full [--gap:1.5rem] [gap:var(--gap)] flex-row [--duration:70s]"
+        >
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ animationPlayState: isRow1Hovered ? "paused" : "running" }}
+          >
+            {row1Capabilities.map((cap, i) => (
+              <CapabilityCard key={`row1-1-${i}`} cap={cap} />
+            ))}
+          </div>
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row" 
+            style={{ animationPlayState: isRow1Hovered ? "paused" : "running" }}
+            aria-hidden="true"
+          >
+            {row1Capabilities.map((cap, i) => (
+              <CapabilityCard key={`row1-2-${i}`} cap={cap} />
+            ))}
+          </div>
         </div>
 
-        {/* Carousel with Autoplay */}
-        
-          <Carousel
-            plugins={[
-              Autoplay({
-                delay: 2500,
-              }),
-            ]}
-            opts={{
-              align: "start",
-              loop: true,
+        {/* Row 2 - Clockwise (Left to Right) */}
+        <div 
+          onMouseEnter={() => setIsRow2Hovered(true)}
+          onMouseLeave={() => setIsRow2Hovered(false)}
+          className="group flex overflow-hidden w-full [--gap:1.5rem] [gap:var(--gap)] flex-row [--duration:70s]"
+        >
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ 
+              animationPlayState: isRow2Hovered ? "paused" : "running",
+              animationDirection: "reverse"
             }}
-            className="w-full"
           >
-            <CarouselContent className="-ml-2 md:-ml-4">
-              {capabilities.map((cap, index) => (
-                <CarouselItem key={index} className="pl-2 md:pl-4 basis-full md:basis-1/2 lg:basis-1/3">
-                  <Card className="h-full border border-border bg-card hover:border-primary/30 transition-all duration-300">
-                    <CardHeader className="">
-                      <div className="w-10 h-10 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-                        <cap.icon className="h-5 w-5 text-primary" />
-                      </div>
-                      <CardTitle className="text-l text-foreground leading-tight">
-                        {cap.title}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <TypographyP className="text-muted-foreground text-[15px] leading-relaxed">
-                        {cap.description}
-                      </TypographyP>
-                    </CardContent>
-                  </Card>
-                </CarouselItem>
-              ))}
-            </CarouselContent>
-          </Carousel>
-        
+            {row2Capabilities.map((cap, i) => (
+              <CapabilityCard key={`row2-1-${i}`} cap={cap} />
+            ))}
+          </div>
+          <div 
+            className="flex shrink-0 justify-around [gap:var(--gap)] animate-marquee flex-row"
+            style={{ 
+              animationPlayState: isRow2Hovered ? "paused" : "running",
+              animationDirection: "reverse"
+            }}
+            aria-hidden="true"
+          >
+            {row2Capabilities.map((cap, i) => (
+              <CapabilityCard key={`row2-2-${i}`} cap={cap} />
+            ))}
+          </div>
+        </div>
 
+        {/* Elegant side fades */}
+        <div className="pointer-events-none absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-background via-background/80 to-transparent z-10" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-background via-background/80 to-transparent z-10" />
+      </div>
+
+      <div className="container mx-auto px-6 max-w-7xl relative z-10">
         {/* Bottom Bar */}
-        <div className="mt-12 flex flex-col sm:flex-row items-center justify-between gap-6 bg-muted/60 rounded-2xl px-8 py-5 border border-border">
-          <TypographyP className="text-muted-foreground text-sm max-w-2xl">
-            Assessments are delivered within controlled environments that enforce timing constraints.
-          </TypographyP>
+        <motion.div 
+          initial={{ opacity: 0, y: 10 }}
+          whileInView={{ opacity: 1, y: 0 }}
+          viewport={{ once: true, amount: 0.2 }}
+          transition={{ duration: 0.5, ease: "easeOut", delay: 0.2 }}
+          className="mt-12 flex flex-col sm:flex-row items-center justify-between gap-4 bg-muted/40 rounded-xl px-6 py-4 border border-border/80"
+        >
+          <p className="text-xs md:text-sm text-muted-foreground max-w-2xl font-normal leading-normal">
+            Every capability is designed with security and institutional compliance at its core.
+          </p>
 
           <div className="flex-shrink-0">
             <a
               href="#"
-              className="inline-flex items-center gap-2 text-sm font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
+              className="inline-flex items-center gap-1.5 text-xs md:text-sm font-medium text-primary hover:text-primary/80 transition-colors whitespace-nowrap"
             >
-              View all
+              Explore all features
               <ChevronRight className="h-4 w-4" />
             </a>
           </div>
-        </div>
-
+        </motion.div>
       </div>
     </section>
   );

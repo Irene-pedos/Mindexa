@@ -98,6 +98,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { apiClient } from "@/lib/api/client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { questionApi } from "@/lib/api/question";
 import { assessmentApi } from "@/lib/api/assessment";
 import { groupWorkApi } from "@/lib/api/group-work";
@@ -236,6 +246,7 @@ interface Question {
   tolerance?: number;
   shuffleOptions?: boolean;
   caseSensitive?: boolean;
+  savedToBank?: boolean;
 }
 
 interface GroupMember {
@@ -766,11 +777,21 @@ function QuestionCard({
                 variant="ghost"
                 size="icon"
                 onClick={onSaveToBank}
-                className="text-primary hover:bg-primary/5 h-8 w-8"
-                title="Save to Bank"
-                aria-label="Save to Bank"
+                disabled={question.savedToBank}
+                className={cn(
+                  "h-8 w-8 transition-colors",
+                  question.savedToBank
+                    ? "text-emerald-500 hover:text-emerald-500 cursor-not-allowed bg-emerald-50"
+                    : "text-primary hover:bg-primary/5"
+                )}
+                title={question.savedToBank ? "Already saved to Bank" : "Save to Bank"}
+                aria-label={question.savedToBank ? "Already saved to Bank" : "Save to Bank"}
               >
-                <Database className="size-4" />
+                {question.savedToBank ? (
+                  <CheckCircle2 className="size-4 text-emerald-500" />
+                ) : (
+                  <Database className="size-4" />
+                )}
               </Button>
               <Button
                 variant="ghost"
@@ -796,7 +817,7 @@ function QuestionCard({
               onChange={(e) => onUpdate({ text: e.target.value })}
               className="min-h-25 text-base"
             />
-            {question.type === "fillblank" && (
+            {(question.type === "fillblank" || (question.type as string) === "fill_blank") && (
               <div className="space-y-1 mt-1">
                 <p className="text-[11px] text-primary font-medium">
                   Tip: Use <strong>[blank]</strong> to indicate where students
@@ -1198,7 +1219,7 @@ function QuestionCard({
           />
         )}
 
-        {question.type === "fillblank" && (
+        {(question.type === "fillblank" || (question.type as string) === "fill_blank") && (
           <div className="space-y-6 pl-4 border-l-2 border-muted">
             <div className="space-y-4">
               <Label className="text-sm font-semibold flex items-center gap-2">
@@ -1760,16 +1781,18 @@ const mapFrontendToBackendType = (type: string): string => {
 
 const mapBackendToFrontendType = (type: string): QuestionType => {
   const norm = (type || "").toLowerCase().replaceAll("_", "");
-  if (norm === "truefalse") return "truefalse";
-  if (norm === "shortanswer") return "shortanswer";
-  if (norm === "fillblank") return "fillblank";
-  if (
-    norm === "casestudy" ||
-    norm === "casestudycontext" ||
-    norm === "case_study"
-  )
-    return "casestudy";
-  return norm as QuestionType;
+  if (norm === "truefalse" || norm === "true_false") return "truefalse";
+  if (norm === "shortanswer" || norm === "short_answer") return "shortanswer";
+  if (norm === "fillblank" || norm === "fill_blank") return "fillblank";
+  if (norm === "casestudy" || norm === "case_study") return "casestudy";
+  if (norm === "computational") return "computational";
+  if (norm === "matching") return "matching";
+  if (norm === "ordering") return "ordering";
+  if (norm === "mcq") return "mcq";
+  if (norm === "essay") return "essay";
+  
+  console.warn(`[mapBackendToFrontendType] Unknown backend question type: '${type}'. Falling back to 'shortanswer'.`);
+  return "shortanswer";
 };
 
 const mapCandidateToQuestion = (
@@ -2010,20 +2033,30 @@ export default function NewAssessmentBuilder() {
   const [aiTargetSectionId, setAiTargetSectionId] = useState<string>("all");
   const [aiBatchId, setAiBatchId] = useState<string | null>(null);
   const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
+  const [showAcceptAllConfirm, setShowAcceptAllConfirm] = useState(false);
 
   // Load and save AI config to/from sessionStorage
   const loadSavedAiConfig = useCallback(
     (targetSectionId: string, defaults: typeof aiGenerationConfig) => {
-      if (draftIdRef.current) {
-        const saved = sessionStorage.getItem(
-          `aiGenerationConfig_${draftIdRef.current}_${targetSectionId}`,
-        );
-        if (saved) {
-          try {
-            return JSON.parse(saved);
-          } catch {
-            return defaults;
-          }
+      const currentId = draftIdRef.current || "new";
+      const key = `aiGenerationConfig_${currentId}_${targetSectionId}`;
+      let saved = sessionStorage.getItem(key);
+      
+      // Migrate temp config to the saved draft ID once available
+      if (!saved && draftIdRef.current) {
+        const tempKey = `aiGenerationConfig_new_${targetSectionId}`;
+        const tempSaved = sessionStorage.getItem(tempKey);
+        if (tempSaved) {
+          sessionStorage.setItem(key, tempSaved);
+          saved = tempSaved;
+        }
+      }
+
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch {
+          return defaults;
         }
       }
       return defaults;
@@ -2032,11 +2065,9 @@ export default function NewAssessmentBuilder() {
   );
 
   useEffect(() => {
-    if (draftIdRef.current && aiTargetSectionId) {
-      sessionStorage.setItem(
-        `aiGenerationConfig_${draftIdRef.current}_${aiTargetSectionId}`,
-        JSON.stringify(aiGenerationConfig),
-      );
+    if (aiTargetSectionId) {
+      const key = `aiGenerationConfig_${draftIdRef.current || "new"}_${aiTargetSectionId}`;
+      sessionStorage.setItem(key, JSON.stringify(aiGenerationConfig));
     }
   }, [aiGenerationConfig, aiTargetSectionId]);
 
@@ -2711,20 +2742,34 @@ export default function NewAssessmentBuilder() {
     }));
   };
 
-  // Logic: Result Release Mode (auto-suggest based on question mix)
+  // Logic: Result Release Mode (generated automatically based on question mix)
   useEffect(() => {
-    if (rules.resultRelease === "scheduled") return;
     const hasOpen = questions.some((q) =>
       ["essay", "shortanswer", "computational", "casestudy"].includes(q.type),
     );
     const suggested = hasOpen ? "manual" : "immediate";
-    if (rules.resultRelease !== suggested) {
-      setRules((prev) => ({
-        ...prev,
-        resultRelease: suggested,
-      }));
-    }
-  }, [questions, rules.resultRelease]);
+    const suggestedMode = hasOpen ? "MANUAL" : "IMMEDIATE";
+
+    setRules((prev) => {
+      if (prev.resultRelease !== suggested) {
+        return {
+          ...prev,
+          resultRelease: suggested,
+        };
+      }
+      return prev;
+    });
+
+    setMetadata((prev) => {
+      if (prev.result_release_mode !== suggestedMode) {
+        return {
+          ...prev,
+          result_release_mode: suggestedMode,
+        };
+      }
+      return prev;
+    });
+  }, [questions]);
 
   // Unsaved changes beforeunload warning
   useEffect(() => {
@@ -3027,13 +3072,18 @@ export default function NewAssessmentBuilder() {
               return;
             }
 
-            const tagged = generatedQuestions.map((q) => ({
-              ...q,
-              _options: q.options || q._options || [],
-              _sectionId:
-                q.target_section_id ||
-                (targetSectionId === "all" ? undefined : targetSectionId),
-            }));
+            const tagged = generatedQuestions.map((q) => {
+              let secId = q.target_section_id || (q as any)._sectionId;
+              if (!secId) {
+                secId = targetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : targetSectionId;
+                console.warn("Ingested candidate question has no section ID. Falling back to:", secId);
+              }
+              return {
+                ...q,
+                _options: q.options || q._options || [],
+                _sectionId: secId,
+              };
+            });
 
             // Validate candidates structurally before showing them
             const discardedReasonMap: Record<string, string[]> = {};
@@ -3101,12 +3151,6 @@ export default function NewAssessmentBuilder() {
                     reasons.push(
                       "Open-ended question has an empty explanation/model answer.",
                     );
-                  } else if (
-                    !explanationText.toLowerCase().includes("model answer")
-                  ) {
-                    reasons.push(
-                      "Explanation does not start with or contain 'Model Answer:' required format.",
-                    );
                   }
                 }
 
@@ -3143,12 +3187,7 @@ export default function NewAssessmentBuilder() {
                 const targetCount = sec.questions || 3;
                 const sectionSecId = sec.id;
                 const sectionGeneratedCount = validCandidatesList.filter(
-                  (c: any) =>
-                    (c.target_section_id ||
-                    c._sectionId ||
-                    targetSectionId === "all"
-                      ? c._sectionId || c.target_section_id
-                      : targetSectionId) === sectionSecId,
+                  (c: any) => c._sectionId === sectionSecId,
                 ).length;
                 if (sectionGeneratedCount !== targetCount) {
                   toast.warning(
@@ -3192,7 +3231,7 @@ export default function NewAssessmentBuilder() {
             if (targetSectionId === "all") {
               const generatedSectionIds = new Set(
                 validCandidatesList
-                  .map((q) => q.target_section_id || q._sectionId)
+                  .map((q) => q._sectionId)
                   .filter(Boolean),
               );
               const failedIds = blueprint
@@ -3225,9 +3264,17 @@ export default function NewAssessmentBuilder() {
             // Continue polling
             pollBatchStatus(batchId, currentTick + 1, targetSectionId);
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Polling batch failed:", err);
-          // Continue polling despite small errors
+          const status = err.status;
+          if (status === 401 || status === 403 || status === 404) {
+            setAiGenerating(false);
+            toast.error(
+              `AI question generation stopped: ${err.message || "Authentication or resource error"}`
+            );
+            return;
+          }
+          // Continue polling despite other temporary errors
           pollBatchStatus(batchId, currentTick + 1, targetSectionId);
         }
       }, 2000);
@@ -3306,28 +3353,27 @@ export default function NewAssessmentBuilder() {
         pollBatchStatus(res.id, 0, "all");
       } else {
         // Synchronize AI drawer config back to the selected blueprint section so it's persisted in the draft
-        setBlueprint((prev) =>
-          prev.map((s) =>
-            s.id === aiTargetSectionId
-              ? {
-                  ...s,
-                  topics: aiGenerationConfig.topic,
-                  difficulty: (aiGenerationConfig.difficulty
-                    .charAt(0)
-                    .toUpperCase() +
-                    aiGenerationConfig.difficulty.slice(1)) as any,
-                  questions: aiGenerationConfig.count,
-                  bloomLevel: aiGenerationConfig.bloom_level as any,
-                  aiPromptHint: aiGenerationConfig.additional_context,
-                  allowedTypes: s.allowedTypes,
-                }
-              : s,
-          ),
+        const nextBlueprint = blueprintRef.current.map((s) =>
+          s.id === aiTargetSectionId
+            ? {
+                ...s,
+                topics: aiGenerationConfig.topic,
+                difficulty: (aiGenerationConfig.difficulty
+                  .charAt(0)
+                  .toUpperCase() +
+                  aiGenerationConfig.difficulty.slice(1)) as any,
+                questions: aiGenerationConfig.count,
+                bloomLevel: aiGenerationConfig.bloom_level as any,
+                aiPromptHint: aiGenerationConfig.additional_context,
+                allowedTypes: s.allowedTypes,
+              }
+            : s,
         );
+        setBlueprint(nextBlueprint);
+        blueprintRef.current = nextBlueprint;
         setTimeout(() => runAutosave(4), 0);
 
-        // Use blueprintRef.current for the same reason — may have been updated by ensureDraftId
-        const targetSection = blueprintRef.current.find(
+        const targetSection = nextBlueprint.find(
           (s) => s.id === aiTargetSectionId,
         );
         const secTopic =
@@ -3469,6 +3515,7 @@ export default function NewAssessmentBuilder() {
   };
 
   const handleAcceptCandidate = async (candidateId: string) => {
+    if (isReviewApplyingRef.current) return;
     const candidate = aiCandidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
@@ -3478,12 +3525,15 @@ export default function NewAssessmentBuilder() {
 
     const action = async () => {
       const activeId = draftIdRef.current;
-      const targetSecId =
-        (candidate as any)._sectionId ||
-        (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+      let targetSecId = (candidate as any)._sectionId;
+      if (!targetSecId) {
+        targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
+        console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
+        toast.warning("Associated candidate question with first section due to missing target section ID.");
+      }
 
       // Calculate marks per question using questionsRef.current to avoid stale closures
-      const sectionObj = blueprint.find((s) => s.id === targetSecId);
+      const sectionObj = blueprintRef.current.find((s) => s.id === targetSecId);
       let marksPerQuestion = 2;
       if (sectionObj) {
         const sectionQuestions = questionsRef.current.filter(
@@ -3530,6 +3580,9 @@ export default function NewAssessmentBuilder() {
         marksPerQuestion,
       );
       newQ.id = realId;
+      if (saveToBank) {
+        newQ.savedToBank = true;
+      }
       nextQuestions = [...questionsRef.current, newQ];
       questionsRef.current = nextQuestions;
       setQuestions(nextQuestions);
@@ -3543,6 +3596,7 @@ export default function NewAssessmentBuilder() {
         }
         return updated;
       });
+      setSaveToBank(false); // Reset the checkbox
       toast.success("Question accepted and added!");
     };
 
@@ -3576,6 +3630,7 @@ export default function NewAssessmentBuilder() {
   };
 
   const handleSaveEditedCandidate = async (candidateId: string) => {
+    if (isReviewApplyingRef.current) return;
     const candidate = aiCandidates.find((c) => c.id === candidateId);
     if (!candidate) return;
 
@@ -3585,12 +3640,15 @@ export default function NewAssessmentBuilder() {
 
     const action = async () => {
       const activeId = draftIdRef.current;
-      const targetSecId =
-        (candidate as any)._sectionId ||
-        (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
+      let targetSecId = (candidate as any)._sectionId;
+      if (!targetSecId) {
+        targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
+        console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
+        toast.warning("Associated candidate question with first section due to missing target section ID.");
+      }
 
       // Calculate marks per question using questionsRef.current to avoid stale closures
-      const sectionObj = blueprint.find((s) => s.id === targetSecId);
+      const sectionObj = blueprintRef.current.find((s) => s.id === targetSecId);
       let marksPerQuestion = 2;
       if (sectionObj) {
         const sectionQuestions = questionsRef.current.filter(
@@ -3642,6 +3700,9 @@ export default function NewAssessmentBuilder() {
         editingOptions,
       );
       newQ.id = realId;
+      if (saveToBank) {
+        newQ.savedToBank = true;
+      }
       nextQuestions = [...questionsRef.current, newQ];
       questionsRef.current = nextQuestions;
       setQuestions(nextQuestions);
@@ -3656,6 +3717,7 @@ export default function NewAssessmentBuilder() {
         return updated;
       });
       setEditingCandidateId(null);
+      setSaveToBank(false); // Reset the checkbox
       toast.success("Edited question accepted!");
     };
 
@@ -3685,10 +3747,13 @@ export default function NewAssessmentBuilder() {
       const activeId = draftIdRef.current;
       const simulatedQuestionsForMarks = [...questionsRef.current];
       const candidatesWithMarks = aiCandidates.map((c) => {
-        const targetSecId =
-          (c as any)._sectionId ||
-          (aiTargetSectionId === "all" ? blueprint[0].id : aiTargetSectionId);
-        const sectionObj = blueprint.find((s) => s.id === targetSecId);
+        let targetSecId = (c as any)._sectionId;
+        if (!targetSecId) {
+          targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
+          console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
+          toast.warning("Associated candidate question with first section due to missing target section ID.");
+        }
+        const sectionObj = blueprintRef.current.find((s) => s.id === targetSecId);
         let marksPerQuestion = 2;
         if (sectionObj) {
           const sectionQuestions = simulatedQuestionsForMarks.filter(
@@ -3746,6 +3811,10 @@ export default function NewAssessmentBuilder() {
         ),
       );
 
+      const rejectedResults = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected",
+      );
+
       const simulatedQuestions = [...questionsRef.current];
       const successfulCandidates: any[] = [];
       candidatesWithMarks.forEach(
@@ -3764,6 +3833,9 @@ export default function NewAssessmentBuilder() {
               marksPerQuestion,
             );
             newQ.id = realId;
+            if (saveToBank) {
+              newQ.savedToBank = true;
+            }
             simulatedQuestions.push(newQ);
             successfulCandidates.push({ candidate, targetSecId, marksPerQuestion });
           }
@@ -3773,11 +3845,13 @@ export default function NewAssessmentBuilder() {
       finalQuestionsList = simulatedQuestions;
       setQuestions(simulatedQuestions);
       questionsRef.current = simulatedQuestions;
+      
       setAiCandidates((prev) =>
         prev.filter((c) =>
-          successfulCandidates.some((success) => success.candidate.id === c.id),
+          !successfulCandidates.some((success) => success.candidate.id === c.id),
         ),
       );
+
       if (successfulCandidates.length > 0) {
         if (successfulCandidates.length === aiCandidates.length) {
           setAiReviewDrawerOpen(false);
@@ -3789,11 +3863,26 @@ export default function NewAssessmentBuilder() {
           `${successfulCandidates.length} candidate question(s) accepted!`,
         );
       }
-      if (successfulCandidates.length < candidatesWithMarks.length) {
-        toast.error(
-          "Some questions failed to accept. Please retry remaining candidates.",
-        );
+      
+      if (rejectedResults.length > 0) {
+        const errorMsgs = rejectedResults
+          .map((r) => r.reason?.message || "Unknown error")
+          .join(", ");
+        console.error("Failed to accept some candidates:", errorMsgs);
+        if (saveToBank) {
+          toast.warning(
+            `Failed to save/add ${rejectedResults.length} question(s) to the Question Bank or assessment. Details: ${errorMsgs}`,
+            { duration: 8000 }
+          );
+        } else {
+          toast.error(
+            `Failed to add ${rejectedResults.length} question(s). Details: ${errorMsgs}`,
+            { duration: 8000 }
+          );
+        }
       }
+
+      setSaveToBank(false); // Reset the checkbox
     };
 
     try {
@@ -3829,9 +3918,33 @@ export default function NewAssessmentBuilder() {
   };
 
   const handleSaveToBank = async (q: Question) => {
-    if (!q.text) {
+    if (q.savedToBank) {
+      toast.info("This question is already saved to the Question Bank.");
+      return;
+    }
+
+    if (!q.text || !q.text.trim()) {
       toast.error("Please enter question text before saving to bank");
       return;
+    }
+
+    // Validation for choices/options based on question type
+    if (["mcq", "truefalse", "matching", "ordering"].includes(q.type)) {
+      if (!q.options || q.options.length < 2) {
+        toast.error("Questions of this type must have at least 2 options before saving to bank.");
+        return;
+      }
+      const hasEmptyOption = q.options.some((opt) => !opt.option_text || !opt.option_text.trim());
+      if (hasEmptyOption) {
+        toast.error("All options must have non-empty text before saving to bank.");
+        return;
+      }
+      
+      // Specifically for MCQ, check that at least one option is correct
+      if (q.type === "mcq" && !q.options.some((opt) => opt.is_correct)) {
+        toast.error("MCQ question must have at least one correct option selected before saving to bank.");
+        return;
+      }
     }
 
     try {
@@ -3847,8 +3960,18 @@ export default function NewAssessmentBuilder() {
           is_correct: opt.is_correct,
           order_index: opt.order_index,
         })),
-        topic: blueprint.find((s) => s.id === q.sectionId)?.topics || "",
+        topic: blueprintRef.current.find((s) => s.id === q.sectionId)?.topics || "",
       });
+
+      // Update question state with savedToBank = true
+      setQuestions((prev) =>
+        prev.map((item) => (item.id === q.id ? { ...item, savedToBank: true } : item))
+      );
+      // Update ref as well
+      questionsRef.current = questionsRef.current.map((item) =>
+        item.id === q.id ? { ...item, savedToBank: true } : item
+      );
+
       toast.success("Question saved to bank successfully");
     } catch (err: any) {
       toast.error(err.message || "Failed to save question to bank");
@@ -3863,7 +3986,7 @@ export default function NewAssessmentBuilder() {
     // Check for duplicate content or ID
     const isDuplicate = questionsRef.current.some(
       (q) =>
-        q.id.includes(qBankSummary.id) ||
+        q.id === qBankSummary.id ||
         q.text.trim() === qBankSummary.content.trim(),
     );
     if (isDuplicate) {
@@ -3983,25 +4106,57 @@ export default function NewAssessmentBuilder() {
           ? questionsOverride
           : questionsRef.current;
 
-      // 1. Generate UUIDs for temporary IDs and mutate refs in-place
-      blueprintRef.current.forEach((b) => {
+      // 1. Generate UUIDs for temporary IDs.
+      let blueprintChanged = false;
+      let questionsChanged = false;
+
+      const nextBlueprint = blueprintRef.current.map((b) => {
         if (b.id.startsWith("sec-")) {
-          const newId = crypto.randomUUID();
-          // Update any questions referencing this temporary section ID
-          activeQuestions.forEach((q) => {
-            if (q.sectionId === b.id) {
-              q.sectionId = newId;
-            }
-          });
-          b.id = newId;
+          blueprintChanged = true;
+          return { ...b, id: crypto.randomUUID() };
+        }
+        return b;
+      });
+
+      // Create a mapping of old section IDs to new section IDs
+      const sectionIdMap: Record<string, string> = {};
+      blueprintRef.current.forEach((b, idx) => {
+        const nextB = nextBlueprint[idx];
+        if (b.id !== nextB.id) {
+          sectionIdMap[b.id] = nextB.id;
         }
       });
 
-      activeQuestions.forEach((q) => {
-        if (q.id.startsWith("q-") && !q.id.startsWith("q-bank-")) {
-          q.id = crypto.randomUUID();
+      // Clone questions and map section IDs and question IDs
+      const nextQuestions = activeQuestions.map((q) => {
+        const clonedQ = { ...q };
+        let questionChanged = false;
+
+        if (clonedQ.sectionId && sectionIdMap[clonedQ.sectionId]) {
+          clonedQ.sectionId = sectionIdMap[clonedQ.sectionId];
+          questionChanged = true;
         }
+
+        if (clonedQ.id.startsWith("q-") && !clonedQ.id.startsWith("q-bank-")) {
+          clonedQ.id = crypto.randomUUID();
+          questionChanged = true;
+        }
+
+        if (questionChanged) {
+          questionsChanged = true;
+        }
+        return clonedQ;
       });
+
+      if (blueprintChanged) {
+        setBlueprint(nextBlueprint);
+        blueprintRef.current = nextBlueprint;
+      }
+
+      if (questionsChanged) {
+        setQuestions(nextQuestions);
+        questionsRef.current = nextQuestions;
+      }
 
       const payload = {
         id: draftIdRef.current || undefined,
@@ -4089,7 +4244,7 @@ export default function NewAssessmentBuilder() {
           bloomLevel: b.bloomLevel,
           per_group: b.per_group || false,
         })),
-        questions: activeQuestions.map((q) => {
+        questions: nextQuestions.map((q) => {
           let finalOptions: QuestionOption[] = (q.options || []).map((opt) => ({
             option_text: opt.option_text,
             option_text_right: opt.option_text_right,
@@ -4224,7 +4379,7 @@ export default function NewAssessmentBuilder() {
     (targetStep: number): boolean => {
       if (targetStep < activeStep) return true;
 
-      if (targetStep >= 2 && activeStep < 2) {
+      if (targetStep >= 2) {
         if (!metadata.title) {
           toast.error("Display Title is required");
           return false;
@@ -4285,7 +4440,7 @@ export default function NewAssessmentBuilder() {
         }
       }
 
-      if (targetStep >= 4 && activeStep < 4) {
+      if (targetStep >= 4) {
         if (
           metadata.audience_type === "selected" &&
           (!metadata.target_student_ids ||
@@ -4298,7 +4453,7 @@ export default function NewAssessmentBuilder() {
         }
       }
 
-      if (targetStep >= 5 && activeStep < 5) {
+      if (targetStep >= 5) {
         if (blueprint.length === 0) {
           toast.error(
             "Cannot advance to questions without completing blueprint (must have at least 1 section)",
@@ -4335,7 +4490,7 @@ export default function NewAssessmentBuilder() {
         }
       }
 
-      if (targetStep >= 6 && activeStep < 6) {
+      if (targetStep >= 6) {
         const targetTotal = parseInt(metadata.total_marks as any) || 0;
         if (currentMarks !== targetTotal) {
           toast.error(
@@ -4352,7 +4507,7 @@ export default function NewAssessmentBuilder() {
             );
             return false;
           }
-          if (q.type === "fillblank") {
+          if (q.type === "fillblank" || (q.type as string) === "fill_blank") {
             const content = q.text || "";
             if (!content.includes("[blank]")) {
               toast.error(
@@ -4375,89 +4530,89 @@ export default function NewAssessmentBuilder() {
       const sortedSections = [...res.sections].sort(
         (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
       );
-      setBlueprint(
-        sortedSections.map((s: any) => ({
-          id: s.id,
-          section: s.title,
-          topics: s.description || "",
-          marks: s.allocated_marks || 0,
-          questions: s.question_count_target || 0,
-          difficulty: (() => {
-            const diff =
-              s.allowed_question_types?.difficulty || s.difficulty || "Medium";
-            return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
-          })(),
-          allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map(
-            (t: string) => t.toLowerCase().replaceAll("_", ""),
-          ),
-          aiPromptHint: s.ai_generation_prompt_hint || "",
-          difficultyDistribution: s.difficulty_distribution || undefined,
-          bloomLevel:
-            s.allowed_question_types?.bloom_level ||
-            s.allowed_question_types?.bloomLevel ||
-            s.bloom_level ||
-            s.bloomLevel ||
-            "understand",
-        })),
-      );
+      const nextBlueprint = sortedSections.map((s: any) => ({
+        id: s.id,
+        section: s.title,
+        topics: s.description || "",
+        marks: s.allocated_marks || 0,
+        questions: s.question_count_target || 0,
+        difficulty: (() => {
+          const diff =
+            s.allowed_question_types?.difficulty || s.difficulty || "Medium";
+          return diff.charAt(0).toUpperCase() + diff.slice(1).toLowerCase();
+        })(),
+        allowedTypes: (s.allowed_question_types?.types || ["mcq"]).map(
+          (t: string) => t.toLowerCase().replaceAll("_", ""),
+        ),
+        aiPromptHint: s.ai_generation_prompt_hint || "",
+        difficultyDistribution: s.difficulty_distribution || undefined,
+        bloomLevel:
+          s.allowed_question_types?.bloom_level ||
+          s.allowed_question_types?.bloomLevel ||
+          s.bloom_level ||
+          s.bloomLevel ||
+          "understand",
+      }));
+      setBlueprint(nextBlueprint);
+      blueprintRef.current = nextBlueprint;
     }
 
     if (res.assessment_questions?.length > 0) {
       const sortedQuestions = [...res.assessment_questions].sort(
         (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
       );
-      setQuestions(
-        sortedQuestions.map((aq: any) => {
-          const type = aq.question.question_type
-            .toLowerCase()
-            .replaceAll("_", "") as QuestionType;
-          const optionsRaw = aq.question.options || [];
-          const unpacked = parseOpenEndedExplanation(
-            type,
-            optionsRaw[0]?.option_text ||
-              optionsRaw[0]?.content ||
-              aq.question.explanation ||
-              "",
-          );
-          return {
-            id: aq.question.id,
-            sectionId: aq.assessment_section_id,
-            groupId: aq.group_id,
-            text: aq.question.content,
-            imageUrl: aq.question.image_url,
-            type: type,
-            marks: aq.marks_override || aq.question.marks,
-            options: ["essay", "shortanswer", "computational"].includes(type)
-              ? [
-                  {
-                    id: optionsRaw[0]?.id,
-                    option_text:
-                      unpacked.modelAnswer || aq.question.explanation || "",
-                    option_text_right: "",
-                    is_correct: true,
-                    order_index: 0,
-                  },
-                ]
-              : optionsRaw.map((o: any, idx: number) => ({
-                  id: o.id,
-                  option_text: o.option_text || o.content || "",
-                  option_text_right: o.option_text_right || o.match_value || "",
-                  is_correct: o.is_correct,
-                  order_index: o.order_index,
-                  match_key: o.match_key,
-                })),
-            rubric: unpacked.rubric,
-            wordLimit: unpacked.wordLimit,
-            solutionSteps: unpacked.solutionSteps,
-            tolerance: unpacked.tolerance,
-            computationalType: aq.question.computational_type,
-            caseStudyContext: aq.question.case_study_context,
-            aiGenerated:
-              aq.added_via === "ai_generated" || aq.question.ai_generated,
-            is_required: aq.is_required ?? true,
-          };
-        }),
-      );
+      const nextQuestions = sortedQuestions.map((aq: any) => {
+        const type = aq.question.question_type
+          .toLowerCase()
+          .replaceAll("_", "") as QuestionType;
+        const optionsRaw = aq.question.options || [];
+        const unpacked = parseOpenEndedExplanation(
+          type,
+          optionsRaw[0]?.option_text ||
+            optionsRaw[0]?.content ||
+            aq.question.explanation ||
+            "",
+        );
+        return {
+          id: aq.question.id,
+          sectionId: aq.assessment_section_id,
+          groupId: aq.group_id,
+          text: aq.question.content,
+          imageUrl: aq.question.image_url,
+          type: type,
+          marks: aq.marks_override || aq.question.marks,
+          options: ["essay", "shortanswer", "computational"].includes(type)
+            ? [
+                {
+                  id: optionsRaw[0]?.id,
+                  option_text:
+                    unpacked.modelAnswer || aq.question.explanation || "",
+                  option_text_right: "",
+                  is_correct: true,
+                  order_index: 0,
+                },
+              ]
+            : optionsRaw.map((o: any, idx: number) => ({
+                id: o.id,
+                option_text: o.option_text || o.content || "",
+                option_text_right: o.option_text_right || o.match_value || "",
+                is_correct: o.is_correct,
+                order_index: o.order_index,
+                match_key: o.match_key,
+              })),
+          rubric: unpacked.rubric,
+          wordLimit: unpacked.wordLimit,
+          solutionSteps: unpacked.solutionSteps,
+          tolerance: unpacked.tolerance,
+          computationalType: aq.question.computational_type,
+          caseStudyContext: aq.question.case_study_context,
+          aiGenerated:
+            aq.added_via === "ai_generated" || aq.question.ai_generated,
+          is_required: aq.is_required ?? true,
+        };
+      });
+      setQuestions(nextQuestions);
+      questionsRef.current = nextQuestions;
     }
 
     const initialTotal = res.total_marks || 0;
@@ -4534,6 +4689,11 @@ export default function NewAssessmentBuilder() {
     async (targetStep: number) => {
       if (targetStep === activeStep) return;
 
+      if (aiGenerating) {
+        toast.warning("AI is currently generating questions. Please wait until generation completes.");
+        return;
+      }
+
       if (targetStep < activeStep) {
         toast.warning(
           `Navigating backward to step ${targetStep}. Your draft is autosaved.`,
@@ -4559,7 +4719,7 @@ export default function NewAssessmentBuilder() {
       }
       setActiveStep(targetStep);
     },
-    [activeStep, runAutosave, runStepGuards, triggerStep6Load],
+    [activeStep, aiGenerating, runAutosave, runStepGuards, triggerStep6Load],
   );
 
   const runAutosaveRef = useRef(runAutosave);
@@ -5100,8 +5260,8 @@ export default function NewAssessmentBuilder() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-6 border-t border-dashed">
-                  <div className="space-y-2">
+                <div className="pt-6 border-t border-dashed">
+                  <div className="space-y-2 max-w-sm">
                     <Label htmlFor="durationMinutes">
                       Duration (Min) <span className="text-red-500">*</span>
                     </Label>
@@ -5133,23 +5293,6 @@ export default function NewAssessmentBuilder() {
                         {fieldErrors.duration_minutes}
                       </p>
                     )}
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="totalMarksInput">
-                      Total Marks <span className="text-red-500">*</span>
-                    </Label>
-                    <Input
-                      type="number"
-                      id="totalMarksInput"
-                      value={metadata.total_marks || 0}
-                      disabled
-                      className="h-10 bg-muted cursor-not-allowed"
-                      aria-invalid={!!fieldErrors.total_marks}
-                    />
-                    <p className="text-[10px] text-muted-foreground">
-                      Automatically calculated from Blueprint section marks
-                      (configured in Step 4).
-                    </p>
                   </div>
                 </div>
               </CardContent>
@@ -5461,35 +5604,7 @@ export default function NewAssessmentBuilder() {
                       ))}
                     </div>
 
-                    <div className="space-y-3 pt-5 border-t">
-                      <Label htmlFor="resultRelease">Result Release Mode</Label>
-                      <Select
-                        value={metadata.result_release_mode}
-                        onValueChange={(v: any) => {
-                          setMetadata({ ...metadata, result_release_mode: v });
-                          setRules({
-                            ...rules,
-                            resultRelease: v.toLowerCase() as any,
-                          });
-                          triggerDebouncedAutosave(2);
-                        }}
-                      >
-                        <SelectTrigger className="h-9" id="resultRelease">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="IMMEDIATE">
-                            Immediate (Auto-grade)
-                          </SelectItem>
-                          <SelectItem value="MANUAL">
-                            Manual Review Required
-                          </SelectItem>
-                          <SelectItem value="SCHEDULED">
-                            Scheduled Release Time
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
+
 
                     <div className="pt-5 border-t">
                       <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-4">
@@ -6287,12 +6402,20 @@ export default function NewAssessmentBuilder() {
                     setAiGenerationConfig(loadSavedAiConfig("all", defaults));
                     setAiDrawerOpen(true);
                   }}
+                  disabled={aiGenerating}
                   variant="outline"
                   size="sm"
                   className="h-9"
                 >
-                  <BrainCircuit className="mr-2 size-4 text-primary" /> Generate
-                  All with AI
+                  {aiGenerating ? (
+                    <>
+                      <LoaderCircleIcon className="mr-2 size-4 animate-spin text-primary" /> Generating...
+                    </>
+                  ) : (
+                    <>
+                      <BrainCircuit className="mr-2 size-4 text-primary" /> Generate All with AI
+                    </>
+                  )}
                 </Button>
                 <Button
                   onClick={addSection}
@@ -6375,9 +6498,18 @@ export default function NewAssessmentBuilder() {
                           );
                           setAiDrawerOpen(true);
                         }}
+                        disabled={aiGenerating}
                         className="h-7 text-xs"
                       >
-                        <BrainCircuit className="mr-1.5 size-3.5" /> AI Generate
+                        {aiGenerating && aiTargetSectionId === sec.id ? (
+                          <>
+                            <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> Generating...
+                          </>
+                        ) : (
+                          <>
+                            <BrainCircuit className="mr-1.5 size-3.5" /> Generate with AI
+                          </>
+                        )}
                       </Button>
                       <Button
                         variant="ghost"
@@ -6519,23 +6651,26 @@ export default function NewAssessmentBuilder() {
                           >
                             Section Difficulty
                           </Label>
-                          <select
-                            id={`difficulty-${sec.id}`}
+                          <Select
                             value={sec.difficulty}
-                            onChange={(e) => {
+                            onValueChange={(val) => {
                               updateSection(
                                 sec.id,
                                 "difficulty",
-                                e.target.value as any,
+                                val as any,
                               );
                               triggerDebouncedAutosave(4);
                             }}
-                            className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
                           >
-                            <option value="Easy">Easy</option>
-                            <option value="Medium">Medium</option>
-                            <option value="Hard">Hard</option>
-                          </select>
+                            <SelectTrigger id={`difficulty-${sec.id}`} className="w-full h-9 text-xs">
+                              <SelectValue placeholder="Select difficulty" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="Easy">Easy</SelectItem>
+                              <SelectItem value="Medium">Medium</SelectItem>
+                              <SelectItem value="Hard">Hard</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                         <div className="space-y-1.5">
                           <Label
@@ -6544,26 +6679,29 @@ export default function NewAssessmentBuilder() {
                           >
                             Target Bloom&apos;s Level
                           </Label>
-                          <select
-                            id={`bloom-${sec.id}`}
+                          <Select
                             value={sec.bloomLevel || "understand"}
-                            onChange={(e) => {
+                            onValueChange={(val) => {
                               updateSection(
                                 sec.id,
                                 "bloomLevel",
-                                e.target.value as any,
+                                val as any,
                               );
                               triggerDebouncedAutosave(4);
                             }}
-                            className="w-full h-9 rounded-lg border border-zinc-200 text-xs px-2.5 bg-white outline-none text-zinc-700"
                           >
-                            <option value="remember">Remembering</option>
-                            <option value="understand">Understanding</option>
-                            <option value="apply">Applying</option>
-                            <option value="analyze">Analyzing</option>
-                            <option value="evaluate">Evaluating</option>
-                            <option value="create">Creating</option>
-                          </select>
+                            <SelectTrigger id={`bloom-${sec.id}`} className="w-full h-9 text-xs">
+                              <SelectValue placeholder="Select Bloom's Level" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="remember">Remembering</SelectItem>
+                              <SelectItem value="understand">Understanding</SelectItem>
+                              <SelectItem value="apply">Applying</SelectItem>
+                              <SelectItem value="analyze">Analyzing</SelectItem>
+                              <SelectItem value="evaluate">Evaluating</SelectItem>
+                              <SelectItem value="create">Creating</SelectItem>
+                            </SelectContent>
+                          </Select>
                         </div>
                       </div>
                     </div>
@@ -7553,33 +7691,7 @@ export default function NewAssessmentBuilder() {
                       </div>
                     </div>
 
-                    {metadata.result_release_mode === "SCHEDULED" && (
-                      <div className="pt-3 border-t space-y-1.5">
-                        <Label htmlFor="releaseAt">Release Date / Time</Label>
-                        <Input
-                          type="datetime-local"
-                          id="releaseAt"
-                          value={
-                            rules.resultReleaseAt
-                              ? format(
-                                  new Date(rules.resultReleaseAt),
-                                  "yyyy-MM-dd'T'HH:mm",
-                                )
-                              : ""
-                          }
-                          onChange={(e) => {
-                            setRules({
-                              ...rules,
-                              resultReleaseAt: e.target.value
-                                ? new Date(e.target.value)
-                                : undefined,
-                            });
-                            triggerDebouncedAutosave(6);
-                          }}
-                          className="h-9 text-xs"
-                        />
-                      </div>
-                    )}
+
 
                     <div className="pt-4 border-t space-y-3">
                       <div className="flex items-start gap-2.5">
@@ -7878,19 +7990,19 @@ export default function NewAssessmentBuilder() {
         </Stepper>
       </div>
 
-      {/* AI GENERATION CONFIG DIALOG */}
-      <Dialog open={aiDrawerOpen} onOpenChange={setAiDrawerOpen}>
-        <DialogContent className="sm:max-w-162.5 md:max-w-175 w-full p-6 flex flex-col max-h-[90vh]">
-          <DialogHeader className="border-b pb-4 shrink-0">
-            <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+      {/* AI GENERATION CONFIG SHEET */}
+      <Sheet open={aiDrawerOpen} onOpenChange={setAiDrawerOpen}>
+        <SheetContent side="right" className="w-full sm:max-w-162.5 md:max-w-175 p-6 flex flex-col h-full overflow-y-auto">
+          <SheetHeader className="border-b pb-4 shrink-0">
+            <SheetTitle className="flex items-center gap-2 text-lg font-bold">
               <BrainCircuit className="size-5 text-primary animate-pulse" /> AI
               Question Generator Settings
-            </DialogTitle>
-            <DialogDescription>
+            </SheetTitle>
+            <SheetDescription>
               Configure generation constraints. AI will draft questions matching
               these criteria.
-            </DialogDescription>
-          </DialogHeader>
+            </SheetDescription>
+          </SheetHeader>
           <div className="-mx-4 no-scrollbar max-h-[60vh] overflow-y-auto px-4 py-2 space-y-4 flex-1">
             {aiTargetSectionId === "all" ? (
               <div className="space-y-4">
@@ -8149,8 +8261,8 @@ export default function NewAssessmentBuilder() {
               )}
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </SheetContent>
+      </Sheet>
 
       {/* AI REVIEW CANDIDATES SHEET */}
       <Sheet
@@ -8243,325 +8355,335 @@ export default function NewAssessmentBuilder() {
 
           <div className="-mx-4 no-scrollbar max-h-[60vh] overflow-y-auto px-4 py-2 space-y-6 flex-1">
             <div className="space-y-6">
-              {aiCandidates.map((cand, idx) => (
-                <Card
-                  key={cand.id}
-                  className="shadow-none border hover:border-primary/20 transition-all"
-                >
-                  <CardContent className="p-4 space-y-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] font-bold uppercase"
-                        >
-                          {cand.question_type}
-                        </Badge>
-                        <Badge
-                          variant="secondary"
-                          className="text-[10px] uppercase"
-                        >
-                          {cand.difficulty}
-                        </Badge>
-                        {/* RAG source badge — tells the lecturer how the question was grounded */}
-                        {cand.grounded_by_rag ? (
-                          <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
-                            <BookOpen className="size-2.5" />
-                            Lecture Material
-                          </Badge>
-                        ) : (
-                          <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50">
-                            <BrainCircuit className="size-2.5" />
-                            AI Knowledge
-                          </Badge>
-                        )}
+              {(() => {
+                const groups: { [key: string]: any[] } = {};
+                aiCandidates.forEach((c) => {
+                  const secId = c._sectionId || "unknown";
+                  if (!groups[secId]) groups[secId] = [];
+                  groups[secId].push(c);
+                });
+
+                return Object.entries(groups).map(([secId, items]) => {
+                  const sectionObj = blueprint.find((s) => s.id === secId);
+                  const sectionTitle = sectionObj ? sectionObj.section : "General / First Section";
+                  return (
+                    <div key={secId} className="space-y-4">
+                      <div className="flex items-center gap-2 border-b pb-2 bg-muted/5 sticky top-0 z-10 backdrop-blur-sm pt-2">
+                        <div className="h-4 w-1 rounded bg-primary" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                          {sectionTitle} ({items.length})
+                        </h4>
                       </div>
-                      <div className="flex gap-1">
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleAcceptCandidate(cand.id)}
-                          className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
-                        >
-                          <Check className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setEditingCandidateId(cand.id);
-                            setEditingText(cand.parsed_question_text || "");
-                            setEditingExplanation(
-                              cand.parsed_explanation || "",
-                            );
-                            setEditingOptions(
-                              (cand.options || cand._options || []).map(
-                                (o: any) => ({
-                                  option_text: o.text || o.option_text || "",
-                                  option_text_right:
-                                    o.option_text_right || o.explanation || "",
-                                  is_correct: o.is_correct ?? false,
-                                  order_index: o.order_index ?? 0,
-                                  match_key: o.match_key,
-                                }),
-                              ),
-                            );
-                          }}
-                          className="h-8 w-8 text-primary hover:bg-primary/5"
-                        >
-                          <FileText className="size-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => handleRejectCandidate(cand.id)}
-                          className="h-8 w-8 text-destructive hover:bg-destructive/5"
-                        >
-                          <X className="size-4" />
-                        </Button>
+                      <div className="space-y-4">
+                        {items.map((cand) => (
+                          <Card
+                            key={cand.id}
+                            className="shadow-none border hover:border-primary/20 transition-all bg-white"
+                          >
+                            <CardContent className="p-4 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[10px] font-bold uppercase"
+                                  >
+                                    {cand.question_type}
+                                  </Badge>
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[10px] uppercase"
+                                  >
+                                    {cand.difficulty}
+                                  </Badge>
+                                  {cand.grounded_by_rag ? (
+                                    <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
+                                      <BookOpen className="size-2.5" />
+                                      Lecture Material
+                                    </Badge>
+                                  ) : (
+                                    <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50">
+                                      <BrainCircuit className="size-2.5" />
+                                      AI Knowledge
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex gap-1">
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleAcceptCandidate(cand.id)}
+                                    disabled={isReviewApplying}
+                                    className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                                  >
+                                    <Check className="size-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => {
+                                      setEditingCandidateId(cand.id);
+                                      setEditingText(cand.parsed_question_text || "");
+                                      setEditingExplanation(
+                                        cand.parsed_explanation || "",
+                                      );
+                                      setEditingOptions(
+                                        (cand.options || cand._options || []).map(
+                                          (o: any) => ({
+                                            option_text: o.text || o.option_text || "",
+                                            option_text_right:
+                                              o.option_text_right || o.explanation || "",
+                                            is_correct: o.is_correct ?? false,
+                                            order_index: o.order_index ?? 0,
+                                            match_key: o.match_key,
+                                          }),
+                                        ),
+                                      );
+                                    }}
+                                    className="h-8 w-8 text-primary hover:bg-primary/5"
+                                  >
+                                    <FileText className="size-4" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => handleRejectCandidate(cand.id)}
+                                    disabled={isReviewApplying}
+                                    className="h-8 w-8 text-destructive hover:bg-destructive/5"
+                                  >
+                                    <X className="size-4" />
+                                  </Button>
+                                </div>
+                              </div>
+
+                              {editingCandidateId === cand.id ? (
+                                <div className="space-y-3 pt-2">
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold">
+                                      Edit Question Content
+                                    </Label>
+                                    <Textarea
+                                      value={editingText}
+                                      onChange={(e) => setEditingText(e.target.value)}
+                                      className="min-h-20"
+                                    />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label className="text-xs font-semibold">
+                                      Edit Explanation
+                                    </Label>
+                                    <Textarea
+                                      value={editingExplanation}
+                                      onChange={(e) =>
+                                        setEditingExplanation(e.target.value)
+                                      }
+                                    />
+                                  </div>
+
+                                  {editingOptions.length > 0 && (
+                                    <div className="space-y-2.5 pt-2 border-t border-dashed">
+                                      <Label className="text-xs font-semibold">
+                                        Edit Options / Choices
+                                      </Label>
+                                      <div className="space-y-2">
+                                        {editingOptions.map((opt, oIdx) => {
+                                          const qType = mapBackendToFrontendType(
+                                            cand.question_type,
+                                          );
+                                          return (
+                                            <div
+                                              key={oIdx}
+                                              className="flex gap-2 items-center"
+                                            >
+                                              {qType === "matching" ? (
+                                                <>
+                                                  <Input
+                                                    value={opt.option_text || ""}
+                                                    onChange={(e) => {
+                                                      const newOpts = [...editingOptions];
+                                                      newOpts[oIdx] = {
+                                                        ...newOpts[oIdx],
+                                                        option_text: e.target.value,
+                                                      };
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                    placeholder="Left value..."
+                                                    className="h-8 text-xs flex-1"
+                                                  />
+                                                  <span className="text-xs text-muted-foreground">
+                                                    ➔
+                                                  </span>
+                                                  <Input
+                                                    value={opt.option_text_right || ""}
+                                                    onChange={(e) => {
+                                                      const newOpts = [...editingOptions];
+                                                      newOpts[oIdx] = {
+                                                        ...newOpts[oIdx],
+                                                        option_text_right: e.target.value,
+                                                      };
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                    placeholder="Right value..."
+                                                    className="h-8 text-xs flex-1"
+                                                  />
+                                                </>
+                                              ) : qType === "casestudy" ? (
+                                                <>
+                                                  <Input
+                                                    value={opt.option_text || ""}
+                                                    onChange={(e) => {
+                                                      const newOpts = [...editingOptions];
+                                                      newOpts[oIdx] = {
+                                                        ...newOpts[oIdx],
+                                                        option_text: e.target.value,
+                                                      };
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                    placeholder="Sub-question text..."
+                                                    className="h-8 text-xs flex-1"
+                                                  />
+                                                  <Input
+                                                    type="number"
+                                                    value={
+                                                      opt.match_key !== undefined &&
+                                                      opt.match_key !== null
+                                                        ? opt.match_key
+                                                        : "5"
+                                                    }
+                                                    onChange={(e) => {
+                                                      const newOpts = [...editingOptions];
+                                                      newOpts[oIdx] = {
+                                                        ...newOpts[oIdx],
+                                                        match_key: e.target.value,
+                                                      };
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                    placeholder="Marks"
+                                                    className="h-8 text-xs w-16 text-center"
+                                                  />
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Checkbox
+                                                    checked={opt.is_correct}
+                                                    onCheckedChange={(checked) => {
+                                                      const newOpts = [...editingOptions];
+                                                      if (
+                                                        qType === "truefalse" ||
+                                                        qType === "mcq"
+                                                      ) {
+                                                        if (checked) {
+                                                          newOpts.forEach((o, idx) => {
+                                                            o.is_correct = idx === oIdx;
+                                                          });
+                                                        } else {
+                                                          newOpts[oIdx].is_correct =
+                                                            false;
+                                                        }
+                                                      } else {
+                                                        newOpts[oIdx].is_correct =
+                                                          !!checked;
+                                                      }
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                  />
+                                                  <Input
+                                                    value={opt.option_text || ""}
+                                                    onChange={(e) => {
+                                                      const newOpts = [...editingOptions];
+                                                      newOpts[oIdx] = {
+                                                        ...newOpts[oIdx],
+                                                        option_text: e.target.value,
+                                                      };
+                                                      setEditingOptions(newOpts);
+                                                    }}
+                                                    placeholder="Option text..."
+                                                    className="h-8 text-xs flex-1"
+                                                  />
+                                                </>
+                                              )}
+                                            </div>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  <div className="flex justify-end gap-2">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => setEditingCandidateId(null)}
+                                    >
+                                      Cancel
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => handleSaveEditedCandidate(cand.id)}
+                                      disabled={isReviewApplying}
+                                    >
+                                      Save & Accept
+                                    </Button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="space-y-2">
+                                  <p className="text-sm font-semibold">
+                                    {cand.parsed_question_text}
+                                  </p>
+                                  {(() => {
+                                    const opts = cand.options || cand._options || [];
+                                    return (
+                                      opts.length > 0 && (
+                                        <div className="grid grid-cols-2 gap-2 pt-2">
+                                          {opts.map((opt: any, oIdx: number) => (
+                                            <div
+                                              key={oIdx}
+                                              className={cn(
+                                                "flex items-center justify-between text-xs p-2 rounded border transition-all",
+                                                opt.is_correct
+                                                  ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-medium"
+                                                  : "bg-zinc-50 border-zinc-200 text-zinc-700",
+                                              )}
+                                            >
+                                              <span className="truncate">
+                                                {(() => {
+                                                  const textVal =
+                                                    opt.option_text ||
+                                                    opt.text ||
+                                                    opt.content ||
+                                                    "";
+                                                  if (opt.option_text_right) {
+                                                    return `${textVal} ➔ ${opt.option_text_right}`;
+                                                  }
+                                                  return textVal;
+                                                })()}
+                                              </span>
+                                              {opt.is_correct && (
+                                                <Check className="size-3 text-emerald-600" />
+                                              )}
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )
+                                    );
+                                  })()}
+                                  {cand.parsed_explanation && (
+                                    <div className="text-[11px] text-muted-foreground bg-muted/10 p-2 rounded border border-dashed mt-2">
+                                      <strong>Explanation:</strong>{" "}
+                                      {cand.parsed_explanation}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </CardContent>
+                          </Card>
+                        ))}
                       </div>
                     </div>
+                  );
+                });
+              })()}
 
-                    {editingCandidateId === cand.id ? (
-                      <div className="space-y-3 pt-2">
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">
-                            Edit Question Content
-                          </Label>
-                          <Textarea
-                            value={editingText}
-                            onChange={(e) => setEditingText(e.target.value)}
-                            className="min-h-20"
-                          />
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label className="text-xs font-semibold">
-                            Edit Explanation
-                          </Label>
-                          <Textarea
-                            value={editingExplanation}
-                            onChange={(e) =>
-                              setEditingExplanation(e.target.value)
-                            }
-                          />
-                        </div>
-
-                        {editingOptions.length > 0 && (
-                          <div className="space-y-2.5 pt-2 border-t border-dashed">
-                            <Label className="text-xs font-semibold">
-                              Edit Options / Choices
-                            </Label>
-                            <div className="space-y-2">
-                              {editingOptions.map((opt, oIdx) => {
-                                const qType = mapBackendToFrontendType(
-                                  cand.question_type,
-                                );
-                                return (
-                                  <div
-                                    key={oIdx}
-                                    className="flex gap-2 items-center"
-                                  >
-                                    {qType === "matching" ? (
-                                      <>
-                                        <Input
-                                          value={opt.option_text || ""}
-                                          onChange={(e) => {
-                                            const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = {
-                                              ...newOpts[oIdx],
-                                              option_text: e.target.value,
-                                            };
-                                            setEditingOptions(newOpts);
-                                          }}
-                                          placeholder="Left value..."
-                                          className="h-8 text-xs flex-1"
-                                        />
-                                        <span className="text-xs text-muted-foreground">
-                                          ➔
-                                        </span>
-                                        <Input
-                                          value={opt.option_text_right || ""}
-                                          onChange={(e) => {
-                                            const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = {
-                                              ...newOpts[oIdx],
-                                              option_text_right: e.target.value,
-                                            };
-                                            setEditingOptions(newOpts);
-                                          }}
-                                          placeholder="Right value..."
-                                          className="h-8 text-xs flex-1"
-                                        />
-                                      </>
-                                    ) : qType === "casestudy" ? (
-                                      <>
-                                        <Input
-                                          value={opt.option_text || ""}
-                                          onChange={(e) => {
-                                            const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = {
-                                              ...newOpts[oIdx],
-                                              option_text: e.target.value,
-                                            };
-                                            setEditingOptions(newOpts);
-                                          }}
-                                          placeholder="Sub-question text..."
-                                          className="h-8 text-xs flex-1"
-                                        />
-                                        <Input
-                                          type="number"
-                                          value={
-                                            opt.match_key !== undefined &&
-                                            opt.match_key !== null
-                                              ? opt.match_key
-                                              : "5"
-                                          }
-                                          onChange={(e) => {
-                                            const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = {
-                                              ...newOpts[oIdx],
-                                              match_key: e.target.value,
-                                            };
-                                            setEditingOptions(newOpts);
-                                          }}
-                                          placeholder="Marks"
-                                          className="h-8 text-xs w-16 text-center"
-                                        />
-                                      </>
-                                    ) : (
-                                      <>
-                                        <Checkbox
-                                          checked={opt.is_correct}
-                                          onCheckedChange={(checked) => {
-                                            const newOpts = [...editingOptions];
-                                            if (
-                                              qType === "truefalse" ||
-                                              qType === "mcq"
-                                            ) {
-                                              if (checked) {
-                                                newOpts.forEach((o, idx) => {
-                                                  o.is_correct = idx === oIdx;
-                                                });
-                                              } else {
-                                                newOpts[oIdx].is_correct =
-                                                  false;
-                                              }
-                                            } else {
-                                              newOpts[oIdx].is_correct =
-                                                !!checked;
-                                            }
-                                            setEditingOptions(newOpts);
-                                          }}
-                                        />
-                                        <Input
-                                          value={opt.option_text || ""}
-                                          onChange={(e) => {
-                                            const newOpts = [...editingOptions];
-                                            newOpts[oIdx] = {
-                                              ...newOpts[oIdx],
-                                              option_text: e.target.value,
-                                            };
-                                            setEditingOptions(newOpts);
-                                          }}
-                                          placeholder="Option text..."
-                                          className="h-8 text-xs flex-1"
-                                        />
-                                      </>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setEditingCandidateId(null)}
-                          >
-                            Cancel
-                          </Button>
-                          <Button
-                            size="sm"
-                            onClick={() => handleSaveEditedCandidate(cand.id)}
-                          >
-                            Save & Accept
-                          </Button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        <p className="text-sm font-semibold">
-                          {cand.parsed_question_text}
-                        </p>
-                        {(() => {
-                          const opts = cand.options || cand._options || [];
-                          return (
-                            opts.length > 0 && (
-                              <div className="grid grid-cols-2 gap-2 pt-2">
-                                {opts.map((opt: any, oIdx: number) => (
-                                  <div
-                                    key={oIdx}
-                                    className={cn(
-                                      "text-xs p-2 rounded border flex items-center justify-between",
-                                      opt.is_correct
-                                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                        : "bg-muted/10 border-border",
-                                    )}
-                                  >
-                                    <span>
-                                      {(() => {
-                                        const textVal =
-                                          opt.text || opt.option_text || "";
-                                        const rightVal =
-                                          opt.explanation ||
-                                          opt.option_text_right ||
-                                          "";
-                                        const marksVal =
-                                          opt.match_key !== undefined &&
-                                          opt.match_key !== null
-                                            ? opt.match_key
-                                            : "5";
-                                        const normType = (
-                                          cand.question_type || ""
-                                        )
-                                          .toLowerCase()
-                                          .replaceAll("_", "");
-
-                                        if (normType === "matching") {
-                                          return `${textVal} ➔ ${rightVal}`;
-                                        }
-                                        if (normType === "casestudy") {
-                                          const guidance = rightVal
-                                            ? ` — Guidance: ${rightVal}`
-                                            : "";
-                                          return `${textVal} (${marksVal} Marks)${guidance}`;
-                                        }
-                                        return textVal;
-                                      })()}
-                                    </span>
-                                    {opt.is_correct && (
-                                      <Check className="size-3 text-emerald-600" />
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            )
-                          );
-                        })()}
-                        {cand.parsed_explanation && (
-                          <div className="text-[11px] text-muted-foreground bg-muted/10 p-2 rounded border border-dashed mt-2">
-                            <strong>Explanation:</strong>{" "}
-                            {cand.parsed_explanation}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              ))}
               {aiCandidates.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
                   <CheckCircle2 className="size-8 text-emerald-500" />
@@ -8587,7 +8709,7 @@ export default function NewAssessmentBuilder() {
                 htmlFor="global-save-to-bank"
                 className="cursor-pointer font-medium text-foreground"
               >
-                Also save approved questions to the Question Bank
+                Save to bank in addition to adding to this assessment
               </Label>
             </div>
             <div className="flex gap-2">
@@ -8610,7 +8732,7 @@ export default function NewAssessmentBuilder() {
               <Button
                 variant="default"
                 size="sm"
-                onClick={handleAcceptAllCandidates}
+                onClick={() => setShowAcceptAllConfirm(true)}
                 className="text-xs h-8 bg-emerald-600 text-white hover:bg-emerald-700"
               >
                 Accept All
@@ -8619,6 +8741,39 @@ export default function NewAssessmentBuilder() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog open={showAcceptAllConfirm} onOpenChange={setShowAcceptAllConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Accept All Questions</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to accept and add all generated questions to this assessment?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                handleAcceptAllCandidates();
+                setShowAcceptAllConfirm(false);
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white focus:ring-emerald-500"
+            >
+              Accept All
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {aiGenerating && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-zinc-950 text-white p-4 rounded-xl shadow-2xl border border-zinc-800 animate-in slide-in-from-bottom-5 duration-300">
+          <LoaderCircleIcon className="size-5 animate-spin text-primary" />
+          <div className="text-xs">
+            <p className="font-semibold">AI Question Generator</p>
+            <p className="text-zinc-400">Generating candidates...</p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -103,3 +103,63 @@ async def test_analytics_service_ensures_no_raw_student_data_passed():
         assert "students" not in stats
         assert "results" not in stats
         assert all(isinstance(v, (int, float, str, list, dict)) for v in stats.values())
+
+
+@pytest.mark.asyncio
+async def test_analytics_service_compute_aggregates_compilation():
+    # Verify that the SQLAlchemy queries inside _compute_aggregates construct and compile properly
+    from sqlalchemy.dialects import postgresql
+    
+    db = AsyncMock()
+    # Mocking executing queries (cohort summary, grade distribution, attempt metrics, released counts, and questions)
+    mock_res_cohort = MagicMock()
+    mock_res_cohort.fetchone.return_value = (50, 75.0, 95.0, 40.0, 45)
+    
+    mock_res_grades = MagicMock()
+    mock_res_grades.fetchall.return_value = [("A", 10), ("B", 40)]
+    
+    mock_res_attempt = MagicMock()
+    mock_res_attempt.fetchone.return_value = (50, 5, 2)
+    
+    mock_res_released = MagicMock()
+    mock_res_released.scalar.return_value = 30
+    
+    mock_res_q = MagicMock()
+    mock_res_q.fetchall.return_value = [(uuid.uuid4(), "Question Content here", "ESSAY", 3.0, 10.0)]
+
+    mock_res_total_oe = MagicMock()
+    mock_res_total_oe.scalar_one.return_value = 100
+
+    mock_res_ai_graded = MagicMock()
+    mock_res_ai_graded.scalar_one.return_value = 85
+    
+    db.execute.side_effect = [
+        mock_res_cohort,
+        mock_res_grades,
+        mock_res_attempt,
+        mock_res_released,
+        mock_res_q,
+        mock_res_total_oe,
+        mock_res_ai_graded
+    ]
+    
+    service = AnalyticsService(db)
+    assessment_id = uuid.uuid4()
+    
+    stats = await service._compute_aggregates(assessment_id)
+    
+    assert stats["cohort_size"] == 50
+    assert stats["average_score"] == 75.0
+    assert stats["pass_rate"] == 90.0
+    assert stats["grade_distribution"] == {"A": 10, "B": 40}
+    assert stats["hard_questions"] == ["Question Content here..."]
+    assert stats["ai_coverage_pct"] == 85.0
+    
+    # Verify we executed the 7 queries
+    assert db.execute.call_count == 7
+    
+    # Get the cohort query and check its compilation
+    cohort_stmt = db.execute.call_args_list[0][0][0]
+    compiled_cohort = cohort_stmt.compile(dialect=postgresql.dialect())
+    assert "CAST(assessment_result.is_passing AS INTEGER)" in str(compiled_cohort)
+

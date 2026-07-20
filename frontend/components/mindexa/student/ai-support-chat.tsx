@@ -122,6 +122,28 @@ export function AISupportChat() {
     }
   };
 
+  const handleApiError = (err: any, fallbackMessage: string) => {
+    const rawMessage = err?.message || "";
+    const isInternetIssue = 
+      rawMessage.toLowerCase().includes("internet issue") || 
+      rawMessage.toLowerCase().includes("timeout") ||
+      rawMessage.toLowerCase().includes("could not reach the api") ||
+      rawMessage.toLowerCase().includes("failed to fetch") ||
+      rawMessage.toLowerCase().includes("networkerror");
+
+    const userFriendlyMessage = isInternetIssue 
+      ? "Internet issue: Connection to external service failed. Please check your network connection."
+      : rawMessage || fallbackMessage;
+
+    setError(userFriendlyMessage);
+    
+    if (isInternetIssue) {
+      toast.error("Internet issue");
+    } else {
+      toast.error(userFriendlyMessage);
+    }
+  };
+
   // Parsed Interactive Schedules and Insights
   const [plannerSchedule, setPlannerSchedule] = useState<any[]>([]);
   const [insightsParsed, setInsightsParsed] = useState<{
@@ -420,8 +442,7 @@ export function AISupportChat() {
 
       setMessages((prev) => [...prev, newAiMessage]);
     } catch (err: any) {
-      setError(err.message || "Failed to retrieve AI explanation.");
-      toast.error("AI support request failed.");
+      handleApiError(err, "Failed to retrieve AI explanation.");
     } finally {
       setIsThinking(false);
     }
@@ -467,7 +488,7 @@ Ensure all values are properly escaped. If you cannot return JSON, return the pl
       }
       toast.success("Revision guide generated!");
     } catch (err: any) {
-      setError(err.message || "Failed to generate revision guide.");
+      handleApiError(err, "Failed to generate revision guide.");
     } finally {
       setIsGeneratingRevision(false);
     }
@@ -541,7 +562,7 @@ D) Option D
             /\[\[ANSWER:\s*([\s\S]*?)\s*\|\s*EXPLANATION:\s*([\s\S]*?)\s*\]\]/,
           );
           if (match) {
-            let qText = part.replace(/\[\[ANSWER:[\s\S]*?\]\]/, "").trim();
+            const qText = part.replace(/\[\[ANSWER:[\s\S]*?\]\]/, "").trim();
             const options: Record<string, string> = {};
             const lines = qText.split("\n");
             let cleanQuestion = "";
@@ -580,7 +601,7 @@ D) Option D
       setPracticeQuestions(parsedQuestions);
       toast.success("Practice quiz generated!");
     } catch (err: any) {
-      setError(err.message || "Failed to generate practice quiz.");
+      handleApiError(err, "Failed to generate practice quiz.");
     } finally {
       setIsGeneratingPractice(false);
     }
@@ -624,7 +645,7 @@ Ensure all text values are valid. If you cannot return JSON, return a plain text
       }
       toast.success("Study plan generated!");
     } catch (err: any) {
-      setError(err.message || "Failed to generate study plan.");
+      handleApiError(err, "Failed to generate study plan.");
     } finally {
       setIsGeneratingPlanner(false);
     }
@@ -679,7 +700,7 @@ Ensure the JSON is valid. If you cannot return JSON, return plain text.`;
       }
       toast.success("Insights analyzed!");
     } catch (err: any) {
-      setError(err.message || "Failed to analyze learning insights.");
+      handleApiError(err, "Failed to analyze learning insights.");
     } finally {
       setIsAnalyzingInsights(false);
     }
@@ -728,7 +749,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
       setFeedbackExplanation(res.explanation);
       toast.success("Feedback explanation generated!");
     } catch (err: any) {
-      setError(err.message || "Failed to explain lecturer feedback.");
+      handleApiError(err, "Failed to explain lecturer feedback.");
     } finally {
       setIsExplainingFeedback(false);
     }

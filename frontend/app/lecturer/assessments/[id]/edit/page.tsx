@@ -57,6 +57,7 @@ import {
   Users,
   Upload,
 } from "lucide-react";
+import Image from "next/image";
 import { format } from "date-fns";
 
 import {
@@ -861,10 +862,13 @@ function QuestionCard({
               </Label>
               {question.imageUrl ? (
                 <div className="relative inline-block border rounded-lg p-2 bg-background group">
-                  <img
+                  <Image
                     src={question.imageUrl}
                     alt="Diagram"
-                    className="max-h-60 rounded-md object-contain"
+                    width={800}
+                    height={600}
+                    unoptimized
+                    className="max-h-60 rounded-md object-contain w-auto h-auto"
                   />
                   {!disabled && (
                     <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-md">
@@ -1571,10 +1575,13 @@ function ReviewQuestionCard({
             </p>
             {question.imageUrl && (
               <div className="mt-3 inline-block p-1 border rounded-lg overflow-hidden">
-                <img
+                <Image
                   src={question.imageUrl}
                   alt="Diagram"
-                  className="max-h-52 rounded-md object-contain"
+                  width={800}
+                  height={600}
+                  unoptimized
+                  className="max-h-52 rounded-md object-contain w-auto h-auto"
                 />
               </div>
             )}

@@ -83,6 +83,15 @@ export interface Rubric {
   criteria: RubricCriterion[];
 }
 
+export interface SubQuestion {
+  id: string;
+  text: string;
+  marks: number;
+  ai_score?: number | null;
+  score?: number | null;
+  student_answer?: string | null;
+}
+
 export interface AttemptQuestion {
   id: string;
   type: string;
@@ -93,6 +102,7 @@ export interface AttemptQuestion {
   grading_mode?: string;
   caseStudyContext?: string;
   rubric?: Rubric;
+  sub_questions?: SubQuestion[];
 }
 
 export interface RubricCriteria {
@@ -181,6 +191,9 @@ export interface AssessmentSummary {
   passing_marks?: number;
   max_attempts?: number;
   is_group_assessment?: boolean;
+  individual_member_scoring?: boolean;
+  individual_weighting_enabled?: boolean;
+  teaching_workspace_id?: string;
 }
 
 export interface QuestionSummary {
@@ -218,6 +231,12 @@ export interface AnalyticsData {
   highest_score: number;
   lowest_score: number;
   pass_rate: number;
+  total_submissions: number;
+  pending_submissions: number;
+  released_submissions: number;
+  integrity_issues_count: number;
+  ai_coverage?: number;
+  grade_distribution: Record<string, number>;
   question_difficulty: Array<{
     question_title: string;
     question_type: string;
@@ -226,6 +245,9 @@ export interface AnalyticsData {
     difficulty: "Easy" | "Medium" | "Hard";
   }>;
   ai_narrative: string | null;
+  weak_topics?: string[];
+  insights?: string[];
+  recommended_interventions?: string[];
 }
 
 /** Represents a recently visited grading session stored in localStorage. */

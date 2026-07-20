@@ -21,6 +21,7 @@ import {
   Building2,
   Upload
 } from "lucide-react"
+import Image from "next/image"
 import { adminApi } from "@/lib/api/admin"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
@@ -311,10 +312,12 @@ export default function InstitutionsPage() {
                 <div className="flex items-center gap-3 mt-1">
                     <div className="size-16 rounded-xl border-2 border-dashed flex flex-col items-center justify-center bg-muted/30 text-muted-foreground transition-colors hover:bg-muted/50 cursor-pointer relative overflow-hidden group">
                         {logoFile ? (
-                             <img 
-                                src={URL.createObjectURL(logoFile)} 
-                                alt="Preview" 
-                                className="size-full object-cover"
+                             <Image
+                                src={URL.createObjectURL(logoFile)}
+                                alt="Preview"
+                                fill
+                                unoptimized
+                                className="object-cover"
                              />
                         ) : (
                             <>
@@ -430,9 +433,9 @@ export default function InstitutionsPage() {
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2.5">
-                        <div className="size-7 rounded-lg bg-muted flex items-center justify-center border overflow-hidden shrink-0">
+                        <div className="size-7 rounded-lg bg-muted flex items-center justify-center border overflow-hidden shrink-0 relative">
                           {inst.logo_url ? (
-                            <img src={inst.logo_url} alt="" className="size-full object-cover" />
+                            <Image src={inst.logo_url} alt="" fill unoptimized className="object-cover" />
                           ) : (
                             <Building2 className="size-3 text-muted-foreground/60" />
                           )}
@@ -572,9 +575,9 @@ export default function InstitutionsPage() {
              <div className="flex flex-col items-center gap-6">
                 <div className="size-32 rounded-2xl border-2 border-dashed flex flex-col items-center justify-center bg-muted/30 text-muted-foreground transition-colors hover:bg-muted/50 cursor-pointer relative overflow-hidden group">
                     {logoFile ? (
-                         <img src={URL.createObjectURL(logoFile)} alt="Preview" className="size-full object-cover" />
+                         <Image src={URL.createObjectURL(logoFile)} alt="Preview" fill unoptimized className="object-cover" />
                     ) : formData.logo_url ? (
-                         <img src={formData.logo_url} alt="Current" className="size-full object-cover" />
+                         <Image src={formData.logo_url} alt="Current" fill unoptimized className="object-cover" />
                     ) : (
                         <>
                             <Upload className="size-6 mb-2" />

@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -1020,10 +1021,13 @@ export default function AssessmentDetailsPage() {
                           <p className="font-semibold text-sm leading-relaxed">{q.content}</p>
                           {q.image_url && (
                             <div className="mt-3 inline-block p-1 border rounded-lg overflow-hidden bg-muted/10">
-                              <img
+                              <Image
                                 src={q.image_url}
                                 alt="Question diagram"
-                                className="max-h-48 rounded-md object-contain"
+                                width={800}
+                                height={600}
+                                unoptimized
+                                className="max-h-48 rounded-md object-contain w-auto h-auto"
                               />
                             </div>
                           )}

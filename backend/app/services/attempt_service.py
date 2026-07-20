@@ -282,30 +282,7 @@ class AttemptService:
         await self.submission_repo.finalize_all(attempt_id)
         await self._append_submit_logs(attempt_id, change_type="submit")
         
-        # 3.5. Trigger Automatic Grading & Result Calculation
-        try:
-            from app.services.grading_service import GradingService
-            from app.services.result_service import ResultService
-            
-            grading_service = GradingService(self.db)
-            result_service = ResultService(self.db)
-            
-            # Perform initial grading (Auto for closed, Queue for open)
-            # This marks closed-question grades as is_final=True
-            await grading_service.grade_attempt(
-                attempt_id=attempt_id,
-                assessment_id=attempt.assessment_id,
-                student_id=student_id
-            )
-            
-            # Calculate initial result based on the grades we just created
-            # ResultService internally handles auto-release if conditions are met
-            await result_service.calculate_result(attempt_id=attempt_id)
-        except Exception as e:
-            # We log but don't fail the whole submission if background grading/release fails
-            print(f"FAILED automatic grading/result cycle for attempt {attempt_id}: {e}")
-            import traceback
-            traceback.print_exc()
+        # Automatic grading and result calculations are dispatched asynchronously via Celery in the route handler.
 
         # 4. Trigger Notifications
         try:

@@ -196,9 +196,11 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
     response = await fetch(`${apiUrl}${endpoint}`, config);
   } catch (fetchError) {
     console.error(`[apiClient] Network error at ${endpoint} via ${apiUrl}:`, fetchError);
-    throw new Error(
+    const err = new Error(
       `Could not reach the API at ${apiUrl}. Make sure the backend is running and NEXT_PUBLIC_API_URL is correct.`,
     );
+    (err as any).status = 503;
+    throw err;
   }
 
   if (response.status === 401) {
@@ -304,7 +306,9 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
           return `${field}: ${msg}`;
         })
         .join(" | ");
-      throw new Error(`Validation failed: ${fieldErrors}`);
+      const err = new Error(`Validation failed: ${fieldErrors}`);
+      (err as any).status = response.status;
+      throw err;
     }
 
     const errorMessage =
@@ -312,11 +316,30 @@ export async function apiClient(endpoint: string, options: FetchOptions = {}) {
       errorData?.message ||
       errorData?.detail ||
       "An error occurred";
-    throw new Error(
+
+    let msgStr =
       typeof errorMessage === "string"
         ? errorMessage
-        : JSON.stringify(errorMessage),
-    );
+        : JSON.stringify(errorMessage);
+
+    const lowerMsg = msgStr.toLowerCase();
+    if (
+      lowerMsg.includes("getaddrinfo failed") ||
+      lowerMsg.includes("errno 11001") ||
+      lowerMsg.includes("all configured ai providers failed") ||
+      lowerMsg.includes("connecterror") ||
+      lowerMsg.includes("enotfound") ||
+      lowerMsg.includes("econnrefused") ||
+      lowerMsg.includes("nameorpolicynotknown") ||
+      lowerMsg.includes("socket.gaierror")
+    ) {
+      msgStr =
+        "Network problem: Unable to connect to AI services. Please check your internet connection and try again.";
+    }
+
+    const err = new Error(msgStr);
+    (err as any).status = response.status;
+    throw err;
   }
 
   if (response.status === 204) return null;

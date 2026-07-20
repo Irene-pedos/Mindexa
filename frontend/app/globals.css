@@ -1,4 +1,9 @@
-@import "tailwindcss";
+@config "../tailwind.config.ts";
+@import "tailwindcss" source(none);
+@source ".";
+@source "../components";
+@source "../lib";
+@source "../hooks";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -50,8 +55,8 @@
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
   --animate-marquee: marquee var(--duration) linear infinite;
-  --color-brand-foreground: var(----brand-foreground);
-  --color-brand: var(----brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand: var(--brand);
   @keyframes marquee {
     from {
       transform: translateX(0);
@@ -176,8 +181,20 @@
 }
 
 .scroll-fade {
-  mask-image: linear-gradient(to bottom, transparent 0%, black 4%, black 96%, transparent 100%);
-  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 4%, black 96%, transparent 100%);
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 4%,
+    black 96%,
+    transparent 100%
+  );
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0%,
+    black 4%,
+    black 96%,
+    transparent 100%
+  );
 }
 
 @keyframes shimmer-anim {
@@ -190,7 +207,12 @@
 }
 
 .shimmer {
-  background: linear-gradient(90deg, oklch(0.723 0.014 214.4 / 30%) 25%, oklch(0.723 0.014 214.4) 50%, oklch(0.723 0.014 214.4 / 30%) 75%);
+  background: linear-gradient(
+    90deg,
+    oklch(0.723 0.014 214.4 / 30%) 25%,
+    oklch(0.723 0.014 214.4) 50%,
+    oklch(0.723 0.014 214.4 / 30%) 75%
+  );
   background-size: 200% 100%;
   animation: shimmer-anim 1.5s infinite linear;
   -webkit-background-clip: text;

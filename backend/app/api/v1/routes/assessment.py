@@ -91,6 +91,7 @@ async def create_assessment(
 async def list_assessments(
     status_filter: str | None = Query(default=None, alias="status"),
     assessment_type: str | None = Query(default=None),
+    workspace_id: uuid.UUID | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(require_active_user),
@@ -101,6 +102,7 @@ async def list_assessments(
         current_user=current_user,
         status=status_filter,
         assessment_type=assessment_type,
+        workspace_id=workspace_id,
         page=page,
         page_size=page_size,
     )
@@ -118,6 +120,15 @@ async def get_assessment(
 ) -> AssessmentDetailResponse:
     svc = _service(db)
     assessment = await svc.get_assessment(assessment_id, current_user)
+    if current_user.role == "student":
+        if assessment.assessment_questions:
+            for aq in assessment.assessment_questions:
+                if aq.question:
+                    aq.question.explanation = None
+                    if aq.question.options:
+                        for opt in aq.question.options:
+                            opt.is_correct = None
+                            opt.explanation = None
     return AssessmentDetailResponse.model_validate(assessment)
 
 

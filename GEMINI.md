@@ -28,7 +28,7 @@ Mindexa is a secure academic assessment operating system designed for institutio
 ### Backend (from `/backend`)
 - **Setup:** `pip install -e ".[dev]"`
 - **Start API:** `uvicorn app.main:app --reload`
-- **Start Worker:** `celery -A app.workers.celery_app worker --loglevel=info --pool=solo` (Windows)
+- **Start Worker:** `MINDEXA_RUNTIME=celery celery -A app.workers.celery_app worker --loglevel=info --pool=solo` (Windows)
 - **Migrations:** `alembic upgrade head`
 - **Tests:** `pytest`
 

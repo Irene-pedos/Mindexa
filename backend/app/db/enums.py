@@ -197,6 +197,25 @@ class QuestionType(str, Enum):
     CASE_STUDY = "CASE_STUDY"
     ORDERING = "ORDERING"
 
+    @property
+    def is_auto_gradable(self) -> bool:
+        return self in {
+            QuestionType.MCQ,
+            QuestionType.TRUE_FALSE,
+            QuestionType.ORDERING,
+            QuestionType.MATCHING,
+            QuestionType.FILL_BLANK,
+        }
+
+    @property
+    def is_open_ended(self) -> bool:
+        return self in {
+            QuestionType.SHORT_ANSWER,
+            QuestionType.ESSAY,
+            QuestionType.COMPUTATIONAL,
+            QuestionType.CASE_STUDY,
+        }
+
 
 class DifficultyLevel(str, Enum):
     EASY = "EASY"

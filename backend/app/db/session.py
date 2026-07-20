@@ -7,6 +7,7 @@ Async SQLAlchemy engine, session factory, and FastAPI dependency.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 import sys
 from collections.abc import AsyncGenerator
@@ -43,13 +44,13 @@ def _build_engine() -> AsyncEngine:
     # for each task. Connection pools (like QueuePool) are bound to the loop that created them.
     # If a pooled connection is used across loops, or if the pool tries to close a connection
     # after the task's loop has died, it results in "Event loop is closed" errors.
-    is_celery = "celery" in sys.argv[0] or "celery" in sys.modules
+    is_celery = os.environ.get("MINDEXA_RUNTIME") == "celery"
 
     if is_celery:
         logger.info("Initializing AsyncEngine with NullPool for Celery worker")
         return create_async_engine(
             settings.DATABASE_ASYNC_URL,
-            echo=settings.DEBUG and settings.is_development,
+            echo=getattr(settings, "SQLALCHEMY_ECHO", False),
             future=True,
             poolclass=NullPool,
             json_serializer=_json_dumps,
@@ -65,7 +66,7 @@ def _build_engine() -> AsyncEngine:
         logger.info("Initializing AsyncEngine with AsyncAdaptedQueuePool for API server")
         return create_async_engine(
             settings.DATABASE_ASYNC_URL,
-            echo=settings.DEBUG and settings.is_development,
+            echo=getattr(settings, "SQLALCHEMY_ECHO", False),
             future=True,
             pool_pre_ping=True,
             pool_size=10,

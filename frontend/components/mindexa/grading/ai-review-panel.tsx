@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Card,
   CardContent,
@@ -40,7 +40,13 @@ interface AIReviewPanelProps {
   queueItemId?: string;
   responseId: string;
   maxScore: number;
-  onSuggestionApplied?: (score: number) => void;
+  onSuggestionApplied?: (score: number, feedback?: string) => void;
+  onSuggestionLoaded?: (
+    draft: string,
+    strengths: string[],
+    improvements: string[],
+    suggestions: string[]
+  ) => void;
 }
 
 export function AIReviewPanel({
@@ -48,6 +54,7 @@ export function AIReviewPanel({
   responseId,
   maxScore,
   onSuggestionApplied,
+  onSuggestionLoaded,
 }: AIReviewPanelProps) {
   const [loading, setLoading] = useState(true);
   const [requesting, setRequesting] = useState(false);
@@ -56,10 +63,17 @@ export function AIReviewPanel({
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<
     "thumbs_up" | "thumbs_down" | null
-  >(null);
+  >(
+    null
+  );
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [pollCount, setPollCount] = useState(0);
   const [pollTimeoutReached, setPollTimeoutReached] = useState(false);
+  const onSuggestionLoadedRef = useRef(onSuggestionLoaded);
+
+  useEffect(() => {
+    onSuggestionLoadedRef.current = onSuggestionLoaded;
+  }, [onSuggestionLoaded]);
 
   const loadDetails = useCallback(async () => {
     setLoading(true);
@@ -67,6 +81,14 @@ export function AIReviewPanel({
     try {
       const data = await aiGradingApi.getGradeDetails(responseId);
       setDetails(data);
+      if (data && onSuggestionLoadedRef.current) {
+        onSuggestionLoadedRef.current(
+          data.ai_feedback_draft || "",
+          data.ai_feedback_strengths || [],
+          data.ai_feedback_improvements || [],
+          data.ai_feedback_suggestions || []
+        );
+      }
     } catch (err: any) {
       if (err.response?.status !== 404) {
         setError("Failed to load AI grading details.");
@@ -83,33 +105,32 @@ export function AIReviewPanel({
   }, [loadDetails]);
 
   useEffect(() => {
-    let intervalId: any = null;
-    const isPending = details?.ai_review_status === "PENDING" || details?.ai_review_status === "PROCESSING";
-    
-    if (isPending && !pollTimeoutReached) {
-      intervalId = setInterval(() => {
-        setPollCount((prevCount) => {
-          const nextCount = prevCount + 1;
-          if (nextCount >= 12) {
-            setPollTimeoutReached(true);
-            if (intervalId) clearInterval(intervalId);
-            return nextCount;
-          }
-          loadDetails();
-          return nextCount;
-        });
-      }, 5000);
+    // Exponential backoff polling: 5s → 7.5s → 11.3s → 17s → 25s → 30s max
+    // Max 6 polls (≈ 95 seconds total). Much less aggressive than the old setInterval.
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const isPending =
+      details?.ai_review_status === "PENDING" ||
+      details?.ai_review_status === "PROCESSING";
+
+    if (isPending && pollCount < 6 && !pollTimeoutReached) {
+      const delay = Math.min(5000 * Math.pow(1.5, pollCount), 30000);
+      timeoutId = setTimeout(() => {
+        setPollCount((prev) => prev + 1);
+        loadDetails();
+      }, delay);
+    } else if (pollCount >= 6 && !pollTimeoutReached) {
+      setPollTimeoutReached(true);
     }
+
     return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
+      if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [details?.ai_review_status, pollTimeoutReached, loadDetails]);
+  }, [details?.ai_review_status, pollCount, pollTimeoutReached, loadDetails]);
 
   const handleRequestSuggestion = async () => {
-    if (!queueItemId) {
-      toast.error("Cannot request AI suggestion without a queue item ID.");
+    const triggerId = queueItemId || responseId;
+    if (!triggerId) {
+      toast.error("Cannot request AI suggestion without a queue item ID or response ID.");
       return;
     }
 
@@ -122,7 +143,7 @@ export function AIReviewPanel({
     setRequesting(true);
     setError(null);
     try {
-      await aiGradingApi.requestAISuggestion(queueItemId);
+      await aiGradingApi.requestAISuggestion(triggerId);
       toast.success("AI suggestion generated successfully.");
       await loadDetails();
     } catch (err: any) {
@@ -629,7 +650,7 @@ export function AIReviewPanel({
             size="sm"
             variant="secondary"
             onClick={() =>
-              onSuggestionApplied(details.ai_suggested_score as number)
+              onSuggestionApplied(details.ai_suggested_score as number, details.ai_feedback_draft || "")
             }
             disabled={details.is_final}
             className="font-medium"

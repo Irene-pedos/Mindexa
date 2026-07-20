@@ -299,6 +299,7 @@ class AssessmentRepository:
         created_by_id: uuid.UUID,
         status: AssessmentStatus | None = None,
         assessment_type: AssessmentType | None = None,
+        workspace_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -315,6 +316,8 @@ class AssessmentRepository:
             filters.append(col(Assessment.status) == status)
         if assessment_type:
             filters.append(col(Assessment.assessment_type) == assessment_type)
+        if workspace_id:
+            filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
 
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)
@@ -346,6 +349,7 @@ class AssessmentRepository:
         status: AssessmentStatus | None = None,
         assessment_type: AssessmentType | None = None,
         course_id: uuid.UUID | None = None,
+        workspace_id: uuid.UUID | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -361,6 +365,8 @@ class AssessmentRepository:
             filters.append(col(Assessment.assessment_type) == assessment_type)
         if course_id:
             filters.append(col(Assessment.course_id) == course_id)
+        if workspace_id:
+            filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
 
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)

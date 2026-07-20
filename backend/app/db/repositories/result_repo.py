@@ -120,30 +120,73 @@ class ResultRepository:
     async def list_by_assessment(
         self,
         assessment_id: uuid.UUID,
+        class_section_id: uuid.UUID | None = None,
         is_released: bool | None = None,
         page: int = 1,
         page_size: int = 50,
-    ) -> tuple[list[AssessmentResult], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
+        from app.db.models.auth import User, UserProfile
+        from app.db.models.academic import StudentEnrollment
+        from typing import Any
+        
         filters = [
             AssessmentResult.assessment_id == assessment_id,
             AssessmentResult.is_deleted == False,  # noqa: E712
         ]
         if is_released is not None:
             filters.append(AssessmentResult.is_released == is_released)
+        if class_section_id:
+            filters.append(StudentEnrollment.class_section_id == class_section_id)
 
-        count_result = await self.db.execute(
-            select(func.count(AssessmentResult.id)).where(*filters)
-        )
+        count_query = select(func.count(AssessmentResult.id))
+        if class_section_id:
+            count_query = count_query.join(
+                StudentEnrollment,
+                StudentEnrollment.student_id == AssessmentResult.student_id
+            )
+        count_result = await self.db.execute(count_query.where(*filters))
         total = count_result.scalar_one()
 
+        select_query = (
+            select(AssessmentResult, UserProfile.display_name)
+            .join(User, User.id == AssessmentResult.student_id)
+            .join(UserProfile, UserProfile.user_id == User.id)
+        )
+        if class_section_id:
+            select_query = select_query.join(
+                StudentEnrollment,
+                StudentEnrollment.student_id == AssessmentResult.student_id
+            )
+
         result = await self.db.execute(
-            select(AssessmentResult)
+            select_query
             .where(*filters)
             .order_by(AssessmentResult.calculated_at.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return list(result.scalars().all()), total
+        
+        items = []
+        for r, name in result.all():
+            r_dict = {
+                "id": r.id,
+                "attempt_id": r.attempt_id,
+                "student_id": r.student_id,
+                "student_name": name,
+                "assessment_id": r.assessment_id,
+                "assessment_title": r.assessment_title,
+                "academic_year": r.academic_year,
+                "total_score": r.total_score,
+                "max_score": r.max_score,
+                "percentage": r.percentage,
+                "letter_grade": r.letter_grade,
+                "is_passing": r.is_passing,
+                "is_released": r.is_released,
+                "integrity_hold": r.integrity_hold,
+            }
+            items.append(r_dict)
+            
+        return items, total
 
     async def list_unreleased_without_hold(
         self, assessment_id: uuid.UUID

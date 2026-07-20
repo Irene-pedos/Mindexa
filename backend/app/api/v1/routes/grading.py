@@ -809,7 +809,7 @@ async def process_ai_queue_item_endpoint(
     repo = GradingRepository(db)
     item = await repo.get_queue_item_by_id(item_id)
     if not item:
-        # Check if it's a GroupSubmissionAnswer
+        # Check if it's a GroupSubmissionAnswer — enqueue group AI grading
         from app.db.models.attempt import GroupSubmissionAnswer
         from sqlalchemy import select
         stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_id)
@@ -817,33 +817,27 @@ async def process_ai_queue_item_endpoint(
         group_answer = res.scalar_one_or_none()
         if not group_answer:
             raise NotFoundError("Queue item or Group answer not found", code="QUEUE_ITEM_NOT_FOUND")
-            
-        service = GradingService(db)
-        await service.process_ai_group_answer(group_answer)
-        
-        # Reload group answer to get the updated suggested score
-        res = await db.execute(select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_id))
-        group_answer = res.scalar_one_or_none()
-        suggested_score = (group_answer.answer_content or {}).get("ai_suggested_score")
-        
+
+        # Dispatch to Celery (do NOT run inline — group AI grading may take 15-30s)
+        from app.workers.tasks import process_ai_grading_job
+        process_ai_grading_job.delay(str(item_id))
+
         return AIReviewSuggestionResponse(
-            status="success",
+            status="queued",
             item_id=item_id,
             response_id=item_id,
-            suggested_score=suggested_score,
+            suggested_score=None,
         )
 
-    service = GradingService(db)
-    await service.process_ai_queue_item(item_id)
-    
-    grade = await repo.get_full_grade_detail(item.response_id)
-    suggested_score = grade.ai_suggested_score if grade else None
-    
+    # Dispatch individual queue item to Celery worker — never block uvicorn with LLM calls
+    from app.workers.tasks import process_ai_grading_job
+    process_ai_grading_job.delay(str(item_id))
+
     return AIReviewSuggestionResponse(
-        status="success",
+        status="queued",
         item_id=item_id,
         response_id=item.response_id,
-        suggested_score=suggested_score,
+        suggested_score=None,
     )
 
 

@@ -35,10 +35,19 @@ export function AIFeedbackEditor({
   const [drafting, setDrafting] = useState(false);
   const [draftText, setDraftText] = useState(initialDraft || "");
   
-  // Keep local copies of the metadata to display if generation succeeds
   const [strengths, setStrengths] = useState<string[]>(initialStrengths || []);
   const [improvements, setImprovements] = useState<string[]>(initialImprovements || []);
   const [suggestions, setSuggestions] = useState<string[]>(initialSuggestions || []);
+
+  React.useEffect(() => {
+    setDraftText(initialDraft || "");
+  }, [initialDraft]);
+
+  React.useEffect(() => {
+    setStrengths(initialStrengths || []);
+    setImprovements(initialImprovements || []);
+    setSuggestions(initialSuggestions || []);
+  }, [initialStrengths, initialImprovements, initialSuggestions]);
 
   const handleGenerateDraft = async () => {
     setDrafting(true);

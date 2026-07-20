@@ -49,7 +49,13 @@ class ReviewAgent(BaseAgent):
         attempt_id: uuid.UUID | None = None,
         response_id: uuid.UUID | None = None,
         lecturer_feedback: str | None = None,
-    ) -> ReviewAgentOutput:
+        course_context: str | None = None,
+        rubric_context: str | None = None,
+        course_material_context: str | None = None,
+        basis_policy: str | None = None,
+        basis_used: str | None = None,
+        source_citations: list[str] | None = None,
+    ) -> tuple[ReviewAgentOutput, AICompletionResponse]:
         """
         Analyze a student response and suggest a grade, optionally refining based on lecturer feedback.
         """
@@ -62,6 +68,18 @@ class ReviewAgent(BaseAgent):
             .replace("{{max_score}}", str(max_score))
             .replace("{{question_type}}", question_type)
         )
+        if course_context:
+            system_content += f"\n\n### Lecturer Course Materials Context (RAG):\n{course_context}"
+        if rubric_context:
+            system_content += f"\n\n### Rubric Context:\n{rubric_context}"
+        if course_material_context:
+            system_content += f"\n\n### Course Material Context:\n{course_material_context}"
+        if basis_policy:
+            system_content += f"\n\n### Grading Basis Policy:\n{basis_policy}"
+        if basis_used:
+            system_content += f"\n\n### Grading Basis Used:\n{basis_used}"
+        if source_citations:
+            system_content += f"\n\n### Source Citations:\n" + "\n".join(f"- {c}" for c in source_citations)
 
         messages = [
             AIMessage(role="system", content=system_content),
@@ -96,5 +114,6 @@ class ReviewAgent(BaseAgent):
             prompt_version=f"{self.prompt_name}_{self.prompt_version}",
         )
 
-        return self._parse_json_output(response.content, ReviewAgentOutput)
+        parsed = self._parse_json_output(response.content, ReviewAgentOutput)
+        return parsed, response
 
