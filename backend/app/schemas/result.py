@@ -84,7 +84,9 @@ class ResultBreakdownItem(BaseModel):
     question_type: str | None = None
     section_title: str | None = None
     image_url: str | None = Field(None, alias="imageUrl")
+    case_study_context: str | None = None
     student_answer: str | None = None
+    student_answer_json: dict | list | None = None
     correct_answer: str | None = None
     options: list[dict] | None = None
 
@@ -102,6 +104,11 @@ class AssessmentResultResponse(BaseModel):
     assessment_id: uuid.UUID
     assessment_title: str | None = None
     academic_year: str | None = None
+    course_code: str | None = None
+    course_name: str | None = None
+    institution_name: str | None = None
+    college_name: str | None = None
+    department_name: str | None = None
     total_score: float
     max_score: float
     percentage: float
@@ -126,7 +133,13 @@ class ResultSummary(BaseModel):
     student_name: str | None = None
     assessment_id: uuid.UUID
     assessment_title: str | None = None
+    assessment_type: str | None = None
     academic_year: str | None = None
+    course_code: str | None = None
+    course_name: str | None = None
+    submitted_at: datetime | None = None
+    released_at: datetime | None = None
+    student_status: str | None = None
     total_score: float
     max_score: float
     percentage: float
@@ -134,6 +147,8 @@ class ResultSummary(BaseModel):
     is_passing: bool
     is_released: bool
     integrity_hold: bool
+    graded_question_count: int | None = None
+    total_question_count: int | None = None
 
 
 class ResultListResponse(BaseModel):

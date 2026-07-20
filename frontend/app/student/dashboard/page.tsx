@@ -112,8 +112,10 @@ const getTerminationLabel = (status: string, reason?: string): string => {
 
 const getNotificationLink = (notification: {
   notification_type: string;
+  action_url?: string | null | undefined;
   related_id?: string | null | undefined;
 }): string => {
+  if (notification.action_url) return notification.action_url;
   const type = notification.notification_type.toUpperCase();
   const id = notification.related_id;
   if ((type.includes("RESULT") || type.includes("GRADE")) && id)

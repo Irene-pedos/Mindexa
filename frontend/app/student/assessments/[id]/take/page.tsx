@@ -1272,6 +1272,10 @@ const getAnswerType = (questionType: string): AnswerType => {
     singleoption: "SINGLE_OPTION",
     matching: "MATCH_PAIRS",
     ordering: "ORDERED_LIST",
+    orderedlist: "ORDERED_LIST",
+    ordered_list: "ORDERED_LIST",
+    sequence: "ORDERED_LIST",
+    sequencing: "ORDERED_LIST",
     fillblank: "FILL_BLANKS",
     fillblanks: "FILL_BLANKS",
     fill_blank: "FILL_BLANKS",
@@ -1738,7 +1742,11 @@ export default function TakeAssessmentPage() {
           savedAnswers[s.question_id] = s.match_pairs_json || {};
         else if (s.answer_type === "FILL_BLANKS")
           savedAnswers[s.question_id] = s.fill_blank_answers || {};
-        else if (s.answer_type === "ORDERED_LIST") {
+        else if (
+          s.answer_type === "ORDERED_LIST" ||
+          s.answer_type === "ordered_list" ||
+          s.answer_type === "ordering"
+        ) {
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
           setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
         }
@@ -1773,6 +1781,8 @@ export default function TakeAssessmentPage() {
           }
         }
       });
+      // Store truly saved answers from backend in lastSavedValuesRef
+      const trulySavedAnswers: Record<string, any> = { ...savedAnswers };
       // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
       questions.forEach((q) => {
         if (
@@ -1784,7 +1794,7 @@ export default function TakeAssessmentPage() {
         }
       });
       setAnswers(savedAnswers);
-      lastSavedValuesRef.current = { ...savedAnswers };
+      lastSavedValuesRef.current = trulySavedAnswers;
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : "Failed to sync submissions";
@@ -2307,7 +2317,11 @@ export default function TakeAssessmentPage() {
             savedAnswers[s.question_id] = s.match_pairs_json || {};
           else if (s.answer_type === "FILL_BLANKS")
             savedAnswers[s.question_id] = s.fill_blank_answers || {};
-          else if (s.answer_type === "ORDERED_LIST") {
+          else if (
+            s.answer_type === "ORDERED_LIST" ||
+            s.answer_type === "ordered_list" ||
+            s.answer_type === "ordering"
+          ) {
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
             setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
           }
@@ -2344,6 +2358,8 @@ export default function TakeAssessmentPage() {
             }
           }
         });
+        // Store truly saved answers from backend in lastSavedValuesRef
+        const trulySavedAnswers: Record<string, any> = { ...savedAnswers };
         // Now, for any ORDERED_LIST question that does NOT have a saved answer, initialize it!
         (attemptData.questions || []).forEach((q: any) => {
           if (
@@ -2355,7 +2371,7 @@ export default function TakeAssessmentPage() {
           }
         });
         setAnswers(savedAnswers);
-        lastSavedValuesRef.current = { ...savedAnswers };
+        lastSavedValuesRef.current = trulySavedAnswers;
       } catch (e: unknown) {
         console.error(e);
       }

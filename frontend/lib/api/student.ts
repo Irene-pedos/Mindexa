@@ -32,6 +32,8 @@ export interface StudentActiveAttempt {
 
 export interface StudentRecentResult {
   id: string;
+  attempt_id?: string;
+  assessment_id?: string;
   assessment_title: string;
   assessment_type: string;
   course_code?: string;
@@ -41,7 +43,13 @@ export interface StudentRecentResult {
   total_marks: number;
   percentage: number;
   letter_grade?: string;
-  released_at: string;
+  released_at?: string;
+  submitted_at?: string;
+  is_released?: boolean;
+  integrity_hold?: boolean;
+  student_status?: string;
+  graded_question_count?: number;
+  total_question_count?: number;
 }
 
 export interface StudentUpcomingAssessment {

@@ -6,10 +6,11 @@ export const resultApi = {
   getReleaseQueue: (assessmentId: string, classSectionId: string) => 
     apiClient(`/results/assessment/${assessmentId}/release-queue?class_section_id=${classSectionId}`),
   getStudentResults: () => apiClient("/results/me"),
-  getMyResults: (params: { page?: number; page_size?: number } = {}) => {
+  getMyResults: (params: { page?: number; page_size?: number; include_pending?: boolean } = {}) => {
     const searchParams = new URLSearchParams();
     if (params.page !== undefined) searchParams.append("page", params.page.toString());
     if (params.page_size !== undefined) searchParams.append("page_size", params.page_size.toString());
+    if (params.include_pending !== undefined) searchParams.append("include_pending", params.include_pending.toString());
     const qs = searchParams.toString();
     return apiClient(`/results/me${qs ? `?${qs}` : ""}`);
   },

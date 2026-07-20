@@ -73,49 +73,131 @@ async def get_my_result(
 async def list_my_results(
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    include_pending: bool = Query(default=False),
     current_user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> ResultListResponse:
     """
-    Returns a paginated list of released results for the current student.
+    Returns a paginated list of results for the current student.
+    By default this exposes released rows only. With include_pending=True it
+    also includes submitted attempts whose marks are still under review or
+    held for integrity audit, without exposing unreleased scores.
     """
     from sqlalchemy import func, not_, select
+    from sqlalchemy.orm import selectinload
 
     from app.db.models.assessment import Assessment
+    from app.db.models.attempt import AssessmentAttempt
     from app.db.models.result import AssessmentResult
+    from app.db.enums import AttemptStatus
 
-    # Get results for current student
-    stmt = select(AssessmentResult).where(
-        AssessmentResult.student_id == current_user.id,
-        AssessmentResult.is_released,
-        not_(AssessmentResult.is_deleted)
-    ).order_by(AssessmentResult.released_at.desc())
+    if not include_pending:
+        stmt = (
+            select(AssessmentResult)
+            .options(selectinload(AssessmentResult.attempt))
+            .where(
+                AssessmentResult.student_id == current_user.id,
+                AssessmentResult.is_released,
+                not_(AssessmentResult.is_deleted),
+            )
+            .order_by(AssessmentResult.released_at.desc())
+        )
 
-    # Count total
-    count_stmt = select(func.count(AssessmentResult.id)).where(
-        AssessmentResult.student_id == current_user.id,
-        AssessmentResult.is_released,
-        not_(AssessmentResult.is_deleted)
+        count_stmt = select(func.count(AssessmentResult.id)).where(
+            AssessmentResult.student_id == current_user.id,
+            AssessmentResult.is_released,
+            not_(AssessmentResult.is_deleted),
+        )
+        total = (await db.execute(count_stmt)).scalar_one()
+
+        stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+        result = await db.execute(stmt)
+        items = result.scalars().all()
+
+        summaries = []
+        for r in items:
+            summary = ResultSummary.model_validate(r)
+            ass = await db.get(Assessment, r.assessment_id)
+            if ass:
+                summary.assessment_title = ass.title
+                summary.assessment_type = ass.assessment_type.value if hasattr(ass.assessment_type, "value") else str(ass.assessment_type)
+                summary.academic_year = ass.academic_year
+                summary.course_code = ass.course_code
+                summary.course_name = ass.course_name
+                summary.released_at = r.released_at
+                summary.submitted_at = r.attempt.submitted_at if r.attempt else None
+                summary.student_status = "GRADED"
+            summaries.append(summary)
+
+        return ResultListResponse(
+            items=summaries,
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    attempts_stmt = (
+        select(AssessmentAttempt)
+        .options(
+            selectinload(AssessmentAttempt.assessment).selectinload(Assessment.course),
+            selectinload(AssessmentAttempt.result),
+        )
+        .where(
+            AssessmentAttempt.student_id == current_user.id,
+            AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
+            AssessmentAttempt.is_deleted == False,  # noqa: E712
+        )
+        .order_by(AssessmentAttempt.submitted_at.desc().nullslast(), AssessmentAttempt.created_at.desc())
     )
-    total = (await db.execute(count_stmt)).scalar_one()
-
-    # Paginate
-    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
-    result = await db.execute(stmt)
-    items = result.scalars().all()
+    attempts_result = await db.execute(attempts_stmt)
+    attempts = list(attempts_result.scalars().all())
 
     summaries = []
-    for r in items:
-        summary = ResultSummary.model_validate(r)
-        # Fetch assessment info
-        ass = await db.get(Assessment, r.assessment_id)
-        if ass:
-            summary.assessment_title = ass.title
-            summary.academic_year = ass.academic_year
-        summaries.append(summary)
+    for attempt in attempts:
+        ass = attempt.assessment
+        result = attempt.result
+        released = bool(result and result.is_released)
+        held = bool(result and result.integrity_hold)
+        max_score = (
+            result.max_score
+            if result and result.max_score
+            else float(ass.total_marks or 0) if ass else 0.0
+        )
+
+        status = "GRADED" if released else "AUTO_SUBMITTED" if attempt.status == AttemptStatus.AUTO_SUBMITTED else "SUBMITTED"
+        if held:
+            status = "AUTO_SUBMITTED" if attempt.status == AttemptStatus.AUTO_SUBMITTED else "INTEGRITY_HOLD"
+
+        summaries.append(ResultSummary(
+            id=result.id if result else attempt.id,
+            attempt_id=attempt.id,
+            student_id=attempt.student_id,
+            assessment_id=attempt.assessment_id,
+            assessment_title=ass.title if ass else "Assessment",
+            assessment_type=ass.assessment_type.value if ass and hasattr(ass.assessment_type, "value") else str(ass.assessment_type) if ass else None,
+            academic_year=ass.academic_year if ass else None,
+            course_code=ass.course_code if ass else None,
+            course_name=ass.course_name if ass else None,
+            submitted_at=attempt.submitted_at,
+            released_at=result.released_at if released and result else None,
+            student_status=status,
+            total_score=result.total_score if released and result else 0.0,
+            max_score=max_score,
+            percentage=result.percentage if released and result else 0.0,
+            letter_grade=result.letter_grade if released and result else None,
+            is_passing=result.is_passing if released and result else False,
+            is_released=released,
+            integrity_hold=held,
+            graded_question_count=result.graded_question_count if result else 0,
+            total_question_count=result.total_question_count if result else 0,
+        ))
+
+    total = len(summaries)
+    start = (page - 1) * page_size
+    paged = summaries[start:start + page_size]
 
     return ResultListResponse(
-        items=summaries,
+        items=paged,
         total=total,
         page=page,
         page_size=page_size,

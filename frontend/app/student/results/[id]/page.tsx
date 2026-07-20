@@ -1,32 +1,41 @@
 // app/student/results/[id]/page.tsx
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import { format } from "date-fns";
 import {
-  ArrowLeft,
-  CheckCircle2,
-  XCircle,
-  Clock,
   AlertTriangle,
+  ArrowLeft,
+  Award,
+  Calendar,
+  CheckCircle2,
+  Clock,
+  Cpu,
   Download,
   MessageCircle,
-  Cpu,
-  Calendar,
   RefreshCw,
-  Award,
+  XCircle,
 } from "lucide-react";
-
-import { resultApi } from "@/lib/api/result";
-import { attemptApi } from "@/lib/api/attempt";
-import { submissionApi } from "@/lib/api/submission";
-import { assessmentApi } from "@/lib/api/assessment";
-import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+import { assessmentApi } from "@/lib/api/assessment";
+import { attemptApi } from "@/lib/api/attempt";
+import { resultApi } from "@/lib/api/result";
+import { submissionApi } from "@/lib/api/submission";
+import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
+
+interface ResultOption {
+  id: string;
+  text: string;
+  is_correct?: boolean | null;
+  match_key?: string | null;
+  match_value?: string | null;
+  order_index?: number;
+}
 
 interface QuestionBreakdown {
   id: string;
@@ -38,16 +47,29 @@ interface QuestionBreakdown {
   feedback_author_basis?: string | null;
   grading_mode: string | null;
   was_skipped: boolean;
-  question_text: string;
-  question_type: string;
+  question_text: string | null;
+  question_type: string | null;
   section_title: string | null;
+  imageUrl?: string | null;
+  case_study_context?: string | null;
   student_answer: string | null;
+  student_answer_json?: Record<string, unknown> | unknown[] | null;
   correct_answer: string | null;
-  options: unknown;
+  options: ResultOption[] | null;
 }
 
 interface AssessmentResultResponse {
-  assessment_title: string;
+  id: string;
+  attempt_id: string;
+  student_id: string;
+  assessment_id: string;
+  assessment_title: string | null;
+  academic_year?: string | null;
+  course_code?: string | null;
+  course_name?: string | null;
+  institution_name?: string | null;
+  college_name?: string | null;
+  department_name?: string | null;
   total_score: number;
   max_score: number;
   percentage: number;
@@ -62,452 +84,508 @@ interface AssessmentResultResponse {
   breakdowns: QuestionBreakdown[];
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const OPEN_TYPES = new Set(["shortanswer", "short_answer", "essay", "casestudy", "case_study", "computational", "practical"]);
+const MCQ_TYPES = new Set(["mcq", "multiplechoice", "multiple_choice"]);
+const TRUE_FALSE_TYPES = new Set(["truefalse", "true_false"]);
 
-const isOpenEnded = (type: string) =>
-  ["short_answer", "essay", "case_study", "computational"].includes(type);
+function normalizeType(value?: string | null) {
+  return (value || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+}
 
-function getAssessmentTypeBadge(title: string): string {
-  const t = title.toUpperCase();
+function labelForType(value?: string | null) {
+  const normalized = normalizeType(value);
+  if (MCQ_TYPES.has(normalized)) return "Multiple choice";
+  if (TRUE_FALSE_TYPES.has(normalized)) return "True / False";
+  if (normalized === "casestudy" || normalized === "case_study") return "Case study";
+  if (normalized === "fillblank" || normalized === "fill_blank") return "Fill in the blanks";
+  if (normalized === "matching") return "Matching";
+  if (normalized === "ordering") return "Ordering";
+  if (normalized === "essay") return "Essay";
+  if (normalized === "computational") return "Computational";
+  return (value || "Question").replace(/_/g, " ");
+}
+
+function isOpenEnded(type?: string | null) {
+  return OPEN_TYPES.has(normalizeType(type));
+}
+
+function fmtDate(iso?: string | null, withTime = false) {
+  if (!iso) return "N/A";
+  try {
+    return format(new Date(iso), withTime ? "MMM d, yyyy HH:mm" : "MMM d, yyyy");
+  } catch {
+    return "N/A";
+  }
+}
+
+function safeJson(value: unknown) {
+  if (!value || typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function answerValues(item: QuestionBreakdown): string[] {
+  const parsed = safeJson(item.student_answer_json ?? item.student_answer);
+  if (Array.isArray(parsed)) return parsed.map(String);
+  if (parsed && typeof parsed === "object") return Object.values(parsed).map(String);
+  if (item.student_answer) return item.student_answer.split(",").map((v) => v.trim()).filter(Boolean);
+  return [];
+}
+
+function feedbackBasisLabel(value?: string | null) {
+  if (!value) return "Lecturer feedback";
+  if (value === "AI") return "AI drafted";
+  if (value === "AI_EDITED") return "AI drafted, lecturer edited";
+  return "Lecturer feedback";
+}
+
+function getAssessmentTypeBadge(title?: string | null) {
+  const t = (title || "").toUpperCase();
   if (t.includes("CAT")) return "CAT";
-  if (t.includes("ESSAY")) return "Essay";
-  if (t.includes("HOMEWORK") || t.includes("HOME WORK")) return "Homework";
-  if (t.includes("QUIZ")) return "Quiz";
   if (t.includes("EXAM")) return "Exam";
+  if (t.includes("QUIZ")) return "Quiz";
   if (t.includes("TEST")) return "Test";
   if (t.includes("ASSIGNMENT")) return "Assignment";
   return "Assessment";
 }
 
-function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return format(new Date(iso), "MMM d, yyyy");
-  } catch {
-    return "—";
-  }
-}
+function ScoreRing({ pct, isPassing }: { pct: number; isPassing: boolean }) {
+  const radius = 38;
+  const circ = 2 * Math.PI * radius;
+  const filled = Math.max(0, Math.min(100, pct)) / 100 * circ;
 
-// SVG score ring — circumference = 2π × 38 ≈ 238.76
-function ScoreRing({
-  pct,
-  isPassing,
-}: {
-  pct: number;
-  isPassing: boolean;
-}) {
-  const circ = 238.76;
-  const filled = Math.max(0, Math.min(1, pct / 100)) * circ;
-  const stroke = isPassing ? "#10b981" : "#ef4444"; // emerald-500 / red-500
   return (
-    <svg
-      viewBox="0 0 88 88"
-      width={88}
-      height={88}
-      className="shrink-0"
-      aria-hidden="true"
-    >
+    <svg viewBox="0 0 96 96" width={96} height={96} className="shrink-0" aria-hidden="true">
+      <circle cx="48" cy="48" r={radius} fill="none" stroke="hsl(var(--muted))" strokeWidth="8" />
       <circle
-        cx={44}
-        cy={44}
-        r={38}
+        cx="48"
+        cy="48"
+        r={radius}
         fill="none"
-        stroke="var(--muted)"
-        strokeWidth={8}
-      />
-      <circle
-        cx={44}
-        cy={44}
-        r={38}
-        fill="none"
-        stroke={stroke}
-        strokeWidth={8}
-        strokeDasharray={`${filled} ${circ}`}
-        strokeDashoffset={60}
+        stroke={isPassing ? "#059669" : "#dc2626"}
+        strokeWidth="8"
+        strokeDasharray={`${filled} ${circ - filled}`}
         strokeLinecap="round"
-        style={{ transition: "stroke-dasharray 0.6s ease" }}
+        transform="rotate(-90 48 48)"
       />
-      <text
-        x="50%"
-        y={40}
-        textAnchor="middle"
-        dominantBaseline="middle"
-        className="fill-foreground text-[13px] font-semibold"
-        style={{ fontSize: 13, fontWeight: 600, fill: "currentColor" }}
-      >
+      <text x="48" y="45" textAnchor="middle" className="fill-foreground text-sm font-semibold">
         {pct}%
       </text>
-      <text
-        x="50%"
-        y={56}
-        textAnchor="middle"
-        dominantBaseline="middle"
-        style={{ fontSize: 10, fill: "var(--muted-foreground)" }}
-      >
+      <text x="48" y="61" textAnchor="middle" className="fill-muted-foreground text-[10px]">
         score
       </text>
     </svg>
   );
 }
 
-// ─── Question Card ─────────────────────────────────────────────────────────────
-
-function QuestionCard({
-  item,
-  index,
-}: {
-  item: QuestionBreakdown;
-  index: number;
-}) {
-  const open = isOpenEnded(item.question_type);
-  const pending =
-    item.is_correct === null && (item.score === null || item.score === undefined);
-  const graded = item.score !== null && item.score !== undefined;
-
-  // Score badge
-  let scoreBadge: React.ReactNode;
+function ScoreBadge({ item }: { item: QuestionBreakdown }) {
+  const pending = item.score === null || item.score === undefined;
   if (item.was_skipped) {
-    scoreBadge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-        Skipped
-      </span>
-    );
-  } else if (item.is_correct === true) {
-    scoreBadge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-        <CheckCircle2 className="size-3" />
-        {item.score}/{item.max_score}
-      </span>
-    );
-  } else if (item.is_correct === false) {
-    scoreBadge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 px-2 py-0.5 text-[11px] font-medium text-red-700">
-        <XCircle className="size-3" />
-        0/{item.max_score}
-      </span>
-    );
-  } else if (pending) {
-    scoreBadge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-        <Clock className="size-3" />
-        Pending
-      </span>
-    );
-  } else if (graded) {
-    scoreBadge = (
-      <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 border border-blue-200 px-2 py-0.5 text-[11px] font-medium text-blue-700">
-        {item.score}/{item.max_score}
-      </span>
-    );
+    return <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">Skipped</span>;
   }
-
+  if (pending) {
+    return <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><Clock className="size-3" /> Pending</span>;
+  }
+  const tone = item.is_correct === false ? "border-red-200 bg-red-50 text-red-700" : "border-emerald-200 bg-emerald-50 text-emerald-700";
   return (
-    <div className="border border-border/50 rounded-lg p-4 mb-2 bg-card/30">
-      {/* Header */}
-      <div className="flex justify-between items-start mb-2">
-        <div className="space-y-0.5">
-          <p className="text-xs text-muted-foreground">Question {index + 1}</p>
-          <p className="text-[11px] text-muted-foreground/60 capitalize">
-            {item.question_type.replace(/_/g, " ")} · {item.max_score}{" "}
-            {item.max_score === 1 ? "mark" : "marks"}
-          </p>
-        </div>
-        {scoreBadge}
+    <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium", tone)}>
+      {item.is_correct === false ? <XCircle className="size-3" /> : <CheckCircle2 className="size-3" />}
+      {item.score}/{item.max_score}
+    </span>
+  );
+}
+
+function FeedbackBlock({ item }: { item: QuestionBreakdown }) {
+  if (!item.feedback) return null;
+  return (
+    <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 print:border-slate-300 print:bg-white">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase text-blue-700">
+          <MessageCircle className="size-3" />
+          Feedback
+        </span>
+        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase text-blue-700 print:bg-slate-100 print:text-slate-700">
+          {feedbackBasisLabel(item.feedback_author_basis)}
+        </span>
       </div>
-
-      {/* Question text */}
-      <p className="text-sm text-foreground leading-relaxed mb-3">
-        {item.question_text}
-      </p>
-
-      {/* Closed question answers */}
-      {!open && (
-        <div className="space-y-2">
-          {item.was_skipped ? (
-            <div className="bg-muted/40 rounded p-2 text-xs text-muted-foreground">
-              No answer submitted
-            </div>
-          ) : item.is_correct === true ? (
-            <div className="bg-emerald-50 border-l-2 border-emerald-500 p-2 rounded">
-              <p className="text-[10px] font-medium text-emerald-700 mb-0.5">
-                ✓ Your answer (correct)
-              </p>
-              <p className="text-xs text-emerald-900">{item.student_answer}</p>
-            </div>
-          ) : item.is_correct === false ? (
-            <>
-              <div className="bg-red-50 border-l-2 border-red-500 p-2 rounded">
-                <p className="text-[10px] font-medium text-red-700 mb-0.5">
-                  ✗ Your answer (incorrect)
-                </p>
-                <p className="text-xs text-red-900">
-                  {item.student_answer || "—"}
-                </p>
-              </div>
-              {item.correct_answer && (
-                <div className="bg-emerald-50 border-l-2 border-emerald-500 p-2 rounded">
-                  <p className="text-[10px] font-medium text-emerald-700 mb-0.5">
-                    ✓ Correct answer
-                  </p>
-                  <p className="text-xs text-emerald-900">
-                    {item.correct_answer}
-                  </p>
-                </div>
-              )}
-            </>
-          ) : null}
-
-          {/* Explanation */}
-          {item.feedback && (
-            <div className="border-t pt-3 mt-3">
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[10px] font-medium text-muted-foreground">
-                  Explanation
-                </p>
-                {item.feedback_author_basis && (
-                  <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-muted text-muted-foreground/80">
-                    {item.feedback_author_basis === "AI"
-                      ? "AI Drafted"
-                      : item.feedback_author_basis === "AI_EDITED"
-                      ? "AI Drafted (Edited by Human)"
-                      : "Human Written"}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-muted-foreground">{item.feedback}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Open-ended answers */}
-      {open && (
-        <div className="space-y-2">
-          {/* Student response */}
-          <div className="bg-muted/30 rounded p-2">
-            <p className="text-[10px] font-medium text-muted-foreground mb-1">
-              Your response
-            </p>
-            <p className="text-sm text-foreground whitespace-pre-wrap">
-              {item.student_answer || (
-                <span className="text-muted-foreground italic">
-                  No response submitted
-                </span>
-              )}
-            </p>
-          </div>
-
-          {/* Pending state */}
-          {pending && (
-            <div className="bg-amber-50 border border-amber-200 rounded p-2">
-              <p className="text-[10px] font-semibold text-amber-700 mb-0.5">
-                Awaiting lecturer review
-              </p>
-              <p className="text-xs text-amber-700/80">
-                This response will be reviewed and scored by your lecturer.
-              </p>
-            </div>
-          )}
-
-          {/* Graded open-ended */}
-          {graded && !pending && (
-            <>
-              <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-medium text-muted-foreground">
-                  Awarded:
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                  <Award className="size-3" />
-                  {item.score}/{item.max_score}
-                </span>
-              </div>
-
-              {item.feedback && (
-                <div className="bg-blue-50 border-l-2 border-blue-400 p-3 rounded">
-                  <div className="flex items-center justify-between mb-1">
-                    <div className="flex items-center gap-1.5">
-                      <MessageCircle className="size-3 text-blue-600" />
-                      <p className="text-[10px] font-medium text-blue-700">
-                        Lecturer feedback
-                      </p>
-                    </div>
-                    {item.feedback_author_basis && (
-                      <span className="text-[9px] font-semibold uppercase px-1.5 py-0.5 rounded bg-blue-100/50 text-blue-700">
-                        {item.feedback_author_basis === "AI"
-                          ? "AI Drafted"
-                          : item.feedback_author_basis === "AI_EDITED"
-                          ? "AI Drafted (Edited by Human)"
-                          : "Human Written"}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-blue-900">{item.feedback}</p>
-                </div>
-              )}
-
-              {item.grading_mode?.toLowerCase().includes("ai") && (
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                  <Cpu className="size-3" />
-                  AI-assisted · reviewed by lecturer
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
+      <p className="whitespace-pre-wrap text-xs leading-relaxed text-blue-950 print:text-slate-800">{item.feedback}</p>
     </div>
   );
 }
 
-// ─── Section Breakdown Bar ────────────────────────────────────────────────────
-
-interface SectionGroup {
-  name: string;
-  items: QuestionBreakdown[];
-  total: number;
-  correct: number;
-  incorrect: number;
-  pending: number;
-}
-
-function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] }) {
-  // Group by section_title or question_type
-  const groupMap = new Map<string, QuestionBreakdown[]>();
-  for (const item of breakdowns) {
-    const key = item.section_title || item.question_type || "General";
-    if (!groupMap.has(key)) groupMap.set(key, []);
-    groupMap.get(key)!.push(item);
-  }
-
-  const groups: SectionGroup[] = Array.from(groupMap.entries()).map(
-    ([name, items]) => {
-      let correct = 0,
-        incorrect = 0,
-        pending = 0;
-      let totalMarks = 0,
-        correctMarks = 0,
-        incorrectMarks = 0;
-      for (const item of items) {
-        totalMarks += item.max_score;
-        if (item.is_correct === true) {
-          correct++;
-          correctMarks += item.score ?? item.max_score;
-        } else if (item.is_correct === false) {
-          incorrect++;
-          incorrectMarks += item.max_score;
-        } else {
-          pending++;
-        }
-      }
-      return {
-        name,
-        items,
-        total: totalMarks,
-        correct: correctMarks,
-        incorrect: incorrectMarks,
-        pending,
-      };
-    }
-  );
-
-  // Topic performance by question_type within all breakdowns
-  const topicMap = new Map<string, { correct: number; total: number }>();
-  for (const item of breakdowns) {
-    const type = item.question_type || "Unknown";
-    if (!topicMap.has(type)) topicMap.set(type, { correct: 0, total: 0 });
-    const t = topicMap.get(type)!;
-    t.total++;
-    if (item.is_correct === true) t.correct++;
-  }
+function ClosedChoiceReview({ item }: { item: QuestionBreakdown }) {
+  const selected = answerValues(item);
+  const options = item.options || [];
+  const type = normalizeType(item.question_type);
+  const renderedOptions = TRUE_FALSE_TYPES.has(type) && options.length === 0
+    ? [
+        { id: "true", text: "True", is_correct: item.correct_answer?.toLowerCase() === "true" },
+        { id: "false", text: "False", is_correct: item.correct_answer?.toLowerCase() === "false" },
+      ]
+    : options;
 
   return (
-    <div className="border border-border/50 rounded-lg p-4 bg-card/30">
-      <p className="text-xs font-medium text-muted-foreground mb-3">
-        Score breakdown
-      </p>
-
-      <div className="space-y-4">
-        {groups.map((g) => {
-          const pctCorrect = g.total > 0 ? (g.correct / g.total) * 100 : 0;
-          const pctIncorrect = g.total > 0 ? (g.incorrect / g.total) * 100 : 0;
-          const score = g.items.reduce((s, i) => s + (i.score ?? 0), 0);
+    <div className="space-y-2">
+      <div className="grid gap-2 sm:grid-cols-2">
+        {renderedOptions.map((option) => {
+          const wasChosen = selected.some((v) => v === option.id || v.toLowerCase() === option.text.toLowerCase());
+          const correct = !!option.is_correct;
           return (
-            <div key={g.name}>
-              <div className="flex justify-between mb-1">
-                <span className="text-xs font-medium capitalize">
-                  {g.name.replace(/_/g, " ")}
-                </span>
-                <span className="text-xs font-medium tabular-nums">
-                  {score}/{g.total}
-                </span>
-              </div>
-              {/* Stacked bar */}
-              <div className="h-2 rounded-full bg-muted/50 overflow-hidden flex">
-                <div
-                  className="h-full bg-emerald-500 transition-all"
-                  style={{ width: `${pctCorrect}%` }}
-                />
-                <div
-                  className="h-full bg-red-400 transition-all"
-                  style={{ width: `${pctIncorrect}%` }}
-                />
+            <div
+              key={option.id}
+              className={cn(
+                "rounded-lg border p-3 text-xs",
+                correct && "border-emerald-300 bg-emerald-50 text-emerald-900",
+                wasChosen && !correct && "border-red-300 bg-red-50 text-red-900",
+                wasChosen && correct && "ring-1 ring-emerald-500",
+                !wasChosen && !correct && "border-border bg-muted/10",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-medium">{option.text}</span>
+                <div className="flex shrink-0 gap-1">
+                  {wasChosen && <span className="rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-bold uppercase">Chosen</span>}
+                  {correct && <span className="rounded bg-background/80 px-1.5 py-0.5 text-[9px] font-bold uppercase">Correct</span>}
+                </div>
               </div>
             </div>
           );
         })}
       </div>
+      {item.was_skipped && <p className="text-xs italic text-muted-foreground">No answer submitted.</p>}
+      {!item.was_skipped && selected.length === 0 && <p className="text-xs italic text-muted-foreground">Answer not available.</p>}
+    </div>
+  );
+}
 
-      {/* Legend */}
-      <div className="flex items-center gap-3 mt-3">
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <span className="size-2 rounded-full bg-emerald-500 inline-block" />
-          Correct
-        </span>
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <span className="size-2 rounded-full bg-red-400 inline-block" />
-          Incorrect
-        </span>
-        <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <span className="size-2 rounded-full bg-muted-foreground/30 inline-block" />
-          Pending
-        </span>
-      </div>
-
-      {/* Topic performance */}
-      {topicMap.size > 0 && (
-        <div className="mt-4 pt-3 border-t border-border/30">
-          <p className="text-[10px] font-medium text-muted-foreground mb-2">
-            Topic performance
-          </p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-            {Array.from(topicMap.entries()).map(([type, stat]) => {
-              const pct =
-                stat.total > 0
-                  ? Math.round((stat.correct / stat.total) * 100)
-                  : 0;
-              return (
-                <div
-                  key={type}
-                  className="border border-border/40 rounded p-2 text-center bg-muted/20"
-                >
-                  <p className="text-[10px] text-muted-foreground capitalize truncate">
-                    {type.replace(/_/g, " ")}
-                  </p>
-                  <p className="text-sm font-medium">{pct}%</p>
-                  <p className="text-[10px] text-muted-foreground">
-                    {stat.correct}/{stat.total} correct
-                  </p>
-                </div>
-              );
-            })}
+function MatchingReview({ item }: { item: QuestionBreakdown }) {
+  const student = safeJson(item.student_answer_json ?? item.student_answer);
+  const studentMap = student && typeof student === "object" && !Array.isArray(student) ? student as Record<string, unknown> : {};
+  const options = item.options || [];
+  return (
+    <div className="space-y-2">
+      {options.map((option) => {
+        const chosen = studentMap[option.id] ?? studentMap[option.text] ?? "No match submitted";
+        return (
+          <div key={option.id} className="grid gap-2 rounded-lg border bg-muted/10 p-3 text-xs sm:grid-cols-3">
+            <div><span className="text-muted-foreground">Prompt</span><p className="font-medium">{option.text}</p></div>
+            <div><span className="text-muted-foreground">Your match</span><p className="font-medium">{String(chosen)}</p></div>
+            <div><span className="text-muted-foreground">Expected</span><p className="font-medium text-emerald-700">{option.match_value || "N/A"}</p></div>
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function OrderingReview({ item }: { item: QuestionBreakdown }) {
+  const parsed = safeJson(item.student_answer_json ?? item.student_answer);
+  const options = item.options;
+
+  const optionMap = useMemo(() => new Map((options || []).map((o) => [o.id, o])), [options]);
+
+  const orderedItems = useMemo(() => {
+    const opts = options || [];
+    if (Array.isArray(parsed)) {
+      return parsed.map((val) => {
+        const strVal = String(val);
+        const opt = optionMap.get(strVal) || opts.find((o) => o.text === strVal);
+        return {
+          id: opt?.id || strVal,
+          text: opt?.text || strVal,
+        };
+      });
+    }
+    if (item.student_answer) {
+      const parts = item.student_answer.split(",").map((s) => s.trim()).filter(Boolean);
+      return parts.map((strVal) => {
+        const opt = optionMap.get(strVal) || opts.find((o) => o.text === strVal);
+        return {
+          id: opt?.id || strVal,
+          text: opt?.text || strVal,
+        };
+      });
+    }
+    return [];
+  }, [parsed, item.student_answer, optionMap, options]);
+
+  const expectedOptions = useMemo(() => {
+    return [...(options || [])].sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0));
+  }, [options]);
+
+  if (item.was_skipped || orderedItems.length === 0) {
+    return <p className="text-xs italic text-muted-foreground">No response submitted.</p>;
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Your submitted sequence</p>
+        {orderedItems.map((opt, idx) => {
+          const expected = expectedOptions[idx];
+          const isCorrectPosition = expected && (opt.id === expected.id || opt.text.trim().toLowerCase() === expected.text.trim().toLowerCase());
+
+          return (
+            <div
+              key={opt.id || idx}
+              className={cn(
+                "flex items-center justify-between rounded-lg border p-3 text-xs",
+                isCorrectPosition
+                  ? "border-emerald-300 bg-emerald-50 text-emerald-900"
+                  : "border-amber-200 bg-amber-50 text-amber-900",
+              )}
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-background text-[10px] font-bold shadow-xs">
+                  {idx + 1}
+                </span>
+                <span className="font-medium">{opt.text}</span>
+              </div>
+              {expected && (
+                <span className="text-[10px] font-semibold">
+                  {isCorrectPosition ? (
+                    <span className="font-bold text-emerald-700">Correct position</span>
+                  ) : (
+                    <span className="text-amber-800">Expected: {expected.text}</span>
+                  )}
+                </span>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {item.correct_answer && (
+        <p className="mt-2 text-xs font-medium text-emerald-700">
+          Expected full sequence: {item.correct_answer}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function FillBlankReview({ item }: { item: QuestionBreakdown }) {
+  const parsed = safeJson(item.student_answer_json ?? item.student_answer);
+  const values = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? Object.values(parsed) : [];
+  return (
+    <div className="rounded-lg border bg-muted/10 p-3">
+      <p className="mb-2 text-[10px] font-semibold uppercase text-muted-foreground">Your blanks</p>
+      {values.length > 0 ? (
+        <ol className="space-y-1 text-sm">
+          {values.map((value, index) => <li key={index}>{index + 1}. {String(value)}</li>)}
+        </ol>
+      ) : (
+        <p className="text-xs italic text-muted-foreground">No blank answers available.</p>
+      )}
+      {item.correct_answer && <p className="mt-3 text-xs text-emerald-700">Accepted answer: {item.correct_answer}</p>}
+    </div>
+  );
+}
+
+function CaseStudyReview({ item }: { item: QuestionBreakdown }) {
+  const parsed = safeJson(item.student_answer_json ?? item.student_answer);
+  const answerMap = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  const prompts = item.options?.length ? item.options : Object.keys(answerMap).map((id, index) => ({ id, text: `Sub-question ${index + 1}` }));
+
+  return (
+    <div className="space-y-3">
+      {item.case_study_context && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 print:bg-white">
+          <p className="mb-1 text-[10px] font-semibold uppercase text-amber-700">Case context</p>
+          <p className="whitespace-pre-wrap text-xs leading-relaxed text-amber-950 print:text-slate-800">{item.case_study_context}</p>
+        </div>
+      )}
+      <div className="space-y-2">
+        {prompts.map((prompt, index) => (
+          <div key={prompt.id} className="rounded-lg border bg-muted/10 p-3">
+            <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Sub-question {index + 1}</p>
+            <p className="mb-2 text-sm font-medium">{prompt.text}</p>
+            <p className="whitespace-pre-wrap text-sm text-foreground">
+              {String(answerMap[prompt.id] ?? "") || <span className="text-muted-foreground italic">No response submitted</span>}
+            </p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function OpenResponseReview({ item }: { item: QuestionBreakdown }) {
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border bg-muted/10 p-3">
+        <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Your response</p>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
+          {item.student_answer || <span className="text-muted-foreground italic">No response submitted</span>}
+        </p>
+      </div>
+      {item.score === null && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+          Awaiting lecturer review.
         </div>
       )}
     </div>
   );
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+function QuestionCard({ item, index }: { item: QuestionBreakdown; index: number }) {
+  const type = normalizeType(item.question_type);
+  const isCaseStudy = type === "casestudy" || type === "case_study";
+  const isMatching = type === "matching";
+  const isOrdering = type === "ordering" || type === "ordered_list" || type === "orderedlist";
+  const isFillBlank = type === "fillblank" || type === "fill_blank";
+  const isClosedChoice = MCQ_TYPES.has(type) || TRUE_FALSE_TYPES.has(type);
+
+  return (
+    <section className="rounded-xl border border-border/50 bg-card/40 p-4 print:break-inside-avoid print:bg-white">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground">Question {index + 1}</p>
+          <p className="text-[11px] font-medium capitalize text-muted-foreground/70">
+            {labelForType(item.question_type)} - {item.max_score} {item.max_score === 1 ? "mark" : "marks"}
+          </p>
+          {item.section_title && <p className="text-[10px] text-muted-foreground/70">{item.section_title}</p>}
+        </div>
+        <ScoreBadge item={item} />
+      </div>
+
+      <p className="mb-3 whitespace-pre-wrap text-sm font-medium leading-relaxed">{item.question_text}</p>
+
+      {isCaseStudy ? <CaseStudyReview item={item} /> :
+        isClosedChoice ? <ClosedChoiceReview item={item} /> :
+        isMatching ? <MatchingReview item={item} /> :
+        isOrdering ? <OrderingReview item={item} /> :
+        isFillBlank ? <FillBlankReview item={item} /> :
+        isOpenEnded(item.question_type) ? <OpenResponseReview item={item} /> :
+        <OpenResponseReview item={item} />}
+
+      <div className="mt-3">
+        <FeedbackBlock item={item} />
+      </div>
+
+      {item.grading_mode?.toLowerCase().includes("ai") && (
+        <div className="mt-2 inline-flex items-center gap-1.5 text-[10px] font-medium text-muted-foreground">
+          <Cpu className="size-3" />
+          AI-assisted grading reviewed by lecturer
+        </div>
+      )}
+    </section>
+  );
+}
+
+function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] }) {
+  const groups = useMemo(() => {
+    const map = new Map<string, QuestionBreakdown[]>();
+    for (const item of breakdowns) {
+      const key = item.section_title || labelForType(item.question_type);
+      map.set(key, [...(map.get(key) || []), item]);
+    }
+    return Array.from(map.entries()).map(([name, items]) => {
+      const score = items.reduce((sum, item) => sum + (item.score ?? 0), 0);
+      const total = items.reduce((sum, item) => sum + (item.max_score ?? 0), 0);
+      return { name, items, score, total, pct: total > 0 ? Math.round((score / total) * 100) : 0 };
+    });
+  }, [breakdowns]);
+
+  return (
+    <section className="rounded-xl border border-border/50 bg-card/40 p-4 print:bg-white">
+      <p className="mb-3 text-xs font-semibold uppercase text-muted-foreground">Score breakdown</p>
+      <div className="space-y-3">
+        {groups.map((group) => (
+          <div key={group.name}>
+            <div className="mb-1 flex justify-between text-xs">
+              <span className="font-medium">{group.name}</span>
+              <span className="tabular-nums">{group.score}/{group.total}</span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-muted">
+              <div className="h-full rounded-full bg-emerald-600" style={{ width: `${group.pct}%` }} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function SubmittedQuestionCard({ q, sub, index }: { q: any; sub: any; index: number }) {
+  const type = normalizeType(q.type || q.question_type);
+  const selected = sub?.selected_option_ids || [];
+  const isCaseStudy = type === "casestudy" || type === "case_study";
+  const isOrdering = type === "ordering" || type === "ordered_list" || type === "orderedlist";
+  const answer = safeJson(sub?.answer_text);
+  const answerMap = answer && typeof answer === "object" && !Array.isArray(answer) ? answer as Record<string, unknown> : {};
+
+  return (
+    <section className="rounded-xl border border-border/40 bg-card/30 p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-muted-foreground">Question {index + 1}</p>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">
+            {labelForType(q.type)} - {q.marks} {q.marks === 1 ? "mark" : "marks"}
+          </p>
+        </div>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-bold uppercase text-muted-foreground">
+          {sub?.is_skipped ? "Skipped" : "Submitted"}
+        </span>
+      </div>
+      <p className="mb-3 whitespace-pre-wrap text-sm font-medium">{q.text || q.content}</p>
+      {isCaseStudy && q.caseStudyContext && (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+          {q.caseStudyContext}
+        </div>
+      )}
+      {MCQ_TYPES.has(type) || TRUE_FALSE_TYPES.has(type) ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(q.options || []).map((option: any) => (
+            <div key={option.id} className={cn("rounded-lg border p-3 text-xs", selected.includes(option.id) ? "border-primary bg-primary/5" : "bg-muted/10")}>
+              <span className="font-medium">{option.text || option.option_text}</span>
+              {selected.includes(option.id) && <span className="ml-2 rounded bg-background px-1.5 py-0.5 text-[9px] font-bold uppercase">Chosen</span>}
+            </div>
+          ))}
+        </div>
+      ) : isCaseStudy ? (
+        <div className="space-y-2">
+          {(q.options || Object.keys(answerMap).map((id: string, i: number) => ({ id, text: `Sub-question ${i + 1}` }))).map((option: any, i: number) => (
+            <div key={option.id} className="rounded-lg border bg-muted/10 p-3">
+              <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Sub-question {i + 1}</p>
+              <p className="mb-2 text-sm font-medium">{option.text || option.option_text}</p>
+              <p className="whitespace-pre-wrap text-sm">{String(answerMap[option.id] ?? "") || "No response submitted"}</p>
+            </div>
+          ))}
+        </div>
+      ) : isOrdering ? (
+        <div className="space-y-2">
+          <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Your submitted sequence</p>
+          {(() => {
+            const rawOrdered: string[] = sub?.ordered_option_ids || (Array.isArray(safeJson(sub?.answer_text)) ? safeJson(sub?.answer_text) : []);
+            const opts = q.options || [];
+            const optionMap = new Map(opts.map((o: any) => [o.id, o]));
+            if (!rawOrdered || rawOrdered.length === 0) {
+              return <p className="text-xs italic text-muted-foreground">No response submitted</p>;
+            }
+            return rawOrdered.map((val: string, idx: number) => {
+              const opt = optionMap.get(val);
+              const label = opt ? (opt.text || opt.option_text) : val;
+              return (
+                <div key={val || idx} className="flex items-center gap-3 rounded-lg border bg-muted/10 p-3 text-xs">
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">{idx + 1}</span>
+                  <span className="font-medium">{label}</span>
+                </div>
+              );
+            });
+          })()}
+        </div>
+      ) : (
+        <div className="rounded-lg border bg-muted/10 p-3">
+          <p className="mb-1 text-[10px] font-semibold uppercase text-muted-foreground">Your response</p>
+          <p className="whitespace-pre-wrap text-sm">{sub?.answer_text || "No response submitted"}</p>
+        </div>
+      )}
+    </section>
+  );
+}
 
 export default function ResultDetailPage() {
   const params = useParams();
@@ -519,36 +597,23 @@ export default function ResultDetailPage() {
   const [attempt, setAttempt] = useState<any | null>(null);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [assessment, setAssessment] = useState<any | null>(null);
-  const [isAwaitingReview, setIsAwaitingReview] = useState(false);
 
   useEffect(() => {
     async function loadResult() {
       try {
         const data = await resultApi.getResultByAttempt(attemptId);
         setResult(data);
-      } catch (err: unknown) {
-        console.log("Result not released, loading raw attempt and submission data for student review");
+      } catch {
         try {
           const attemptData = await attemptApi.getAttempt(attemptId);
           setAttempt(attemptData);
-          if (attemptData) {
-            try {
-              const assessData = await assessmentApi.getAssessmentById(attemptData.assessment_id);
-              setAssessment(assessData);
-            } catch (aErr) {
-              console.error("Failed to load assessment title", aErr);
-            }
-
-            const hasOpen = attemptData.questions?.some((q: any) =>
-              isOpenEnded(q.type || "")
-            );
-            const isSubmitted = attemptData.status?.toUpperCase() === "SUBMITTED" || !!attemptData.submitted_at;
-            if (hasOpen && isSubmitted) {
-              setIsAwaitingReview(true);
-            }
-
-            const subsData = await submissionApi.getSubmissionsForAttempt(attemptId);
-            setSubmissions(subsData.submissions || []);
+          if (attemptData?.assessment_id) {
+            const [assessmentData, submissionsData] = await Promise.all([
+              assessmentApi.getAssessmentById(attemptData.assessment_id).catch(() => null),
+              submissionApi.getSubmissionsForAttempt(attemptId).catch(() => ({ submissions: [] })),
+            ]);
+            setAssessment(assessmentData);
+            setSubmissions(submissionsData.submissions || []);
           }
         } catch (attemptErr) {
           console.error("Failed to load attempt details", attemptErr);
@@ -560,193 +625,72 @@ export default function ResultDetailPage() {
     loadResult();
   }, [attemptId]);
 
-  // ── Loading state ──────────────────────────────────────────────────────────
+  function requestReview() {
+    const subject = encodeURIComponent(`Result review request: ${result?.assessment_title || "Assessment"}`);
+    const body = encodeURIComponent(
+      `Please review my published result.\n\nAssessment: ${result?.assessment_title || ""}\nAttempt ID: ${result?.attempt_id || attemptId}\nCurrent score: ${result?.total_score}/${result?.max_score} (${Math.round(result?.percentage || 0)}%)\n\nReason for review:\n`,
+    );
+    window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    toast.info("Review request prepared in your email client.");
+  }
+
   if (loading) {
     return (
-      <div className="space-y-4 w-full">
-        <Skeleton className="h-8 w-28 rounded-lg" />
-        <div className="border border-border/50 rounded-lg p-4 bg-card/30">
-          <Skeleton className="h-4 w-48 mb-2 rounded" />
-          <Skeleton className="h-3 w-64 rounded" />
-        </div>
-        <div className="border border-border/50 rounded-lg p-4 bg-card/30 flex gap-4 items-center">
-          <Skeleton className="size-[88px] rounded-full shrink-0" />
-          <div className="space-y-2 flex-1">
-            <Skeleton className="h-7 w-32 rounded" />
-            <Skeleton className="h-3 w-40 rounded" />
-            <Skeleton className="h-5 w-20 rounded-full" />
-          </div>
-        </div>
-        <div className="border border-border/50 rounded-lg p-4 bg-card/30 space-y-3">
-          <Skeleton className="h-3 w-32 rounded" />
-          {[1, 2].map((i) => (
-            <Skeleton key={i} className="h-2 w-full rounded" />
-          ))}
-        </div>
-        {[1, 2, 3].map((i) => (
-          <div
-            key={i}
-            className="border border-border/50 rounded-lg p-4 bg-card/30 space-y-2"
-          >
-            <Skeleton className="h-3 w-24 rounded" />
-            <Skeleton className="h-4 w-full rounded" />
-            <Skeleton className="h-3 w-3/4 rounded" />
-          </div>
-        ))}
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-28" />
+        <Skeleton className="h-28 w-full rounded-xl" />
+        <Skeleton className="h-32 w-full rounded-xl" />
+        <Skeleton className="h-48 w-full rounded-xl" />
       </div>
     );
   }
 
-  // ── Empty / not released state ─────────────────────────────────────────────
   if (!result && attempt) {
-    const isSubmitted = attempt.status?.toUpperCase() === "SUBMITTED" || !!attempt.submitted_at;
     const title = assessment?.title || "Assessment Submission";
-    const typeBadge = getAssessmentTypeBadge(title);
-    const dateLabel = attempt.submitted_at 
-      ? format(new Date(attempt.submitted_at), "MMM d, yyyy • HH:mm") 
-      : (attempt.started_at ? format(new Date(attempt.started_at), "MMM d, yyyy • HH:mm") : "Recent");
-
+    const isSubmitted = attempt.status?.toUpperCase() === "SUBMITTED" || !!attempt.submitted_at;
+    const hasOpen = attempt.questions?.some((q: any) => isOpenEnded(q.type));
     return (
-      <div className="space-y-4 w-full">
-        {/* Back button */}
-        <div className="flex items-center">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => router.push("/student/assessments")}
-            className="h-8 px-3 text-xs font-medium gap-1.5 border border-border/55 rounded-lg hover:bg-muted/50 transition-colors"
-          >
-            <ArrowLeft className="size-3.5" />
-            Back to Assessments
-          </Button>
-        </div>
-
-        {/* Header Zone */}
-        <div className="border border-border/40 rounded-2xl p-6 bg-card/45 shadow-sm backdrop-blur-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="space-y-1">
-              <span className="inline-flex items-center rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-bold text-primary uppercase tracking-wide">
-                {typeBadge}
-              </span>
-              <h1 className="text-xl font-semibold text-foreground leading-snug tracking-tight">
-                {title}
-              </h1>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground font-medium pt-1">
-                <span className="flex items-center gap-1.5">
-                  <Calendar className="size-3.5 opacity-70" />
-                  Submitted: {dateLabel}
-                </span>
-                <span className="text-muted-foreground/30">•</span>
-                <span>{attempt.questions?.length || 0} Questions</span>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-3 py-1 text-xs font-semibold uppercase tracking-wide">
-                <CheckCircle2 className="size-3.5" /> Submitted
-              </span>
-            </div>
+      <div className="space-y-4">
+        <Button variant="ghost" size="sm" onClick={() => router.push("/student/results")} className="h-8 gap-1.5 border border-border/55 text-xs">
+          <ArrowLeft className="size-3.5" />
+          Results
+        </Button>
+        <section className="rounded-2xl border bg-card/45 p-6">
+          <span className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary">
+            {getAssessmentTypeBadge(title)}
+          </span>
+          <h1 className="mt-2 text-xl font-semibold">{title}</h1>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Submitted: {fmtDate(attempt.submitted_at || attempt.started_at, true)} - {attempt.questions?.length || 0} questions
+          </p>
+        </section>
+        <section className="flex gap-4 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-5">
+          <Clock className="mt-0.5 size-5 shrink-0 text-amber-600" />
+          <div>
+            <p className="text-sm font-semibold text-amber-900">Marks not published yet</p>
+            <p className="mt-1 text-xs leading-relaxed text-amber-800">
+              {hasOpen && isSubmitted
+                ? "This assessment includes responses that need lecturer review. You will receive a notification when marks are published."
+                : "Your submission was recorded. Marks will appear here once the lecturer publishes the results."}
+            </p>
           </div>
-        </div>
-
-        {/* Explain/Notification Banner */}
-        {isAwaitingReview ? (
-          <div className="p-5 rounded-2xl border border-amber-500/15 bg-amber-500/5 flex items-start gap-4 transition-all duration-300">
-            <div className="size-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-              <Clock className="size-5 text-amber-600 animate-pulse" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-amber-950 dark:text-amber-200">Lecturer Grading Pending</p>
-              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 leading-relaxed font-medium">
-                This assessment contains open-ended questions (such as essay or short answer questions) that require manual review and grading by your lecturer. Marks have not been published yet, but as soon as your lecturer publishes the results, they will appear here and we will let you know immediately!
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="p-5 rounded-2xl border border-primary/15 bg-primary/5 flex items-start gap-4 transition-all duration-300">
-            <div className="size-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0">
-              <Clock className="size-5 text-primary" />
-            </div>
-            <div className="space-y-1">
-              <p className="text-sm font-semibold text-primary">Awaiting Results Release</p>
-              <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-                Your submission was successful! The results for this assessment have not been released by your lecturer yet. Once released, your final score, grade breakdown, and feedback will be visible here.
-              </p>
-            </div>
+        </section>
+        {attempt.questions?.length > 0 && (
+          <div className="space-y-3">
+            <h2 className="px-1 text-sm font-semibold">Submitted responses</h2>
+            {attempt.questions.map((q: any, index: number) => (
+              <SubmittedQuestionCard
+                key={q.id}
+                q={q}
+                sub={submissions.find((s) => s.question_id === q.id)}
+                index={index}
+              />
+            ))}
           </div>
         )}
-
-        {/* Questions and Responses Review */}
-        {attempt.questions && attempt.questions.length > 0 && (
-          <div className="space-y-4">
-            <h2 className="text-base font-semibold text-foreground tracking-tight px-1">
-              Submitted Responses Review
-            </h2>
-            <div className="space-y-3">
-              {attempt.questions.map((q: any, idx: number) => {
-                const sub = submissions.find((s: any) => s.question_id === q.id);
-                const open = isOpenEnded(q.type || "");
-                
-                // Decode answer text or selected options
-                let studentAnsText = sub?.answer_text;
-                if (!open && sub?.selected_option_ids?.length > 0 && q.options) {
-                  const opt = q.options.find((o: any) => o.id === sub.selected_option_ids[0]);
-                  studentAnsText = opt?.text || sub.selected_option_ids[0];
-                }
-
-                return (
-                  <div key={q.id} className="border border-border/40 rounded-xl p-5 bg-card/30 space-y-4 hover:border-border/60 transition-colors shadow-sm">
-                    <div className="flex justify-between items-start gap-3">
-                      <div className="space-y-1">
-                        <p className="text-xs text-muted-foreground font-semibold">Question {idx + 1}</p>
-                        <p className="text-[10px] text-muted-foreground/60 uppercase font-bold tracking-wider">
-                          {q.type?.replace(/_/g, " ")} · {q.marks} {q.marks === 1 ? "mark" : "marks"}
-                        </p>
-                      </div>
-                      <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-2.5 py-0.5 text-[10px] font-bold text-muted-foreground uppercase">
-                        {sub?.is_skipped ? "Skipped" : "Submitted"}
-                      </span>
-                    </div>
-
-                    <p className="text-sm text-foreground leading-relaxed font-medium">
-                      {q.text || q.content}
-                    </p>
-
-                    <div className="bg-muted/15 border border-border/30 rounded-xl p-4 space-y-1">
-                      <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
-                        Your Response
-                      </p>
-                      <div className="text-sm text-foreground font-medium leading-relaxed whitespace-pre-wrap">
-                        {sub?.is_skipped ? (
-                          <span className="text-muted-foreground italic">No response submitted</span>
-                        ) : (
-                          studentAnsText || <span className="text-muted-foreground italic font-normal">Submitted</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Actions Zone */}
-        <div className="border border-border/40 rounded-2xl p-5 bg-card/30 flex flex-wrap gap-3 justify-end items-center shadow-sm">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/student/assessments")}
-            className="h-9 text-xs font-semibold px-4 rounded-xl border-border/60"
-          >
-            Back to Assessments
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => window.location.reload()}
-            className="h-9 text-xs font-semibold px-4 rounded-xl shadow-none gap-1.5"
-          >
-            <RefreshCw className="size-3.5" /> Refresh Status
-          </Button>
+        <div className="flex justify-end gap-2 rounded-xl border bg-card/30 p-4">
+          <Button variant="outline" size="sm" onClick={() => router.push("/student/results")} className="h-8 text-xs">Back to results</Button>
+          <Button size="sm" onClick={() => window.location.reload()} className="h-8 gap-1.5 text-xs"><RefreshCw className="size-3.5" /> Refresh status</Button>
         </div>
       </div>
     );
@@ -754,201 +698,133 @@ export default function ResultDetailPage() {
 
   if (!result) {
     return (
-      <div className="py-20 text-center space-y-3 px-4">
-        <div className="mx-auto size-12 bg-muted rounded-full flex items-center justify-center border border-dashed">
-          <Clock className="size-5 text-muted-foreground/50" />
-        </div>
-        <h2 className="text-sm font-semibold text-foreground">
-          Results not yet released
-        </h2>
-        <p className="text-xs text-muted-foreground">
-          The lecturer has not yet released results for this assessment.
-        </p>
-        <div className="flex gap-2 justify-center pt-1">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => window.location.reload()}
-            className="h-8 gap-1.5 text-xs font-medium border-border/60"
-          >
-            <RefreshCw className="size-3.5" />
-            Refresh
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => router.push("/student/dashboard")}
-            className="h-8 text-xs font-medium"
-          >
-            Back to Dashboard
-          </Button>
-        </div>
+      <div className="py-20 text-center">
+        <Clock className="mx-auto mb-3 size-6 text-muted-foreground" />
+        <h2 className="text-sm font-semibold">Result not available</h2>
+        <p className="mt-1 text-xs text-muted-foreground">This attempt could not be found or is not visible to your account.</p>
       </div>
     );
   }
 
-  // ── Derived data ───────────────────────────────────────────────────────────
-  const pct = Math.round(result.percentage ?? 0);
-  const dateLabel = fmtDate(result.calculated_at ?? result.released_at);
-  const typeBadge = getAssessmentTypeBadge(result.assessment_title);
-  const holdBannerShown = result.integrity_hold;
+  const pct = Math.round(result.percentage || 0);
+  const title = result.assessment_title || "Assessment Result";
 
   return (
-    <div className="space-y-4">
-      {/* Back button */}
-      <div className="flex items-center">
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => router.push("/student/results")}
-          className="h-8 px-3 text-xs font-medium gap-1.5 border border-border/55 rounded-lg hover:bg-muted/50"
-        >
+    <div className="result-paper space-y-4">
+      <style jsx global>{`
+        @media print {
+          body { background: white !important; }
+          aside, header, nav, .no-print { display: none !important; }
+          main { padding: 0 !important; background: white !important; min-height: auto !important; }
+          .result-paper { padding: 24px !important; color: #0f172a !important; }
+          .result-paper * { box-shadow: none !important; }
+        }
+      `}</style>
+
+      <div className="no-print flex items-center justify-between gap-3">
+        <Button variant="ghost" size="sm" onClick={() => router.push("/student/results")} className="h-8 gap-1.5 border border-border/55 text-xs">
           <ArrowLeft className="size-3.5" />
           Results
         </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={requestReview} className="h-8 gap-1.5 text-xs">
+            <MessageCircle className="size-3.5" />
+            Request review
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => window.print()} className="h-8 gap-1.5 text-xs">
+            <Download className="size-3.5" />
+            Download PDF
+          </Button>
+        </div>
       </div>
 
-      {/* Integrity hold banner */}
-      {holdBannerShown && (
-        <div className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3">
-          <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
+      {result.integrity_hold && (
+        <section className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
           <p className="text-xs font-medium text-red-800">
-            This result is provisional — under integrity review. Final result
-            may differ.
+            This result is provisional and under integrity review. The final result may differ after the audit is completed.
           </p>
-        </div>
+        </section>
       )}
 
-      {/* ── 1. Header Zone ────────────────────────────────────────────────── */}
-      <div className="border border-border/50 rounded-lg p-4 bg-card/30">
-        <div className="flex items-start justify-between gap-2 mb-1.5">
-          <p className="text-sm font-medium text-foreground leading-snug">
-            {result.assessment_title}
-          </p>
-          <span className="shrink-0 inline-flex items-center rounded-full border border-border/50 bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-            {typeBadge}
-          </span>
-        </div>
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <Calendar className="size-3" />
-            {dateLabel}
-          </span>
-          <span>·</span>
-          <span>
-            {result.graded_question_count}/{result.total_question_count}{" "}
-            questions graded
-          </span>
-        </div>
-      </div>
-
-      {/* ── 2. Score Hero ─────────────────────────────────────────────────── */}
-      <div className="border border-border/50 rounded-lg p-4 bg-card/30 flex flex-row gap-4 items-center">
-        <ScoreRing pct={pct} isPassing={result.is_passing} />
-
-        <div className="flex-1 space-y-1">
-          <div className="flex items-baseline gap-1 tabular-nums">
-            <span className="text-2xl font-medium text-foreground">
-              {result.total_score}
-            </span>
-            <span className="text-sm text-muted-foreground">
-              / {result.max_score}
-            </span>
+      <section className="rounded-2xl border border-border/50 bg-card/40 p-5 print:bg-white">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex items-start gap-3">
+            <Image src="/icons/logo/Mindexa-logo.svg" alt="Mindexa" width={154} height={40} className="h-10 w-auto print:h-9" />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Official result slip</p>
+              <h1 className="mt-1 text-xl font-semibold leading-snug">{title}</h1>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {result.course_code ? `${result.course_code} - ` : ""}{result.course_name || "Course not specified"}
+              </p>
+            </div>
           </div>
+          <span className="w-fit rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-[10px] font-bold uppercase text-primary">
+            {getAssessmentTypeBadge(title)}
+          </span>
+        </div>
 
-          <p className="text-xs text-muted-foreground">
-            {pct}%
-            {result.letter_grade ? ` · Grade ${result.letter_grade}` : ""}
+        <div className="mt-4 grid gap-2 border-t pt-4 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          <div><span className="text-muted-foreground">Institution</span><p className="font-medium">{result.institution_name || "Mindexa"}</p></div>
+          <div><span className="text-muted-foreground">College</span><p className="font-medium">{result.college_name || "N/A"}</p></div>
+          <div><span className="text-muted-foreground">Department</span><p className="font-medium">{result.department_name || "N/A"}</p></div>
+          <div><span className="text-muted-foreground">Academic year</span><p className="font-medium">{result.academic_year || "N/A"}</p></div>
+          <div><span className="text-muted-foreground">Released</span><p className="font-medium">{fmtDate(result.released_at, true)}</p></div>
+          <div><span className="text-muted-foreground">Calculated</span><p className="font-medium">{fmtDate(result.calculated_at, true)}</p></div>
+          <div><span className="text-muted-foreground">Attempt ID</span><p className="font-mono text-[10px]">{result.attempt_id}</p></div>
+          <div><span className="text-muted-foreground">Result ID</span><p className="font-mono text-[10px]">{result.id}</p></div>
+        </div>
+      </section>
+
+      <section className="flex items-center gap-4 rounded-2xl border border-border/50 bg-card/40 p-5 print:bg-white">
+        <ScoreRing pct={pct} isPassing={result.is_passing} />
+        <div className="flex-1">
+          <div className="flex items-baseline gap-1 tabular-nums">
+            <span className="text-3xl font-semibold">{result.total_score}</span>
+            <span className="text-sm text-muted-foreground">/ {result.max_score}</span>
+          </div>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {pct}%{result.letter_grade ? ` - Grade ${result.letter_grade}` : ""}
           </p>
-
-          <div className="pt-0.5">
+          <div className="mt-2">
             {result.is_passing ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
-                <CheckCircle2 className="size-3" />
-                Passed
+              <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
+                <CheckCircle2 className="size-3" /> Passed
               </span>
             ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-red-50 border border-red-200 px-2.5 py-0.5 text-[11px] font-medium text-red-700">
-                <XCircle className="size-3" />
-                Did not pass
+              <span className="inline-flex items-center gap-1 rounded-full border border-red-200 bg-red-50 px-2.5 py-0.5 text-[11px] font-medium text-red-700">
+                <XCircle className="size-3" /> Did not pass
               </span>
             )}
           </div>
-
-          {result.released_at && (
-            <p className="text-[10px] text-muted-foreground pt-0.5">
-              Released by lecturer · {fmtDate(result.released_at)}
-            </p>
-          )}
         </div>
-      </div>
+        <div className="hidden text-right text-xs text-muted-foreground sm:block">
+          <Calendar className="mb-1 ml-auto size-4" />
+          {result.graded_question_count}/{result.total_question_count} questions graded
+        </div>
+      </section>
 
-      {/* ── 3. Score Breakdown ────────────────────────────────────────────── */}
-      {result.breakdowns && result.breakdowns.length > 0 && (
-        <ScoreBreakdownCard breakdowns={result.breakdowns} />
-      )}
+      {result.breakdowns?.length > 0 && <ScoreBreakdownCard breakdowns={result.breakdowns} />}
 
-      {/* ── 4. Question Review List ───────────────────────────────────────── */}
-      {result.breakdowns && result.breakdowns.length > 0 && (
-        <div>
-          <p className="text-sm font-medium mb-3">Question review</p>
-          {result.breakdowns.map((item, idx) => (
-            <QuestionCard key={item.id} item={item} index={idx} />
+      {result.breakdowns?.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold">Question review</h2>
+            <span className="text-[10px] font-medium uppercase text-muted-foreground">{result.breakdowns.length} items</span>
+          </div>
+          {result.breakdowns.map((item, index) => (
+            <QuestionCard key={item.id} item={item} index={index} />
           ))}
         </div>
       )}
 
-      {/* ── 5. Integrity Zone ─────────────────────────────────────────────── */}
-      {result.integrity_hold && (
-        <div className="border border-red-300 rounded-lg p-4 bg-red-50">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle className="size-4 text-red-600" />
-            <p className="text-xs font-semibold text-red-800">
-              Integrity review in progress
-            </p>
-          </div>
-          <p className="text-xs text-red-700">
-            One or more responses in this assessment have been flagged for
-            review. Your final result will be confirmed once the review is
-            complete.
-          </p>
+      <section className="rounded-xl border bg-card/30 p-4 text-xs text-muted-foreground print:bg-white">
+        <div className="mb-1 flex items-center gap-1.5 font-semibold text-foreground">
+          <Award className="size-3.5" />
+          Result note
         </div>
-      )}
-
-      {/* ── 6. Actions Zone ───────────────────────────────────────────────── */}
-      <div className="border border-border/50 rounded-lg p-4 bg-card/30">
-        <p className="text-sm font-medium mb-2">Actions</p>
-        <div className="flex gap-2 flex-wrap">
-          {!result.integrity_hold && result.is_released && (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-8 text-xs font-medium gap-1.5 border border-border/50"
-            >
-              <MessageCircle className="size-3.5" />
-              Request review
-            </Button>
-          )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => window.print()}
-            className="h-8 text-xs font-medium gap-1.5 border border-border/50"
-          >
-            <Download className="size-3.5" />
-            Download PDF
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => router.push("/student/results")}
-            className="h-8 text-xs font-medium gap-1.5 border border-border/60"
-          >
-            <ArrowLeft className="size-3.5" />
-            Back to results
-          </Button>
-        </div>
-      </div>
+        This result slip is generated by Mindexa from published assessment marks and lecturer feedback. Formal review requests are subject to the institution&apos;s assessment appeal policy and deadlines.
+      </section>
     </div>
   );
 }

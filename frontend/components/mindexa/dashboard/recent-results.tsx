@@ -30,7 +30,11 @@ export function RecentResults({ results }: { results: StudentRecentResult[] }) {
                   {res.assessment_title}
                 </div>
                 <div className="text-[10px] text-muted-foreground flex items-center gap-2">
-                  <span>{new Date(res.released_at).toLocaleDateString()}</span>
+                  <span>
+                    {res.released_at
+                      ? new Date(res.released_at).toLocaleDateString()
+                      : "Pending release"}
+                  </span>
                   {res.course_code && (
                     <span className="font-mono bg-muted px-1 py-0.5 rounded">
                       {res.course_code} {res.academic_year && `• ${res.academic_year}`}

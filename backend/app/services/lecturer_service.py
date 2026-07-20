@@ -4,13 +4,13 @@ import uuid
 from typing import List
 from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, cast, Date
+from sqlalchemy import select, func, cast, Date, or_
 from sqlalchemy.orm import selectinload
 
-from app.db.models.attempt import AssessmentAttempt
+from app.db.models.attempt import AssessmentAttempt, StudentResponse
 from app.db.models.assessment import Assessment
 from app.db.models.integrity import IntegrityEvent
-from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus
+from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus, AIGradeDecision
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.grading_repo import GradingRepository
@@ -510,33 +510,48 @@ class LecturerService:
         base = datetime.now(UTC).date()
         start_date = base - timedelta(days=30)
 
-        # manual grading (GradingMode.MANUAL)
-        manual_stmt = (
-            select(cast(AssessmentAttempt.submitted_at, Date), func.count(AssessmentAttempt.id))
-            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
-            .where(
-                Assessment.created_by_id == lecturer_id,
-                AssessmentAttempt.submitted_at >= start_date,
-                AssessmentAttempt.grading_mode == GradingMode.MANUAL
-            )
-            .group_by(cast(AssessmentAttempt.submitted_at, Date))
-        )
-        manual_res = await self.db.execute(manual_stmt)
-        manual_map = {row[0].isoformat(): row[1] for row in manual_res.all() if row[0]}
-
-        # AI assisted (GradingMode.SEMI)
+        # AI assisted / processed attempts
         ai_stmt = (
-            select(cast(AssessmentAttempt.submitted_at, Date), func.count(AssessmentAttempt.id))
+            select(cast(AssessmentAttempt.submitted_at, Date), func.count(func.distinct(AssessmentAttempt.id)))
             .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .outerjoin(StudentResponse, StudentResponse.attempt_id == AssessmentAttempt.id)
             .where(
                 Assessment.created_by_id == lecturer_id,
                 AssessmentAttempt.submitted_at >= start_date,
-                AssessmentAttempt.grading_mode == GradingMode.SEMI
+                or_(
+                    AssessmentAttempt.grading_mode.in_([GradingMode.SEMI, GradingMode.AUTO]),
+                    Assessment.grading_mode.in_([GradingMode.SEMI, GradingMode.AUTO]),
+                    StudentResponse.ai_grade_score.isnot(None),
+                    StudentResponse.auto_grade_score.isnot(None),
+                    StudentResponse.ai_grade_decision.in_([
+                        AIGradeDecision.SUGGESTED,
+                        AIGradeDecision.ACCEPTED,
+                        AIGradeDecision.MODIFIED
+                    ])
+                )
             )
             .group_by(cast(AssessmentAttempt.submitted_at, Date))
         )
         ai_res = await self.db.execute(ai_stmt)
         ai_map = {row[0].isoformat(): row[1] for row in ai_res.all() if row[0]}
+
+        # Total submitted attempts per day
+        total_stmt = (
+            select(cast(AssessmentAttempt.submitted_at, Date), func.count(AssessmentAttempt.id))
+            .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .where(
+                Assessment.created_by_id == lecturer_id,
+                AssessmentAttempt.submitted_at >= start_date
+            )
+            .group_by(cast(AssessmentAttempt.submitted_at, Date))
+        )
+        total_res = await self.db.execute(total_stmt)
+        total_map = {row[0].isoformat(): row[1] for row in total_res.all() if row[0]}
+
+        manual_map = {}
+        for d_str, tot_cnt in total_map.items():
+            ai_cnt = ai_map.get(d_str, 0)
+            manual_map[d_str] = max(0, tot_cnt - ai_cnt)
 
         for i in range(30, -1, -1):
             d = (base - timedelta(days=i)).isoformat()

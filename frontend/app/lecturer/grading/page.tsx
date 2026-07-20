@@ -119,14 +119,11 @@ interface ReleaseQueueItem {
 }
 
 export function isQuestionAutoGraded(q?: {
-  type: string;
+  type?: string;
   question_type?: string;
   grading_mode?: string;
 }) {
   if (!q) return false;
-  if (q.grading_mode) {
-    return q.grading_mode.toUpperCase() === "AUTO";
-  }
   const t = (q.type || q.question_type || "")
     .toLowerCase()
     .replace(/[^a-z0-9_]/g, "");
@@ -135,10 +132,24 @@ export function isQuestionAutoGraded(q?: {
     "truefalse",
     "true_definition",
     "true_false",
+    "singleoption",
+    "multiplechoice",
+    "multiple_choice",
+    "multichoice",
+    "multiselect",
+    "multicorrect",
+    "multi_correct",
+    "checkbox",
     "matching",
+    "match_pairs",
     "fillblank",
     "fillblanks",
+    "fill_blank",
     "ordering",
+    "orderedlist",
+    "ordered_list",
+    "sequence",
+    "sequencing",
   ].includes(t);
 }
 
@@ -1158,7 +1169,7 @@ export default function LecturerGradingQueue() {
   // ─── RENDERING PATH 2: INDIVIDUAL SPEEDGRADER ─────────────────────────────
   if (activeAttempt) {
     const currentQuestion = activeAttempt.questions?.[activeQuestionIndex];
-    const isAutoGraded = ["MCQ", "TRUE_FALSE", "MATCHING", "ORDERING", "FILL_BLANK"].includes(currentQuestion?.type || "");
+    const isAutoGraded = isQuestionAutoGraded(currentQuestion);
     const maxMarks = currentQuestion?.marks || DEFAULT_QUESTION_MAX_MARKS;
     const currentSubmission = activeSubmissions.find((s: any) => s.question_id === currentQuestion?.id);
 
@@ -1353,12 +1364,131 @@ export default function LecturerGradingQueue() {
                   </div>
                 )}
                 
-                <div className="text-xs sm:text-sm font-mono leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[400px] overflow-y-auto bg-muted/10 p-3.5 rounded-xl border border-border/40 font-medium">
-                  {currentSubmission?.answer_text || (
-                    <span className="italic text-muted-foreground/60 font-sans font-medium">
-                      No response recorded for this question node.
-                    </span>
-                  )}
+                <div className="text-xs sm:text-sm font-sans leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[450px] overflow-y-auto bg-muted/10 p-3.5 rounded-xl border border-border/40 font-medium">
+                  {(() => {
+                    if (!currentSubmission || currentSubmission.is_skipped) {
+                      return (
+                        <span className="italic text-muted-foreground/60 font-sans font-medium">
+                          No response recorded for this question node.
+                        </span>
+                      );
+                    }
+
+                    const subType = (currentSubmission.answer_type || "").toUpperCase();
+                    const qType = (currentQuestion?.type || currentQuestion?.question_type || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
+                    const isOrdering = subType === "ORDERED_LIST" || qType === "ordering" || qType === "ordered_list" || qType === "orderedlist";
+
+                    if (isOrdering) {
+                      const orderedIds: string[] = currentSubmission.ordered_option_ids || (Array.isArray(currentSubmission.answer_text) ? currentSubmission.answer_text : []);
+                      if (!orderedIds || orderedIds.length === 0) {
+                        return (
+                          <span className="italic text-muted-foreground/60 font-sans font-medium">
+                            No ordering sequence submitted.
+                          </span>
+                        );
+                      }
+                      const opts = currentQuestion?.options || [];
+                      const expectedOpts = [...opts].sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
+                      return (
+                        <div className="space-y-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Student Submitted Sequence</p>
+                          {orderedIds.map((val: string, idx: number) => {
+                            const opt = opts.find((o: any) => o.id === val || o.text === val || o.content === val);
+                            const label = opt ? (opt.content || opt.text || opt.option_text) : val;
+                            const expected = expectedOpts[idx];
+                            const isCorrect = expected && (expected.id === val || (expected.content || expected.text) === label);
+
+                            return (
+                              <div key={val || idx} className={cn("p-3 rounded-xl border flex items-center justify-between text-xs font-sans", isCorrect ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-950" : "bg-amber-500/10 border-amber-500/30 text-amber-950")}>
+                                <div className="flex items-center gap-3 font-semibold">
+                                  <span className="size-5 rounded-full bg-background border flex items-center justify-center text-[10px] font-mono font-bold shrink-0">{idx + 1}</span>
+                                  <span>{label}</span>
+                                </div>
+                                {expected && (
+                                  <span className="text-[10px] font-mono font-bold">
+                                    {isCorrect ? <span className="text-emerald-700">✓ Correct</span> : <span className="text-amber-800">Expected: {expected.content || expected.text}</span>}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+
+                    const isMatching = subType === "MATCH_PAIRS" || qType === "matching" || qType === "match_pairs";
+                    if (isMatching) {
+                      const pairs = currentSubmission.match_pairs_json || {};
+                      const keys = Object.keys(pairs);
+                      if (keys.length === 0) {
+                        return <span className="italic text-muted-foreground/60 font-sans font-medium">No matches submitted.</span>;
+                      }
+                      return (
+                        <div className="space-y-2 font-sans text-xs">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Submitted Matches</p>
+                          {keys.map((k) => (
+                            <div key={k} className="p-2.5 rounded-lg border bg-background flex items-center justify-between">
+                              <span className="font-semibold">{k}</span>
+                              <span className="text-primary font-bold">→ {String(pairs[k])}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    const isFillBlanks = subType === "FILL_BLANKS" || qType === "fillblank" || qType === "fillblanks" || qType === "fill_blank";
+                    if (isFillBlanks) {
+                      const blanks = currentSubmission.fill_blank_answers || {};
+                      const keys = Object.keys(blanks);
+                      if (keys.length === 0) {
+                        return <span className="italic text-muted-foreground/60 font-sans font-medium">No fill-blank answers recorded.</span>;
+                      }
+                      return (
+                        <div className="space-y-2 font-sans text-xs">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Submitted Blanks</p>
+                          {keys.map((k) => (
+                            <div key={k} className="p-2.5 rounded-lg border bg-background flex items-center justify-between">
+                              <span className="font-semibold">Blank {k}</span>
+                              <span className="font-mono font-bold">{String(blanks[k])}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+
+                    const isMcq = subType === "SINGLE_OPTION" || subType === "MULTI_OPTION" || qType === "mcq" || qType === "singleoption" || qType === "multiplechoice" || qType === "multiple_choice" || qType === "multiselect" || qType === "checkbox";
+                    if (isMcq && (currentSubmission.selected_option_ids?.length || subType === "SINGLE_OPTION" || subType === "MULTI_OPTION")) {
+                      const selected = currentSubmission.selected_option_ids || [];
+                      const opts = currentQuestion?.options || [];
+                      if (selected.length === 0) {
+                        return <span className="italic text-muted-foreground/60 font-sans font-medium">No option chosen.</span>;
+                      }
+                      return (
+                        <div className="space-y-2 font-sans text-xs">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2">Selected Option(s)</p>
+                          {selected.map((oid: string) => {
+                            const opt = opts.find((o: any) => o.id === oid);
+                            return (
+                              <div key={oid} className={cn("p-2.5 rounded-lg border flex items-center justify-between font-semibold", opt?.is_correct ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-950" : "bg-background")}>
+                                <span>{opt ? (opt.content || opt.text || opt.option_text) : oid}</span>
+                                {opt?.is_correct && <span className="text-[10px] font-mono font-bold text-emerald-700">✓ Correct</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    }
+
+                    const textVal = currentSubmission.answer_text || 
+                                    (typeof currentSubmission.submitted_content === "string" ? currentSubmission.submitted_content : currentSubmission.submitted_content?.text) || 
+                                    currentSubmission.student_answer;
+
+                    return textVal || (
+                      <span className="italic text-muted-foreground/60 font-sans font-medium">
+                        No response recorded for this question node.
+                      </span>
+                    );
+                  })()}
                 </div>
                 
                 {currentQuestion?.sub_questions && currentQuestion.sub_questions.length > 0 && (

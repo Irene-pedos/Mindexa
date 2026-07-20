@@ -62,6 +62,58 @@ class ResultService:
         self.assessment_repo = AssessmentRepository(db)
         self.submission_repo = SubmissionRepository(db)
 
+    async def _notify_result_released(
+        self,
+        *,
+        result: AssessmentResult,
+        assessment_title: str,
+    ) -> None:
+        from app.core.config import settings
+        from app.db.enums import NotificationType
+        from app.db.models.auth import User
+        from app.db.repositories.notification_repo import NotificationRepository
+        from app.workers.tasks import send_email_notification
+
+        action_url = f"/student/results/{result.attempt_id}"
+        notification_repo = NotificationRepository(self.db)
+        await notification_repo.create(
+            recipient_id=result.student_id,
+            notification_type=NotificationType.RESULT_RELEASED,
+            title=f"Marks published: {assessment_title}",
+            body=(
+                f"Your marks for {assessment_title} have been published. "
+                f"Score: {round(result.percentage, 1)}%."
+            ),
+            reference_id=result.attempt_id,
+            reference_type="assessment_attempt",
+            action_url=action_url,
+        )
+
+        student = await self.db.get(User, result.student_id)
+        if student and student.email:
+            first_name = student.profile.first_name if student.profile else "Student"
+            results_url = f"{settings.FRONTEND_URL}{action_url}"
+            send_email_notification.delay(
+                to_email=student.email,
+                subject=f"Results Released: {assessment_title}",
+                template_name="result_released",
+                context={
+                    "first_name": first_name,
+                    "assessment_title": assessment_title,
+                    "result_id": str(result.id),
+                    "results_url": results_url,
+                    "percentage": round(result.percentage, 1),
+                    "letter_grade": (
+                        result.letter_grade.value
+                        if hasattr(result.letter_grade, "value")
+                        else str(result.letter_grade)
+                    ),
+                    "is_passing": result.is_passing,
+                    "notification_type": NotificationType.RESULT_RELEASED.value,
+                    "app_name": settings.APP_NAME,
+                },
+            )
+
     # -----------------------------------------------------------------------
     # CALCULATE RESULT
     # -----------------------------------------------------------------------
@@ -132,41 +184,24 @@ class ResultService:
         await self.generate_breakdown(result.id, attempt_id)
 
         # Gate: Automatic Release for IMMEDIATE mode
-        from app.db.enums import NotificationType, ResultReleaseMode
-        from app.db.models.auth import User
-        from app.workers.tasks import send_email_notification
+        from app.db.enums import ResultReleaseMode
 
         release_mode = assessment.result_release_mode
         if hasattr(release_mode, "value"):
             release_mode = release_mode.value
 
-        if release_mode == ResultReleaseMode.IMMEDIATE.value and not result.integrity_hold:
+        if (
+            release_mode == ResultReleaseMode.IMMEDIATE.value
+            and not result.integrity_hold
+            and not result.is_released
+        ):
             await self.result_repo.release(result.id, released_by_id=None)
             result.is_released = True
 
-            # Dispatch notification
-            student = await self.db.get(User, result.student_id)
-            if student and student.email:
-                first_name = student.profile.first_name if student.profile else "Student"
-                from app.core.config import settings
-                results_url = f"{settings.FRONTEND_URL}/student/results/{result.id}"
-                
-                send_email_notification.delay(
-                    to_email=student.email,
-                    subject=f"Results Released: {assessment.title}",
-                    template_name="result_released",
-                    context={
-                        "first_name": first_name,
-                        "assessment_title": assessment.title,
-                        "result_id": str(result.id),
-                        "results_url": results_url,
-                        "percentage": round(result.percentage, 1),
-                        "letter_grade": result.letter_grade.value if hasattr(result.letter_grade, "value") else str(result.letter_grade),
-                        "is_passing": result.is_passing,
-                        "notification_type": NotificationType.RESULT_RELEASED.value,
-                        "app_name": settings.APP_NAME
-                    }
-                )
+            await self._notify_result_released(
+                result=result,
+                assessment_title=assessment.title if assessment else "Assessment",
+            )
 
         return result, created
 
@@ -277,36 +312,14 @@ class ResultService:
 
         # Dispatch notifications for released results
         if released_ids:
-            from app.db.enums import NotificationType
-            from app.db.models.auth import User
-            from app.workers.tasks import send_email_notification
-            
             assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
             assessment_title = assessment.title if assessment else "Assessment"
 
             for r in releasable:
-                student = await self.db.get(User, r.student_id)
-                if student and student.email:
-                    first_name = student.profile.first_name if student.profile else "Student"
-                    from app.core.config import settings
-                    results_url = f"{settings.FRONTEND_URL}/student/results/{r.id}"
-                    
-                    send_email_notification.delay(
-                        to_email=student.email,
-                        subject=f"Results Released: {assessment_title}",
-                        template_name="result_released",
-                        context={
-                            "first_name": first_name,
-                            "assessment_title": assessment_title,
-                            "result_id": str(r.id),
-                            "results_url": results_url,
-                            "percentage": round(r.percentage, 1),
-                            "letter_grade": r.letter_grade.value if hasattr(r.letter_grade, "value") else str(r.letter_grade),
-                            "is_passing": r.is_passing,
-                            "notification_type": NotificationType.RESULT_RELEASED.value,
-                            "app_name": settings.APP_NAME
-                        }
-                    )
+                await self._notify_result_released(
+                    result=r,
+                    assessment_title=assessment_title,
+                )
 
         held_attempt_ids = [r.attempt_id for r in held]
 
@@ -366,7 +379,8 @@ class ResultService:
 
     async def _enrich_result_response(self, result: AssessmentResult) -> dict:
         """Add question and answer text to breakdowns for UI review."""
-        from app.schemas.result import AssessmentResultResponse, ResultBreakdownItem
+        from app.schemas.result import AssessmentResultResponse
+        from app.db.models.academic import College, Department, Institution
         from app.db.models.assessment import Assessment
         
         resp = AssessmentResultResponse.model_validate(result)
@@ -376,6 +390,18 @@ class ResultService:
         if assessment:
             resp.assessment_title = assessment.title
             resp.academic_year = assessment.academic_year
+            resp.course_code = assessment.course_code
+            resp.course_name = assessment.course_name
+            if assessment.course:
+                if assessment.course.institution_id:
+                    institution = await self.db.get(Institution, assessment.course.institution_id)
+                    resp.institution_name = institution.name if institution else None
+                if assessment.course.department_id:
+                    department = await self.db.get(Department, assessment.course.department_id)
+                    resp.department_name = department.name if department else None
+                    if department and department.college_id:
+                        college = await self.db.get(College, department.college_id)
+                        resp.college_name = college.name if college else None
 
         # Load all questions and responses for this attempt
         responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id)
@@ -393,6 +419,7 @@ class ResultService:
             q = response.question
             bd.question_text = q.content
             bd.image_url = q.image_url
+            bd.case_study_context = q.case_study_context
             
             # Populate section title
             aq = aq_map.get(bd.question_id)
@@ -403,7 +430,7 @@ class ResultService:
             q_type = q.question_type
             if hasattr(q_type, "value"):
                 q_type = q_type.value
-            bd.question_type = str(q_type).lower().replace("_", "")
+            bd.question_type = str(q_type).lower()
             
             # Format student answer
             ans_type = response.answer_type
@@ -422,11 +449,28 @@ class ResultService:
                     for oid in (response.selected_option_ids or [])
                 ])
             elif ans_type == "MATCH_PAIRS":
-                bd.student_answer = str(response.match_pairs_json)
+                bd.student_answer_json = response.match_pairs_json
+                bd.student_answer = ""
             elif ans_type == "FILL_BLANKS":
-                bd.student_answer = str(response.fill_blank_answers)
+                bd.student_answer_json = response.fill_blank_answers
+                bd.student_answer = ""
+            elif ans_type == "ORDERED_LIST":
+                bd.student_answer_json = response.ordered_option_ids or []
+                ordered_texts = [
+                    next((o.content for o in q.options if str(o.id) == str(oid)), "Unknown")
+                    for oid in (response.ordered_option_ids or [])
+                ]
+                bd.student_answer = ", ".join(ordered_texts)
             else:
                 bd.student_answer = response.answer_text
+                if response.answer_text:
+                    try:
+                        import json
+                        parsed = json.loads(response.answer_text)
+                        if isinstance(parsed, (dict, list)):
+                            bd.student_answer_json = parsed
+                    except (TypeError, ValueError):
+                        pass
                 
             # Correct answer (for auto-gradable)
             raw_q_type = q.question_type
@@ -439,9 +483,19 @@ class ResultService:
             elif raw_q_type == "MATCHING":
                 # Show matches
                 bd.correct_answer = ", ".join([f"{o.content} -> {o.match_value}" for o in q.options])
+            elif raw_q_type in ["ORDERING", "ORDERED_LIST"]:
+                sorted_opts = sorted(q.options, key=lambda o: (o.order_index if o.order_index is not None else 0))
+                bd.correct_answer = " -> ".join([o.content for o in sorted_opts])
             
             bd.options = [
-                {"id": str(o.id), "text": o.content, "is_correct": o.is_correct}
+                {
+                    "id": str(o.id),
+                    "text": o.content,
+                    "is_correct": o.is_correct,
+                    "match_key": o.match_key,
+                    "match_value": o.match_value,
+                    "order_index": o.order_index,
+                }
                 for o in (q.options or [])
             ]
 

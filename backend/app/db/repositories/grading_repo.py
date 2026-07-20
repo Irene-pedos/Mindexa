@@ -443,6 +443,8 @@ class GradingRepository:
                 func.concat(AssignedToProfile.first_name, ' ', AssignedToProfile.last_name).label("assigned_to_name"),
                 Institution.name.label("institution_name"),
                 Course.name.label("workspace_title"),
+                StudentResponse.answer_text.label("student_answer_text"),
+                StudentResponse.submitted_content.label("student_submitted_content"),
             )
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
@@ -451,6 +453,7 @@ class GradingRepository:
             .join(Institution, Course.institution_id == Institution.id)
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
+            .outerjoin(StudentResponse, GradingQueueItem.response_id == StudentResponse.id)
             # Link to SubmissionGrade for AI info
             .outerjoin(SubmissionGrade, GradingQueueItem.response_id == SubmissionGrade.response_id)
             # Resolve class section — filter by course to avoid row multiplication
@@ -512,10 +515,18 @@ class GradingRepository:
                 or "Student"
             )
 
+            student_ans = row.student_answer_text
+            if not student_ans and row.student_submitted_content:
+                if isinstance(row.student_submitted_content, dict):
+                    student_ans = row.student_submitted_content.get("text", "")
+                elif isinstance(row.student_submitted_content, str):
+                    student_ans = row.student_submitted_content
+
             # Convert model to dict and add extra fields
             item_dict = item.model_dump()
             item_dict.update({
                 "student_name": student_name,
+                "student_answer": student_ans or "No written response provided",
                 "assessment_title": row.assessment_title,
                 "class_section_id": row.class_section_id,
                 "class_section_name": row.class_section_name,

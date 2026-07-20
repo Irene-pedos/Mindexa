@@ -57,23 +57,31 @@ export default function StudentResultsPage() {
         // BUG-12 fix: use /results/me for the full paginated list, not the dashboard
         // which only returns the last few entries.
         const [resultsData, dashboardData] = await Promise.all([
-          resultApi.getMyResults({ page: 1, page_size: 100 }),
+          resultApi.getMyResults({ page: 1, page_size: 100, include_pending: true }),
           studentApi.getDashboard(),
         ]);
         // ResultSummary shape differs slightly from StudentRecentResult;
         // map the common fields so the existing UI keeps working.
         const items = (resultsData.items || []).map((r: any) => ({
           id: r.attempt_id || r.id,
+          attempt_id: r.attempt_id,
+          assessment_id: r.assessment_id,
           assessment_title: r.assessment_title || "Assessment",
           assessment_type: r.assessment_type || "",
           course_code: r.course_code,
           course_name: r.course_name,
           academic_year: r.academic_year,
           score: r.total_score ?? r.score ?? 0,
-          total_marks: r.total_marks ?? 0,
+          total_marks: r.max_score ?? r.total_marks ?? 0,
           percentage: r.percentage ?? 0,
           letter_grade: r.letter_grade,
           released_at: r.released_at,
+          submitted_at: r.submitted_at,
+          is_released: r.is_released,
+          integrity_hold: r.integrity_hold,
+          student_status: r.student_status,
+          graded_question_count: r.graded_question_count,
+          total_question_count: r.total_question_count,
         }));
         setResults(items);
         setOverallGPA(dashboardData.summary.cgpa.value);
@@ -127,6 +135,14 @@ export default function StudentResultsPage() {
   const renderResultItem = (result: StudentRecentResult) => {
     const lifecycle = getResultLifecycleSummary(result as any);
     const category = getAssessmentCategory(result as any);
+    const isPublished = !!result.is_released || !!result.released_at;
+    const isHeld = !!result.integrity_hold || category === "VIOLATION";
+    const statusLabel = isPublished ? "Published" : isHeld ? "Integrity Review" : "Under Review";
+    const statusClass = isPublished
+      ? "border-emerald-500/20 text-emerald-700 bg-emerald-500/10"
+      : isHeld
+        ? "border-destructive/20 text-destructive bg-destructive/10"
+        : "border-amber-500/20 text-amber-700 bg-amber-500/10";
 
     return (
       <div
@@ -146,11 +162,9 @@ export default function StudentResultsPage() {
                 Violation
               </Badge>
             )}
-            {lifecycle.tone === "warning" && (
-              <Badge variant="outline" className="h-5 text-xs font-medium border-amber-500/20 text-amber-600 bg-amber-500/10 px-2 py-0 rounded-full">
-                In Review
-              </Badge>
-            )}
+            <Badge variant="outline" className={cn("h-5 text-xs font-medium px-2 py-0 rounded-full", statusClass)}>
+              {statusLabel}
+            </Badge>
           </div>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <Badge variant="secondary" className="h-5 px-2 text-xs border-none bg-muted/60 text-muted-foreground">{getAssessmentTypeLabel(result.assessment_type)}</Badge>
@@ -161,36 +175,49 @@ export default function StudentResultsPage() {
             )}
             <span className="flex items-center gap-1.5 text-xs text-muted-foreground/50 font-medium">
               <Calendar className="size-3.5" />{" "}
-              {new Date(result.released_at || (result as any).submitted_at || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
+              {new Date(result.released_at || result.submitted_at || Date.now()).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
             </span>
           </div>
           <p className={cn(
             "text-xs font-medium leading-relaxed",
             category === "VIOLATION" ? "text-destructive italic" : "text-muted-foreground"
           )}>
-            {category === "VIOLATION" ? "Integrity protocol audit in progress." : lifecycle.description}
+            {isHeld ? "Integrity protocol audit in progress." : isPublished ? lifecycle.description : "Submitted successfully. Marks will appear here after lecturer publication."}
           </p>
         </div>
 
         <div className="flex items-center gap-5 mt-4 md:mt-0">
           <div className="text-right shrink-0">
-            <div className="flex items-baseline justify-end gap-1.5 tabular-nums">
-              <span className="text-lg font-semibold text-foreground">
-                {result.score}
-              </span>
-              <span className="text-xs font-medium text-muted-foreground/50">
-                / {result.total_marks}
-              </span>
-            </div>
-            <div className={cn(
-              "text-xs font-medium mt-0.5",
-              category === "VIOLATION" ? "text-destructive" : 
-              result.percentage >= 70 ? "text-emerald-600" :
-              result.percentage >= 40 ? "text-primary" : "text-amber-600"
-            )}>
-              {result.letter_grade || (category === "VIOLATION" ? "Violation" : lifecycle.label.split(",")[0])}
-              <span className="ml-1.5 opacity-55">({result.percentage}%)</span>
-            </div>
+            {isPublished ? (
+              <>
+                <div className="flex items-baseline justify-end gap-1.5 tabular-nums">
+                  <span className="text-lg font-semibold text-foreground">
+                    {result.score}
+                  </span>
+                  <span className="text-xs font-medium text-muted-foreground/50">
+                    / {result.total_marks || "N/A"}
+                  </span>
+                </div>
+                <div className={cn(
+                  "text-xs font-medium mt-0.5",
+                  isHeld ? "text-destructive" :
+                  result.percentage >= 70 ? "text-emerald-600" :
+                  result.percentage >= 40 ? "text-primary" : "text-amber-600"
+                )}>
+                  {result.letter_grade || lifecycle.label.split(",")[0]}
+                  <span className="ml-1.5 opacity-55">({result.percentage}%)</span>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="text-sm font-semibold text-muted-foreground">
+                  Not published
+                </div>
+                <div className="text-[10px] font-medium text-muted-foreground/70 mt-0.5">
+                  {result.graded_question_count ?? 0}/{result.total_question_count ?? 0} graded
+                </div>
+              </>
+            )}
           </div>
 
           <Button
@@ -214,10 +241,12 @@ export default function StudentResultsPage() {
 
   const filteredAndSortedResults = getSortedResults(results.filter(r => {
     const category = getAssessmentCategory(r as any);
+    const isPublished = !!r.is_released || !!r.released_at;
+    const isHeld = !!r.integrity_hold || category === "VIOLATION";
     if (activeTab === "all") return true;
-    if (activeTab === "graded") return r.letter_grade || category === "GRADED";
-    if (activeTab === "pending") return !r.letter_grade && category === "SUBMITTED";
-    if (activeTab === "violations") return category === "VIOLATION";
+    if (activeTab === "graded") return isPublished && !isHeld;
+    if (activeTab === "pending") return !isPublished && !isHeld;
+    if (activeTab === "violations") return isHeld;
     return true;
   }));
 
@@ -239,7 +268,7 @@ export default function StudentResultsPage() {
             <TrendingUp className="size-4 text-primary animate-pulse" /> Active academic evaluations and performance ledger.
           </p>
         </div>
-        <Button variant="outline" size="sm" className="h-9 rounded-xl text-xs font-semibold gap-2 border-border/60">
+        <Button variant="outline" size="sm" onClick={() => window.print()} className="h-9 rounded-xl text-xs font-semibold gap-2 border-border/60">
           <FileText className="size-4" /> Export Result Slip (PDF)
         </Button>
       </div>
