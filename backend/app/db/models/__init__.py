@@ -124,6 +124,7 @@ from app.db.models.resource_chunk import ResourceChunk
 from app.db.models.study_support_session import StudySupportSession
 from app.db.models.result import AssessmentResult, ResultBreakdown
 from app.db.models.study_plan import StudyPlan, StudySession
+from app.db.models.learning_profile import StudentLearningProfile
 
 __all__: list[str] = [
     # ── Audit ──────────────────────────────────────────────────────────────────
@@ -209,4 +210,5 @@ __all__: list[str] = [
     # ── Study Planner ──────────────────────────────────────────────────────────
     "StudyPlan",
     "StudySession",
+    "StudentLearningProfile",
 ]

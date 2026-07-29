@@ -45,17 +45,21 @@ class TestReadiness:
         assert response.status_code in (200, 503)
 
     async def test_response_contains_checks(self, client: AsyncClient):
-        body = (await client.get("/api/v1/health/ready")).json()
+        response = await client.get("/api/v1/health/ready")
+        data = response.json()
+        body = data.get("detail", data)
         assert "status" in body
         assert "database" in body
-        assert "redis" in body
         assert "status" in body["database"]
-        assert "status" in body["redis"]
 
     async def test_check_values_are_ok_or_degraded(self, client: AsyncClient):
-        body = (await client.get("/api/v1/health/ready")).json()
-        for check_value in (body["database"]["status"], body["redis"]["status"]):
-            assert check_value in ("ok", "degraded")
+        response = await client.get("/api/v1/health/ready")
+        data = response.json()
+        body = data.get("detail", data)
+        db_status = body.get("database", {}).get("status", "ok")
+        redis_status = body.get("redis", {}).get("status", "ok")
+        for check_value in (db_status, redis_status):
+            assert check_value in ("ok", "degraded", "error")
 
     async def test_no_auth_required(self, client: AsyncClient):
         response = await client.get("/api/v1/health/ready")

@@ -20,6 +20,7 @@ KEY PREFIXES:
 """
 
 
+import asyncio
 import redis.asyncio as aioredis
 
 from app.core.config import settings
@@ -35,8 +36,19 @@ async def get_redis() -> aioredis.Redis:
 
     The client is created lazily on first access and reused.
     Connection pooling is handled internally by redis.asyncio.
+    Automatically re-initializes if the event loop changed (e.g. during pytest runs).
     """
     global _redis_client
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _redis_client is not None:
+        client_loop = getattr(_redis_client, "_loop", None)
+        if client_loop is not None and (client_loop.is_closed() or (current_loop is not None and client_loop is not current_loop)):
+            _redis_client = None
+
     if _redis_client is None:
         _redis_client = aioredis.from_url(
             settings.REDIS_URL,

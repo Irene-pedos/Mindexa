@@ -232,8 +232,21 @@ class RAGService:
         )
 
         # 1. Generate embedding for the student's question
-        query_embedding = await self._embed_question(question)
-        logger.info("Query embedding generated", dim=len(query_embedding))
+        try:
+            query_embedding = await self._embed_question(question)
+            logger.info("Query embedding generated", dim=len(query_embedding))
+        except Exception as exc:
+            logger.warning(
+                "RAG: query embedding unavailable, using general AI knowledge fallback",
+                error=str(exc),
+            )
+            return RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True,
+            )
 
         # 2. Get allowed academic_resource_ids
         allowed_resource_ids = await self._get_allowed_resource_ids(student_id)
@@ -382,6 +395,9 @@ class RAGService:
 
     async def _embed_question(self, question: str) -> List[float]:
         """Generate embedding for query text using Jina API."""
+        if not self.jina_api_key or not self.jina_api_key.strip():
+            raise Exception("Jina API key is not configured")
+
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.jina_api_key}"
@@ -395,28 +411,17 @@ class RAGService:
         }
         
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
                     logger.error("Jina embedding failed", status=response.status_code, text=response.text)
-                    raise Exception("Failed to generate embedding")
+                    raise Exception(f"Jina embedding request failed with status {response.status_code}")
                 
                 data = response.json()
                 return data["data"][0]["embedding"]
-        except (httpx.ConnectTimeout, httpx.TimeoutException) as e:
-            logger.error("Jina embedding timeout", error=str(e))
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=504,
-                detail="Internet issue: Connection to external embedding service timed out. Please check your network connection."
-            )
-        except httpx.RequestError as e:
-            logger.error("Jina embedding network error", error=str(e))
-            from fastapi import HTTPException
-            raise HTTPException(
-                status_code=503,
-                detail="Internet issue: Connection to external embedding service failed. Please check your network connection."
-            )
+        except Exception as e:
+            logger.warning("Jina embedding error", error=str(e))
+            raise e
 
     async def _get_allowed_resource_ids(self, student_id: uuid.UUID) -> List[uuid.UUID]:
         """

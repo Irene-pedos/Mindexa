@@ -18,6 +18,9 @@ from app.schemas.study_planner import (
     AdjustPlanRequest,
     StudyPlannerDashboardSummary,
     ScheduleConflictWarning,
+    GuidedSessionAskRequest,
+    GuidedSessionExerciseRequest,
+    SubmitKnowledgeCheckRequest,
 )
 from app.services.study_planner_service import StudyPlannerService
 
@@ -210,3 +213,136 @@ async def adjust_plan(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=str(err)
         )
+
+
+# ── GUIDED STUDY SESSION ENDPOINTS ─────────────────────────────────────────
+
+@router.post(
+    "/sessions/{session_id}/guided/start",
+    response_model=StudySessionResponse,
+    summary="Start or resume a dedicated guided study session",
+)
+async def start_guided_session(
+    session_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    try:
+        return await service.start_guided_session(session_id, current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.get(
+    "/sessions/{session_id}/guided",
+    response_model=StudySessionResponse,
+    summary="Get current state of a guided study session",
+)
+async def get_guided_session(
+    session_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    try:
+        return await service.get_guided_session_detail(session_id, current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.post(
+    "/sessions/{session_id}/guided/ask",
+    response_model=Dict[str, Any],
+    summary="Ask AI a context-aware question within the guided lesson",
+)
+async def ask_guided_session_question(
+    session_id: uuid.UUID,
+    body: GuidedSessionAskRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    service = StudyPlannerService(db)
+    try:
+        return await service.ask_guided_session_question(
+            session_id, current_user.id, body.question, body.section_context
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.post(
+    "/sessions/{session_id}/guided/exercise",
+    response_model=Dict[str, Any],
+    summary="Generate an inline practice exercise for current section",
+)
+async def generate_guided_exercise(
+    session_id: uuid.UUID,
+    body: GuidedSessionExerciseRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    service = StudyPlannerService(db)
+    try:
+        return await service.generate_guided_exercise(
+            session_id, current_user.id, body.section_index or 0
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.post(
+    "/sessions/{session_id}/guided/knowledge-check/generate",
+    response_model=List[Dict[str, Any]],
+    summary="Generate non-academic self-evaluation knowledge check questions",
+)
+async def generate_guided_knowledge_check(
+    session_id: uuid.UUID,
+    body: GenerateQuizRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> List[Dict[str, Any]]:
+    service = StudyPlannerService(db)
+    try:
+        return await service.generate_session_quiz(
+            session_id, current_user.id, body.question_count
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.post(
+    "/sessions/{session_id}/guided/knowledge-check/submit",
+    response_model=Dict[str, Any],
+    summary="Submit and self-grade knowledge check responses",
+)
+async def submit_guided_knowledge_check(
+    session_id: uuid.UUID,
+    body: SubmitKnowledgeCheckRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> Dict[str, Any]:
+    service = StudyPlannerService(db)
+    try:
+        return await service.submit_guided_knowledge_check(
+            session_id, current_user.id, body.answers
+        )
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.post(
+    "/sessions/{session_id}/guided/complete",
+    response_model=StudySessionResponse,
+    summary="Finalize guided study session, generate summary, and update progress",
+)
+async def complete_guided_session(
+    session_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    try:
+        return await service.complete_guided_session(session_id, current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))

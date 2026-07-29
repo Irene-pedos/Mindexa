@@ -6,18 +6,19 @@ import { StudyPlanDashboard } from "@/components/mindexa/study/study-plan-dashbo
 import { StudyPlanWizard } from "@/components/mindexa/study/study-plan-wizard";
 import { SessionCompletionModal } from "@/components/mindexa/study/session-completion-modal";
 import { PlanAdjustmentModal } from "@/components/mindexa/study/plan-adjustment-modal";
-import { SessionQuizModal } from "@/components/mindexa/study/session-quiz-modal";
 import { studyPlannerApi, StudyPlan, StudySession, StudyPlannerSummary } from "@/lib/api/study-planner";
 import HeroUITabs from "@/components/ui/heroui-tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Sparkles, Calendar as CalendarIcon, CheckCircle2, Clock, Plus, BookOpen, Layers, SlidersHorizontal, Award, Zap } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Sparkles, Calendar as CalendarIcon, CheckCircle2, Clock, Plus, BookOpen, Layers, SlidersHorizontal, Award, Zap, Play } from "lucide-react";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 
 export default function StudentStudyPage() {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<string>("overview");
   const [selectedTopicContext, setSelectedTopicContext] = useState<string>("");
   const [summary, setSummary] = useState<StudyPlannerSummary | null>(null);
@@ -29,7 +30,6 @@ export default function StudentStudyPage() {
   const [initialAssessmentForWizard, setInitialAssessmentForWizard] = useState<string | undefined>(undefined);
   const [completeModalSession, setCompleteModalSession] = useState<StudySession | null>(null);
   const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(null);
-  const [quizModalSession, setQuizModalSession] = useState<StudySession | null>(null);
 
   async function loadData() {
     try {
@@ -104,8 +104,18 @@ export default function StudentStudyPage() {
               <span className="flex items-center gap-1.5">
                 <Sparkles className="size-3.5 text-primary" /> Study AI Tutor
                 {selectedTopicContext && (
-                  <Badge variant="outline" className="text-[8px] bg-primary/10 text-primary border-primary/20">
+                  <Badge variant="outline" className="text-[8px] bg-primary/10 text-primary border-primary/20 flex items-center gap-1">
                     Topic: {selectedTopicContext}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedTopicContext("");
+                      }}
+                      className="ml-0.5 hover:text-foreground font-bold text-xs"
+                      title="Clear topic filter"
+                    >
+                      ×
+                    </button>
                   </Badge>
                 )}
               </span>
@@ -130,7 +140,6 @@ export default function StudentStudyPage() {
                 onOpenWizard={handleOpenWizardWithAssessment}
                 onOpenCompleteModal={(session) => setCompleteModalSession(session)}
                 onOpenAdjustModal={(plan) => setAdjustModalPlan(plan)}
-                onOpenQuizModal={(session) => setQuizModalSession(session)}
                 onSelectTab={handleSelectTabWithTopic}
               />
             )}
@@ -166,7 +175,7 @@ export default function StudentStudyPage() {
                           </Badge>
                         )}
                         <Badge variant="outline" className="text-[9px] uppercase font-bold bg-emerald-500/10 text-emerald-600 border-emerald-500/20">
-                          Readiness: {plan.readiness_score || 85}%
+                          Readiness: {plan.readiness_score ?? 0}%
                         </Badge>
                       </div>
                       <h3 className="text-base font-bold text-foreground tracking-tight mt-1">
@@ -214,20 +223,19 @@ export default function StudentStudyPage() {
                               ) : (
                                 <Button
                                   size="sm"
-                                  variant="outline"
-                                  onClick={() => setCompleteModalSession(s)}
-                                  className="h-7 text-[9px] font-bold uppercase tracking-wider rounded-lg border-primary/20 text-primary hover:bg-primary hover:text-white"
+                                  onClick={() => router.push(`/student/study/session/${s.id}`)}
+                                  className="h-7 text-[9px] font-bold uppercase tracking-wider rounded-lg bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-xs gap-1"
                                 >
-                                  Mark Done
+                                  <Play className="size-2.5 fill-white" /> Start Guided Session
                                 </Button>
                               )}
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setQuizModalSession(s)}
-                                className="h-7 text-[9px] font-bold uppercase tracking-wider rounded-lg border-primary/30 text-primary"
+                                onClick={() => setCompleteModalSession(s)}
+                                className="h-7 text-[9px] font-bold uppercase tracking-wider rounded-lg border-border/60 text-muted-foreground hover:text-foreground"
                               >
-                                Quiz
+                                Self-Report
                               </Button>
                             </div>
                           </div>
@@ -246,7 +254,7 @@ export default function StudentStudyPage() {
         {/* Tab 3: Study AI Tutor */}
         {activeTab === "tutor" && (
           <div className="pt-4 h-[calc(100vh-220px)] min-h-[500px]">
-            <AISupportChat />
+            <AISupportChat initialTopicContext={selectedTopicContext} />
           </div>
         )}
       </HeroUITabs>
@@ -264,7 +272,6 @@ export default function StudentStudyPage() {
         open={!!completeModalSession}
         onOpenChange={(open) => { if (!open) setCompleteModalSession(null); }}
         onCompleted={loadData}
-        onOpenAiTutorWithTopic={(topic) => handleSelectTabWithTopic("tutor", topic)}
       />
 
       <PlanAdjustmentModal
@@ -272,13 +279,6 @@ export default function StudentStudyPage() {
         open={!!adjustModalPlan}
         onOpenChange={(open) => { if (!open) setAdjustModalPlan(null); }}
         onAdjusted={loadData}
-      />
-
-      <SessionQuizModal
-        session={quizModalSession}
-        open={!!quizModalSession}
-        onOpenChange={(open) => { if (!open) setQuizModalSession(null); }}
-        onQuizCompleted={loadData}
       />
     </div>
   );

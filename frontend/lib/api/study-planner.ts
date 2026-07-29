@@ -14,6 +14,36 @@ export interface QuizQuestion {
   explanation: string;
 }
 
+export interface LessonSection {
+  section_title: string;
+  content: string;
+  key_points?: string[];
+}
+
+export interface KnowledgeCheckQuestionGrade {
+  question_id: string;
+  is_correct: boolean;
+  score: number;
+  feedback: string;
+}
+
+export interface KnowledgeCheckReport {
+  total_questions: number;
+  score_percentage: number;
+  question_grades: KnowledgeCheckQuestionGrade[];
+  mastered_concepts: string[];
+  weak_concepts: string[];
+  estimated_confidence_level: number;
+  recommendations: string[];
+}
+
+export interface SourceCitation {
+  resource_id?: string;
+  title: string;
+  snippet: string;
+  relevance_score?: number;
+}
+
 export interface StudySession {
   id: string;
   study_plan_id: string;
@@ -32,6 +62,14 @@ export interface StudySession {
   checklist_items?: ChecklistItem[];
   quiz_questions?: QuizQuestion[];
   recommended_resource_ids?: string[];
+  lesson_sections_json?: LessonSection[];
+  lesson_status?: "NOT_GENERATED" | "IN_PROGRESS" | "COMPLETED" | string;
+  current_section_index?: number;
+  lesson_generated_at?: string | null;
+  knowledge_check_answers?: Record<string, any> | null;
+  knowledge_check_score?: number | null;
+  knowledge_check_report?: KnowledgeCheckReport | null;
+  session_summary_text?: string | null;
 }
 
 export interface ReadinessTimelinePoint {
@@ -221,6 +259,71 @@ export const studyPlannerApi = {
     return apiClient(`/students/study-plans/${planId}/adjust`, {
       method: "POST",
       body: JSON.stringify({ action }),
+    });
+  },
+  startGuidedSession: async (sessionId: string): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/start`, {
+      method: "POST",
+    });
+  },
+  getGuidedSession: async (sessionId: string): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided`);
+  },
+  askInSession: async (
+    sessionId: string,
+    question: string,
+    sectionContext?: string
+  ): Promise<{ answer: string; citations: SourceCitation[] }> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/ask`, {
+      method: "POST",
+      body: JSON.stringify({ question, section_context: sectionContext || "" }),
+    });
+  },
+  generateGuidedExercise: async (
+    sessionId: string,
+    sectionIndex: number = 0
+  ): Promise<{
+    id: string;
+    section_index: number;
+    section_title: string;
+    question_text: string;
+    question_type: string;
+    options: string[];
+    correct_option_index: number;
+    explanation: string;
+  }> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise`, {
+      method: "POST",
+      body: JSON.stringify({ section_index: sectionIndex }),
+    });
+  },
+  generateKnowledgeCheck: async (
+    sessionId: string,
+    questionCount: number = 5
+  ): Promise<QuizQuestion[]> => {
+    return apiClient(
+      `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/generate`,
+      {
+        method: "POST",
+        body: JSON.stringify({ question_count: questionCount }),
+      }
+    );
+  },
+  submitKnowledgeCheck: async (
+    sessionId: string,
+    answers: Record<string, any>
+  ): Promise<KnowledgeCheckReport> => {
+    return apiClient(
+      `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/submit`,
+      {
+        method: "POST",
+        body: JSON.stringify({ answers }),
+      }
+    );
+  },
+  completeGuidedSession: async (sessionId: string): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/guided/complete`, {
+      method: "POST",
     });
   },
 };

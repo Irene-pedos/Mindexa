@@ -29,12 +29,13 @@ import { StudyPlan, StudySession, StudyPlannerSummary } from "@/lib/api/study-pl
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 
+import { useRouter } from "next/navigation";
+
 interface StudyPlanDashboardProps {
   summary: StudyPlannerSummary | null;
   onOpenWizard: (assessmentId?: string) => void;
   onOpenCompleteModal: (session: StudySession) => void;
   onOpenAdjustModal: (plan: StudyPlan) => void;
-  onOpenQuizModal: (session: StudySession) => void;
   onSelectTab: (tab: string, contextTopic?: string) => void;
 }
 
@@ -43,60 +44,17 @@ export function StudyPlanDashboard({
   onOpenWizard,
   onOpenCompleteModal,
   onOpenAdjustModal,
-  onOpenQuizModal,
   onSelectTab,
 }: StudyPlanDashboardProps) {
+  const router = useRouter();
   const activePlan = summary?.active_plan;
   const todaySession = summary?.today_session;
-  const readinessScore = summary?.assessment_readiness_score || 85;
+  const readinessScore = summary?.assessment_readiness_score ?? 0;
   const weakTopics = summary?.weak_topics || [];
   const proactive = summary?.proactive_suggestion;
   const conflicts = summary?.schedule_conflicts || [];
   const readinessTimeline = summary?.readiness_timeline || [];
   const materialCoverage = summary?.material_coverage || [];
-
-  // Live Session Timer state with localStorage persistence
-  const [isTimerRunning, setIsTimerRunning] = useState(false);
-  const [secondsLeft, setSecondsLeft] = useState<number>(() => {
-    if (typeof window !== "undefined") {
-      const cached = localStorage.getItem("mindexa_active_timer_seconds");
-      if (cached) return parseInt(cached, 10);
-    }
-    return (todaySession?.duration_minutes || 60) * 60;
-  });
-
-  useEffect(() => {
-    let interval: any = null;
-    if (isTimerRunning && secondsLeft > 0) {
-      interval = setInterval(() => {
-        setSecondsLeft((prev) => {
-          const nextVal = prev - 1;
-          if (typeof window !== "undefined") {
-            localStorage.setItem("mindexa_active_timer_seconds", nextVal.toString());
-          }
-          if (nextVal <= 0) {
-            clearInterval(interval);
-            setTimeout(() => {
-              setIsTimerRunning(false);
-              if (typeof window !== "undefined") {
-                localStorage.removeItem("mindexa_active_timer_seconds");
-              }
-              if (todaySession) onOpenCompleteModal(todaySession);
-            }, 0);
-            return 0;
-          }
-          return nextVal;
-        });
-      }, 1000);
-    }
-    return () => clearInterval(interval);
-  }, [isTimerRunning, secondsLeft, todaySession, onOpenCompleteModal]);
-
-  const formatTimer = (secs: number) => {
-    const m = Math.floor(secs / 60);
-    const s = secs % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  };
 
   const totalSessions = activePlan?.sessions.length || summary?.total_sessions_count || 0;
   const completedSessions = activePlan?.sessions.filter(s => s.status === "COMPLETED").length || summary?.completed_sessions_count || 0;
@@ -185,10 +143,10 @@ export function StudyPlanDashboard({
           <div className="flex flex-wrap items-center gap-2.5 shrink-0">
             {todaySession && (
               <Button
-                onClick={() => onSelectTab("tutor", todaySession.topic)}
-                className="h-10 px-4 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
+                onClick={() => router.push(`/student/study/session/${todaySession.id}`)}
+                className="h-10 px-4 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground"
               >
-                <Play className="size-3.5 fill-white" /> Continue Today&apos;s Session
+                <Play className="size-3.5 fill-white" /> Start Guided Study Session
               </Button>
             )}
             <Button
@@ -267,7 +225,7 @@ export function StudyPlanDashboard({
 
       {/* Main Grid: Live Session & Timeline */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Today's Featured Study Session with Live Timer & Controls */}
+        {/* Today's Featured Study Session Card */}
         <Card className="lg:col-span-6 rounded-xl border border-border/45 bg-card/30 overflow-hidden shadow-sm">
           <CardHeader className="bg-primary/5 border-b border-border/25 py-3 px-4 flex flex-row items-center justify-between">
             <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
@@ -297,7 +255,7 @@ export function StudyPlanDashboard({
                       {todaySession.title}
                     </h3>
                     <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                      Topic: <span className="text-foreground font-semibold">{todaySession.topic}</span>
+                      Topic: <span className="text-foreground font-semibold">{todaySession.topic}</span> &bull; {todaySession.duration_minutes} mins
                     </p>
                   </div>
                   <Badge variant={todaySession.status === "COMPLETED" ? "outline" : "default"} className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0", todaySession.status === "COMPLETED" ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20" : "")}>
@@ -305,51 +263,33 @@ export function StudyPlanDashboard({
                   </Badge>
                 </div>
 
-                {/* Live Study Session Timer Container */}
-                <div className="flex items-center justify-between p-3.5 rounded-xl border border-primary/20 bg-primary/5">
+                {/* Direct Action Launch Card */}
+                <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                   <div className="space-y-0.5">
-                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">Live Session Timer</div>
-                    <div className="text-xl font-bold font-mono text-primary tabular-nums">
-                      {formatTimer(secondsLeft)}
-                    </div>
+                    <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Sparkles className="size-3.5 text-primary" /> Guided Learning Workspace
+                    </span>
+                    <p className="text-[11px] text-muted-foreground">
+                      Structured teaching, interactive practice, and evaluation.
+                    </p>
                   </div>
-                  <div className="flex items-center gap-2">
-                    {isTimerRunning ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setIsTimerRunning(false)}
-                        className="h-8 text-xs font-bold rounded-lg border-amber-500/30 text-amber-600 gap-1.5"
-                      >
-                        <Pause className="size-3.5" /> Pause
-                      </Button>
-                    ) : (
-                      <Button
-                        size="sm"
-                        onClick={() => setIsTimerRunning(true)}
-                        className="h-8 text-xs font-bold rounded-lg gap-1.5"
-                      >
-                        <Play className="size-3.5" /> Start Timer
-                      </Button>
-                    )}
-                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => router.push(`/student/study/session/${todaySession.id}`)}
+                    className="text-xs font-bold gap-1.5 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-sm shrink-0"
+                  >
+                    <Play className="size-3.5 fill-white" /> Start Studying
+                  </Button>
                 </div>
 
                 {/* Quick Action Controls */}
-                <div className="grid grid-cols-2 gap-2 pt-1">
-                  <Button
-                    onClick={() => onOpenCompleteModal(todaySession)}
-                    className="h-9 text-xs font-bold uppercase tracking-wider rounded-lg shadow-sm gap-2"
-                  >
-                    <CheckCircle2 className="size-4" /> Mark Completed
-                  </Button>
-
+                <div className="flex items-center justify-end gap-2 pt-1">
                   <Button
                     variant="outline"
-                    onClick={() => onOpenQuizModal(todaySession)}
-                    className="h-9 text-xs font-bold uppercase tracking-wider rounded-lg border-primary/30 text-primary gap-1.5"
+                    onClick={() => onOpenCompleteModal(todaySession)}
+                    className="h-8 text-xs font-semibold rounded-lg gap-1.5 text-muted-foreground hover:text-foreground"
                   >
-                    <Sparkles className="size-3.5" /> AI Practice Quiz
+                    <CheckCircle2 className="size-3.5" /> Self-Report Status
                   </Button>
                 </div>
               </div>

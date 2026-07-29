@@ -45,9 +45,10 @@ def _build_engine() -> AsyncEngine:
     # If a pooled connection is used across loops, or if the pool tries to close a connection
     # after the task's loop has died, it results in "Event loop is closed" errors.
     is_celery = os.environ.get("MINDEXA_RUNTIME") == "celery"
+    is_pytest = "pytest" in sys.modules
 
-    if is_celery:
-        logger.info("Initializing AsyncEngine with NullPool for Celery worker")
+    if is_celery or is_pytest:
+        logger.info("Initializing AsyncEngine with NullPool for Celery worker or pytest runner")
         return create_async_engine(
             settings.DATABASE_ASYNC_URL,
             echo=getattr(settings, "SQLALCHEMY_ECHO", False),
@@ -56,7 +57,7 @@ def _build_engine() -> AsyncEngine:
             json_serializer=_json_dumps,
             connect_args={
                 "server_settings": {
-                    "application_name": f"{settings.APP_NAME}_celery",
+                    "application_name": f"{settings.APP_NAME}_celery" if is_celery else f"{settings.APP_NAME}_pytest",
                     "jit": "off",
                 },
                 "command_timeout": 60,

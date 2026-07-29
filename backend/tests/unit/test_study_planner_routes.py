@@ -90,7 +90,7 @@ async def test_all_study_planner_service_methods():
 
         # Test get_summary
         summary = await service.get_summary(student_id)
-        assert summary.assessment_readiness_score == 98
+        assert summary.assessment_readiness_score == mock_plan.readiness_score
         assert summary.streak_days == 3
 
         # Test complete_session

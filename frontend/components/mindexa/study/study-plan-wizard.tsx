@@ -30,7 +30,7 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
 
   // Form states
   const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("");
-  const [title, setTitle] = useState("Prepare for Database CAT 1");
+  const [title, setTitle] = useState("");
   const [studyType, setStudyType] = useState("Assessment Preparation");
   const [courseId, setCourseId] = useState<string>("");
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
@@ -311,7 +311,7 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Prepare for Database CAT"
+                  placeholder="e.g. Prepare for Database CAT 1"
                   className="h-9 text-xs rounded-lg border-border/60"
                 />
               </div>

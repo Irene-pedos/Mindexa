@@ -23,7 +23,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.create_table(
-        'study_plans',
+        'study_plan',
         sa.Column('id', sa.UUID(), nullable=False),
         sa.Column('student_id', sa.UUID(), nullable=False),
         sa.Column('title', sa.String(length=255), nullable=False),
@@ -46,23 +46,25 @@ def upgrade() -> None:
         sa.Column('status', sa.String(length=20), nullable=False, server_default="ACTIVE"),
         sa.Column('auto_generated', sa.Boolean(), nullable=False, server_default="false"),
         sa.Column('streak_count', sa.Integer(), nullable=False, server_default="0"),
-        sa.Column('readiness_score', sa.Integer(), nullable=False, server_default="85"),
+        sa.Column('readiness_score', sa.Integer(), nullable=False, server_default="0"),
         sa.Column('readiness_history', sa.JSON(), nullable=True),
         sa.Column('covered_material_ids', sa.JSON(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text("TIMEZONE('utc', NOW())")),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text("TIMEZONE('utc', NOW())")),
         sa.Column('is_deleted', sa.Boolean(), nullable=False, server_default="false"),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(['student_id'], ['user.id'], ),
         sa.ForeignKeyConstraint(['course_id'], ['course.id'], ),
         sa.ForeignKeyConstraint(['teaching_workspace_id'], ['teaching_workspace.id'], ),
         sa.ForeignKeyConstraint(['assessment_id'], ['assessment.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_study_plans_student_id'), 'study_plans', ['student_id'], unique=False)
-    op.create_index(op.f('ix_study_plans_course_id'), 'study_plans', ['course_id'], unique=False)
+    op.create_index(op.f('ix_study_plan_student_id'), 'study_plan', ['student_id'], unique=False)
+    op.create_index(op.f('ix_study_plan_course_id'), 'study_plan', ['course_id'], unique=False)
+    op.create_index(op.f('ix_study_plan_is_deleted'), 'study_plan', ['is_deleted'], unique=False)
 
     op.create_table(
-        'study_sessions',
+        'study_session',
         sa.Column('id', sa.UUID(), nullable=False),
         sa.Column('study_plan_id', sa.UUID(), nullable=False),
         sa.Column('student_id', sa.UUID(), nullable=False),
@@ -81,21 +83,25 @@ def upgrade() -> None:
         sa.Column('checklist_items', sa.JSON(), nullable=True),
         sa.Column('quiz_questions', sa.JSON(), nullable=True),
         sa.Column('recommended_resource_ids', sa.JSON(), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False),
+        sa.Column('created_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text("TIMEZONE('utc', NOW())")),
+        sa.Column('updated_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.text("TIMEZONE('utc', NOW())")),
         sa.Column('is_deleted', sa.Boolean(), nullable=False, server_default="false"),
-        sa.ForeignKeyConstraint(['study_plan_id'], ['study_plans.id'], ),
+        sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
+        sa.ForeignKeyConstraint(['study_plan_id'], ['study_plan.id'], ),
         sa.ForeignKeyConstraint(['student_id'], ['user.id'], ),
         sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_study_sessions_study_plan_id'), 'study_sessions', ['study_plan_id'], unique=False)
-    op.create_index(op.f('ix_study_sessions_student_id'), 'study_sessions', ['student_id'], unique=False)
+    op.create_index(op.f('ix_study_session_study_plan_id'), 'study_session', ['study_plan_id'], unique=False)
+    op.create_index(op.f('ix_study_session_student_id'), 'study_session', ['student_id'], unique=False)
+    op.create_index(op.f('ix_study_session_is_deleted'), 'study_session', ['is_deleted'], unique=False)
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_study_sessions_student_id'), table_name='study_sessions')
-    op.drop_index(op.f('ix_study_sessions_study_plan_id'), table_name='study_sessions')
-    op.drop_table('study_sessions')
-    op.drop_index(op.f('ix_study_plans_course_id'), table_name='study_plans')
-    op.drop_index(op.f('ix_study_plans_student_id'), table_name='study_plans')
-    op.drop_table('study_plans')
+    op.drop_index(op.f('ix_study_session_is_deleted'), table_name='study_session')
+    op.drop_index(op.f('ix_study_session_student_id'), table_name='study_session')
+    op.drop_index(op.f('ix_study_session_study_plan_id'), table_name='study_session')
+    op.drop_table('study_session')
+    op.drop_index(op.f('ix_study_plan_is_deleted'), table_name='study_plan')
+    op.drop_index(op.f('ix_study_plan_course_id'), table_name='study_plan')
+    op.drop_index(op.f('ix_study_plan_student_id'), table_name='study_plan')
+    op.drop_table('study_plan')

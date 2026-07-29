@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import List, Optional, Dict, Any
 
 from pydantic import BaseModel, Field
+from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
 
 
 class StudySessionResponse(BaseModel):
@@ -25,6 +26,27 @@ class StudySessionResponse(BaseModel):
     checklist_items: List[Dict[str, Any]] = []
     quiz_questions: List[Dict[str, Any]] = []
     recommended_resource_ids: List[str] = []
+    lesson_sections_json: List[Dict[str, Any]] = []
+    lesson_status: str = "NOT_GENERATED"
+    current_section_index: int = 0
+    lesson_generated_at: Optional[datetime] = None
+    knowledge_check_answers: Optional[Dict[str, Any]] = None
+    knowledge_check_score: Optional[float] = None
+    knowledge_check_report: Optional[Dict[str, Any]] = None
+    session_summary_text: Optional[str] = None
+
+
+class GuidedSessionAskRequest(BaseModel):
+    question: str = Field(min_length=1)
+    section_context: Optional[str] = Field(default="")
+
+
+class GuidedSessionExerciseRequest(BaseModel):
+    section_index: Optional[int] = Field(default=0)
+
+
+class SubmitKnowledgeCheckRequest(BaseModel):
+    answers: Dict[str, Any] = Field(default_factory=dict)
 
 
 class StudyPlanResponse(BaseModel):
@@ -50,7 +72,7 @@ class StudyPlanResponse(BaseModel):
     status: str
     auto_generated: bool = False
     streak_count: int = 0
-    readiness_score: int = 85
+    readiness_score: int = DEFAULT_INITIAL_READINESS_SCORE
     readiness_history: List[Dict[str, Any]] = []
     covered_material_ids: List[str] = []
     created_at: datetime
@@ -58,8 +80,8 @@ class StudyPlanResponse(BaseModel):
 
 
 class CreateStudyPlanRequest(BaseModel):
-    title: str
-    study_type: str = "Assessment Preparation"
+    title: str = Field(min_length=1, max_length=255)
+    study_type: str = Field(default="Assessment Preparation", max_length=50)
     course_id: Optional[uuid.UUID] = None
     teaching_workspace_id: Optional[uuid.UUID] = None
     assessment_id: Optional[uuid.UUID] = None
@@ -80,12 +102,12 @@ class CreateStudyPlanRequest(BaseModel):
 
 class GeneratePlanFromAssessmentRequest(BaseModel):
     assessment_id: uuid.UUID
-    available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+    available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     blackout_dates: List[str] = []
     preferred_time_start: str = "19:00"
     preferred_time_end: str = "21:00"
     session_duration_minutes: int = 60
-    daily_goal: str = "1 topic per session"
+    daily_goal: str = "Master 1 assessment topic per session"
     preferred_difficulty: str = "Balanced"
     reminder_preference_minutes: int = 30
     reminder_channels: List[str] = ["in_app", "browser"]
@@ -93,7 +115,7 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
 
 
 class CompleteSessionRequest(BaseModel):
-    understanding_level: str = "YES"
+    understanding_level: str = Field(description="YES, PARTIAL, NO")
     difficulty_rating: Optional[str] = "Medium"
     confidence_rating: Optional[int] = 4
     feedback_notes: Optional[str] = None
@@ -101,16 +123,16 @@ class CompleteSessionRequest(BaseModel):
 
 
 class GenerateQuizRequest(BaseModel):
-    question_count: int = 5
+    question_count: int = Field(default=5, ge=1, le=20)
 
 
 class RescheduleSessionRequest(BaseModel):
     new_start: datetime
-    new_duration_minutes: Optional[int] = None
+    new_duration: Optional[int] = None
 
 
 class AdjustPlanRequest(BaseModel):
-    action: str
+    action: str = Field(description="reduce_duration, shift_weekends, add_topics")
 
 
 class ReadinessTimelinePoint(BaseModel):
@@ -143,7 +165,7 @@ class StudyPlannerDashboardSummary(BaseModel):
     hours_studied_this_week: float = 0.0
     today_session: Optional[StudySessionResponse] = None
     next_upcoming_session: Optional[StudySessionResponse] = None
-    assessment_readiness_score: int = 85
+    assessment_readiness_score: int = DEFAULT_INITIAL_READINESS_SCORE
     weak_topics: List[str] = []
     proactive_suggestion: Optional[Dict[str, Any]] = None
     unplanned_assessments: List[Dict[str, Any]] = []
