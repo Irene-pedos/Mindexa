@@ -317,6 +317,7 @@ class AssessmentGeneralUpdate(BaseModel):
     teaching_workspace_id: uuid.UUID | None = None
     course_id: uuid.UUID | None = None
     class_group_ids: list[uuid.UUID] | None = None
+    target_section_ids: list[uuid.UUID] | None = None
     supervisor_ids: list[uuid.UUID] | None = None
     audience_type: str | None = None
     target_student_ids: list[uuid.UUID] | None = None
@@ -606,6 +607,7 @@ class BulkAssessmentMetadata(BaseModel):
     department_ids: list[str | uuid.UUID] | None = []
     option_ids: list[str | uuid.UUID] | None = []
     class_group_ids: list[str | uuid.UUID] | None = []
+    target_section_ids: list[str | uuid.UUID] | None = []
     teaching_workspace_id: str | uuid.UUID | None = None
     subject_id: str | uuid.UUID | None = None
     audience_type: str | None = "all"

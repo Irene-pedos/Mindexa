@@ -308,9 +308,26 @@ class StudentService:
                 start_at=ass.window_start,
                 end_at=ass.window_end,
                 description=f"{ass.duration_minutes} minute assessment",
-                color_hint="bg-red-500" if ass.assessment_type.value in ["CAT", "SUMMATIVE"] else "bg-emerald-500",
+                color_hint="bg-red-500" if (ass.assessment_type.value if hasattr(ass.assessment_type, 'value') else str(ass.assessment_type)) in ["CAT", "SUMMATIVE"] else "bg-emerald-500",
                 course_code=ass.course.code if ass.course else None,
                 course_name=ass.course.name if ass.course else None,
                 duration_minutes=ass.duration_minutes
             ))
+
+        # Include Study Plan sessions
+        from app.db.repositories.study_planner_repo import StudyPlannerRepository
+        sp_repo = StudyPlannerRepository(self.db)
+        study_sessions = await sp_repo.list_upcoming_sessions_for_student(student_id)
+        for s in study_sessions:
+            events.append(StudentScheduleEvent(
+                id=str(s.id),
+                title=f"Study: {s.title}",
+                type="STUDY_SESSION",
+                start_at=s.scheduled_start,
+                end_at=s.scheduled_end,
+                description=f"Topic: {s.topic} ({s.session_type})",
+                color_hint="bg-primary",
+                duration_minutes=s.duration_minutes
+            ))
+
         return StudentScheduleResponse(events=events)

@@ -103,6 +103,7 @@ from app.db.models.auth import PasswordResetToken, RefreshToken, User, UserProfi
 from app.db.models.integrity import (
     IntegrityEvent,
     IntegrityFlag,
+    IntegrityProfile,
     IntegrityWarning,
     SupervisionSession,
 )
@@ -122,6 +123,7 @@ from app.db.models.academic_resource import AcademicResource
 from app.db.models.resource_chunk import ResourceChunk
 from app.db.models.study_support_session import StudySupportSession
 from app.db.models.result import AssessmentResult, ResultBreakdown
+from app.db.models.study_plan import StudyPlan, StudySession
 
 __all__: list[str] = [
     # ── Audit ──────────────────────────────────────────────────────────────────
@@ -184,6 +186,7 @@ __all__: list[str] = [
     "IntegrityEvent",
     "IntegrityWarning",
     "IntegrityFlag",
+    "IntegrityProfile",
     "SupervisionSession",
     # ── AI traceability ────────────────────────────────────────────────────────
     "AIActionLog",
@@ -203,4 +206,7 @@ __all__: list[str] = [
     # —— Results ————————————————————————————————————————————————————————————————————————————
     "AssessmentResult",
     "ResultBreakdown",
+    # ── Study Planner ──────────────────────────────────────────────────────────
+    "StudyPlan",
+    "StudySession",
 ]

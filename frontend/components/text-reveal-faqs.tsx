@@ -90,7 +90,7 @@ export default function FAQs() {
 
  
 export const BlurredStagger = ({
-  text = "built by ruixen.com",
+  text = "built by mindexa.com",
 }: {
   text: string;
 }) => {
@@ -101,43 +101,43 @@ export const BlurredStagger = ({
     show: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.015,
+        staggerChildren: 0.03, // faster staggers for words
       },
     },
   };
  
-  const letterAnimation = {
+  const wordAnimation = {
     hidden: {
       opacity: 0,
-      filter: "blur(10px)",
+      y: 4,
+      filter: "blur(4px)",
     },
     show: {
       opacity: 1,
+      y: 0,
       filter: "blur(0px)",
     },
   };
  
   return (
-    <>
-      <div className="w-full">
-        <motion.p
-          variants={container}
-          initial="hidden"
-          animate="show"
-          className="text-base leading-relaxed break-words whitespace-normal"
-        >
-          {headingText.split("").map((char, index) => (
-            <motion.span
-              key={index}
-              variants={letterAnimation}
-              transition={{ duration: 0.3 }}
-              className="inline-block"
-            >
-              {char === " " ? "\u00A0" : char}
-            </motion.span>
-          ))}
-        </motion.p>
-      </div>
-    </>
+    <div className="w-full">
+      <motion.p
+        variants={container}
+        initial="hidden"
+        animate="show"
+        className="text-base leading-relaxed break-words whitespace-normal flex flex-wrap"
+      >
+        {headingText.split(" ").map((word, index) => (
+          <motion.span
+            key={index}
+            variants={wordAnimation}
+            transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
+            className="inline-block mr-1.5"
+          >
+            {word}
+          </motion.span>
+        ))}
+      </motion.p>
+    </div>
   );
 };

@@ -566,7 +566,8 @@ def process_ai_generation_batch(
             raise self.retry(exc=exc, countdown=countdown)
         except MaxRetriesExceededError:
             _run(_mark_batch_failed(batch_id, str(exc)))
-            logger.critical("process_ai_generation_batch: max retries for batch %s", batch_id)async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
+            logger.critical("process_ai_generation_batch: max retries for batch %s", batch_id)
+async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
     from app.core.ai.question_generator import (GenerationContext,
                                                 generate_questions)
     from app.db.enums import AIBatchStatus
@@ -603,11 +604,12 @@ def process_ai_generation_batch(
         course_material_context: str = ""
         if workspace_id:
             try:
-                course_material_context = await rag.retrieve_context_for_lecturer(
+                rag_res = await rag.retrieve_context_for_lecturer(
                     topic=rag_topic,
                     teaching_workspace_id=workspace_id,
                     top_k=8,
                 )
+                course_material_context = rag_res.context_string
                 logger.info(
                     "Lecturer RAG context retrieved for batch",
                     extra={
@@ -661,11 +663,12 @@ def process_ai_generation_batch(
                 sec_context = course_material_context
                 if workspace_id and sec_topic and sec_topic != rag_topic:
                     try:
-                        sec_context = await rag.retrieve_context_for_lecturer(
+                        sec_rag_res = await rag.retrieve_context_for_lecturer(
                             topic=sec_topic,
                             teaching_workspace_id=workspace_id,
                             top_k=6,
                         )
+                        sec_context = sec_rag_res.context_string
                     except Exception:
                         sec_context = course_material_context  # fallback to batch-level context
 

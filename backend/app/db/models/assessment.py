@@ -230,6 +230,19 @@ class Assessment(AuditedBaseModel, table=True):
     fullscreen_required: bool = Field(default=True, nullable=False)
     is_supervised: bool = Field(default=False, nullable=False)
     integrity_monitoring_enabled: bool = Field(default=True, nullable=False)
+    allow_resume: bool = Field(default=True, nullable=False, description="Whether student can resume interrupted attempt")
+    integrity_profile_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("integrity_profile.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    integrity_policy_json: Optional[dict] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
     randomize_questions: bool = Field(default=False, nullable=False)
     randomize_options: bool = Field(default=False, nullable=False)
     is_group_assessment: bool = Field(default=False, nullable=False)

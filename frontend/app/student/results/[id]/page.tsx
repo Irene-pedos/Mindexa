@@ -567,7 +567,7 @@ function SubmittedQuestionCard({ q, sub, index }: { q: any; sub: any; index: num
             }
             return rawOrdered.map((val: string, idx: number) => {
               const opt = optionMap.get(val);
-              const label = opt ? (opt.text || opt.option_text) : val;
+              const label = opt ? ((opt as any).text || (opt as any).option_text) : val;
               return (
                 <div key={val || idx} className="flex items-center gap-3 rounded-lg border bg-muted/10 p-3 text-xs">
                   <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-bold">{idx + 1}</span>

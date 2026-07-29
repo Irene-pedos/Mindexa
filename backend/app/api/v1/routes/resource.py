@@ -257,3 +257,53 @@ async def delete_student_resource(
         raise NotFoundError("Resource not found or unauthorized")
     
     return {"success": True, "message": "Resource deleted successfully"}
+
+
+@router.post(
+    "/extract-text",
+    summary="Extract text content from uploaded document (PDF, DOCX, TXT, CSV)",
+)
+async def extract_document_text(
+    file: UploadFile = File(...),
+    current_user=Depends(require_verified_email),
+):
+    """
+    Synchronously extracts clean human-readable text from PDF, DOCX, or text files.
+    """
+    ext = os.path.splitext(file.filename)[1].lower()
+    content = await file.read()
+    
+    extracted_text = ""
+    page_count = 1
+
+    try:
+        if ext == ".pdf":
+            import fitz
+            doc = fitz.open(stream=content, filetype="pdf")
+            page_count = len(doc)
+            pages = []
+            for i, page in enumerate(doc):
+                t = page.get_text()
+                if t.strip():
+                    pages.append(f"--- Page {i+1} ---\n{t.strip()}")
+            doc.close()
+            extracted_text = "\n\n".join(pages)
+        elif ext in [".docx", ".doc"]:
+            import docx
+            import io
+            doc = docx.Document(io.BytesIO(content))
+            paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
+            extracted_text = "\n".join(paragraphs)
+        elif ext in [".txt", ".csv", ".json", ".md", ".py", ".js", ".ts", ".html"]:
+            extracted_text = content.decode("utf-8", errors="ignore")
+        else:
+            extracted_text = f"Attached file: {file.filename} (Binary format {ext})"
+    except Exception as e:
+        extracted_text = f"Extraction note: Could not parse document text: {str(e)}"
+
+    return {
+        "filename": file.filename,
+        "extracted_text": extracted_text.strip(),
+        "page_count": page_count,
+        "char_count": len(extracted_text),
+    }

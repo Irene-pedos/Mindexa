@@ -81,6 +81,7 @@ import {
   DialogTitle,
   DialogTrigger,
   DialogClose,
+  DialogFooter,
 } from "@/components/ui/dialog";
 
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -346,6 +347,7 @@ function useIntegrityMonitor({
     metadata?: Record<string, unknown>,
   ) => Promise<void>;
   setIsFullscreen: (val: boolean) => void;
+  setIsScreenBlurred: (val: boolean) => void;
 }) {
   // Fullscreen enforcement
   useEffect(() => {
@@ -382,12 +384,14 @@ function useIntegrityMonitor({
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [stage, isHighSecurity, handleIntegrityEvent]);
 
-  // Other monitored browser events
+  // Other monitored browser events & screen blurring
   useEffect(() => {
     if (stage !== "taking") return;
 
     const handleBlur = () => {
-      handleIntegrityEvent("WINDOW_BLUR");
+      handleIntegrityEvent("SCREEN_BLURRING", {
+        details: "Focus lost to external task or app",
+      });
     };
 
     const handleCopy = (e: ClipboardEvent) => {
@@ -1358,6 +1362,9 @@ export default function TakeAssessmentPage() {
 
   const [warnings, setWarnings] = useState(0);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isScreenBlurred, setIsScreenBlurred] = useState(false);
+  const [autoSubmitModalOpen, setAutoSubmitModalOpen] = useState(false);
+  const [autoSubmitViolationMessage, setAutoSubmitViolationMessage] = useState("");
   const [terminationReason, setTerminationReason] = useState<string | null>(
     null,
   );
@@ -1580,18 +1587,25 @@ export default function TakeAssessmentPage() {
           type,
           metadata,
         );
+
+        if (res.action_required === "AUTO_SUBMIT") {
+          setAutoSubmitViolationMessage(
+            res.violation_details?.message ||
+              `Critical Non-Tolerated Integrity Violation (${type}). Assessment automatically submitted.`
+          );
+          setAutoSubmitModalOpen(true);
+          autoSubmit();
+          return;
+        }
+
         if (res.warning_issued && res.warning) {
           const warningId = res.warning.id || res.id;
           if (warningId && processedWarningIds.current.has(warningId)) return;
           if (warningId) processedWarningIds.current.add(warningId);
           setWarnings((prev) => {
             const newCount = prev + 1;
-            if (newCount >= MAX_INTEGRITY_WARNINGS) {
-              terminateSession(`Warnings exceeded (${type}).`);
-            } else {
-              setCurrentWarning(res.warning);
-              setWarningModalOpen(true);
-            }
+            setCurrentWarning(res.warning);
+            setWarningModalOpen(true);
             return newCount;
           });
         }
@@ -1599,7 +1613,7 @@ export default function TakeAssessmentPage() {
         console.error("Failed to record integrity event", err);
       }
     },
-    [attemptId, attemptToken, terminateSession],
+    [attemptId, attemptToken, autoSubmit],
   );
 
   useIntegrityMonitor({
@@ -1608,6 +1622,7 @@ export default function TakeAssessmentPage() {
     isHighSecurity,
     handleIntegrityEvent,
     setIsFullscreen,
+    setIsScreenBlurred,
   });
 
   const { isOnline, queueLocalSave, flushOfflineQueue } = useOfflineSync({
@@ -4232,6 +4247,70 @@ export default function TakeAssessmentPage() {
           </div>
         </div>
       )}
+
+      {/* Screen Blurring Overlay */}
+      {isScreenBlurred && stage === "taking" && (
+        <div
+          onClick={() => setIsScreenBlurred(false)}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 bg-background/85 backdrop-blur-md cursor-pointer text-center animate-in fade-in duration-200"
+        >
+          <div className="max-w-md p-6 border rounded-2xl bg-card shadow-2xl space-y-4">
+            <div className="size-12 rounded-full bg-amber-500/10 text-amber-500 flex items-center justify-center mx-auto">
+              <Shield className="size-6" />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-lg font-bold text-foreground">Assessment Screen Blurred</h3>
+              <p className="text-xs text-muted-foreground leading-relaxed font-medium">
+                Another application or external window was active above the assessment interface. This event has been logged with Warning + Log.
+              </p>
+            </div>
+            <Button size="sm" className="w-full text-xs font-bold rounded-lg h-9">
+              Click Anywhere to Refocus Assessment
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Auto-Submission Violation Dialog */}
+      <Dialog open={autoSubmitModalOpen} onOpenChange={() => {}}>
+        <DialogContent className="max-w-md p-6 rounded-xl border border-destructive/30 bg-card text-center sm:text-center">
+          <DialogHeader className="space-y-2">
+            <div className="size-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
+              <AlertTriangle className="size-6" />
+            </div>
+            <DialogTitle className="text-base font-bold text-foreground">
+              Assessment Auto-Submitted
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground">
+              A Non-Tolerated Integrity Violation was recorded on your attempt session.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5 space-y-2 my-2 text-left">
+            <p className="text-xs font-bold text-destructive">Violation Details:</p>
+            <p className="text-xs text-foreground/90 font-medium leading-relaxed">
+              {autoSubmitViolationMessage ||
+                "Exceeded maximum allowed warnings or triggered a critical non-tolerated policy rule."}
+            </p>
+            <p className="text-[11px] text-muted-foreground pt-2 border-t border-destructive/10 font-medium">
+              Your answers recorded up to this point have been safely saved.
+            </p>
+          </div>
+
+          <DialogFooter className="sm:justify-center pt-2">
+            <Button
+              size="sm"
+              className="w-full h-9 text-xs font-bold rounded-lg shadow-none"
+              onClick={() => {
+                setAutoSubmitModalOpen(false);
+                setStage("submitted");
+              }}
+            >
+              View Submission & Results
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={warningModalOpen} onOpenChange={() => {}}>
         <DialogContent

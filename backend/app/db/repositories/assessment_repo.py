@@ -1445,7 +1445,10 @@ class AssessmentRepository:
             StudentEnrollment,
             TeachingAssignment,
             TeachingWorkspace,
+            ClassGroup,
         )
+        from sqlalchemy import exists
+        from app.db.enums import EnrollmentStatus
         
         # Base filters
         filters = [
@@ -1472,25 +1475,37 @@ class AssessmentRepository:
         # We check if assessment has ANY target sections
         has_targets_stmt = select(AssessmentTargetSection.assessment_id).where(AssessmentTargetSection.is_deleted == False)
 
-        course_stmt = (
-            select(Assessment.id)
-            .join(Course, Course.id == Assessment.course_id)
-            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
-            .join(ClassSection, ClassSection.id == TeachingAssignment.class_section_id)
-            .join(StudentEnrollment, StudentEnrollment.class_section_id == ClassSection.id)
-            .where(
-                StudentEnrollment.student_id == student_id,
-                StudentEnrollment.is_deleted == False,
-                not_(Assessment.id.in_(has_targets_stmt))
-            )
-        )
-
         workspace_stmt = (
             select(Assessment.id)
             .join(TeachingWorkspace, TeachingWorkspace.id == Assessment.teaching_workspace_id)
-            .join(StudentEnrollment, StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
+            .join(StudentEnrollment, or_(
+                # Workspace is directly for the student's section
+                TeachingWorkspace.class_section_id == StudentEnrollment.class_section_id,
+                # Workspace is global, but the student's section belongs to the department (and option if option_id is set) of the workspace assignment
+                and_(
+                    TeachingWorkspace.class_section_id == None,
+                    exists().where(
+                        and_(
+                            ClassSection.id == StudentEnrollment.class_section_id,
+                            ClassSection.department_id == TeachingAssignment.department_id,
+                            ClassSection.is_active == True,
+                            or_(
+                                TeachingAssignment.option_id == None,
+                                exists().where(
+                                    and_(
+                                        ClassGroup.id == ClassSection.class_group_id,
+                                        ClassGroup.option_id == TeachingAssignment.option_id
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            ))
             .where(
                 StudentEnrollment.student_id == student_id,
+                StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
                 StudentEnrollment.is_deleted == False,
                 not_(Assessment.id.in_(has_targets_stmt))
             )
@@ -1499,7 +1514,6 @@ class AssessmentRepository:
         # Combined availability
         availability_filter = or_(
             Assessment.id.in_(targeted_stmt),
-            Assessment.id.in_(course_stmt),
             Assessment.id.in_(workspace_stmt),
         )
         filters.append(availability_filter)
@@ -1511,6 +1525,7 @@ class AssessmentRepository:
         audience_filter = or_(
             col(Assessment.audience_type).is_(None),
             col(Assessment.audience_type) == "all",
+            col(Assessment.audience_type) == "sections",
             and_(
                 col(Assessment.audience_type) == "selected",
                 cast(Assessment.target_student_ids, JSONB).contains([str(student_id)])

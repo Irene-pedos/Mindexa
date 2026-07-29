@@ -1366,7 +1366,7 @@ export default function LecturerGradingQueue() {
                 
                 <div className="text-xs sm:text-sm font-sans leading-relaxed whitespace-pre-wrap text-foreground/90 max-h-[450px] overflow-y-auto bg-muted/10 p-3.5 rounded-xl border border-border/40 font-medium">
                   {(() => {
-                    if (!currentSubmission || currentSubmission.is_skipped) {
+                    if (!currentSubmission || (currentSubmission as any).is_skipped) {
                       return (
                         <span className="italic text-muted-foreground/60 font-sans font-medium">
                           No response recorded for this question node.
@@ -1379,7 +1379,7 @@ export default function LecturerGradingQueue() {
                     const isOrdering = subType === "ORDERED_LIST" || qType === "ordering" || qType === "ordered_list" || qType === "orderedlist";
 
                     if (isOrdering) {
-                      const orderedIds: string[] = currentSubmission.ordered_option_ids || (Array.isArray(currentSubmission.answer_text) ? currentSubmission.answer_text : []);
+                      const orderedIds: string[] = (currentSubmission as any).ordered_option_ids || (Array.isArray(currentSubmission.answer_text) ? currentSubmission.answer_text : []);
                       if (!orderedIds || orderedIds.length === 0) {
                         return (
                           <span className="italic text-muted-foreground/60 font-sans font-medium">
@@ -1387,7 +1387,7 @@ export default function LecturerGradingQueue() {
                           </span>
                         );
                       }
-                      const opts = currentQuestion?.options || [];
+                      const opts = (currentQuestion as any)?.options || [];
                       const expectedOpts = [...opts].sort((a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0));
                       return (
                         <div className="space-y-2">
@@ -1418,7 +1418,7 @@ export default function LecturerGradingQueue() {
 
                     const isMatching = subType === "MATCH_PAIRS" || qType === "matching" || qType === "match_pairs";
                     if (isMatching) {
-                      const pairs = currentSubmission.match_pairs_json || {};
+                      const pairs = (currentSubmission as any).match_pairs_json || {};
                       const keys = Object.keys(pairs);
                       if (keys.length === 0) {
                         return <span className="italic text-muted-foreground/60 font-sans font-medium">No matches submitted.</span>;
@@ -1438,7 +1438,7 @@ export default function LecturerGradingQueue() {
 
                     const isFillBlanks = subType === "FILL_BLANKS" || qType === "fillblank" || qType === "fillblanks" || qType === "fill_blank";
                     if (isFillBlanks) {
-                      const blanks = currentSubmission.fill_blank_answers || {};
+                      const blanks = (currentSubmission as any).fill_blank_answers || {};
                       const keys = Object.keys(blanks);
                       if (keys.length === 0) {
                         return <span className="italic text-muted-foreground/60 font-sans font-medium">No fill-blank answers recorded.</span>;
@@ -1457,9 +1457,9 @@ export default function LecturerGradingQueue() {
                     }
 
                     const isMcq = subType === "SINGLE_OPTION" || subType === "MULTI_OPTION" || qType === "mcq" || qType === "singleoption" || qType === "multiplechoice" || qType === "multiple_choice" || qType === "multiselect" || qType === "checkbox";
-                    if (isMcq && (currentSubmission.selected_option_ids?.length || subType === "SINGLE_OPTION" || subType === "MULTI_OPTION")) {
-                      const selected = currentSubmission.selected_option_ids || [];
-                      const opts = currentQuestion?.options || [];
+                    if (isMcq && ((currentSubmission as any).selected_option_ids?.length || subType === "SINGLE_OPTION" || subType === "MULTI_OPTION")) {
+                      const selected = (currentSubmission as any).selected_option_ids || [];
+                      const opts = (currentQuestion as any)?.options || [];
                       if (selected.length === 0) {
                         return <span className="italic text-muted-foreground/60 font-sans font-medium">No option chosen.</span>;
                       }
@@ -1479,9 +1479,10 @@ export default function LecturerGradingQueue() {
                       );
                     }
 
+                    const subAny = currentSubmission as any;
                     const textVal = currentSubmission.answer_text || 
-                                    (typeof currentSubmission.submitted_content === "string" ? currentSubmission.submitted_content : currentSubmission.submitted_content?.text) || 
-                                    currentSubmission.student_answer;
+                                    (typeof subAny.submitted_content === "string" ? subAny.submitted_content : subAny.submitted_content?.text) || 
+                                    subAny.student_answer;
 
                     return textVal || (
                       <span className="italic text-muted-foreground/60 font-sans font-medium">

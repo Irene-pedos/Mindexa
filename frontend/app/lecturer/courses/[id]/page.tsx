@@ -94,6 +94,7 @@ export default function LecturerWorkspaceDetail() {
   const [isMaterialVisible, setIsMaterialVisible] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
   const [deleteMaterialId, setDeleteMaterialId] = useState<string | null>(null);
+  const [selectedCategory, setSelectedCategory] = useState("LECTURE_NOTES");
 
   const [recordDialogOpen, setRecordDialogOpen] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState<{
@@ -151,7 +152,7 @@ export default function LecturerWorkspaceDetail() {
       const formData = new FormData();
       formData.append("file", e.target.files[0]);
       formData.append("teaching_workspace_id", id);
-      formData.append("material_category", "LECTURE_NOTES");
+      formData.append("material_category", selectedCategory);
       formData.append("is_student_visible", String(isMaterialVisible));
       await lecturerApi.uploadMaterial(formData);
       toast.success("Material uploaded successfully");
@@ -502,7 +503,19 @@ export default function LecturerWorkspaceDetail() {
                 </Badge>
               </CardTitle>
               <div className="flex items-center gap-2">
-                <label className="text-[9px] flex items-center gap-1 cursor-pointer text-zinc-400 hover:text-zinc-600 transition-colors font-medium">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="h-6 rounded-md border border-zinc-200 text-[10px] px-1 bg-white text-zinc-700 outline-none max-w-[120px]"
+                  title="Handout Category"
+                >
+                  <option value="LECTURE_NOTES">Lecture Notes</option>
+                  <option value="SYLLABUS">Syllabus</option>
+                  <option value="ASSIGNMENT_SPECS">Assignment Specs</option>
+                  <option value="RUBRIC">Rubric</option>
+                  <option value="REFERENCE_MATERIALS">Reference Materials</option>
+                </select>
+                <label className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 cursor-pointer">
                   <input
                     type="checkbox"
                     checked={isMaterialVisible}
@@ -590,6 +603,14 @@ export default function LecturerWorkspaceDetail() {
                             · {(m.file_size_bytes / (1024 * 1024)).toFixed(2)}{" "}
                             MB
                             {!m.is_student_visible && " · Hidden"}
+                            {" · "}
+                            <span className={
+                              m.processing_status === "PROCESSED" ? "text-emerald-600 font-semibold" :
+                              m.processing_status === "FAILED" ? "text-red-500 font-semibold" :
+                              "text-blue-500 font-semibold animate-pulse"
+                            }>
+                              {m.processing_status || "PENDING"}
+                            </span>
                           </AttachmentDescription>
                         </AttachmentContent>
                         <AttachmentActions onClick={(e) => e.stopPropagation()}>

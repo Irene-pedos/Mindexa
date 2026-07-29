@@ -100,6 +100,10 @@ def _escape_like(value: str) -> str:
     return value
 
 
+def _enum_or_str_value(value):
+    return value.value if hasattr(value, "value") else value
+
+
 # ---------------------------------------------------------------------------
 # QUESTION REPOSITORY
 # ---------------------------------------------------------------------------
@@ -240,6 +244,7 @@ class QuestionRepository:
         is_approved: bool | None = True,
         is_in_question_bank: bool | None = None,
         is_shared: bool | None = None,
+        is_active: bool | None = True,
         include_deleted: bool = False,
         page: int = 1,
         page_size: int = 20,
@@ -258,6 +263,7 @@ class QuestionRepository:
             is_approved   — default True (exclude unapproved AI / imported)
             is_in_question_bank — filter by bank membership
             is_shared     — filter by sharing flag
+            is_active     — filter archived versions
             include_deleted — default False; True for admin audit queries only
 
         Returns (items, total_count).
@@ -297,6 +303,9 @@ class QuestionRepository:
 
         if is_shared is not None:
             filters.append(col(Question.is_shared) == is_shared)
+
+        if is_active is not None:
+            filters.append(col(Question.is_active) == is_active)
 
         if q is not None:
             escaped_q = _escape_like(q)
@@ -850,8 +859,12 @@ class QuestionRepository:
             question_id=question_id,
             added_by_id=added_by_id,
             subject_id=subject_id,
-            difficulty=DifficultyLevel(difficulty.upper()) if difficulty else None,
-            source_type=QuestionSourceType(source_type.upper()),
+            difficulty=(
+                DifficultyLevel(str(_enum_or_str_value(difficulty)).upper())
+                if difficulty
+                else None
+            ),
+            source_type=QuestionSourceType(str(_enum_or_str_value(source_type)).upper()),
             source_assessment_id=source_assessment_id,
             times_used=0,
             is_active=True,

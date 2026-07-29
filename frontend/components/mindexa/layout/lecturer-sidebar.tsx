@@ -18,7 +18,7 @@ import {
   Briefcase,
   BarChart3,
   Unlock,
-  ChevronRight
+  ChevronRight,
 } from "lucide-react";
 
 import {
@@ -41,15 +41,22 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import { Badge } from "@/components/ui/badge";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
 import { notificationApi } from "@/lib/api/notification";
+import { gradingApi } from "@/lib/api/grading";
 import { NotificationType } from "@/lib/api/notification/notificationTypes";
 import { User } from "@/lib/types/user";
 
 const mainNav = [
   { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard },
-  { title: "My Assignments", url: "/lecturer/assignments", icon: Briefcase, badge: true },
+  {
+    title: "My Assignments",
+    url: "/lecturer/assignments",
+    icon: Briefcase,
+    badge: true,
+  },
   { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen },
   { title: "Assessments", url: "/lecturer/assessments", icon: FileText },
   {
@@ -61,8 +68,16 @@ const mainNav = [
 
 const gradingNav = [
   { title: "Review Queue", url: "/lecturer/grading", icon: Users },
-  { title: "Batch Review", url: "/lecturer/grading/batch", icon: ClipboardList },
-  { title: "Assessment Analytics", url: "/lecturer/grading/analytics", icon: BarChart3 },
+  {
+    title: "Batch Review",
+    url: "/lecturer/grading/batch",
+    icon: ClipboardList,
+  },
+  {
+    title: "Assessment Analytics",
+    url: "/lecturer/grading/analytics",
+    icon: BarChart3,
+  },
 ];
 
 const managementNav = [
@@ -81,36 +96,66 @@ export function LecturerSidebar({
   const pathname = usePathname();
   const { user } = useAuth() as { user: User | null };
   const [hasNewAssignments, setHasNewAssignments] = React.useState(false);
+  const [pendingGradingCount, setPendingGradingCount] =
+    React.useState<number>(0);
+  const [hasVisitedGradingCenter, setHasVisitedGradingCenter] =
+    React.useState<boolean>(false);
 
   React.useEffect(() => {
-    async function checkNotifications() {
+    if (pathname.startsWith("/lecturer/grading")) {
+      setHasVisitedGradingCenter(true);
+      try {
+        sessionStorage.setItem("lecturer_grading_visited", "true");
+      } catch {}
+    } else {
+      try {
+        const visited =
+          sessionStorage.getItem("lecturer_grading_visited") === "true";
+        setHasVisitedGradingCenter(visited);
+      } catch {}
+    }
+  }, [pathname]);
+
+  React.useEffect(() => {
+    async function checkNotificationsAndQueue() {
       if (!user) return;
       try {
-        const res = await notificationApi.getNotifications(true);
-        const hasAssignmentNotif = res.items.some(
-          n => n.notification_type === NotificationType.TEACHING_ASSIGNMENT_CREATED
+        const [res, queueRes] = await Promise.all([
+          notificationApi.getNotifications(true).catch(() => ({ items: [] })),
+          gradingApi
+            .getGradingQueue({ status: "PENDING", page_size: 1 })
+            .catch(() => ({ total: 0, items: [] })),
+        ]);
+
+        const hasAssignmentNotif = (res.items || []).some(
+          (n) =>
+            n.notification_type ===
+            NotificationType.TEACHING_ASSIGNMENT_CREATED,
         );
         setHasNewAssignments(hasAssignmentNotif);
+        setPendingGradingCount(
+          (queueRes as any)?.total ?? (queueRes as any)?.items?.length ?? 0,
+        );
       } catch (err) {
-        console.error("Failed to check notifications", err);
+        console.error("Failed to check notifications or grading count", err);
       }
     }
 
-    checkNotifications();
+    checkNotificationsAndQueue();
     // Refresh every 2 minutes
-    const interval = setInterval(checkNotifications, 120000);
-    
+    const interval = setInterval(checkNotificationsAndQueue, 120000);
+
     // Pause polling when tab is inactive
     const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        checkNotifications();
+      if (document.visibilityState === "visible") {
+        checkNotificationsAndQueue();
       }
     };
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
       clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [user]);
 
@@ -202,21 +247,30 @@ export function LecturerSidebar({
               <SidebarMenuItem>
                 <CollapsibleTrigger asChild>
                   <SidebarMenuButton tooltip="Grading Center">
-                     <Users className="size-5" aria-hidden="true" />
-                     <span>Grading Center</span>
-                     <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
+                    <Users className="size-5" aria-hidden="true" />
+                    <span>Grading Center</span>
+                    {pendingGradingCount > 0 &&
+                      !hasVisitedGradingCenter &&
+                      !pathname.startsWith("/lecturer/grading") && (
+                        <Badge className="ml-auto mr-1 h-5 px-1.5 flex items-center justify-center text-xs font-semibold bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 border-none group-data-[collapsible=icon]:hidden">
+                          {pendingGradingCount}
+                        </Badge>
+                      )}
+                    <ChevronRight className="ml-auto transition-transform duration-200 group-data-[state=open]/collapsible:rotate-180" />
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
                   <SidebarMenuSub>
                     {gradingNav.map((subItem) => {
-                      const isActive = pathname === subItem.url || pathname.startsWith(subItem.url + "/");
+                      const isActive =
+                        pathname === subItem.url ||
+                        pathname.startsWith(subItem.url + "/");
                       return (
                         <SidebarMenuSubItem key={subItem.title}>
                           <SidebarMenuSubButton asChild isActive={isActive}>
-                             <Link href={subItem.url}>
-                               <span>{subItem.title}</span>
-                             </Link>
+                            <Link href={subItem.url}>
+                              <span>{subItem.title}</span>
+                            </Link>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>
                       );
@@ -245,8 +299,8 @@ export function LecturerSidebar({
                     isActive={isActive}
                   >
                     <Link href={item.url}>
-                       <item.icon className="size-5" aria-hidden="true" />
-                       <span>{item.title}</span>
+                      <item.icon className="size-5" aria-hidden="true" />
+                      <span>{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>

@@ -67,4 +67,18 @@ export const integrityApi = {
       method: "POST", 
       body: JSON.stringify({ is_flagged: flagged }) 
     }),
+
+  getProfiles: (): Promise<{ items: any[] }> => apiClient("/integrity/profiles"),
+
+  createProfile: (data: any) =>
+    apiClient("/integrity/profiles", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  updateProfile: (profileId: string, data: any) =>
+    apiClient(`/integrity/profiles/${profileId}`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
 };

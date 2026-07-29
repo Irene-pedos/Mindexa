@@ -265,5 +265,6 @@ class QuestionSearchParams(BaseModel):
     source_type: str | None = None
     tag_names: list[str] | None = None
     is_active: bool | None = Field(default=True)
+    is_in_question_bank: bool | None = Field(default=True)
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=20, ge=1, le=100)

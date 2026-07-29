@@ -75,6 +75,8 @@ export function AcademicPlannerDropdown() {
     if (highSecurity) return <ShieldAlert className="size-4 text-primary" />;
 
     switch (type.toUpperCase()) {
+      case "STUDY_SESSION":
+        return <BookOpen className="size-4 text-primary" />;
       case "CAT":
         return <AlertCircle className="size-4 text-red-500" />;
       case "SUMMATIVE":

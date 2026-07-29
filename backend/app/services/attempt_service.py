@@ -91,6 +91,29 @@ class AttemptService:
                     "You are not eligible for this assessment.",
                     code="STUDENT_NOT_TARGETED",
                 )
+        elif assessment.audience_type == "sections":
+            from app.db.models.academic import StudentEnrollment
+            from app.db.models.assessment import AssessmentTargetSection
+            from app.db.enums import EnrollmentStatus
+            from sqlalchemy import select
+            
+            stmt = (
+                select(StudentEnrollment.id)
+                .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
+                .where(
+                    StudentEnrollment.student_id == student_id,
+                    StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
+                    StudentEnrollment.is_deleted == False,
+                    AssessmentTargetSection.assessment_id == assessment_id,
+                    AssessmentTargetSection.is_deleted == False
+                )
+            )
+            res = await self.db.execute(stmt)
+            if not res.scalars().first():
+                raise AuthorizationError(
+                    "You are not eligible for this assessment.",
+                    code="STUDENT_NOT_TARGETED",
+                )
 
         # Gate 2 — within window
         if assessment.is_group_assessment:

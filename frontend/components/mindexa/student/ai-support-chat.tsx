@@ -45,10 +45,7 @@ import {
 } from "@/lib/api/student";
 import { assessmentApi } from "@/lib/api/assessment";
 import { apiClient } from "@/lib/api/client";
-import {
-  PureMultimodalInput,
-  type Attachment,
-} from "@/components/ui/multimodal-ai-chat-input";
+import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -82,11 +79,14 @@ import {
   AttachmentActions as UIAttachmentActions,
   AttachmentAction as UIAttachmentAction,
 } from "@/components/ui/attachment";
+import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
+import { MessageActionBar } from "@/components/mindexa/common/message-action-bar";
 
 interface Message {
   id: string;
   sender: "student" | "ai";
   text: string;
+  attachments?: Attachment[];
   timestamp: Date;
   citations?: Array<{
     resource_name: string;
@@ -114,9 +114,14 @@ export function AISupportChat() {
   const tryParseJSON = (str: string) => {
     if (!str) return null;
     try {
-      // Strip markdown code block fences if present
-      const cleanStr = str.replace(/^```json\s*/i, "").replace(/```$/, "").trim();
-      return JSON.parse(cleanStr);
+      let cleanStr = str.trim();
+      if (cleanStr.includes("```")) {
+        const match = cleanStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        if (match) {
+          cleanStr = match[1];
+        }
+      }
+      return JSON.parse(cleanStr.trim());
     } catch (e) {
       return null;
     }
@@ -395,23 +400,60 @@ export function AISupportChat() {
   ];
 
   // 1. Core Chat Support Handlers
-  const handleSendMessage = async (params: {
-    input: string;
-    attachments: Attachment[];
-  }) => {
-    const query = params.input.trim();
-    if (!query) return;
+  const handleSendMessage = async (
+    params: string | { input: string; attachments?: Attachment[]; isThinking?: boolean; isDeepSearch?: boolean },
+  ) => {
+    const rawInput = typeof params === "string" ? params : params?.input || "";
+    const attachmentList = typeof params === "string" ? [] : params?.attachments || [];
+    const isThinkingMode = typeof params === "object" ? params?.isThinking : false;
+    const isDeepSearchMode = typeof params === "object" ? params?.isDeepSearch : false;
 
-    let userQuestion = query;
-    if (params.attachments.length > 0) {
-      const fileNames = params.attachments.map((a) => a.name).join(", ");
-      userQuestion = `${userQuestion}\n\n[Reference File: ${fileNames}]`;
+    const userQuery = rawInput.trim();
+    let promptWithContext = userQuery;
+
+    if (isThinkingMode) {
+      promptWithContext = `[THINKING & DEEP REASONING MODE ACTIVE]\n${promptWithContext}`;
+      toast.info("Deep Reasoning mode active");
     }
+    if (isDeepSearchMode) {
+      promptWithContext = `[DEEP RAG SEARCH ACTIVE]\n${promptWithContext}`;
+      toast.info("Deep Document RAG Search active");
+    }
+
+    if (attachmentList.length > 0) {
+      const fileDetails = attachmentList
+        .map((a) => {
+          if (a.extractedText) {
+            return `\n--- ATTACHED STUDY FILE: ${a.name} ---\n${a.extractedText.slice(0, 15000)}\n--- END FILE ---`;
+          }
+          return `\n[Attached Study File: ${a.name}]`;
+        })
+        .join("\n");
+
+      promptWithContext = userQuery ? `${promptWithContext}\n${fileDetails}` : fileDetails;
+
+      // Automatically upload file to student personal resources in background if file exists
+      for (const att of attachmentList) {
+        if ((att as any).file) {
+          try {
+            const formData = new FormData();
+            formData.append("file", (att as any).file);
+            await studentApi.uploadPersonalResource(formData);
+            toast.success(`Uploaded ${att.name} to personal study resources.`);
+          } catch (uploadErr) {
+            console.warn("Auto-upload error:", uploadErr);
+          }
+        }
+      }
+    }
+
+    if (!userQuery && attachmentList.length === 0) return;
 
     const newStudentMessage: Message = {
       id: Date.now().toString(),
       sender: "student",
-      text: userQuestion,
+      text: userQuery,
+      attachments: attachmentList,
       timestamp: new Date(),
     };
 
@@ -427,8 +469,9 @@ export function AISupportChat() {
       }));
 
       const res = await studentAiApi.getSupport({
-        question: userQuestion,
+        question: promptWithContext,
         conversation_history: history,
+        selected_resource_id: selectedResource || undefined,
       });
 
       const newAiMessage: Message = {
@@ -459,33 +502,72 @@ export function AISupportChat() {
     setError(null);
 
     const questionText = `Generate a structured, comprehensive revision note for the topic: "${revisionTopic}".
-Provide your output inside the "explanation" key in the required JSON format:
-{
-  "summary": "Detailed concept summary, rules, formulas, examples in clear educational language",
-  "checklist": ["Important point to master 1", "Important point to master 2", "Important point to master 3"],
-  "readings": ["Reference book/chapter/article 1", "Reference book/chapter/article 2"]
-}
-Ensure all values are properly escaped. If you cannot return JSON, return the plain text summary in the explanation.`;
+Format your response exactly as follows in clean markdown:
+### Summary
+[Detailed concept summary, rules, formulas, examples in clear educational language]
+
+### Key Checklist
+- [Important point to master 1]
+- [Important point to master 2]
+
+### Recommended Readings
+- [Reference book/chapter/article 1]
+- [Reference book/chapter/article 2]`;
 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
+        selected_resource_id: selectedResource || undefined,
       });
 
-      const parsed = tryParseJSON(res.explanation);
-      if (parsed && (parsed.summary || parsed.checklist || parsed.readings)) {
-        setRevisionResult({
-          summary: parsed.summary || "No summary provided.",
-          checklist: parsed.checklist || [],
-          readings: parsed.readings || [],
-        });
-      } else {
-        setRevisionResult({
-          summary: res.explanation,
-          checklist: [],
-          readings: [],
-        });
+      const text = res.explanation;
+      let summary = "";
+      const checklist: string[] = [];
+      const readings: string[] = [];
+
+      const lines = text.split("\n");
+      let currentSection: "summary" | "checklist" | "readings" | null = null;
+
+      for (const line of lines) {
+        const cleanLine = line.trim();
+        const lower = cleanLine.toLowerCase();
+        if (lower.startsWith("### summary") || lower.startsWith("**summary**") || lower.startsWith("## summary")) {
+          currentSection = "summary";
+          continue;
+        } else if (lower.startsWith("### key checklist") || lower.startsWith("**key checklist**") || lower.startsWith("## key checklist") || lower.startsWith("### checklist") || lower.startsWith("**checklist**")) {
+          currentSection = "checklist";
+          continue;
+        } else if (lower.startsWith("### recommended readings") || lower.startsWith("**recommended readings**") || lower.startsWith("## recommended readings") || lower.startsWith("### readings") || lower.startsWith("**readings**")) {
+          currentSection = "readings";
+          continue;
+        }
+
+        if (currentSection === "summary") {
+          summary += line + "\n";
+        } else if (currentSection === "checklist") {
+          if (cleanLine.startsWith("-") || cleanLine.startsWith("*") || /^\d+[\s:.)]+/.test(cleanLine)) {
+            checklist.push(cleanLine.replace(/^[-*\s\d.]+/, ""));
+          } else if (cleanLine) {
+            checklist.push(cleanLine);
+          }
+        } else if (currentSection === "readings") {
+          if (cleanLine.startsWith("-") || cleanLine.startsWith("*") || /^\d+[\s:.)]+/.test(cleanLine)) {
+            readings.push(cleanLine.replace(/^[-*\s\d.]+/, ""));
+          } else if (cleanLine) {
+            readings.push(cleanLine);
+          }
+        }
       }
+
+      if (!summary.trim()) {
+        summary = text;
+      }
+
+      setRevisionResult({
+        summary: summary.trim(),
+        checklist,
+        readings,
+      });
       toast.success("Revision guide generated!");
     } catch (err: any) {
       handleApiError(err, "Failed to generate revision guide.");
@@ -507,33 +589,21 @@ Ensure all values are properly escaped. If you cannot return JSON, return the pl
     setError(null);
 
     const questionText = `Generate a practice quiz with exactly ${practiceCount} questions of style "${practiceStyle}" for the topic: "${practiceTopic}".
-Provide the questions in this JSON format inside the "explanation" key:
-{
-  "questions": [
-    {
-      "question": "What is the primary goal of database normalization?",
-      "options": {
-        "A": "To reduce data redundancy",
-        "B": "To increase data consistency",
-        "C": "To improve data security",
-        "D": "To enhance data scalability"
-      },
-      "answer": "A",
-      "explanation": "Normalizing a database helps to improve data scalability by reducing data redundancy and improving data integrity."
-    }
-  ]
-}
-Ensure all double quotes inside the text are escaped. If you return raw text, format it as:
-1. Question text
-A) Option A
-B) Option B
-C) Option C
-D) Option D
-[[ANSWER: A | EXPLANATION: Explanation details here]]`;
+Format your response exactly as follows:
+1. Question text here
+A) Option A details
+B) Option B details
+C) Option C details
+D) Option D details
+[[ANSWER: A | EXPLANATION: Explanation details here]]
+
+2. Next question text here
+...`;
 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
+        selected_resource_id: selectedResource || undefined,
       });
 
       const rawText = res.explanation;
@@ -621,19 +691,12 @@ D) Option D
     const questionText = `Generate a structured daily revision study plan for the assessment: "${plannerExam}" scheduled on ${plannerDate || "next week"}.
 The plan must cover these topics: "${plannerTopics || "general course outline"}" with a target of ${plannerHours} hours of revision per day.
 
-Provide the response in this JSON format inside the "explanation" key:
-{
-  "schedule": [
-    {"day": "Day 1", "topics": "Topic name here", "activities": "Specific tasks & active recall instructions", "duration": "${plannerHours} hours"},
-    {"day": "Day 2", "topics": "Next topic name here", "activities": "Specific exercises & review tasks", "duration": "${plannerHours} hours"}
-  ],
-  "milestones": ["Understand basic queries", "Pass practice test"]
-}
-Ensure all text values are valid. If you cannot return JSON, return a plain text guide.`;
+Please format the plan in clear daily schedule sections. For each day, outline the specific topics, suggested revision activities, and recommended hours of study.`;
 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
+        selected_resource_id: selectedResource || undefined,
       });
 
       const rawText = res.explanation;
@@ -672,18 +735,12 @@ Ensure all text values are valid. If you cannot return JSON, return a plain text
     const questionText = `Analyze my completed assessment results: ${JSON.stringify(resultsSummary)}.
 Identify my strong areas, weak areas, and recommended topics for revision.
 
-Provide a structured JSON output inside the "explanation" key, detailing:
-{
-  "strengths": ["List of strong areas"],
-  "weaknesses": ["List of weak areas"],
-  "recommendations": ["Recommended topics for revision"],
-  "summary": "Overall summary text"
-}
-Ensure the JSON is valid. If you cannot return JSON, return plain text.`;
+Provide your analysis in clear sections: Strengths, Weaknesses, Recommendations, and an Overall Summary.`;
 
     try {
       const res = await studentAiApi.getSupport({
         question: questionText,
+        selected_resource_id: selectedResource || undefined,
       });
 
       const rawText = res.explanation;
@@ -744,6 +801,7 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
       const res = await studentAiApi.getSupport({
         question: promptText,
+        selected_resource_id: selectedResource || undefined,
       });
 
       setFeedbackExplanation(res.explanation);
@@ -1218,74 +1276,79 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                 <MessageScroller className="h-full">
                   <MessageScrollerViewport className="scroll-fade">
                     <MessageScrollerContent aria-busy={isThinking} className="max-w-3xl mx-auto py-2">
-                      {messages.map((msg) => (
-                        <div
-                          key={msg.id}
-                          className={cn(
-                            "flex flex-col max-w-[85%] space-y-1.5 p-4 rounded-2xl text-xs font-medium shadow-sm leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300",
-                            msg.sender === "student"
-                              ? "bg-primary text-primary-foreground ml-auto rounded-tr-none"
-                              : "bg-white border text-foreground mr-auto rounded-tl-none border-zinc-200/60",
-                          )}
-                        >
-                          <div className="font-bold text-[9px] uppercase tracking-wider opacity-60">
-                            {msg.sender === "student" ? "You" : "Study AI"}
-                          </div>
-                          <div>{msg.text}</div>
-
-                          {msg.fallback_used && (
-                            <Marker className="mt-2" role="status">
-                              <MarkerIcon className="bg-amber-500/10 text-amber-600 border-amber-500/20">
-                                <ShieldAlert className="size-3" />
-                              </MarkerIcon>
-                              <MarkerContent className="text-[10px] text-amber-700">
-                                No matching course materials found — answering from general knowledge.
-                              </MarkerContent>
-                            </Marker>
-                          )}
-
-                          {msg.citations && msg.citations.length > 0 && (
-                            <div className="mt-4 pt-3 border-t border-zinc-200/60 space-y-2">
-                              <div className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-widest text-zinc-500">
-                                <FileText className="size-3" />
-                                Sources used in this answer
+                          {messages.map((msg) => (
+                            <div
+                              key={msg.id}
+                              className={cn(
+                                "flex flex-col max-w-[85%] space-y-2 p-4 rounded-2xl text-xs font-medium shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300",
+                                msg.sender === "student"
+                                  ? "bg-primary text-primary-foreground ml-auto rounded-tr-none"
+                                  : "bg-card border border-border/80 text-foreground mr-auto rounded-tl-none text-left"
+                              )}
+                            >
+                              <div className="font-semibold text-[9px] uppercase tracking-wider opacity-65 flex items-center justify-between">
+                                <span>{msg.sender === "student" ? "You" : "Study AI"}</span>
                               </div>
-                              <div className="space-y-2">
-                                {msg.citations.map((cite, idx) => (
-                                  <div key={idx} className="p-2 bg-zinc-50 border border-zinc-200/40 rounded-lg space-y-1">
-                                    <div className="flex items-center justify-between text-[10px] font-bold text-zinc-700">
-                                      <div className="flex items-center gap-1 truncate">
-                                        <CheckCircle2 className="size-3 text-emerald-600" />
-                                        {cite.resource_name}
-                                      </div>
-                                      {cite.page_number && <span className="text-zinc-400">Page {cite.page_number}</span>}
+
+                              {msg.sender === "student" ? (
+                                <div className="space-y-2">
+                                  {msg.attachments && msg.attachments.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
+                                      {msg.attachments.map((att: any, aIdx: number) => (
+                                        <div
+                                          key={aIdx}
+                                          className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-xs font-medium"
+                                        >
+                                          <FileText className="size-3.5 shrink-0" />
+                                          <span className="truncate max-w-[160px] text-[11px]">{att.name}</span>
+                                        </div>
+                                      ))}
                                     </div>
-                                    <div className="text-[10px] text-zinc-500 italic line-clamp-2">
-                                      &quot;{cite.excerpt}...&quot;
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
+                                  )}
+                                  {msg.text && <div className="whitespace-pre-wrap leading-relaxed">{msg.text}</div>}
+                                </div>
+                              ) : (
+                                <RichMessageRenderer content={msg.text} citations={msg.citations} />
+                              )}
+
+                              {msg.fallback_used && (
+                                <Marker className="mt-2" role="status">
+                                  <MarkerIcon className="bg-amber-500/10 text-amber-600 border-amber-500/20">
+                                    <ShieldAlert className="size-3" />
+                                  </MarkerIcon>
+                                  <MarkerContent className="text-[10px] text-amber-700">
+                                    No matching course materials found — answering from general knowledge.
+                                  </MarkerContent>
+                                </Marker>
+                              )}
+
+                              {msg.sender === "ai" && (
+                                <div className="pt-2.5 flex justify-end border-t border-border/30">
+                                  <MessageActionBar
+                                    content={msg.text}
+                                    onRegenerate={() => handleSendMessage({ input: messages[messages.length - 2]?.text || "", attachments: [] })}
+                                    isStreaming={isThinking && msg.id === messages[messages.length - 1]?.id}
+                                    onStop={() => setIsThinking(false)}
+                                  />
+                                </div>
+                              )}
+                            </div>
+                          ))}
+
+                          {isThinking && (
+                            <div className="max-w-[85%] mr-auto py-1">
+                              <Marker role="status" className="bg-card border border-border/80 rounded-2xl p-3.5 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <MarkerIcon>
+                                    <Spinner className="size-3" />
+                                  </MarkerIcon>
+                                  <MarkerContent className="shimmer text-xs font-semibold text-primary">
+                                    Analyzing course materials & assessment records...
+                                  </MarkerContent>
+                                </div>
+                              </Marker>
                             </div>
                           )}
-                        </div>
-                      ))}
-
-                      {isThinking && (
-                        <div className="flex flex-col gap-2 max-w-[85%] mr-auto p-4 bg-white border border-zinc-200/60 rounded-2xl rounded-tl-none animate-in fade-in duration-200">
-                          <Marker role="status">
-                            <MarkerIcon>
-                              <Spinner className="size-3" />
-                            </MarkerIcon>
-                            <MarkerContent className="shimmer text-xs font-semibold text-primary">
-                              Thinking & analyzing context...
-                            </MarkerContent>
-                          </Marker>
-                          <p className="shimmer text-xs text-muted-foreground mt-1">
-                            Generating response&hellip;
-                          </p>
-                        </div>
-                      )}
                       <div ref={messagesEndRef} />
                     </MessageScrollerContent>
                   </MessageScrollerViewport>
@@ -1294,51 +1357,22 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
               )}
             </div>
 
-            {/* Input Bar with Attachment support */}
-            <div className="p-4 border-t bg-white rounded-xl shadow-sm border-zinc-200/60 flex flex-col gap-2.5">
-              {attachments.length > 0 && (
-                <UIAttachmentGroup className="px-1 pt-1.5 flex flex-wrap gap-2.5">
-                  {attachments.map((file) => (
-                    <UIAttachment key={file.url} className="max-w-[200px] h-9 py-1.5 px-2.5 shrink-0 bg-zinc-50/50">
-                      <UIAttachmentMedia>
-                        <FileText className="size-3.5 text-primary" />
-                      </UIAttachmentMedia>
-                      <UIAttachmentContent>
-                        <UIAttachmentTitle className="text-[10px] max-w-[110px] truncate">{file.name}</UIAttachmentTitle>
-                        <UIAttachmentDescription className="text-[8.5px]">Reference Context</UIAttachmentDescription>
-                      </UIAttachmentContent>
-                      <UIAttachmentActions>
-                        <UIAttachmentAction
-                          onClick={() => setAttachments((prev) => prev.filter((a) => a.url !== file.url))}
-                          aria-label={`Remove ${file.name}`}
-                          className="size-5 hover:bg-red-50 hover:text-red-500"
-                        >
-                          <XIcon className="size-3" />
-                        </UIAttachmentAction>
-                      </UIAttachmentActions>
-                    </UIAttachment>
-                  ))}
-                </UIAttachmentGroup>
-              )}
-
-              <PureMultimodalInput
-                chatId="student-study-ai"
-                messages={messages.map((m) => ({
-                  id: m.id,
-                  role: m.sender === "student" ? "user" : "model",
-                  content: m.text,
-                }))}
-                attachments={attachments}
-                setAttachments={setAttachments}
-                onSendMessage={handleSendMessage}
-                onStopGenerating={() => setIsThinking(false)}
-                isGenerating={isThinking}
-                canSend={!isThinking}
-                selectedVisibilityType="private"
-                suggestedActions={null}
-                placeholder="Ask revision or support questions..."
+            {/* Input Bar with Attachment & Thinking support */}
+            <div className="pt-2">
+              <AIChatInput
                 value={prompt}
                 onChange={setPrompt}
+                onSend={handleSendMessage}
+                isGenerating={isThinking}
+                onStop={() => setIsThinking(false)}
+                attachments={attachments}
+                setAttachments={setAttachments}
+                onUploadFile={async (file: File) => {
+                  const formData = new FormData();
+                  formData.append("file", file);
+                  const res = await studentApi.uploadPersonalResource(formData);
+                  return { id: res.id };
+                }}
               />
             </div>
           </TabsContent>
@@ -1386,10 +1420,15 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
               <div className="lg:col-span-8 space-y-4">
                 {isGeneratingRevision && (
-                  <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
-                    <div className="h-4 bg-zinc-200 rounded w-1/3" />
-                    <div className="h-3 bg-zinc-100 rounded w-full" />
-                    <div className="h-3 bg-zinc-100 rounded w-5/6" />
+                  <div className="py-2">
+                    <Marker role="status" className="bg-card border border-border/80 rounded-xl p-3">
+                      <MarkerIcon>
+                        <Spinner />
+                      </MarkerIcon>
+                      <MarkerContent className="shimmer text-xs">
+                        Study AI is thinking & compiling revision guide...
+                      </MarkerContent>
+                    </Marker>
                   </div>
                 )}
 
@@ -1422,9 +1461,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             <BookOpen className="size-3.5 text-primary" /> Concept
                             Summary
                           </h4>
-                          <p className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
-                            {revisionResult.summary}
-                          </p>
+                          <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
+                            <RichMessageRenderer content={revisionResult.summary} />
+                          </div>
                         </div>
 
                         {revisionResult.checklist && revisionResult.checklist.length > 0 && (
@@ -1562,10 +1601,15 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
               <div className="lg:col-span-8 space-y-4">
                 {isGeneratingPractice && (
-                  <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
-                    <div className="h-4 bg-zinc-200 rounded w-1/4" />
-                    <div className="h-12 bg-zinc-100 rounded w-full" />
-                    <div className="h-12 bg-zinc-100 rounded w-full" />
+                  <div className="py-2">
+                    <Marker role="status" className="bg-card border border-border/80 rounded-xl p-3">
+                      <MarkerIcon>
+                        <Spinner />
+                      </MarkerIcon>
+                      <MarkerContent className="shimmer text-xs">
+                        Study AI is thinking & generating practice questions...
+                      </MarkerContent>
+                    </Marker>
                   </div>
                 )}
 
@@ -1797,9 +1841,15 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
               <div className="lg:col-span-8 space-y-4">
                 {isGeneratingPlanner && (
-                  <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
-                    <div className="h-4 bg-zinc-200 rounded w-1/3" />
-                    <div className="h-32 bg-zinc-100 rounded w-full" />
+                  <div className="py-2">
+                    <Marker role="status" className="bg-card border border-border/80 rounded-xl p-3">
+                      <MarkerIcon>
+                        <Spinner />
+                      </MarkerIcon>
+                      <MarkerContent className="shimmer text-xs">
+                        Study AI is thinking & scheduling study plan...
+                      </MarkerContent>
+                    </Marker>
                   </div>
                 )}
 
@@ -1848,9 +1898,9 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             </div>
                           </div>
                         ) : (
-                          <p className="text-xs text-foreground/85 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
-                            {plannerResult}
-                          </p>
+                          <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
+                            <RichMessageRenderer content={plannerResult} />
+                          </div>
                         )}
                       </CardContent>
                     </Card>
@@ -1976,16 +2026,28 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
 
                   <div className="md:col-span-8 space-y-4">
                     {isAnalyzingInsights && (
-                      <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
-                        <div className="h-4 bg-zinc-200 rounded w-1/3" />
-                        <div className="h-24 bg-zinc-100 rounded w-full" />
+                      <div className="py-2">
+                        <Marker role="status" className="bg-card border border-border/80 rounded-xl p-3">
+                          <MarkerIcon>
+                            <Spinner />
+                          </MarkerIcon>
+                          <MarkerContent className="shimmer text-xs">
+                            Study AI is thinking & analyzing academic performance...
+                          </MarkerContent>
+                        </Marker>
                       </div>
                     )}
 
                     {isExplainingFeedback && (
-                      <div className="space-y-3 p-6 border border-zinc-200/60 rounded-xl bg-white animate-pulse">
-                        <div className="h-4 bg-zinc-200 rounded w-1/3" />
-                        <div className="h-24 bg-zinc-100 rounded w-full" />
+                      <div className="py-2">
+                        <Marker role="status" className="bg-card border border-border/80 rounded-xl p-3">
+                          <MarkerIcon>
+                            <Spinner />
+                          </MarkerIcon>
+                          <MarkerContent className="shimmer text-xs">
+                            Study AI is thinking & generating feedback explanation...
+                          </MarkerContent>
+                        </Marker>
                       </div>
                     )}
 
@@ -2068,8 +2130,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                                 </Card>
                               </div>
                             ) : (
-                              <div className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
-                                {insightsResult}
+                              <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
+                                <RichMessageRenderer content={insightsResult} />
                               </div>
                             )}
                             <p className="text-[10px] text-muted-foreground mt-4 italic">
@@ -2107,8 +2169,8 @@ Ensure the JSON output is valid and escape all double quotes inside the text as 
                             </div>
                           </CardHeader>
                           <CardContent className="p-6 text-left">
-                            <div className="text-xs text-foreground/80 leading-relaxed whitespace-pre-wrap p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
-                              {feedbackExplanation}
+                            <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
+                              <RichMessageRenderer content={feedbackExplanation} />
                             </div>
                             <p className="text-[10px] text-muted-foreground mt-4 italic">
                               * Note: This assistant only explains comments and

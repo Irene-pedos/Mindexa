@@ -2148,8 +2148,9 @@ export default function NewAssessmentBuilder() {
     peer_evaluation_weight_percent: "" as any,
     individual_weighting_enabled: false,
     appeal_window_days: 7,
-    audience_type: "all" as "all" | "selected",
+    audience_type: "all" as "all" | "selected" | "sections",
     target_student_ids: [] as string[],
+    target_section_ids: [] as string[],
   });
 
   const loadWorkspaceDetail = useCallback(async (workspaceId: string) => {
@@ -2165,7 +2166,7 @@ export default function NewAssessmentBuilder() {
       setMetadata((prev) => ({
         ...prev,
         teaching_workspace_id: workspaceId,
-        course_id: workspaceId,
+        course_id: detail.course_id || workspaceId,
         academic_year: detail.academic_year || prev.academic_year,
       }));
     } catch (err) {
@@ -2214,6 +2215,8 @@ export default function NewAssessmentBuilder() {
     aiAllowed: false,
     browserRestricted: true,
     integrityMonitoring: true, // integrity_monitoring_enabled
+    integrityProfileCode: "SECURE_ASSESSMENT",
+    allowResume: false,
     lateSubmissionAllowed: false, // late_submission_allowed
     shuffleQuestions: true,
     shuffleOptions: true,
@@ -2494,6 +2497,7 @@ export default function NewAssessmentBuilder() {
               appeal_window_days: data.appeal_window_days || 7,
               audience_type: data.audience_type || "all",
               target_student_ids: data.target_student_ids || [],
+              target_section_ids: (data.target_sections || []).map((ts: any) => ts.class_section_id || ts.id),
             });
 
             const initialTotal = data.total_marks || 0;
@@ -2553,6 +2557,8 @@ export default function NewAssessmentBuilder() {
               aiAllowed: data.ai_assistance_allowed || false,
               browserRestricted: data.fullscreen_required || false,
               integrityMonitoring: data.integrity_monitoring_enabled ?? true,
+              integrityProfileCode: data.integrity_profile_code || "standard",
+              allowResume: data.allow_resume ?? true,
               lateSubmissionAllowed: data.late_submission_allowed || false,
               shuffleQuestions: data.randomise_questions || false,
               shuffleOptions: data.randomise_options || false,
@@ -4193,6 +4199,7 @@ export default function NewAssessmentBuilder() {
           subject_id: activeMetadata.subject_id || undefined,
           audience_type: activeMetadata.audience_type || "all",
           target_student_ids: activeMetadata.target_student_ids || [],
+          target_section_ids: activeMetadata.target_section_ids || [],
           date: activeMetadata.date || undefined,
           startTime: activeMetadata.startTime || undefined,
           endTime: activeMetadata.endTime || undefined,
@@ -4448,6 +4455,16 @@ export default function NewAssessmentBuilder() {
         ) {
           toast.error(
             "At least one student must be selected for targeted audience",
+          );
+          return false;
+        }
+        if (
+          metadata.audience_type === "sections" &&
+          (!metadata.target_section_ids ||
+            metadata.target_section_ids.length === 0)
+        ) {
+          toast.error(
+            "At least one class section must be selected for targeted audience",
           );
           return false;
         }
@@ -5033,7 +5050,7 @@ export default function NewAssessmentBuilder() {
                         const updated = {
                           ...metadata,
                           teaching_workspace_id: v,
-                          course_id: v,
+                          course_id: selectedWorkspaceDetail?.id === v ? selectedWorkspaceDetail.course_id || v : v,
                         };
                         setMetadata(updated);
                         loadWorkspaceDetail(v);
@@ -5401,8 +5418,7 @@ export default function NewAssessmentBuilder() {
                         Defines which team member can trigger the group submission workflow.
                       </p>
                     </div>
-
-                    <div className="flex flex-col justify-center space-y-4">
+                    <div className="flex flex-col justify-center space-y-4 pt-5 border-t">
                       <div className="flex items-center space-x-2">
                         <Switch
                           id="indiv-weighting-st1"
@@ -5604,7 +5620,56 @@ export default function NewAssessmentBuilder() {
                       ))}
                     </div>
 
-
+                    <div className="pt-5 border-t space-y-3">
+                      <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block">
+                        Institutional Integrity Profile
+                      </Label>
+                      <p className="text-[11px] text-muted-foreground">
+                        Select central institution policy profile for this assessment:
+                      </p>
+                      <Select
+                        value={rules.integrityProfileCode || "SECURE_ASSESSMENT"}
+                        onValueChange={(code) => {
+                          const isAllowResume = code !== "SECURE_ASSESSMENT";
+                          setRules({
+                            ...rules,
+                            integrityProfileCode: code,
+                            allowResume: isAllowResume,
+                          });
+                          triggerDebouncedAutosave(2);
+                        }}
+                      >
+                        <SelectTrigger className="h-9 text-xs font-semibold w-full">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SECURE_ASSESSMENT">
+                            Secure Assessment Profile (CAT/Formative/Summative) — Resume Disabled
+                          </SelectItem>
+                          <SelectItem value="HOMEWORK">
+                            Homework Profile — Resume Enabled (Warning + Log)
+                          </SelectItem>
+                          <SelectItem value="PRACTICE">
+                            Practice Profile — Resume Enabled (Warning Only)
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <div className="p-3 rounded-lg border bg-muted/20 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between font-bold text-foreground">
+                          <span>Applied Security Rules:</span>
+                          <Badge variant="outline" className="text-[9px] font-mono">
+                            {rules.integrityProfileCode === "SECURE_ASSESSMENT" ? "Strict Lock-Down" : "Flexible Policy"}
+                          </Badge>
+                        </div>
+                        <p className="text-muted-foreground leading-relaxed">
+                          {rules.integrityProfileCode === "SECURE_ASSESSMENT"
+                            ? "Tab switches, minimize, and full-screen exits trigger Warning → Auto-Submit. Refresh, exit, and multiple sessions trigger immediate Auto-Submit. Student Resume is DISABLED."
+                            : rules.integrityProfileCode === "HOMEWORK"
+                            ? "Tab switches and blur events generate Warnings & Audit Logs. Student Resume is ALLOWED."
+                            : "Low strictness for practice. Warnings displayed without immediate penalty. Student Resume is ALLOWED."}
+                        </p>
+                      </div>
+                    </div>
 
                     <div className="pt-5 border-t">
                       <Label className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider block mb-4">
@@ -6157,7 +6222,7 @@ export default function NewAssessmentBuilder() {
                 <CardContent className="p-6 space-y-6">
                   <RadioGroup
                     value={metadata.audience_type || "all"}
-                    onValueChange={(val: "all" | "selected") => {
+                    onValueChange={(val: "all" | "selected" | "sections") => {
                       const updated = {
                         ...metadata,
                         audience_type: val,
@@ -6165,11 +6230,15 @@ export default function NewAssessmentBuilder() {
                           val === "all"
                             ? []
                             : metadata.target_student_ids || [],
+                        target_section_ids:
+                          val === "sections"
+                            ? metadata.target_section_ids || []
+                            : [],
                       };
                       setMetadata(updated);
                       triggerDebouncedAutosave(3, updated);
                     }}
-                    className="grid grid-cols-1 md:grid-cols-2 gap-4"
+                    className="grid grid-cols-1 md:grid-cols-3 gap-4"
                   >
                     <div>
                       <RadioGroupItem
@@ -6190,6 +6259,28 @@ export default function NewAssessmentBuilder() {
                         <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
                           This assessment will automatically be assigned to all
                           students enrolled in the selected Teaching Workspace.
+                        </p>
+                      </Label>
+                    </div>
+
+                    <div>
+                      <RadioGroupItem
+                        value="sections"
+                        id="audience-sections"
+                        className="peer sr-only"
+                      />
+                      <Label
+                        htmlFor="audience-sections"
+                        className="flex flex-col items-start justify-between rounded-xl border-2 border-muted bg-popover p-4 hover:bg-accent hover:text-accent-foreground peer-data-[state=checked]:border-primary [&:has([data-state=checked])]:border-primary cursor-pointer transition-all h-full"
+                      >
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="size-4 text-primary opacity-0 peer-data-[state=checked]:opacity-100 [&:has([data-state=checked])]:opacity-100 transition-opacity" />
+                          <span className="font-bold text-sm">
+                            Selected Cohorts/Sections
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
+                          Restrict this assessment to specific classes/sections (e.g. Section A or Section B).
                         </p>
                       </Label>
                     </div>
@@ -6339,6 +6430,61 @@ export default function NewAssessmentBuilder() {
                             )}
                           </div>
                         </ScrollArea>
+                      </div>
+                    </div>
+                  )}
+
+                  {metadata.audience_type === "sections" && (
+                    <div className="space-y-4 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
+                      <div className="flex justify-between items-center">
+                        <Label className="text-xs font-semibold text-muted-foreground">
+                          Select Target Cohorts / Sections
+                        </Label>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {(selectedWorkspaceDetail?.sections || []).map((sec: any) => {
+                          const isChecked = metadata.target_section_ids?.includes(sec.id);
+                          return (
+                            <div
+                              key={sec.id}
+                              className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/10 transition-colors"
+                            >
+                              <Checkbox
+                                id={`section-${sec.id}`}
+                                checked={isChecked}
+                                onCheckedChange={(checked) => {
+                                  const updatedIds = checked
+                                    ? [...(metadata.target_section_ids || []), sec.id]
+                                    : (metadata.target_section_ids || []).filter((id) => id !== sec.id);
+                                  const updated = {
+                                    ...metadata,
+                                    target_section_ids: updatedIds,
+                                  };
+                                  setMetadata(updated);
+                                  triggerDebouncedAutosave(3, updated);
+                                }}
+                              />
+                              <label htmlFor={`section-${sec.id}`} className="flex-1 cursor-pointer">
+                                <p className="text-xs font-semibold text-foreground leading-none">
+                                  Section {sec.name}
+                                </p>
+                                {sec.class_group_name && (
+                                  <p className="text-[10px] text-muted-foreground mt-1">
+                                    {sec.class_group_name}
+                                  </p>
+                                )}
+                              </label>
+                              <Badge variant="secondary" className="text-[10px]">
+                                {sec.student_count} Students
+                              </Badge>
+                            </div>
+                          );
+                        })}
+                        {(!selectedWorkspaceDetail?.sections || selectedWorkspaceDetail.sections.length === 0) && (
+                          <p className="text-xs text-muted-foreground italic col-span-2 text-center py-6">
+                            No sections found for this workspace.
+                          </p>
+                        )}
                       </div>
                     </div>
                   )}
@@ -7159,6 +7305,9 @@ export default function NewAssessmentBuilder() {
           (metadata.audience_type === "selected" &&
             (!metadata.target_student_ids ||
               metadata.target_student_ids.length === 0)) ||
+          (metadata.audience_type === "sections" &&
+            (!metadata.target_section_ids ||
+              metadata.target_section_ids.length === 0)) ||
           (isGroupMode && groups.length === 0) ||
           (isGroupMode && unassignedCount > 0);
 
@@ -7663,6 +7812,20 @@ export default function NewAssessmentBuilder() {
                             <span>
                               Targeted students selected (
                               {metadata.target_student_ids?.length || 0})
+                            </span>
+                          </div>
+                        )}
+                        {metadata.audience_type === "sections" && (
+                          <div className="flex items-center gap-2">
+                            {metadata.target_section_ids &&
+                            metadata.target_section_ids.length > 0 ? (
+                              <Check className="size-3.5 text-emerald-500" />
+                            ) : (
+                              <X className="size-3.5 text-destructive" />
+                            )}
+                            <span>
+                              Targeted sections selected (
+                              {metadata.target_section_ids?.length || 0})
                             </span>
                           </div>
                         )}

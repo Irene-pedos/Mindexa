@@ -78,3 +78,6 @@ class LecturerMaterialResponse(BaseAuditedResponse):
     is_student_visible: bool
     version: int
     is_current: bool
+    processing_status: str = "PENDING"
+    chunk_count: int | None = None
+    processing_error: str | None = None

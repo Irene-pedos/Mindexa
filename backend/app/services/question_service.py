@@ -7,6 +7,7 @@ Question Bank service - business logic for the Question domain.
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -108,6 +109,9 @@ class QuestionService:
             explanation=data.explanation,
             course_id=data.course_id,
             topic_tag=data.topic,
+            is_in_question_bank=True,
+            bank_added_at=datetime.now(UTC),
+            bank_added_by_id=created_by.id,
         )
         await self._repo.update_fields(question.id, grading_mode=grading_mode)
 
@@ -120,6 +124,15 @@ class QuestionService:
                 match_key=getattr(opt, "match_key", None),
                 match_value=getattr(opt, "match_value", None),
             )
+
+        await self._repo.create_bank_entry(
+            question_id=question.id,
+            added_by_id=created_by.id,
+            subject_id=None,
+            difficulty=data.difficulty,
+            source_type="manual",
+            source_assessment_id=None,
+        )
 
         return question
 
@@ -174,6 +187,9 @@ class QuestionService:
                 topic_tag=data.topic if data.topic is not None else existing.topic_tag,
                 parent_question_id=existing.id,
                 version=existing.version + 1,
+                is_in_question_bank=existing.is_in_question_bank,
+                bank_added_at=datetime.now(UTC) if existing.is_in_question_bank else None,
+                bank_added_by_id=updated_by.id if existing.is_in_question_bank else None,
             )
             await self._repo.update_fields(new_question.id, grading_mode=new_grading_mode)
 
@@ -197,6 +213,26 @@ class QuestionService:
                         match_key=getattr(new_opt, "match_key", None),
                         match_value=getattr(new_opt, "match_value", None),
                     )
+
+            if existing.is_in_question_bank:
+                await self._repo.deactivate_bank_entry(
+                    existing.id,
+                    existing.bank_added_by_id or updated_by.id,
+                )
+                await self._repo.create_bank_entry(
+                    question_id=new_question.id,
+                    added_by_id=existing.bank_added_by_id or updated_by.id,
+                    subject_id=existing.subject_id,
+                    difficulty=(
+                        data.difficulty if data.difficulty is not None else existing.difficulty
+                    ),
+                    source_type=(
+                        existing.source_type.value
+                        if hasattr(existing.source_type, "value")
+                        else str(existing.source_type)
+                    ),
+                    source_assessment_id=existing.source_assessment_id,
+                )
 
             return new_question
 
@@ -261,6 +297,8 @@ class QuestionService:
             topic_tag=params.topic,
             source_type=params.source_type,
             created_by_id=created_by_id,
+            is_in_question_bank=params.is_in_question_bank,
+            is_active=params.is_active,
             page=params.page,
             page_size=params.page_size,
         )

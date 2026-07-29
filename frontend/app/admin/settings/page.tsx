@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import {
   Card,
   CardContent,
@@ -29,9 +30,35 @@ import {
   Loader2,
   ArrowRight,
 } from "lucide-react";
-import { toast } from "sonner";
+import { integrityApi } from "@/lib/api/integrity";
 import { adminApi } from "@/lib/api/admin";
 import { Skeleton } from "@/components/ui/skeleton";
+
+const ACTION_LABELS: Record<string, string> = {
+  IGNORE: "Ignore",
+  LOG_ONLY: "Log only",
+  WARNING: "Warning",
+  WARNING_LOG: "Warning + Log",
+  WARNING_AUTO_SUBMIT: "Warning → Auto Submit",
+  AUTO_SUBMIT: "Auto Submit",
+};
+
+const INTEGRITY_RULES_CATALOG = [
+  { key: "tab_switching", label: "Tab switching", defaultCategory: "Non-Tolerated", defaultAction: "WARNING_AUTO_SUBMIT", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "WARNING_AUTO_SUBMIT", "AUTO_SUBMIT"], desc: "Switching to another browser tab or window" },
+  { key: "window_minimize", label: "Window minimize", defaultCategory: "Non-Tolerated", defaultAction: "WARNING_AUTO_SUBMIT", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "WARNING_AUTO_SUBMIT", "AUTO_SUBMIT"], desc: "Minimizing the assessment browser window" },
+  { key: "copy", label: "Copy", defaultCategory: "Tolerated", defaultAction: "WARNING_LOG", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "AUTO_SUBMIT"], desc: "Attempting to copy question text or content" },
+  { key: "paste", label: "Paste", defaultCategory: "Tolerated", defaultAction: "WARNING_LOG", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "AUTO_SUBMIT"], desc: "Attempting to paste external text into response fields" },
+  { key: "browser_zoom", label: "Browser zoom", defaultCategory: "Tolerated", defaultAction: "LOG_ONLY", allowedActions: ["IGNORE", "LOG_ONLY", "WARNING"], desc: "Changing page zoom scale in browser" },
+  { key: "fullscreen_exit", label: "Full-screen exit", defaultCategory: "Tolerated", defaultAction: "WARNING", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "WARNING_AUTO_SUBMIT", "AUTO_SUBMIT"], desc: "Exiting mandatory full-screen mode" },
+  { key: "idle_long_period", label: "Idle for long period", defaultCategory: "Tolerated", defaultAction: "WARNING_LOG", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG", "AUTO_SUBMIT"], desc: "Inactivity detected for extended duration" },
+  { key: "screen_blurring", label: "Screen blurring (Focus lost)", defaultCategory: "Tolerated", defaultAction: "WARNING_LOG", allowedActions: ["IGNORE", "WARNING", "WARNING_LOG"], desc: "Assessment blurred when another task or app runs above it" },
+  { key: "browser_refresh", label: "Browser refresh", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["WARNING_AUTO_SUBMIT", "AUTO_SUBMIT"], desc: "Reloading or refreshing the page mid-assessment" },
+  { key: "closing_browser", label: "Closing browser", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["AUTO_SUBMIT"], desc: "Closing the browser or active tab" },
+  { key: "opening_another_device", label: "Opening assessment in another device", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["AUTO_SUBMIT"], desc: "Attempting concurrent access on a second device" },
+  { key: "multiple_sessions", label: "Multiple simultaneous sessions", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["AUTO_SUBMIT"], desc: "Multiple active sessions detected for student account" },
+  { key: "unauthorized_sharing", label: "Unauthorized assessment sharing", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["AUTO_SUBMIT"], desc: "Attempting screen share or unauthorized mirror link" },
+  { key: "time_expired", label: "Time expired", defaultCategory: "Non-Tolerated", defaultAction: "AUTO_SUBMIT", allowedActions: ["AUTO_SUBMIT"], desc: "Assessment duration timer reaches zero" },
+];
 
 export default function AdminSystemSettings() {
   const [loading, setLoading] = useState(false);
@@ -46,11 +73,18 @@ export default function AdminSystemSettings() {
     default_duration: 90,
   });
 
+  const [profiles, setProfiles] = useState<any[]>([]);
+  const [activeProfileCode, setActiveProfileCode] = useState<string>("SECURE_ASSESSMENT");
+
   useEffect(() => {
     async function loadSettings() {
       try {
-        const data = await adminApi.getSystemSettings();
+        const [data, profRes] = await Promise.all([
+          adminApi.getSystemSettings().catch(() => null),
+          integrityApi.getProfiles().catch(() => ({ items: [] })),
+        ]);
         if (data) setSettings(data);
+        if (profRes && profRes.items) setProfiles(profRes.items);
       } catch (err) {
         console.error("Failed to load settings", err);
       } finally {
@@ -60,13 +94,46 @@ export default function AdminSystemSettings() {
     loadSettings();
   }, []);
 
+  const currentProfile = profiles.find((p) => p.code === activeProfileCode) || profiles[0];
+
+  const updateCurrentProfileField = (field: string, val: any) => {
+    if (!currentProfile) return;
+    setProfiles((prev) =>
+      prev.map((p) => (p.code === currentProfile.code ? { ...p, [field]: val } : p))
+    );
+  };
+
+  const updateRuleAction = (ruleKey: string, newAction: string) => {
+    if (!currentProfile) return;
+    const ruleObj = INTEGRITY_RULES_CATALOG.find((r) => r.key === ruleKey);
+    const existingRule = currentProfile.rules_json?.[ruleKey] || {
+      category: ruleObj?.defaultCategory || "Non-Tolerated",
+    };
+
+    const newRulesJson = {
+      ...(currentProfile.rules_json || {}),
+      [ruleKey]: {
+        ...existingRule,
+        action: newAction,
+      },
+    };
+
+    updateCurrentProfileField("rules_json", newRulesJson);
+  };
+
   const handleSave = async () => {
     setLoading(true);
     try {
       await adminApi.updateSystemSettings(settings);
-      toast.success("System configurations updated successfully");
+      if (currentProfile && currentProfile.id) {
+        await integrityApi.updateProfile(currentProfile.id, {
+          allow_resume: currentProfile.allow_resume,
+          rules_json: currentProfile.rules_json,
+        });
+      }
+      toast.success("System & Integrity configurations updated successfully");
     } catch (err) {
-      toast.error("Failed to save system settings");
+      toast.error("Failed to save settings");
     } finally {
       setLoading(false);
     }
@@ -222,10 +289,10 @@ export default function AdminSystemSettings() {
           <Card id="security" className="border shadow-none scroll-mt-20">
             <CardHeader className="py-3 px-4 border-b h-12 flex justify-center">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                Security & Integrity Policies
+                Security & Institutional Integrity Profiles
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-4 space-y-4">
+            <CardContent className="p-4 space-y-6">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="text-xs font-semibold">
@@ -262,28 +329,114 @@ export default function AdminSystemSettings() {
                 />
               </div>
 
-              <div className="space-y-1.5 pt-2 border-t mt-2">
-                <Label className="text-[10px] uppercase font-bold text-muted-foreground">
-                  Auto-Flag Threshold
-                </Label>
-                <Select
-                  value={settings.auto_flag_threshold}
-                  onValueChange={(v) =>
-                    setSettings({ ...settings, auto_flag_threshold: v })
-                  }
-                >
-                  <SelectTrigger className="h-9 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="2">2 warnings</SelectItem>
-                    <SelectItem value="3">3 warnings</SelectItem>
-                    <SelectItem value="5">5 warnings</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-[10px] text-muted-foreground italic">
-                  Warnings before system flags attempt for review
-                </p>
+              {/* Institutional Profiles Configuration Manager */}
+              <div className="pt-4 border-t space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                      Institutional Integrity Profiles
+                    </h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      Centrally configure integrity rules applied when lecturers publish assessments
+                    </p>
+                  </div>
+                  <Select
+                    value={activeProfileCode}
+                    onValueChange={(code) => setActiveProfileCode(code)}
+                  >
+                    <SelectTrigger className="w-56 h-8 text-xs font-semibold">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="SECURE_ASSESSMENT">
+                        Secure Assessment Profile (CAT/Formative/Summative)
+                      </SelectItem>
+                      <SelectItem value="HOMEWORK">Homework Profile</SelectItem>
+                      <SelectItem value="PRACTICE">Practice Profile</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Selected Profile Settings */}
+                {currentProfile && (
+                  <div className="p-4 border rounded-xl bg-muted/10 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h4 className="text-sm font-bold text-foreground">{currentProfile.name}</h4>
+                        <p className="text-[11px] text-muted-foreground">{currentProfile.description}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs font-semibold">Allow Student Resume:</Label>
+                        <Switch
+                          checked={currentProfile.allow_resume}
+                          onCheckedChange={(v) =>
+                            updateCurrentProfileField("allow_resume", v)
+                          }
+                          className="scale-75"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Integrity Rules Table */}
+                    <div className="border rounded-lg overflow-hidden bg-background">
+                      <table className="w-full text-xs text-left border-collapse">
+                        <thead className="bg-muted/40 text-[10px] font-bold uppercase tracking-wider text-muted-foreground border-b">
+                          <tr>
+                            <th className="py-2.5 px-3">Integrity Rule</th>
+                            <th className="py-2.5 px-3">Category</th>
+                            <th className="py-2.5 px-3">Enforced Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y text-[11px]">
+                          {INTEGRITY_RULES_CATALOG.map((rule) => {
+                            const currentRuleConfig = currentProfile.rules_json?.[rule.key] || {
+                              category: rule.defaultCategory,
+                              action: rule.defaultAction,
+                            };
+                            return (
+                              <tr key={rule.key} className="hover:bg-muted/20">
+                                <td className="py-2 px-3">
+                                  <div className="font-semibold text-foreground">{rule.label}</div>
+                                  <div className="text-[10px] text-muted-foreground">{rule.desc}</div>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <span
+                                    className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
+                                      currentRuleConfig.category === "Non-Tolerated"
+                                        ? "bg-red-50 text-red-700 border border-red-200"
+                                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                                    }`}
+                                  >
+                                    {currentRuleConfig.category}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-3">
+                                  <Select
+                                    value={currentRuleConfig.action}
+                                    onValueChange={(newAction) =>
+                                      updateRuleAction(rule.key, newAction)
+                                    }
+                                  >
+                                    <SelectTrigger className="h-7 text-[10px] font-semibold w-48">
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {rule.allowedActions.map((act) => (
+                                        <SelectItem key={act} value={act} className="text-[10px]">
+                                          {ACTION_LABELS[act] || act}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

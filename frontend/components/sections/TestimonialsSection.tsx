@@ -92,14 +92,14 @@ export default function TestimonialsSection() {
         
         {/* Header */}
         <motion.div 
-          initial={{ opacity: 0, y: 15 }}
+          initial={{ opacity: 0, y: 20 }}
           whileInView={{ opacity: 1, y: 0 }}
           viewport={{ once: true, amount: 0.2 }}
-          transition={{ duration: 0.5, ease: "easeOut" }}
+          transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
           className="text-center mb-16"
         >
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 text-primary text-xs font-normal border border-primary/20 mb-3">
-            <Sparkles className="w-3.5 h-3.5" />
+            <Sparkles className="w-3.5 h-3.5 animate-pulse" />
             <span>Community Voice</span>
           </div>
           
@@ -126,11 +126,17 @@ export default function TestimonialsSection() {
             style={{ animationPlayState: isRow1Hovered ? "paused" : "running" }}
           >
             {row1Testimonials.map((testimonial, i) => (
-              <TestimonialCard
+              <motion.div
                 key={`row1-1-${i}`}
-                author={testimonial.author}
-                text={testimonial.text}
-              />
+                whileHover={{ y: -6, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="cursor-pointer hover:shadow-lg hover:shadow-primary/[0.02] rounded-lg"
+              >
+                <TestimonialCard
+                  author={testimonial.author}
+                  text={testimonial.text}
+                />
+              </motion.div>
             ))}
           </div>
           <div 
@@ -139,11 +145,17 @@ export default function TestimonialsSection() {
             aria-hidden="true"
           >
             {row1Testimonials.map((testimonial, i) => (
-              <TestimonialCard
+              <motion.div
                 key={`row1-2-${i}`}
-                author={testimonial.author}
-                text={testimonial.text}
-              />
+                whileHover={{ y: -6, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="cursor-pointer hover:shadow-lg hover:shadow-primary/[0.02] rounded-lg"
+              >
+                <TestimonialCard
+                  author={testimonial.author}
+                  text={testimonial.text}
+                />
+              </motion.div>
             ))}
           </div>
         </div>
@@ -162,11 +174,17 @@ export default function TestimonialsSection() {
             }}
           >
             {row2Testimonials.map((testimonial, i) => (
-              <TestimonialCard
+              <motion.div
                 key={`row2-1-${i}`}
-                author={testimonial.author}
-                text={testimonial.text}
-              />
+                whileHover={{ y: -6, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="cursor-pointer hover:shadow-lg hover:shadow-primary/[0.02] rounded-lg"
+              >
+                <TestimonialCard
+                  author={testimonial.author}
+                  text={testimonial.text}
+                />
+              </motion.div>
             ))}
           </div>
           <div 
@@ -178,11 +196,17 @@ export default function TestimonialsSection() {
             aria-hidden="true"
           >
             {row2Testimonials.map((testimonial, i) => (
-              <TestimonialCard
+              <motion.div
                 key={`row2-2-${i}`}
-                author={testimonial.author}
-                text={testimonial.text}
-              />
+                whileHover={{ y: -6, scale: 1.02 }}
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className="cursor-pointer hover:shadow-lg hover:shadow-primary/[0.02] rounded-lg"
+              >
+                <TestimonialCard
+                  author={testimonial.author}
+                  text={testimonial.text}
+                />
+              </motion.div>
             ))}
           </div>
         </div>

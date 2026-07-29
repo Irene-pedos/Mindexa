@@ -502,3 +502,157 @@ class IntegrityRepository:
             "flags": flags,
             "warnings": warnings
         }
+
+    # -----------------------------------------------------------------------
+    # IntegrityProfile — CRUD & Seeding
+    # -----------------------------------------------------------------------
+
+    async def list_profiles(self) -> list[IntegrityProfile]:
+        from app.db.models.integrity import IntegrityProfile
+        await self.ensure_default_profiles()
+        result = await self.db.execute(
+            select(IntegrityProfile)
+            .where(IntegrityProfile.is_deleted == False)  # noqa: E712
+            .order_by(IntegrityProfile.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def get_profile_by_id(self, profile_id: uuid.UUID) -> IntegrityProfile | None:
+        from app.db.models.integrity import IntegrityProfile
+        result = await self.db.execute(
+            select(IntegrityProfile).where(
+                IntegrityProfile.id == profile_id,
+                IntegrityProfile.is_deleted == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_profile_by_code(self, code: str) -> IntegrityProfile | None:
+        from app.db.models.integrity import IntegrityProfile
+        result = await self.db.execute(
+            select(IntegrityProfile).where(
+                IntegrityProfile.code == code,
+                IntegrityProfile.is_deleted == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_profile(
+        self,
+        *,
+        name: str,
+        code: str,
+        description: str | None = None,
+        is_default: bool = False,
+        allow_resume: bool = False,
+        rules_json: dict | None = None,
+    ) -> IntegrityProfile:
+        from app.db.models.integrity import IntegrityProfile
+        profile = IntegrityProfile(
+            name=name,
+            code=code,
+            description=description,
+            is_default=is_default,
+            allow_resume=allow_resume,
+            rules_json=rules_json or {},
+        )
+        self.db.add(profile)
+        await self.db.flush()
+        return profile
+
+    async def update_profile(
+        self,
+        profile_id: uuid.UUID,
+        **updates,
+    ) -> IntegrityProfile | None:
+        from app.db.models.integrity import IntegrityProfile
+        profile = await self.get_profile_by_id(profile_id)
+        if not profile:
+            return None
+        for key, val in updates.items():
+            if val is not None and hasattr(profile, key):
+                setattr(profile, key, val)
+        await self.db.flush()
+        return profile
+
+    async def ensure_default_profiles(self) -> None:
+        """Seed initial default profiles if not present."""
+        from app.db.models.integrity import IntegrityProfile
+        
+        defaults = [
+            {
+                "code": "PRACTICE",
+                "name": "Practice Profile",
+                "description": "Low strictness for formative self-assessment practice",
+                "is_default": False,
+                "allow_resume": True,
+                "rules_json": {
+                    "tab_switching": {"category": "Tolerated", "action": "WARNING"},
+                    "window_minimize": {"category": "Tolerated", "action": "WARNING"},
+                    "copy": {"category": "Tolerated", "action": "IGNORE"},
+                    "paste": {"category": "Tolerated", "action": "IGNORE"},
+                    "browser_zoom": {"category": "Tolerated", "action": "IGNORE"},
+                    "fullscreen_exit": {"category": "Tolerated", "action": "IGNORE"},
+                    "idle_long_period": {"category": "Tolerated", "action": "LOG_ONLY"},
+                    "screen_blurring": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "browser_refresh": {"category": "Tolerated", "action": "LOG_ONLY"},
+                    "closing_browser": {"category": "Tolerated", "action": "LOG_ONLY"},
+                },
+            },
+            {
+                "code": "HOMEWORK",
+                "name": "Homework Profile",
+                "description": "Balanced rules for take-home coursework",
+                "is_default": False,
+                "allow_resume": True,
+                "rules_json": {
+                    "tab_switching": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "window_minimize": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "copy": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "paste": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "browser_zoom": {"category": "Tolerated", "action": "LOG_ONLY"},
+                    "fullscreen_exit": {"category": "Tolerated", "action": "WARNING"},
+                    "idle_long_period": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "screen_blurring": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "browser_refresh": {"category": "Tolerated", "action": "LOG_ONLY"},
+                    "closing_browser": {"category": "Tolerated", "action": "LOG_ONLY"},
+                },
+            },
+            {
+                "code": "SECURE_ASSESSMENT",
+                "name": "Secure Assessment Profile (CAT/Formative/Summative)",
+                "description": "High strictness for institutional summative exams and CATs. Resume disabled.",
+                "is_default": True,
+                "allow_resume": False,
+                "rules_json": {
+                    "tab_switching": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"},
+                    "window_minimize": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"},
+                    "copy": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "paste": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "browser_zoom": {"category": "Tolerated", "action": "LOG_ONLY"},
+                    "fullscreen_exit": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"},
+                    "idle_long_period": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "screen_blurring": {"category": "Tolerated", "action": "WARNING_LOG"},
+                    "browser_refresh": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                    "closing_browser": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                    "opening_another_device": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                    "multiple_sessions": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                    "unauthorized_sharing": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                    "time_expired": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+                },
+            },
+        ]
+
+        for d in defaults:
+            existing = await self.get_profile_by_code(d["code"])
+            if not existing:
+                p = IntegrityProfile(**d)
+                self.db.add(p)
+            else:
+                # Ensure copy and paste rules are synced to Tolerated + WARNING_LOG
+                updated_rules = dict(existing.rules_json or {})
+                updated_rules["copy"] = {"category": "Tolerated", "action": "WARNING_LOG"}
+                updated_rules["paste"] = {"category": "Tolerated", "action": "WARNING_LOG"}
+                existing.rules_json = updated_rules
+        await self.db.flush()
+

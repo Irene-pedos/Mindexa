@@ -11,6 +11,7 @@ export interface SourceCitation {
 export interface StudentSupportRequest {
   question: string;
   conversation_history?: Array<{ role: string; content: string }>;
+  selected_resource_id?: string;
 }
 
 export interface StudentSupportResponse {

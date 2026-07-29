@@ -20,6 +20,7 @@ export interface ChatMessage {
   /** Must be "user" or "model" */
   role: "user" | "model";
   content: string;
+  attachments?: any[];
 }
 
 export interface GeminiChatRequest {

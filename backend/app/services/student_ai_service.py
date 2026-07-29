@@ -55,6 +55,7 @@ class StudentAIService:
             question=body.question,
             student_id=current_user.id,
             conversation_history=body.conversation_history if hasattr(body, 'conversation_history') else [],
+            selected_resource_id=body.selected_resource_id,
             db=self.db,
         )
         

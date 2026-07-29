@@ -1,0 +1,226 @@
+import { apiClient } from "./client";
+
+export interface ChecklistItem {
+  id: string;
+  text: string;
+  completed: boolean;
+}
+
+export interface QuizQuestion {
+  id: string;
+  question_text: string;
+  options: string[];
+  correct_option_index: number;
+  explanation: string;
+}
+
+export interface StudySession {
+  id: string;
+  study_plan_id: string;
+  title: string;
+  topic: string;
+  session_type: "STUDY" | "PRACTICE" | "REVISION" | string;
+  scheduled_start: string;
+  scheduled_end: string;
+  duration_minutes: number;
+  status: "SCHEDULED" | "COMPLETED" | "SKIPPED" | "MISSED" | "RESCHEDULED" | string;
+  completed_at?: string | null;
+  understanding_level?: "YES" | "PARTIAL" | "NO" | null;
+  difficulty_rating?: "Easy" | "Medium" | "Hard" | null;
+  confidence_rating?: number | null;
+  feedback_notes?: string | null;
+  checklist_items?: ChecklistItem[];
+  quiz_questions?: QuizQuestion[];
+  recommended_resource_ids?: string[];
+}
+
+export interface ReadinessTimelinePoint {
+  label: string;
+  score: number;
+}
+
+export interface MaterialCoverageItem {
+  course_code: string;
+  course_title: string;
+  covered_count: number;
+  total_count: number;
+  percentage: number;
+}
+
+export interface ScheduleConflictWarning {
+  session_a_id: string;
+  session_a_title: string;
+  session_b_id: string;
+  session_b_title: string;
+  overlap_time: string;
+}
+
+export interface StudyPlan {
+  id: string;
+  student_id: string;
+  title: string;
+  study_type: string;
+  course_id?: string | null;
+  teaching_workspace_id?: string | null;
+  assessment_id?: string | null;
+  start_date: string;
+  end_date: string;
+  available_days: string[];
+  blackout_dates: string[];
+  preferred_time_start: string;
+  preferred_time_end: string;
+  session_duration_minutes: number;
+  daily_goal: string;
+  preferred_difficulty: string;
+  reminder_preference_minutes: number;
+  reminder_channels: string[];
+  priority: "High" | "Medium" | "Low" | string;
+  status: "DRAFT" | "SCHEDULED" | "ACTIVE" | "PAUSED" | "COMPLETED" | "CANCELLED" | "EXPIRED" | "ARCHIVED" | string;
+  auto_generated: boolean;
+  streak_count: number;
+  readiness_score: number;
+  readiness_history?: ReadinessTimelinePoint[];
+  covered_material_ids?: string[];
+  created_at: string;
+  sessions: StudySession[];
+}
+
+export interface CreateStudyPlanPayload {
+  title: string;
+  study_type?: string;
+  course_id?: string;
+  teaching_workspace_id?: string;
+  assessment_id?: string;
+  start_date: string;
+  end_date: string;
+  available_days?: string[];
+  blackout_dates?: string[];
+  preferred_time_start?: string;
+  preferred_time_end?: string;
+  session_duration_minutes?: number;
+  daily_goal?: string;
+  preferred_difficulty?: string;
+  reminder_preference_minutes?: number;
+  reminder_channels?: string[];
+  priority?: string;
+  auto_generate_sessions?: boolean;
+}
+
+export interface GeneratePlanFromAssessmentPayload {
+  assessment_id: string;
+  available_days?: string[];
+  blackout_dates?: string[];
+  preferred_time_start?: string;
+  preferred_time_end?: string;
+  session_duration_minutes?: number;
+  daily_goal?: string;
+  preferred_difficulty?: string;
+  reminder_preference_minutes?: number;
+  reminder_channels?: string[];
+  priority?: string;
+}
+
+export interface ProactiveSuggestion {
+  id: string;
+  title: string;
+  type: string;
+  course_code: string;
+  window_start?: string | null;
+}
+
+export interface StudyPlannerSummary {
+  active_plan?: StudyPlan | null;
+  total_plans: number;
+  completed_sessions_count: number;
+  total_sessions_count: number;
+  streak_days: number;
+  hours_studied_this_week: number;
+  today_session?: StudySession | null;
+  next_upcoming_session?: StudySession | null;
+  assessment_readiness_score: number;
+  weak_topics: string[];
+  proactive_suggestion?: ProactiveSuggestion | null;
+  unplanned_assessments: ProactiveSuggestion[];
+  readiness_timeline: ReadinessTimelinePoint[];
+  material_coverage: MaterialCoverageItem[];
+  schedule_conflicts: ScheduleConflictWarning[];
+}
+
+export const studyPlannerApi = {
+  getSummary: async (): Promise<StudyPlannerSummary> => {
+    return apiClient("/students/study-plans/summary");
+  },
+  getConflicts: async (): Promise<ScheduleConflictWarning[]> => {
+    return apiClient("/students/study-plans/conflicts");
+  },
+  listPlans: async (): Promise<StudyPlan[]> => {
+    return apiClient("/students/study-plans");
+  },
+  getPlanDetail: async (planId: string): Promise<StudyPlan> => {
+    return apiClient(`/students/study-plans/${planId}`);
+  },
+  createManualPlan: async (payload: CreateStudyPlanPayload): Promise<StudyPlan> => {
+    return apiClient("/students/study-plans", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  generateFromAssessment: async (
+    payload: GeneratePlanFromAssessmentPayload
+  ): Promise<StudyPlan> => {
+    return apiClient("/students/study-plans/generate-from-assessment", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  },
+  completeSession: async (
+    planId: string,
+    sessionId: string,
+    understanding_level: "YES" | "PARTIAL" | "NO",
+    difficulty_rating?: "Easy" | "Medium" | "Hard",
+    confidence_rating?: number,
+    feedback_notes?: string,
+    checklist_items?: ChecklistItem[]
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/complete`, {
+      method: "POST",
+      body: JSON.stringify({
+        understanding_level,
+        difficulty_rating,
+        confidence_rating,
+        feedback_notes,
+        checklist_items,
+      }),
+    });
+  },
+  generateQuiz: async (
+    planId: string,
+    sessionId: string,
+    question_count: number = 5
+  ): Promise<QuizQuestion[]> => {
+    return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/generate-quiz`, {
+      method: "POST",
+      body: JSON.stringify({ question_count }),
+    });
+  },
+  rescheduleSession: async (
+    planId: string,
+    sessionId: string,
+    new_start: string,
+    new_duration_minutes?: number
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/reschedule`, {
+      method: "POST",
+      body: JSON.stringify({ new_start, new_duration_minutes }),
+    });
+  },
+  adjustPlan: async (
+    planId: string,
+    action: "reduce_duration" | "shift_weekends" | "rebalance_topics"
+  ): Promise<StudyPlan> => {
+    return apiClient(`/students/study-plans/${planId}/adjust`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+  },
+};

@@ -29,8 +29,9 @@ class RAGService:
         self,
         topic: str,
         teaching_workspace_id: uuid.UUID,
+        material_ids: Optional[List[uuid.UUID]] = None,
         top_k: int = 8,
-    ) -> str:
+    ) -> RAGRetrievalResult:
         """
         Retrieve relevant text chunks from lecturer-uploaded materials for a given topic.
 
@@ -39,34 +40,40 @@ class RAGService:
         Args:
             topic: The question topic / subject the AI is generating for.
             teaching_workspace_id: The teaching workspace whose materials to search.
+            material_ids: Optional list of specific lecturer material IDs to filter search to.
             top_k: Max number of chunks to retrieve.
 
         Returns:
-            A formatted context string to inject into the AI prompt.
-            Returns empty string if no processed materials found (graceful fallback).
+            A RAGRetrievalResult containing the context string and citations.
         """
         logger.info(
             "Lecturer RAG retrieval started",
             workspace_id=str(teaching_workspace_id),
             topic_preview=topic[:80],
+            material_ids_count=len(material_ids) if material_ids else 0,
         )
 
         try:
             query_embedding = await self._embed_question(topic)
         except Exception as exc:
             logger.warning("Lecturer RAG: embedding failed, skipping context", error=str(exc))
-            return ""
+            return RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True,
+            )
 
         embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-        # Query resource_chunks scoped to this workspace's materials.
-        # Join back to LecturerMaterial to filter and get details.
-        stmt = (
-            text("""
+        stmt_text = """
                 SELECT
+                    rc.id,
                     rc.content,
                     rc.chunk_index,
                     rc.metadata_json,
+                    lm.id as material_id,
                     lm.display_name,
                     lm.original_filename,
                     (1 - (rc.embedding <=> CAST(:query_embedding AS vector))) as similarity
@@ -78,21 +85,41 @@ class RAGService:
                   AND lm.is_current = TRUE
                   AND lm.processing_status = 'PROCESSED'
                   AND rc.embedding IS NOT NULL
+        """
+        if material_ids:
+            stmt_text += " AND lm.id = ANY(:material_ids)"
+
+        stmt_text += """
                 ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
                 LIMIT :top_k
-            """)
-        )
+        """
+
+        stmt = text(stmt_text)
+        if material_ids:
+            stmt = stmt.bindparams(bindparam("material_ids", type_=ARRAY(PG_UUID())))
 
         try:
-            result = await self.db.execute(stmt, {
-                "query_embedding": embedding_literal,
-                "workspace_id": str(teaching_workspace_id),
-                "top_k": top_k,
-            })
+            result = await self.db.execute(
+                stmt,
+                {
+                    "query_embedding": embedding_literal,
+                    "workspace_id": str(teaching_workspace_id),
+                    "material_ids": [uuid.UUID(str(m)) for m in material_ids]
+                    if material_ids
+                    else [],
+                    "top_k": top_k,
+                },
+            )
             rows = result.fetchall()
         except Exception as exc:
             logger.warning("Lecturer RAG: vector search failed, skipping context", error=str(exc))
-            return ""
+            return RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True,
+            )
 
         logger.info(
             "Lecturer RAG vector search complete",
@@ -100,21 +127,27 @@ class RAGService:
             workspace_id=str(teaching_workspace_id),
         )
 
-        if not rows:
-            logger.warning(
-                "Lecturer RAG: no chunks found for workspace — AI will generate without material context",
-                workspace_id=str(teaching_workspace_id),
-            )
-            return ""
+        chunks = []
+        citations = []
+        chunk_ids = []
+        total_similarity = 0.0
 
-        # Build formatted context string
-        parts = []
         for row in rows:
-            content, chunk_index, metadata_json, display_name, original_filename, similarity = row
+            (
+                chunk_id,
+                content,
+                chunk_index,
+                metadata_json,
+                mat_id,
+                display_name,
+                original_filename,
+                similarity,
+            ) = row
             if similarity is not None and float(similarity) < 0.22:
                 continue
+
             source_label = display_name or original_filename or "Course Material"
-            
+
             source_page = None
             if metadata_json:
                 if isinstance(metadata_json, dict):
@@ -124,6 +157,7 @@ class RAGService:
                 elif isinstance(metadata_json, str):
                     try:
                         import json
+
                         parsed = json.loads(metadata_json)
                         if isinstance(parsed, dict):
                             source_page = parsed.get("page")
@@ -131,9 +165,27 @@ class RAGService:
                             source_page = parsed
                     except Exception:
                         source_page = metadata_json
-            
-            page_ref = f", Page {source_page}" if source_page else ""
-            parts.append(f"[Source: {source_label}{page_ref}]\n{content}\n")
+
+            chunks.append(
+                {
+                    "content": content,
+                    "resource_name": source_label,
+                    "metadata": {"page": source_page} if source_page else None,
+                }
+            )
+            chunk_ids.append(chunk_id)
+            total_similarity += similarity
+
+            citations.append(
+                SourceCitation(
+                    resource_name=source_label,
+                    resource_id=mat_id,
+                    page_number=source_page,
+                    chunk_index=chunk_index,
+                    excerpt=content[:120],
+                )
+            )
+
             logger.debug(
                 "Lecturer chunk retrieved",
                 source=source_label,
@@ -141,26 +193,43 @@ class RAGService:
                 similarity=round(float(similarity), 4),
             )
 
-        if not parts:
-            logger.warning(
-                "Lecturer RAG: no chunks met similarity threshold (>= 0.22) — AI will generate without material context",
-                workspace_id=str(teaching_workspace_id),
-            )
-            return ""
+        avg_similarity = total_similarity / len(rows) if rows else 0.0
+        fallback_used = avg_similarity < 0.22 or not rows
 
-        return "\n".join(parts)
+        logger.info(
+            "Lecturer RAG decision",
+            avg_similarity=round(avg_similarity, 4),
+            fallback_used=fallback_used,
+            chunks_used=len(chunks),
+        )
+
+        context_string = self._build_context_string(chunks) if not fallback_used else ""
+
+        return RAGRetrievalResult(
+            context_string=context_string,
+            citations=citations if not fallback_used else [],
+            chunk_ids_used=chunk_ids if not fallback_used else [],
+            retrieval_score=avg_similarity,
+            fallback_used=fallback_used,
+        )
 
     async def retrieve_context(
         self,
         question: str,
         student_id: uuid.UUID,
+        selected_resource_id: uuid.UUID | None = None,
         top_k: int = None,
     ) -> RAGRetrievalResult:
         """
         Full RAG retrieval pipeline.
         """
         top_k = top_k or settings.RAG_TOP_K
-        logger.info("RAG retrieval started", student_id=str(student_id), question_preview=question[:80])
+        logger.info(
+            "RAG retrieval started",
+            student_id=str(student_id),
+            question_preview=question[:80],
+            selected_resource_id=str(selected_resource_id) if selected_resource_id else None,
+        )
 
         # 1. Generate embedding for the student's question
         query_embedding = await self._embed_question(question)
@@ -168,16 +237,68 @@ class RAGService:
 
         # 2. Get allowed academic_resource_ids
         allowed_resource_ids = await self._get_allowed_resource_ids(student_id)
-        logger.info("Allowed resource IDs found", count=len(allowed_resource_ids), ids=[str(r) for r in allowed_resource_ids])
+        logger.info(
+            "Allowed resource IDs found",
+            count=len(allowed_resource_ids),
+            ids=[str(r) for r in allowed_resource_ids],
+        )
+
+        if selected_resource_id:
+            resolved_id = None
+            # Check student resources
+            stmt_own = select(StudentResource.academic_resource_id).where(
+                and_(
+                    StudentResource.id == selected_resource_id,
+                    StudentResource.student_id == student_id,
+                    StudentResource.is_deleted == False,
+                )
+            )
+            resolved_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
+
+            # Check lecturer materials
+            if not resolved_id:
+                stmt_lecturer = (
+                    select(LecturerMaterial.academic_resource_id)
+                    .join(
+                        TeachingWorkspace,
+                        LecturerMaterial.teaching_workspace_id == TeachingWorkspace.id,
+                    )
+                    .join(
+                        StudentEnrollment,
+                        and_(
+                            StudentEnrollment.class_section_id
+                            == TeachingWorkspace.class_section_id,
+                            TeachingWorkspace.class_section_id.is_not(None),
+                        ),
+                    )
+                    .where(
+                        and_(
+                            LecturerMaterial.id == selected_resource_id,
+                            StudentEnrollment.student_id == student_id,
+                            StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE,
+                            LecturerMaterial.is_student_visible == True,
+                            LecturerMaterial.is_deleted == False,
+                            LecturerMaterial.is_current == True,
+                        )
+                    )
+                )
+                resolved_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
+
+            if resolved_id and resolved_id in allowed_resource_ids:
+                allowed_resource_ids = [resolved_id]
+            else:
+                allowed_resource_ids = []
 
         if not allowed_resource_ids:
-            logger.warning("No allowed resources found for student — falling back", student_id=str(student_id))
+            logger.warning(
+                "No allowed resources found for student — falling back", student_id=str(student_id)
+            )
             return RAGRetrievalResult(
                 context_string="",
                 citations=[],
                 chunk_ids_used=[],
                 retrieval_score=0.0,
-                fallback_used=True
+                fallback_used=True,
             )
 
         # 3. Query pgvector for top_k nearest chunks
@@ -320,30 +441,61 @@ class RAGService:
 
         # 2. Lecturer materials for enrolled courses
         # Access path: Student → Enrollment (ACTIVE) → ClassSection → Workspace → Material → AcademicResource
-        # NOTE: TeachingWorkspace.class_section_id is nullable.
-        # We join via class_section_id when available, and also check via course_id
-        # on the TeachingAssignment as a fallback.
+        from sqlalchemy import exists
+        from app.db.models.academic import TeachingAssignment, ClassSection, ClassGroup
+
         stmt_lecturer = (
             select(LecturerMaterial.academic_resource_id)
             .join(TeachingWorkspace, LecturerMaterial.teaching_workspace_id == TeachingWorkspace.id)
-            .join(
-                StudentEnrollment,
-                and_(
-                    StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id,
-                    TeachingWorkspace.class_section_id.is_not(None),
-                ),
-            )
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
             .join(AcademicResource, LecturerMaterial.academic_resource_id == AcademicResource.id)
             .where(
                 and_(
-                    StudentEnrollment.student_id == student_id,
-                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE,
                     LecturerMaterial.is_student_visible == True,
                     LecturerMaterial.is_deleted == False,
                     LecturerMaterial.is_current == True,
                     LecturerMaterial.assessment_id.is_(None),
                     AcademicResource.resource_category != ResourceCategory.QUESTION_BANK,
                     AcademicResource.resource_category != ResourceCategory.ANSWER_KEY,
+                    # Student enrollment check (direct or global workspace visibility)
+                    or_(
+                        # Direct section link
+                        exists().where(
+                            and_(
+                                StudentEnrollment.student_id == student_id,
+                                StudentEnrollment.class_section_id == TeachingWorkspace.class_section_id,
+                                StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
+                                StudentEnrollment.is_deleted == False
+                            )
+                        ),
+                        # Global/course-wide workspace link
+                        and_(
+                            TeachingWorkspace.class_section_id == None,
+                            exists().where(
+                                and_(
+                                    StudentEnrollment.student_id == student_id,
+                                    StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
+                                    StudentEnrollment.is_deleted == False,
+                                    exists().where(
+                                        and_(
+                                            ClassSection.id == StudentEnrollment.class_section_id,
+                                            ClassSection.department_id == TeachingAssignment.department_id,
+                                            ClassSection.is_active == True,
+                                            or_(
+                                                TeachingAssignment.option_id == None,
+                                                exists().where(
+                                                    and_(
+                                                        ClassGroup.id == ClassSection.class_group_id,
+                                                        ClassGroup.option_id == TeachingAssignment.option_id
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
                 )
             )
         )

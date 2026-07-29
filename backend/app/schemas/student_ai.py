@@ -25,8 +25,9 @@ class StudentSupportContextRequest(BaseModel):
 class StudentSupportRequest(BaseModel):
     """Student Support Agent request."""
 
-    question: str = Field(..., min_length=3, max_length=4000)
+    question: str = Field(..., min_length=1, max_length=64000)
     conversation_history: list[dict] = Field(default_factory=list)
+    selected_resource_id: uuid.UUID | None = Field(default=None, description="Scope query to single resource")
 
     model_config = {"str_strip_whitespace": True}
 

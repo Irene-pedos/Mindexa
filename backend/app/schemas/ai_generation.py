@@ -199,7 +199,7 @@ class ReviewAIQuestionRequest(BaseModel):
     add_to_section_id: uuid.UUID | None = None
     marks_if_added: int | None = Field(default=None, ge=1)
     save_to_bank: bool = Field(
-        default=True,
+        default=False,
         description="Optionally save the approved/edited question to the lecturer's reusable question bank"
     )
 

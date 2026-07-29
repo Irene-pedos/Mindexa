@@ -11,15 +11,14 @@ from __future__ import annotations
 import traceback
 import uuid
 
-from fastapi import FastAPI, Request, status
-from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
-from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy.exc import IntegrityError
-
 from app.core.config import settings
 from app.core.exceptions import MindexaError
 from app.core.logging import get_logger
+from fastapi import FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = get_logger(__name__)
 
@@ -46,7 +45,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     async def handle_integrity_error(request: Request, exc: IntegrityError) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
         error_msg = str(exc.orig) if exc.orig else str(exc)
-        
+
         # Determine user-friendly message
         friendly_message = "A resource with these details already exists."
         if "unique" in error_msg.lower() or "already exists" in error_msg.lower():
@@ -81,7 +80,7 @@ def register_exception_handlers(app: FastAPI) -> None:
             path=str(request.url),
             request_id=request_id,
         )
-        
+
         message = exc.detail
         detail_lower = (exc.detail or "").lower()
         if any(
@@ -121,11 +120,11 @@ def register_exception_handlers(app: FastAPI) -> None:
                 "message": error["msg"],
                 "type": error["type"],
             })
-        
+
         # Enhanced message to help debugging
         detail_messages = [f"{e['field']}: {e['message']}" for e in errors]
         combined_msg = "Validation failed: " + " | ".join(detail_messages)
-            
+
         logger.info("validation_error", path=str(request.url), errors=errors, request_id=request_id)
         return _error_response(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -161,7 +160,7 @@ def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def handle_unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
         request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
-        
+
         # Log full traceback for server-side monitoring
         logger.error(
             "unhandled_exception",
@@ -174,7 +173,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
         error_message = f"An unexpected error occurred. Reference ID: {request_id}"
-        
+
         # Surface internal error details ONLY if in DEBUG mode
         if settings.DEBUG:
             error_message += f" | Detail: [{type(exc).__name__}] {str(exc)}"

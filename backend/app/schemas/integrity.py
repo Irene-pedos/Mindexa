@@ -162,3 +162,44 @@ class SupervisionStatsResponse(BaseModel):
     online_count: int = 0
     warning_count: int = 0
     high_risk_count: int = 0
+
+
+class RecordEventResponse(BaseModel):
+    """Response returned when recording an integrity event."""
+    event: IntegrityEventResponse
+    warning_issued: bool = False
+    warning: IntegrityWarningResponse | None = None
+    action_required: str = "NONE"  # NONE | LOG_ONLY | WARNING | AUTO_SUBMIT
+    violation_details: dict[str, Any] | None = None
+
+
+class IntegrityProfileCreate(BaseModel):
+    name: str
+    code: str
+    description: str | None = None
+    is_default: bool = False
+    allow_resume: bool = False
+    rules_json: dict[str, Any] = Field(default_factory=dict)
+
+
+class IntegrityProfileUpdate(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    is_default: bool | None = None
+    allow_resume: bool | None = None
+    rules_json: dict[str, Any] | None = None
+
+
+class IntegrityProfileResponse(BaseModel):
+    model_config = {"from_attributes": True}
+
+    id: uuid.UUID
+    name: str
+    code: str
+    description: str | None = None
+    is_default: bool
+    allow_resume: bool
+    rules_json: dict[str, Any]
+    created_at: datetime
+    updated_at: datetime
+

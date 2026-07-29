@@ -71,12 +71,20 @@ class WorkspaceListItem(BaseModel):
     institution_name: str
     class_name: str
 
+class WorkspaceSectionResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    student_count: int
+    class_group_id: Optional[uuid.UUID] = None
+    class_group_name: Optional[str] = None
+
 class WorkspaceDetail(WorkspaceListItem):
     """Detailed operational teaching space view."""
+    course_id: Optional[uuid.UUID] = None
     description: Optional[str] = None
     department_name: Optional[str] = None
     option_name: Optional[str] = None
-    sections: List[str] = []
+    sections: List[WorkspaceSectionResponse] = []
     roster: List[LecturerCourseRosterItem] = []
 
 class WorkspaceCreate(BaseModel):
@@ -92,6 +100,11 @@ class LecturerCourseRosterItem(BaseModel):
     email: str
     progress: int
     last_submission: str | None = None
+    class_section_id: Optional[uuid.UUID] = None
+    class_section_name: Optional[str] = None
+    class_group_id: Optional[uuid.UUID] = None
+    class_group_name: Optional[str] = None
+    department_id: Optional[uuid.UUID] = None
 
 class LecturerCourseDetail(BaseModel):
     id: uuid.UUID

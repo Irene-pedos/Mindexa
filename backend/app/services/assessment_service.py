@@ -395,9 +395,25 @@ class AssessmentService:
                 )
                 self.db.add(sup)
 
-        if data.class_group_ids is not None:
+        if hasattr(data, "target_section_ids") and data.target_section_ids is not None:
             # Clear existing targets
-            from app.db.models.academic import ClassSection, TeachingAssignment
+            from app.db.models.assessment import AssessmentTargetSection
+            from sqlalchemy import update
+            await self.db.execute(
+                update(AssessmentTargetSection)
+                .where(AssessmentTargetSection.assessment_id == assessment_id)
+                .values(is_deleted=True, deleted_at=datetime.now(UTC))
+            )
+            for sec_id in data.target_section_ids:
+                try:
+                    sec_uuid = uuid.UUID(str(sec_id))
+                    await add_or_restore_target_in_wizard(sec_uuid)
+                except (ValueError, TypeError):
+                    pass
+
+        elif data.class_group_ids is not None:
+            # Clear existing targets
+            from app.db.models.academic import ClassSection
             from app.db.models.assessment import AssessmentTargetSection
             from sqlalchemy import select, update
             await self.db.execute(
@@ -408,15 +424,13 @@ class AssessmentService:
             for cg_id in data.class_group_ids:
                 res = await self.db.execute(
                     select(ClassSection.id)
-                    .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
                     .where(
-                        TeachingAssignment.course_id == assessment.course_id,
                         ClassSection.class_group_id == cg_id,
                         ClassSection.is_deleted == False
                     )
                 )
-                section_id = res.scalar_one_or_none()
-                if section_id:
+                section_ids = res.scalars().all()
+                for section_id in section_ids:
                     await add_or_restore_target_in_wizard(section_id)
 
         if "teaching_workspace_id" in update_fields and update_fields["teaching_workspace_id"]:
@@ -808,44 +822,77 @@ class AssessmentService:
 
         # Capture student enrollment snapshot
         try:
-            from app.db.models.academic import (AssessmentTargetSection,
-                                                StudentEnrollment)
+            from app.db.models.assessment import AssessmentTargetSection
+            from app.db.models.academic import StudentEnrollment
             from app.db.models.auth import User, UserProfile
             from sqlalchemy import select
+            from app.db.enums import EnrollmentStatus
 
-            stmt = (
-                select(
-                    User.id,
-                    User.email,
-                    UserProfile.first_name,
-                    UserProfile.last_name,
-                    UserProfile.student_id
+            if assessment.audience_type == "selected" and assessment.target_student_ids:
+                stmt = (
+                    select(
+                        User.id,
+                        User.email,
+                        UserProfile.first_name,
+                        UserProfile.last_name,
+                        UserProfile.student_id
+                    )
+                    .join(UserProfile, UserProfile.user_id == User.id)
+                    .where(
+                        User.id.in_(assessment.target_student_ids),
+                        User.is_deleted == False
+                    )
                 )
-                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
-                .join(UserProfile, UserProfile.user_id == User.id)
-                .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
-                .where(
+            else:
+                t_sec_stmt = select(AssessmentTargetSection.class_section_id).where(
                     AssessmentTargetSection.assessment_id == assessment_id,
-                    AssessmentTargetSection.is_deleted == False,
-                    StudentEnrollment.is_deleted == False
+                    AssessmentTargetSection.is_deleted == False
                 )
-                .distinct()
-            )
-            res = await self.db.execute(stmt)
-            snapshot_students = []
-            for uid, email, fname, lname, sid in res.all():
-                snapshot_students.append({
-                    "id": str(uid),
-                    "email": email,
-                    "name": f"{fname} {lname}",
-                    "student_id": sid or "N/A"
-                })
+                t_sec_ids = (await self.db.execute(t_sec_stmt)).scalars().all()
+                
+                if not t_sec_ids and assessment.teaching_workspace_id:
+                    from app.db.repositories.workspace_repo import WorkspaceRepository
+                    w_repo = WorkspaceRepository(self.db)
+                    resolved_sections = await w_repo.resolve_workspace_sections(assessment.teaching_workspace_id)
+                    t_sec_ids = [s.id for s in resolved_sections]
+                
+                if t_sec_ids:
+                    stmt = (
+                        select(
+                            User.id,
+                            User.email,
+                            UserProfile.first_name,
+                            UserProfile.last_name,
+                            UserProfile.student_id
+                        )
+                        .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+                        .join(UserProfile, UserProfile.user_id == User.id)
+                        .where(
+                            StudentEnrollment.class_section_id.in_(t_sec_ids),
+                            StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
+                            StudentEnrollment.is_deleted == False
+                        )
+                        .distinct()
+                    )
+                else:
+                    stmt = None
 
-            await self._repo.update_fields(
-                assessment_id,
-                updated_by_id=current_user.id,
-                student_enrollment_snapshot=snapshot_students
-            )
+            if stmt is not None:
+                res = await self.db.execute(stmt)
+                snapshot_students = []
+                for uid, email, fname, lname, sid in res.all():
+                    snapshot_students.append({
+                        "id": str(uid),
+                        "email": email,
+                        "name": f"{fname} {lname}",
+                        "student_id": sid or "N/A"
+                    })
+
+                await self._repo.update_fields(
+                    assessment_id,
+                    updated_by_id=current_user.id,
+                    student_enrollment_snapshot=snapshot_students
+                )
         except Exception as e:
             print(f"Failed to save student enrollment snapshot: {e}")
 
@@ -1445,21 +1492,25 @@ class AssessmentService:
             if ws_section_id:
                 await add_or_restore_target_in_bulk(ws_section_id)
 
+        if data.metadata.target_section_ids:
+            for sec_id in data.metadata.target_section_ids:
+                try:
+                    sec_uuid = uuid.UUID(str(sec_id))
+                    await add_or_restore_target_in_bulk(sec_uuid)
+                except (ValueError, TypeError):
+                    pass
+
         if data.metadata.class_group_ids:
             for cg_id in data.metadata.class_group_ids:
-                # Find the ClassSection for this course and this class group via assignments
-                from app.db.models.academic import TeachingAssignment
                 res = await self.db.execute(
                     select(ClassSection.id)
-                    .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
                     .where(
-                        TeachingAssignment.course_id == course_id,
                         ClassSection.class_group_id == cg_id,
                         ClassSection.is_deleted == False
                     )
                 )
-                section_id = res.scalar_one_or_none()
-                if section_id:
+                section_ids = res.scalars().all()
+                for section_id in section_ids:
                     # Check to avoid duplicate if it's the same as ws_section_id
                     if not teaching_workspace_id or str(section_id) != str(ws_section_id):
                         await add_or_restore_target_in_bulk(section_id)

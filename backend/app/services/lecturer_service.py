@@ -267,38 +267,32 @@ class LecturerService:
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
         
-        from app.db.enums import EnrollmentStatus
+        sections = await self.workspace_repo.resolve_workspace_sections(workspace_id)
+        section_ids = [s.id for s in sections]
 
-        if ws.class_section_id:
-            roster_stmt = (
-                select(User, UserProfile)
-                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
-                .join(UserProfile, UserProfile.user_id == User.id)
-                .where(
-                    StudentEnrollment.class_section_id == ws.class_section_id,
-                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                    StudentEnrollment.is_deleted == False
-                )
-                .order_by(UserProfile.last_name.asc())
-            )
+        from app.db.enums import EnrollmentStatus
+        from app.db.models.academic import ClassSection, ClassGroup
+
+        if not section_ids:
+            rows = []
         else:
             roster_stmt = (
-                select(User, UserProfile)
+                select(User, UserProfile, ClassSection)
                 .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
                 .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
-                .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
                 .join(UserProfile, UserProfile.user_id == User.id)
                 .where(
-                    TeachingAssignment.course_id == ws.course_id,
+                    StudentEnrollment.class_section_id.in_(section_ids),
                     StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
                     StudentEnrollment.is_deleted == False
                 )
+                .options(selectinload(ClassSection.class_group).selectinload(ClassGroup.option))
                 .order_by(UserProfile.last_name.asc())
             )
-        rows = (await self.db.execute(roster_stmt)).all()
+            rows = (await self.db.execute(roster_stmt)).all()
 
         roster = []
-        for user, profile in rows:
+        for user, profile, section in rows:
             total_ass_stmt = select(func.count(Assessment.id)).where(
                 Assessment.teaching_workspace_id == workspace_id, 
                 Assessment.status == AssessmentStatus.PUBLISHED,
@@ -325,7 +319,12 @@ class LecturerService:
                 name=f"{profile.first_name} {profile.last_name}",
                 email=user.email,
                 progress=progress,
-                last_submission="N/A"
+                last_submission="N/A",
+                class_section_id=section.id,
+                class_section_name=section.name,
+                class_group_id=section.class_group_id,
+                class_group_name=section.class_group.name if section.class_group else None,
+                department_id=section.department_id
             ))
 
         perf_stmt = (
@@ -338,6 +337,23 @@ class LecturerService:
             )
         )
         avg_perf = (await self.db.execute(perf_stmt)).scalar() or 0.0
+
+        from app.schemas.lecturer import WorkspaceSectionResponse
+        sections_response = []
+        for s in sections:
+            sect_student_count_stmt = select(func.count(StudentEnrollment.id)).where(
+                StudentEnrollment.class_section_id == s.id,
+                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                StudentEnrollment.is_deleted == False
+            )
+            sect_student_count = (await self.db.execute(sect_student_count_stmt)).scalar_one() or 0
+            sections_response.append(WorkspaceSectionResponse(
+                id=s.id,
+                name=s.name,
+                student_count=sect_student_count,
+                class_group_id=s.class_group_id,
+                class_group_name=s.class_group.name if s.class_group else None
+            ))
 
         lect_p = ws.teaching_assignment.lecturer.profile
         return WorkspaceDetail(
@@ -355,7 +371,8 @@ class LecturerService:
             department_name=ws.class_section.department.name if ws.class_section and ws.class_section.department else "N/A",
             option_name=ws.class_section.class_group.option.name if ws.class_section and ws.class_section.class_group and ws.class_section.class_group.option else "N/A",
             roster=roster,
-            sections=[ws.class_section.name] if ws.class_section else ["GLOBAL"]
+            sections=sections_response,
+            course_id=ws.course_id
         )
 
     async def initialize_workspace(self, lecturer_id: uuid.UUID, data: WorkspaceCreate) -> TeachingWorkspace:
@@ -714,32 +731,68 @@ class LecturerService:
         if not course:
             raise NotFoundError("Course not found")
 
-        # 2. Fetch student count
-        from app.db.models.academic import TeachingAssignment
-        student_count_stmt = (
-            select(func.count(StudentEnrollment.id))
-            .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
-            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
-            .where(TeachingAssignment.course_id == course_id, StudentEnrollment.is_deleted == False)
+        # 2. Fetch student count and roster via resolved section IDs for active teaching assignments
+        from app.db.models.academic import TeachingAssignment, ClassGroup, ClassSection
+        ta_stmt = select(TeachingAssignment).where(
+            TeachingAssignment.course_id == course_id,
+            TeachingAssignment.is_active == True
         )
-        student_count_res = await self.db.execute(student_count_stmt)
-        count = student_count_res.scalar_one()
+        teaching_assignments = (await self.db.execute(ta_stmt)).scalars().all()
+        
+        section_ids = set()
+        for ta in teaching_assignments:
+            if ta.class_section_id:
+                section_ids.add(ta.class_section_id)
+            else:
+                # Global assignment scope
+                sec_stmt = select(ClassSection.id).where(
+                    ClassSection.department_id == ta.department_id,
+                    ClassSection.is_active == True
+                )
+                if ta.option_id:
+                    sec_stmt = sec_stmt.join(ClassGroup, ClassGroup.id == ClassSection.class_group_id).where(
+                        ClassGroup.option_id == ta.option_id
+                    )
+                sec_res = await self.db.execute(sec_stmt)
+                for sid in sec_res.scalars().all():
+                    section_ids.add(sid)
 
-        # 3. Fetch Roster
-        stmt = (
-            select(User, UserProfile)
-            .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
-            .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
-            .join(TeachingAssignment, TeachingAssignment.class_section_id == ClassSection.id)
-            .join(UserProfile, UserProfile.user_id == User.id)
-            .where(TeachingAssignment.course_id == course_id, StudentEnrollment.is_deleted == False)
-            .order_by(UserProfile.last_name.asc())
-        )
-        res = await self.db.execute(stmt)
-        rows = res.all()
+        from app.db.enums import EnrollmentStatus
+
+        if not section_ids:
+            count = 0
+            rows = []
+        else:
+            student_count_stmt = (
+                select(func.count(StudentEnrollment.id))
+                .where(
+                    StudentEnrollment.class_section_id.in_(list(section_ids)),
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                    StudentEnrollment.is_deleted == False
+                )
+            )
+            student_count_res = await self.db.execute(student_count_stmt)
+            count = student_count_res.scalar_one()
+
+            # 3. Fetch Roster
+            stmt = (
+                select(User, UserProfile, ClassSection)
+                .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
+                .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
+                .join(UserProfile, UserProfile.user_id == User.id)
+                .where(
+                    StudentEnrollment.class_section_id.in_(list(section_ids)),
+                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                    StudentEnrollment.is_deleted == False
+                )
+                .options(selectinload(ClassSection.class_group).selectinload(ClassGroup.option))
+                .order_by(UserProfile.last_name.asc())
+            )
+            res = await self.db.execute(stmt)
+            rows = res.all()
 
         roster = []
-        for user, profile in rows:
+        for user, profile, section in rows:
             # Calculate student progress in this course
             # Progress = (completed assessments / total assessments in course) * 100
             total_ass_stmt = select(func.count(Assessment.id)).where(Assessment.course_id == course_id, Assessment.is_deleted == False)
@@ -767,7 +820,12 @@ class LecturerService:
                 name=f"{profile.first_name} {profile.last_name}",
                 email=user.email,
                 progress=progress,
-                last_submission="N/A" # Default
+                last_submission="N/A",
+                class_section_id=section.id,
+                class_section_name=section.name,
+                class_group_id=section.class_group_id,
+                class_group_name=section.class_group.name if section.class_group else None,
+                department_id=section.department_id
             ))
 
         # 4. Fetch sections

@@ -244,11 +244,12 @@ class GradingService:
             rag_service = RAGService(self.db)
             try:
                 # We retrieve chunks matching the question content to inject into instructions
-                course_context = await rag_service.retrieve_context_for_lecturer(
+                rag_res = await rag_service.retrieve_context_for_lecturer(
                     topic=question.content,
                     teaching_workspace_id=assessment.teaching_workspace_id,
                     top_k=4
                 )
+                course_context = rag_res.context_string
                 
                 # Perform a direct vector query to fetch chunk IDs and display names for durable auditing
                 query_embedding = await rag_service._embed_question(question.content)
@@ -258,7 +259,8 @@ class GradingService:
                 stmt = text("""
                     SELECT rc.id, lm.display_name
                     FROM resource_chunks rc
-                    JOIN lecturer_materials lm ON lm.id = rc.lecturer_material_id
+                    JOIN academic_resources ar ON ar.id = rc.resource_id
+                    JOIN lecturer_materials lm ON lm.academic_resource_id = ar.id
                     WHERE lm.teaching_workspace_id = :ws_id
                       AND lm.is_deleted = false
                     ORDER BY rc.embedding <=> :embed::vector
@@ -531,11 +533,12 @@ class GradingService:
             rag_service = RAGService(self.db)
             try:
                 # We retrieve chunks matching the question content to inject into instructions
-                course_context = await rag_service.retrieve_context_for_lecturer(
+                rag_res = await rag_service.retrieve_context_for_lecturer(
                     topic=question.content,
                     teaching_workspace_id=assessment.teaching_workspace_id,
                     top_k=4
                 )
+                course_context = rag_res.context_string
 
                 # Perform a direct vector query to fetch chunk IDs and display names for durable auditing
                 query_embedding = await rag_service._embed_question(question.content)
@@ -545,7 +548,8 @@ class GradingService:
                 stmt = text("""
                     SELECT rc.id, lm.display_name
                     FROM resource_chunks rc
-                    JOIN lecturer_materials lm ON lm.id = rc.lecturer_material_id
+                    JOIN academic_resources ar ON ar.id = rc.resource_id
+                    JOIN lecturer_materials lm ON lm.academic_resource_id = ar.id
                     WHERE lm.teaching_workspace_id = :ws_id
                       AND lm.is_deleted = false
                     ORDER BY rc.embedding <=> :embed::vector

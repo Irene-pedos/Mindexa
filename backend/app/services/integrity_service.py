@@ -131,6 +131,10 @@ class IntegrityService:
     # RECORD EVENT
     # -----------------------------------------------------------------------
 
+    # -----------------------------------------------------------------------
+    # RECORD EVENT
+    # -----------------------------------------------------------------------
+
     async def record_event(
         self,
         *,
@@ -139,15 +143,11 @@ class IntegrityService:
         access_token: uuid.UUID,
         event_type: str,
         metadata_json: dict | None = None,
-    ) -> tuple[IntegrityEvent, IntegrityWarning | None]:
+    ) -> tuple[IntegrityEvent, IntegrityWarning | None, str, dict | None]:
         """
-        Record one integrity event and evaluate whether it crosses a threshold.
+        Record one integrity event and evaluate whether it crosses a profile threshold.
 
-        Returns (event, warning_issued_or_None).
-
-        Security:
-            - access_token is validated against the attempt.
-            - Only the student who owns the attempt can submit events.
+        Returns (event, warning_issued_or_None, action_required, violation_details).
         """
         attempt = await self.attempt_repo.get_by_access_token(attempt_id, access_token)
         if not attempt:
@@ -163,8 +163,7 @@ class IntegrityService:
             metadata_json=metadata_json,
         )
 
-        # Evaluate thresholds and potentially issue a warning
-        warning = await self.evaluate_risk(
+        warning, action_required, violation_details = await self.evaluate_risk(
             attempt_id=attempt_id,
             assessment_id=attempt.assessment_id,
             student_id=student_id,
@@ -172,7 +171,7 @@ class IntegrityService:
             trigger_event_id=event.id,
         )
 
-        return event, warning
+        return event, warning, action_required, violation_details
 
     # -----------------------------------------------------------------------
     # EVALUATE RISK
@@ -186,40 +185,131 @@ class IntegrityService:
         student_id: uuid.UUID,
         event_type: str,
         trigger_event_id: uuid.UUID,
-    ) -> IntegrityWarning | None:
+    ) -> tuple[IntegrityWarning | None, str, dict | None]:
         """
-        Check event count against thresholds and issue a warning if threshold crossed.
+        Check event count & profile policies and evaluate action required.
+        Actions: NONE | LOG_ONLY | WARNING | AUTO_SUBMIT
+        """
+        from app.db.models.assessment import Assessment
+        assessment = await self.db.get(Assessment, assessment_id)
+        
+        # Load profile
+        rules = {}
+        if assessment and assessment.integrity_profile_id:
+            profile = await self.integrity_repo.get_profile_by_id(assessment.integrity_profile_id)
+            if profile:
+                rules = profile.rules_json
+        elif assessment and assessment.integrity_policy_json:
+            rules = assessment.integrity_policy_json
+        else:
+            # Fallback based on assessment type
+            code = "SECURE_ASSESSMENT"
+            if assessment and assessment.assessment_type == "HOMEWORK":
+                code = "HOMEWORK"
+            elif assessment and assessment.assessment_type == "PRACTICE":
+                code = "PRACTICE"
+            profile = await self.integrity_repo.get_profile_by_code(code)
+            if profile:
+                rules = profile.rules_json
 
-        Each warning level is issued at most once per attempt (idempotent).
-        WARNING_3 automatically raises a SYSTEM IntegrityFlag.
-        """
-        thresholds = THRESHOLDS.get(event_type)
-        if not thresholds:
-            return None  # No thresholds configured for this event type
+        EVENT_TYPE_TO_RULE_KEY = {
+            "TAB_SWITCH": "tab_switching",
+            "FULLSCREEN_EXIT": "fullscreen_exit",
+            "WINDOW_BLUR": "screen_blurring",
+            "SCREEN_BLURRING": "screen_blurring",
+            "COPY_ATTEMPT": "copy",
+            "PASTE_ATTEMPT": "paste",
+            "BROWSER_ZOOM": "browser_zoom",
+            "BROWSER_REFRESH": "browser_refresh",
+            "CLOSING_BROWSER": "closing_browser",
+            "MULTIPLE_DEVICES": "opening_another_device",
+            "MULTIPLE_SESSIONS": "multiple_sessions",
+            "UNAUTHORIZED_SHARING": "unauthorized_sharing",
+            "TIME_EXPIRED": "time_expired",
+            "EXTENDED_INACTIVITY": "idle_long_period",
+            "IDLE_LONG_PERIOD": "idle_long_period",
+        }
+
+        rule_key = EVENT_TYPE_TO_RULE_KEY.get(event_type, event_type.lower())
+        rule_config = rules.get(rule_key, {})
+        action_name = rule_config.get("action", "WARNING_LOG")
+        category = rule_config.get("category", "Non-Tolerated")
 
         count = await self.integrity_repo.count_event_type(attempt_id, event_type)
-        existing_warnings = await self.integrity_repo.list_warnings_for_attempt(attempt_id)
-        issued_levels = {w.warning_level for w in existing_warnings}
 
-        warning_to_issue = None
-        for threshold, warning_level, risk_level, description in thresholds:
-            if count >= threshold and warning_level not in issued_levels:
-                warning_to_issue = (warning_level, risk_level, description)
+        if action_name == "IGNORE":
+            return None, "NONE", None
 
-        if not warning_to_issue:
-            return None
+        if action_name == "LOG_ONLY":
+            return None, "LOG_ONLY", None
 
-        warning_level, risk_level, description = warning_to_issue
-        return await self.issue_warning(
-            attempt_id=attempt_id,
-            assessment_id=assessment_id,
-            student_id=student_id,
-            warning_level=warning_level,
-            risk_level=risk_level,
-            trigger_event_id=trigger_event_id,
-            auto_raise_flag=(warning_level == WarningLevel.WARNING_3),
-            flag_description=description,
-        )
+        if action_name == "AUTO_SUBMIT":
+            # Immediate Auto Submit for critical non-tolerated violations
+            violation_details = {
+                "rule_key": rule_key,
+                "category": category,
+                "action": action_name,
+                "message": f"Non-Tolerated Violation Triggered: {rule_key.replace('_', ' ').title()}. Assessment automatically submitted.",
+            }
+            from app.db.enums import AttemptStatus, IntegrityRiskLevel
+            await self.raise_flag(
+                attempt_id=attempt_id,
+                assessment_id=assessment_id,
+                student_id=student_id,
+                raised_by=IntegrityFlagRaisedBy.SYSTEM,
+                description=violation_details["message"],
+                risk_level=IntegrityRiskLevel.CRITICAL,
+                evidence_event_ids=[trigger_event_id],
+            )
+            # Mark attempt auto submitted
+            await self.attempt_repo.set_status(attempt_id, AttemptStatus.AUTO_SUBMITTED)
+            return None, "AUTO_SUBMIT", violation_details
+
+        if action_name in ["WARNING", "WARNING_LOG", "WARNING_AUTO_SUBMIT"]:
+            # Warning level calculation based on count
+            existing_warnings = await self.integrity_repo.list_warnings_for_attempt(attempt_id)
+            warn_count = len(existing_warnings) + 1
+
+            if action_name == "WARNING_AUTO_SUBMIT" and warn_count >= 3:
+                # Exceeded warning threshold for Non-Tolerated violation -> Auto Submit
+                violation_details = {
+                    "rule_key": rule_key,
+                    "category": category,
+                    "action": action_name,
+                    "message": f"Non-Tolerated Violation Limit Reached: Exceeded maximum allowed warnings for {rule_key.replace('_', ' ').title()} (3/3). Assessment automatically submitted.",
+                }
+                warning = await self.issue_warning(
+                    attempt_id=attempt_id,
+                    assessment_id=assessment_id,
+                    student_id=student_id,
+                    warning_level=WarningLevel.WARNING_3,
+                    risk_level=RiskLevel.HIGH,
+                    trigger_event_id=trigger_event_id,
+                    auto_raise_flag=True,
+                    flag_description=violation_details["message"],
+                )
+                from app.db.enums import AttemptStatus
+                await self.attempt_repo.set_status(attempt_id, AttemptStatus.AUTO_SUBMITTED)
+                return warning, "AUTO_SUBMIT", violation_details
+
+            # Normal warning
+            level = WarningLevel.WARNING_1 if warn_count == 1 else (WarningLevel.WARNING_2 if warn_count == 2 else WarningLevel.WARNING_3)
+            risk = RiskLevel.LOW if warn_count == 1 else (RiskLevel.MEDIUM if warn_count == 2 else RiskLevel.HIGH)
+
+            msg = f"Warning ({category} Violation): {rule_key.replace('_', ' ').title()} detected during assessment."
+            warning = await self.issue_warning(
+                attempt_id=attempt_id,
+                assessment_id=assessment_id,
+                student_id=student_id,
+                warning_level=level,
+                risk_level=risk,
+                trigger_event_id=trigger_event_id,
+                auto_raise_flag=(level == WarningLevel.WARNING_3),
+                flag_description=msg,
+            )
+            return warning, "WARNING", {"rule_key": rule_key, "category": category, "warn_count": warn_count}
+
+        return None, "NONE", None
 
     # -----------------------------------------------------------------------
     # ISSUE WARNING

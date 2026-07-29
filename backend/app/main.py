@@ -7,8 +7,8 @@ from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
                                ai_generation, analytics, assessment, attempt,
                                auth, blueprint, gemini, grading, group_work,
                                health, integrity, lecturer, notification,
-                               question, resource, result, student, student_ai,
-                               submission)
+                               question, resource, result, student, student_ai, student_resources,
+                               study_planner, submission)
 from app.core.config import settings
 from app.core.handlers import register_exception_handlers
 from app.core.logging import get_logger
@@ -25,6 +25,22 @@ import os
 from fastapi.staticfiles import StaticFiles
 
 
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from app.db.session import AsyncSessionLocal
+    from app.db.repositories.integrity_repo import IntegrityRepository
+    try:
+        async with AsyncSessionLocal() as db:
+            repo = IntegrityRepository(db)
+            await repo.ensure_default_profiles()
+            await db.commit()
+    except Exception as err:
+        logger.warning(f"Failed to seed default integrity profiles: {err}")
+    yield
+
+
 def create_app() -> FastAPI:
     """Application factory for the Mindexa Platform API."""
     app = FastAPI(
@@ -34,6 +50,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{settings.API_V1_STR}/openapi.json",
         docs_url=f"{settings.API_V1_STR}/docs",
         redoc_url=f"{settings.API_V1_STR}/redoc",
+        lifespan=lifespan,
     )
 
     # ── STATIC FILES ──────────────────────────────────────────────────────────
@@ -45,7 +62,7 @@ def create_app() -> FastAPI:
                                    admin_ai_audit, ai_generation, analytics,
                                    assessment, attempt, auth, blueprint,
                                    gemini, grading, group_work, health,
-                                   integrity, lecturer, notification, question,
+                                   integrity, lecturer, lecturer_ai, notification, question,
                                    resource, result, student, student_ai,
                                    student_resources, submission)
 
@@ -59,7 +76,9 @@ def create_app() -> FastAPI:
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(student_resources.router, prefix=settings.API_V1_STR)
     app.include_router(student_ai.router, prefix=settings.API_V1_STR)
+    app.include_router(study_planner.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)
+    app.include_router(lecturer_ai.router, prefix=settings.API_V1_STR)
     app.include_router(resource.router, prefix=settings.API_V1_STR)
     app.include_router(question.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.router, prefix=settings.API_V1_STR)

@@ -72,6 +72,11 @@ export interface LecturerCourseRosterItem {
   email: string;
   progress: number;
   last_submission: string | null;
+  class_section_id?: string;
+  class_section_name?: string;
+  class_group_id?: string;
+  class_group_name?: string;
+  department_id?: string;
 }
 
 export interface LecturerCourseDetail {
@@ -105,6 +110,9 @@ export interface LecturerMaterialResponse {
   version: number;
   is_current: boolean;
   created_at: string;
+  processing_status: string;
+  chunk_count?: number | null;
+  processing_error?: string | null;
 }
 
 export interface InstitutionResponse {
@@ -195,11 +203,20 @@ export interface WorkspaceListItem {
   class_name: string;
 }
 
+export interface WorkspaceSectionResponse {
+  id: string;
+  name: string;
+  student_count: number;
+  class_group_id?: string;
+  class_group_name?: string;
+}
+
 export interface WorkspaceDetail extends WorkspaceListItem {
+  course_id?: string;
   description?: string;
   department_name?: string;
   option_name?: string;
-  sections?: string[];
+  sections?: WorkspaceSectionResponse[];
   roster: LecturerCourseRosterItem[];
 }
 
@@ -318,5 +335,26 @@ export const lecturerApi = {
     a.click();
     window.URL.revokeObjectURL(url);
     document.body.removeChild(a);
+  },
+  getAISupport: async (data: {
+    workspace_id: string;
+    question: string;
+    mode: string;
+    selected_material_ids?: string[];
+    conversation_history?: Array<{ role: string; content: string }>;
+    feature_payload?: any;
+  }): Promise<{
+    answer: string;
+    citations: any[];
+    fallback_used: boolean;
+    selected_sources: string[];
+    mode: string;
+    model?: string;
+    provider?: string;
+  }> => {
+    return apiClient("/lecturers/ai/support", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
   },
 };

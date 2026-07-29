@@ -821,7 +821,13 @@ export default function AdminAssignmentPanel() {
                                                 </div>
                                             </SelectTrigger>
                                             <SelectContent>
-                                                <SelectItem value="none" className="text-xs font-medium">Entire Class Cohort (Global)</SelectItem>
+                                                <SelectItem value="none" className="text-xs font-medium">
+                                                    {selectedGroup !== "none"
+                                                        ? "Level-wide Assignment (All sections at this level)"
+                                                        : selectedOpt !== "none"
+                                                        ? "Program-wide Assignment (All sections in this program)"
+                                                        : "Course-wide / Global Assignment (All sections under Department)"}
+                                                </SelectItem>
                                                 {sections.map(s => (
                                                     <SelectItem key={s.id} value={s.id} className="text-xs font-medium">Section {s.name}</SelectItem>
                                                 ))}

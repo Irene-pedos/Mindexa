@@ -63,10 +63,10 @@ async def record_event(
     The access_token validates the request belongs to an active attempt.
     The system evaluates whether a warning or flag should be issued.
 
-    Returns the event ID and any warning issued.
+    Returns the event ID, any warning issued, action_required, and violation_details.
     """
     service = IntegrityService(db)
-    event, warning = await service.record_event(
+    event, warning, action_required, violation_details = await service.record_event(
         attempt_id=body.attempt_id,
         student_id=current_user.id,
         access_token=body.access_token,
@@ -78,6 +78,8 @@ async def record_event(
         "event_id": str(event.id),
         "event_type": body.event_type,
         "warning_issued": warning is not None,
+        "action_required": action_required,
+        "violation_details": violation_details,
     }
     if warning:
         response["warning"] = {
@@ -407,3 +409,73 @@ async def end_supervision(
         "message": "Supervision session ended",
         "assessment_id": str(assessment_id),
     }
+
+
+# ── INTEGRITY PROFILES MANAGEMENT ─────────────────────────────────────────────
+
+
+@router.get(
+    "/profiles",
+    response_model=dict,
+    summary="List all institutional integrity profiles",
+)
+async def list_integrity_profiles(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    repo = IntegrityRepository(db)
+    profiles = await repo.list_profiles()
+    from app.schemas.integrity import IntegrityProfileResponse
+    return {
+        "items": [IntegrityProfileResponse.model_validate(p) for p in profiles]
+    }
+
+
+@router.post(
+    "/profiles",
+    response_model=dict,
+    status_code=201,
+    summary="Create a new institutional integrity profile (admin)",
+)
+async def create_integrity_profile(
+    body: dict,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    repo = IntegrityRepository(db)
+    profile = await repo.create_profile(
+        name=body.get("name", "Custom Profile"),
+        code=body.get("code", f"CUSTOM_{uuid.uuid4().hex[:6].upper()}"),
+        description=body.get("description"),
+        is_default=body.get("is_default", False),
+        allow_resume=body.get("allow_resume", False),
+        rules_json=body.get("rules_json", {}),
+    )
+    from app.schemas.integrity import IntegrityProfileResponse
+    return IntegrityProfileResponse.model_validate(profile).model_dump()
+
+
+@router.put(
+    "/profiles/{profile_id}",
+    response_model=dict,
+    summary="Update an institutional integrity profile (admin)",
+)
+async def update_integrity_profile(
+    profile_id: uuid.UUID,
+    body: dict,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    repo = IntegrityRepository(db)
+    profile = await repo.update_profile(
+        profile_id=profile_id,
+        name=body.get("name"),
+        description=body.get("description"),
+        is_default=body.get("is_default"),
+        allow_resume=body.get("allow_resume"),
+        rules_json=body.get("rules_json"),
+    )
+    if not profile:
+        raise NotFoundError("Profile not found")
+    from app.schemas.integrity import IntegrityProfileResponse
+    return IntegrityProfileResponse.model_validate(profile).model_dump()
+

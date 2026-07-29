@@ -41,54 +41,17 @@ class WorkspaceRepository:
         self, student_id: uuid.UUID
     ) -> List[TeachingWorkspace]:
         """List all workspaces a student is enrolled in (section-specific or global)."""
-        # 1. Direct Link: Student is in a section, and workspace is targeted at that section
-        # 2. Indirect Link: Student is in a section, workspace is GLOBAL (no section), 
-        #    but both belong to the same Course.
+        # A student sees workspaces that:
+        # 1) Direct: Workspace has class_section_id and student is active in that section
+        # 2) Global: Workspace has class_section_id is Null, student is active in a section
+        #    that belongs to the workspace's assignment department (and option if option_id is set).
         stmt = (
             select(TeachingWorkspace)
-            .join(StudentEnrollment, or_(
-                # Workspace is for a specific section the student is in
-                TeachingWorkspace.class_section_id == StudentEnrollment.class_section_id,
-                # Workspace is for the whole course, student is in ANY section of that course
-                and_(
-                    TeachingWorkspace.class_section_id == None,
-                    exists().where(
-                        and_(
-                            ClassSection.id == StudentEnrollment.class_section_id,
-                            # We can't join ClassSection -> Course directly anymore. 
-                            # However, TeachingWorkspace HAS course_id.
-                            # So we check if the student's section belongs to the SAME level/dept as the assignment.
-                            # This is complex. Let's stick to the direct linkage for now.
-                        )
-                    )
-                )
-            ))
-            .where(
-                StudentEnrollment.student_id == student_id,
-                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                StudentEnrollment.is_deleted == False,
-                TeachingWorkspace.is_deleted == False
-            )
-            .distinct()
-            .options(
-                selectinload(TeachingWorkspace.course).selectinload(Course.institution),
-                selectinload(TeachingWorkspace.class_section),
-                selectinload(TeachingWorkspace.academic_period),
-                selectinload(TeachingWorkspace.teaching_assignment)
-                .selectinload(TeachingAssignment.lecturer)
-                .selectinload(User.profile)
-            )
-        )
-        # Note: The above SQL logic is a placeholder for the refactored joins.
-        # Let's simplify: A student sees workspaces that match their Section ID 
-        # OR workspaces for their Course ID if they are enrolled in ANY section.
-        
-        simple_stmt = (
-            select(TeachingWorkspace)
+            .join(TeachingAssignment, TeachingAssignment.id == TeachingWorkspace.teaching_assignment_id)
             .where(
                 TeachingWorkspace.is_deleted == False,
                 or_(
-                    # Case A: Workspace is for student's specific section
+                    # Direct link
                     exists().where(
                         and_(
                             StudentEnrollment.student_id == student_id,
@@ -97,17 +60,30 @@ class WorkspaceRepository:
                             StudentEnrollment.is_deleted == False
                         )
                     ),
-                    # Case B: Workspace is GLOBAL for the course, and student is in ANY section
+                    # Global/course-wide link
                     and_(
                         TeachingWorkspace.class_section_id == None,
                         exists().where(
                             and_(
                                 StudentEnrollment.student_id == student_id,
-                                StudentEnrollment.is_deleted == False,
                                 StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                                # Cross-reference via Assignments or direct path if possible
-                                # For now, we assume if you are enrolled in a section, 
-                                # you see the global course workspaces for that course.
+                                StudentEnrollment.is_deleted == False,
+                                exists().where(
+                                    and_(
+                                        ClassSection.id == StudentEnrollment.class_section_id,
+                                        ClassSection.department_id == TeachingAssignment.department_id,
+                                        ClassSection.is_active == True,
+                                        or_(
+                                            TeachingAssignment.option_id == None,
+                                            exists().where(
+                                                and_(
+                                                    ClassGroup.id == ClassSection.class_group_id,
+                                                    ClassGroup.option_id == TeachingAssignment.option_id
+                                                )
+                                            )
+                                        )
+                                    )
+                                )
                             )
                         )
                     )
@@ -122,8 +98,7 @@ class WorkspaceRepository:
                 .selectinload(User.profile)
             )
         )
-
-        result = await self.db.execute(simple_stmt)
+        result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
     async def get_by_id(self, workspace_id: uuid.UUID) -> TeachingWorkspace | None:
@@ -148,33 +123,57 @@ class WorkspaceRepository:
         await self.db.flush()
         return workspace
 
-    async def get_student_count(self, workspace_id: uuid.UUID) -> int:
-        """Count students enrolled in this workspace (section-specific or global)."""
+    async def resolve_workspace_sections(self, workspace_id: uuid.UUID) -> List[ClassSection]:
+        """Resolve all active class sections linked to this workspace."""
         ws = await self.get_by_id(workspace_id)
         if not ws:
-            return 0
+            return []
             
         if ws.class_section_id:
-            # Workspace is targeted at a specific cohort (IT Level 6 A)
-            result = await self.db.execute(
-                select(func.count(StudentEnrollment.id))
-                .where(
-                    StudentEnrollment.class_section_id == ws.class_section_id,
-                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                    StudentEnrollment.is_deleted == False
+            stmt = (
+                select(ClassSection)
+                .where(ClassSection.id == ws.class_section_id, ClassSection.is_active == True)
+                .options(
+                    selectinload(ClassSection.department),
+                    selectinload(ClassSection.class_group).selectinload(ClassGroup.option)
                 )
             )
+            result = await self.db.execute(stmt)
+            return list(result.scalars().all())
         else:
-            # Global workspace: count all students in all sections that are studying this course.
-            # Decoupled logic: Join StudentEnrollment -> ClassSection, and match on Department
-            result = await self.db.execute(
-                select(func.count(StudentEnrollment.id))
-                .join(ClassSection, ClassSection.id == StudentEnrollment.class_section_id)
+            ta = ws.teaching_assignment
+            stmt = (
+                select(ClassSection)
                 .where(
-                    ClassSection.department_id == ws.teaching_assignment.department_id,
-                    StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
-                    StudentEnrollment.is_deleted == False
+                    ClassSection.department_id == ta.department_id,
+                    ClassSection.is_active == True
                 )
             )
+            if ta.option_id:
+                stmt = (
+                    stmt.join(ClassGroup, ClassGroup.id == ClassSection.class_group_id)
+                    .where(ClassGroup.option_id == ta.option_id)
+                )
+            stmt = stmt.options(
+                selectinload(ClassSection.department),
+                selectinload(ClassSection.class_group).selectinload(ClassGroup.option)
+            )
+            result = await self.db.execute(stmt)
+            return list(result.scalars().all())
+
+    async def get_student_count(self, workspace_id: uuid.UUID) -> int:
+        """Count students enrolled in this workspace (section-specific or global)."""
+        sections = await self.resolve_workspace_sections(workspace_id)
+        if not sections:
+            return 0
+        section_ids = [s.id for s in sections]
+        result = await self.db.execute(
+            select(func.count(StudentEnrollment.id))
+            .where(
+                StudentEnrollment.class_section_id.in_(section_ids),
+                StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE.value,
+                StudentEnrollment.is_deleted == False
+            )
+        )
         return result.scalar_one()
 

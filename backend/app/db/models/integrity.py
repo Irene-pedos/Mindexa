@@ -340,3 +340,47 @@ class SupervisionSession(BaseModel, table=True):
 
     # -- Relationships --------------------------------------------------------
     assessment: Optional["Assessment"] = Relationship(back_populates="supervision_sessions")
+
+
+class IntegrityProfile(BaseModel, table=True):
+    """
+    Central institution-wide integrity policy configuration.
+    
+    Profiles set standard policies for different assessment types (e.g., Practice, Homework, Secure Assessment).
+    
+    rules_json schema:
+        {
+          "tab_switching": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"},
+          "window_minimize": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"},
+          "copy": {"category": "Tolerated", "action": "WARNING_LOG"},
+          "paste": {"category": "Tolerated", "action": "WARNING_LOG"},
+          "browser_zoom": {"category": "Tolerated", "action": "LOG_ONLY"},
+          "fullscreen_exit": {"category": "Tolerated", "action": "WARNING"},
+          "idle_long_period": {"category": "Tolerated", "action": "WARNING_LOG"},
+          "screen_blurring": {"category": "Tolerated", "action": "WARNING_LOG"},
+          "browser_refresh": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+          "closing_browser": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+          "opening_another_device": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+          "multiple_sessions": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+          "unauthorized_sharing": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"},
+          "time_expired": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"}
+        }
+    """
+
+    __tablename__ = "integrity_profile"
+
+    name: str = Field(nullable=False, max_length=150)
+    code: str = Field(nullable=False, unique=True, index=True, max_length=50)
+    description: Optional[str] = Field(default=None, nullable=True)
+    is_default: bool = Field(default=False, nullable=False)
+    allow_resume: bool = Field(default=False, nullable=False)
+
+    rules_json: dict = Field(
+        default_factory=dict,
+        sa_column=Column(
+            JSONB,
+            nullable=False,
+            server_default=text("'{}'::jsonb"),
+        ),
+    )
+

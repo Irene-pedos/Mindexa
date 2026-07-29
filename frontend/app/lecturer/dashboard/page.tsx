@@ -70,7 +70,10 @@ export default function LecturerDashboard() {
   const metrics = [
     {
       title: "Active Classes",
-      value: (data?.summary.active_classes_count as any)?.value ?? data?.summary.active_classes_count ?? 0,
+      value:
+        (data?.summary.active_classes_count as any)?.value ??
+        data?.summary.active_classes_count ??
+        0,
       delta: (data?.summary.active_classes_count as any)?.delta ?? 0,
       positive: (data?.summary.active_classes_count as any)?.positive ?? true,
       lastMonth: (data?.summary.active_classes_count as any)?.last_month ?? 0,
@@ -78,15 +81,23 @@ export default function LecturerDashboard() {
     },
     {
       title: "Assessments",
-      value: (data?.summary.upcoming_assessments_count as any)?.value ?? data?.summary.upcoming_assessments_count ?? 0,
+      value:
+        (data?.summary.upcoming_assessments_count as any)?.value ??
+        data?.summary.upcoming_assessments_count ??
+        0,
       delta: (data?.summary.upcoming_assessments_count as any)?.delta ?? 0,
-      positive: (data?.summary.upcoming_assessments_count as any)?.positive ?? true,
-      lastMonth: (data?.summary.upcoming_assessments_count as any)?.last_month ?? 0,
+      positive:
+        (data?.summary.upcoming_assessments_count as any)?.positive ?? true,
+      lastMonth:
+        (data?.summary.upcoming_assessments_count as any)?.last_month ?? 0,
       icon: Clock,
     },
     {
       title: "Pending Grading",
-      value: (data?.summary.pending_grading_count as any)?.value ?? data?.summary.pending_grading_count ?? 0,
+      value:
+        (data?.summary.pending_grading_count as any)?.value ??
+        data?.summary.pending_grading_count ??
+        0,
       delta: (data?.summary.pending_grading_count as any)?.delta ?? 0,
       positive: (data?.summary.pending_grading_count as any)?.positive ?? true,
       lastMonth: (data?.summary.pending_grading_count as any)?.last_month ?? 0,
@@ -94,7 +105,10 @@ export default function LecturerDashboard() {
     },
     {
       title: "Integrity Flags",
-      value: (data?.summary.flagged_events_count as any)?.value ?? data?.summary.flagged_events_count ?? 0,
+      value:
+        (data?.summary.flagged_events_count as any)?.value ??
+        data?.summary.flagged_events_count ??
+        0,
       delta: (data?.summary.flagged_events_count as any)?.delta ?? 0,
       positive: (data?.summary.flagged_events_count as any)?.positive ?? true,
       lastMonth: (data?.summary.flagged_events_count as any)?.last_month ?? 0,
@@ -132,7 +146,7 @@ export default function LecturerDashboard() {
           <h1 className="text-2xl font-semibold tracking-tight">
             Lecturer Command Center
           </h1>
-          <p className="text-muted-foreground text-[10px] font-semibold uppercase tracking-wider">
+          <p className="text-muted-foreground text-[13px]">
             Institutional Oversight • Professional Analytics
           </p>
         </div>

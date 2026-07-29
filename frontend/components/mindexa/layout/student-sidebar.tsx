@@ -27,9 +27,11 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { Badge } from "@/components/ui/badge";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
-import { notificationApi } from "@/lib/api/notification";
+import { studentApi } from "@/lib/api/student";
+import { assessmentApi } from "@/lib/api/assessment";
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
@@ -49,35 +51,56 @@ export function StudentSidebar({
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const { user } = useAuth();
-  const [hasNewAssessments, setHasNewAssessments] = React.useState(false);
+  const [pendingAssessmentsCount, setPendingAssessmentsCount] =
+    React.useState<number>(0);
+  const [hasVisitedAssessments, setHasVisitedAssessments] =
+    React.useState<boolean>(false);
 
   React.useEffect(() => {
-    async function checkNotifications() {
-        try {
-            const res = await notificationApi.getNotifications(true); // unread only
-            const hasNew = res.items.some(n => 
-                ["ASSESSMENT_PUBLISHED", "GROUP_WORK_ASSIGNED"].includes(n.notification_type)
-            );
-            setHasNewAssessments(hasNew);
-        } catch (e) {
-            console.error("Failed to check notifications", e);
-        }
+    if (pathname.startsWith("/student/assessments")) {
+      setHasVisitedAssessments(true);
+      try {
+        sessionStorage.setItem("student_assessments_visited", "true");
+      } catch {}
+    } else {
+      try {
+        const visited =
+          sessionStorage.getItem("student_assessments_visited") === "true";
+        setHasVisitedAssessments(visited);
+      } catch {}
     }
-    if (user) checkNotifications();
-  }, [user, pathname]);
+  }, [pathname]);
+
+  React.useEffect(() => {
+    async function checkPendingAssessments() {
+      if (!user) return;
+      try {
+        const dash = await studentApi.getDashboard().catch(() => null);
+        if (dash?.summary?.active_assessments_count?.value !== undefined) {
+          setPendingAssessmentsCount(
+            dash.summary.active_assessments_count.value,
+          );
+        } else {
+          const res = await assessmentApi.getAssessments({ page_size: 50 });
+          const validItems = (res.items || []).filter(
+            (a: any) => a.status === "PUBLISHED" || a.status === "IN_PROGRESS",
+          );
+          setPendingAssessmentsCount(validItems.length);
+        }
+      } catch (e) {
+        console.error("Failed to check pending assessments", e);
+      }
+    }
+    checkPendingAssessments();
+    const interval = setInterval(checkPendingAssessments, 120000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   const displayName =
     (user?.profile as any)?.display_name ||
     ((user?.profile as any)?.first_name
       ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}`
       : "Student");
-
-  const userData = {
-    name: displayName,
-    email: (user as any)?.email || "",
-    avatar:
-      (user?.profile as any)?.avatar_url || "/avatars/user avatar.png",
-  };
 
   return (
     <Sidebar collapsible="icon" {...props}>
@@ -121,8 +144,13 @@ export function StudentSidebar({
             {mainNav.map((item) => {
               const isActive =
                 pathname === item.url || pathname.startsWith(item.url + "/");
-              const showDot = item.title === "Assessments" && hasNewAssessments;
-              
+              const isAssessmentsTab = item.title === "Assessments";
+              const showBadge =
+                isAssessmentsTab &&
+                pendingAssessmentsCount > 0 &&
+                !hasVisitedAssessments &&
+                !pathname.startsWith("/student/assessments");
+
               return (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
@@ -130,11 +158,16 @@ export function StudentSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                   >
-                    <Link href={item.url} className="relative">
+                    <Link
+                      href={item.url}
+                      className="relative flex items-center w-full"
+                    >
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
-                      {showDot && (
-                          <span className="absolute top-1.5 left-4 size-2 rounded-full bg-red-500 border-2 border-background" />
+                      {showBadge && (
+                        <Badge className="ml-auto mr-1 h-5 px-1.5 flex items-center justify-center text-xs font-semibold bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 border-none group-data-[collapsible=icon]:hidden">
+                          {pendingAssessmentsCount}
+                        </Badge>
                       )}
                     </Link>
                   </SidebarMenuButton>

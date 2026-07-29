@@ -34,6 +34,7 @@ class StudySupportAgent(BaseAgent):
         student_id: uuid.UUID,
         conversation_history: List[Dict[str, Any]],
         db: AsyncSession,
+        selected_resource_id: Optional[uuid.UUID] = None,
     ) -> StudySupportAgentResponse:
         
         self.rag_service = RAGService(db)
@@ -42,6 +43,7 @@ class StudySupportAgent(BaseAgent):
         rag_result = await self.rag_service.retrieve_context(
             question=question,
             student_id=student_id,
+            selected_resource_id=selected_resource_id,
         )
         
         # Step 2: Build system prompt
