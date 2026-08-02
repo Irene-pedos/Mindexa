@@ -1,8 +1,22 @@
 "use client";
 
 import React from "react";
-import { CheckCircle2, Trophy, Flame, TrendingUp, Sparkles, ArrowRight, BookOpen } from "lucide-react";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  CheckCircle2,
+  Trophy,
+  Flame,
+  TrendingUp,
+  Sparkles,
+  ArrowRight,
+  BookOpen,
+} from "lucide-react";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
@@ -25,13 +39,18 @@ export function SessionSummaryReport({
         <div className="mx-auto size-20 rounded-full bg-gradient-to-tr from-primary to-indigo-600 flex items-center justify-center text-primary-foreground shadow-lg mb-4">
           <Trophy className="size-10" />
         </div>
-        <Badge variant="outline" className="mx-auto text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1 mb-2">
+        <Badge
+          variant="outline"
+          className="mx-auto text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1 mb-2"
+        >
           Guided Session Completed
         </Badge>
         <CardTitle className="text-2xl md:text-3xl font-black tracking-tight text-foreground">
           {session.topic}
         </CardTitle>
-        <p className="text-xs text-muted-foreground mt-1 font-medium">{session.title}</p>
+        <p className="text-xs text-muted-foreground mt-1 font-medium">
+          {session.title}
+        </p>
       </CardHeader>
 
       <CardContent className="px-8 space-y-6">
@@ -46,7 +65,8 @@ export function SessionSummaryReport({
 
           <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-center space-y-1">
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1">
-              <TrendingUp className="size-3.5 text-emerald-500" /> Knowledge Check
+              <TrendingUp className="size-3.5 text-emerald-500" /> Knowledge
+              Check
             </span>
             <p className="text-xl font-black text-foreground">
               {report ? `${Math.round(report.score_percentage)}%` : "Completed"}
@@ -57,7 +77,9 @@ export function SessionSummaryReport({
             <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1">
               <BookOpen className="size-3.5 text-primary" /> Session Time
             </span>
-            <p className="text-xl font-black text-foreground">{session.duration_minutes}m</p>
+            <p className="text-xl font-black text-foreground">
+              {session.duration_minutes}m
+            </p>
           </div>
         </div>
 
@@ -72,26 +94,63 @@ export function SessionSummaryReport({
                 content={(() => {
                   const raw = session.session_summary_text.trim();
                   if (raw.startsWith("{") && raw.endsWith("}")) {
-                    try {
-                      // Attempt to parse JSON / python dict representation
-                      const jsonStr = raw.replace(/'/g, '"');
-                      const data = JSON.parse(jsonStr);
+                    const tryParseJson = (value: string) => {
+                      try {
+                        return JSON.parse(value);
+                      } catch {
+                        return null;
+                      }
+                    };
+
+                    const data =
+                      tryParseJson(raw) ?? tryParseJson(raw.replace(/'/g, '"'));
+                    if (data && typeof data === "object") {
                       const parts = [];
-                      if (data.key_takeaways && Array.isArray(data.key_takeaways)) {
-                        parts.push("**Key Takeaways:**\n" + data.key_takeaways.map((t: string) => `- ${t}`).join("\n"));
+                      if (
+                        data.key_takeaways &&
+                        Array.isArray(data.key_takeaways)
+                      ) {
+                        parts.push(
+                          "**Key Takeaways:**\n" +
+                            data.key_takeaways
+                              .map((t: string) => `- ${t}`)
+                              .join("\n"),
+                        );
                       }
-                      if (data.concepts_covered && Array.isArray(data.concepts_covered)) {
-                        parts.push("**Concepts Covered:** " + data.concepts_covered.map((c: string) => `\`${c}\``).join(", "));
+                      if (
+                        data.concepts_covered &&
+                        Array.isArray(data.concepts_covered)
+                      ) {
+                        parts.push(
+                          "**Concepts Covered:** " +
+                            data.concepts_covered
+                              .map((c: string) => `\`${c}\``)
+                              .join(", "),
+                        );
                       }
-                      if (data.common_mistakes_to_avoid && Array.isArray(data.common_mistakes_to_avoid)) {
-                        parts.push("**Common Pitfalls to Avoid:**\n" + data.common_mistakes_to_avoid.map((m: string) => `- ${m}`).join("\n"));
+                      if (
+                        data.common_mistakes_to_avoid &&
+                        Array.isArray(data.common_mistakes_to_avoid)
+                      ) {
+                        parts.push(
+                          "**Common Pitfalls to Avoid:**\n" +
+                            data.common_mistakes_to_avoid
+                              .map((m: string) => `- ${m}`)
+                              .join("\n"),
+                        );
                       }
-                      if (data.recommendations_for_future_revision && Array.isArray(data.recommendations_for_future_revision)) {
-                        parts.push("**Recommendations for Revision:**\n" + data.recommendations_for_future_revision.map((r: string) => `- ${r}`).join("\n"));
+                      if (
+                        data.recommendations_for_future_revision &&
+                        Array.isArray(data.recommendations_for_future_revision)
+                      ) {
+                        parts.push(
+                          "**Recommendations for Revision:**\n" +
+                            data.recommendations_for_future_revision
+                              .map((r: string) => `- ${r}`)
+                              .join("\n"),
+                        );
                       }
                       if (parts.length > 0) return parts.join("\n\n");
-                    } catch (e) {
-                      // Return raw if JSON parsing fails
                     }
                   }
                   return raw;

@@ -1,21 +1,22 @@
 from __future__ import annotations
-import uuid
-import os
-import fitz  # PyMuPDF
-import docx
-import tiktoken
-import httpx
-from datetime import datetime, UTC
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import select
-from sqlalchemy import update
-from typing import List, Dict, Any, Optional
 
-from app.db.models.academic_resource import AcademicResource
-from app.db.models.resource_chunk import ResourceChunk
-from app.db.enums import ResourceProcessingStatus
+import os
+import uuid
+from datetime import UTC, datetime
+from typing import Any, Dict, List, Optional
+
+import docx
+import fitz  # PyMuPDF
+import httpx
+import tiktoken
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.db.enums import ResourceProcessingStatus
+from app.db.models.academic_resource import AcademicResource
+from app.db.models.resource_chunk import ResourceChunk
+from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 
 logger = get_logger(__name__)
 
@@ -63,11 +64,11 @@ class DocumentProcessingService:
 
             # 5. Chunk text
             chunks_data = self._chunk_text(pages)
-            
+
             # 6. Generate embeddings
             texts = [c["content"] for c in chunks_data]
             embeddings = await self._generate_embeddings(texts, resource_id=resource.id, db=db)
-            
+
             # 7. Store ResourceChunk records
             await self._store_chunks(resource.id, chunks_data, embeddings, db)
 
@@ -76,7 +77,7 @@ class DocumentProcessingService:
             resource.processed_at = datetime.now(UTC)
             resource.chunk_count = len(chunks_data)
             await db.commit()
-            
+
             # 9. Also update the owning StudentResource or LecturerMaterial so the
             #    frontend can see the correct processing status.
             await self._sync_parent_resource_status(
@@ -85,7 +86,7 @@ class DocumentProcessingService:
                 chunk_count=len(chunks_data),
                 db=db,
             )
-            
+
             logger.info("Resource processed successfully", resource_id=resource.id)
 
         except Exception as e:
@@ -122,17 +123,17 @@ class DocumentProcessingService:
             doc = docx.Document(file_path)
             text_blocks = []
             current_block = []
-            
+
             for para in doc.paragraphs:
                 if para.text.strip():
                     current_block.append(para.text)
                     if len(current_block) >= 5: # Group 5 paragraphs as a block
                         text_blocks.append({"section": None, "text": "\n".join(current_block)})
                         current_block = []
-            
+
             if current_block:
                 text_blocks.append({"section": None, "text": "\n".join(current_block)})
-            
+
             return text_blocks
         except Exception as e:
             raise DocumentExtractionError(f"DOCX extraction failed: {str(e)}")
@@ -142,7 +143,7 @@ class DocumentProcessingService:
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 content = f.read()
-            
+
             # Split by double newlines as logical blocks
             blocks = content.split("\n\n")
             return [{"page": 1, "text": b} for b in blocks if b.strip()]
@@ -155,19 +156,19 @@ class DocumentProcessingService:
         overlap = overlap or settings.RAG_CHUNK_OVERLAP
         chunks = []
         chunk_index = 0
-        
+
         for p in pages:
             text = p["text"]
             # Simplified character-based approximation if tiktoken is not available
             # 1 token approx 4 characters
             chars_per_chunk = chunk_size * 4
             chars_overlap = overlap * 4
-            
+
             start = 0
             while start < len(text):
                 end = start + chars_per_chunk
                 chunk_text = text[start:end]
-                
+
                 if len(chunk_text.strip()) > 30: # Minimum 30 tokens approx 120 chars
                     token_count = self._count_tokens(chunk_text)
                     chunks.append({
@@ -177,11 +178,11 @@ class DocumentProcessingService:
                         "metadata": {"page": p.get("page"), "section": p.get("section")}
                     })
                     chunk_index += 1
-                
+
                 start += chars_per_chunk - chars_overlap
                 if start >= len(text):
                     break
-                    
+
         return chunks
 
     def _count_tokens(self, text: str) -> int:
@@ -199,7 +200,8 @@ class DocumentProcessingService:
         if db is not None:
             try:
                 from app.core.ai.gateway import AIGateway
-                from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+                from app.core.ai.provider_factory import (
+                    get_ai_providers, get_embedding_providers)
                 from app.core.ai.providers import AIEmbeddingRequest
 
                 gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
@@ -210,9 +212,13 @@ class DocumentProcessingService:
                     subject_entity_id=resource_id,
                     prompt_summary=f"Document embedding batch for resource {resource_id}",
                 )
+                if len(res.embeddings) != len(texts):
+                    raise EmbeddingGenerationError(
+                        f"AIGateway returned {len(res.embeddings)} embeddings for {len(texts)} inputs"
+                    )
                 return res.embeddings
             except Exception as exc:
-                logger.warning(
+                logger.exception(
                     "AIGateway document embedding failed, attempting direct provider fallback",
                     error=str(exc),
                 )
@@ -224,7 +230,7 @@ class DocumentProcessingService:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.jina_api_key}",
         }
-        
+
         # Jina supports batching.
         url = f"{self.jina_base_url}/embeddings"
         payload = {
@@ -233,14 +239,19 @@ class DocumentProcessingService:
             "dimensions": settings.PGVECTOR_DIMENSION,
             "input": texts,
         }
-        
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(url, headers=headers, json=payload)
             if response.status_code != 200:
                 raise EmbeddingGenerationError(f"Jina API failed: {response.text}")
-            
+
             data = response.json()
-            return [item["embedding"] for item in data["data"]]
+            embeddings = [item["embedding"] for item in data["data"]]
+            if len(embeddings) != len(texts):
+                raise EmbeddingGenerationError(
+                    f"Jina direct provider returned {len(embeddings)} embeddings for {len(texts)} inputs"
+                )
+            return embeddings
 
     async def _store_chunks(self, resource_id: uuid.UUID, chunks_data: List[Dict[str, Any]], embeddings: List[List[float]], db: AsyncSession) -> None:
         """Bulk insert ResourceChunk records."""
@@ -269,7 +280,7 @@ class DocumentProcessingService:
         to the StudentResource or LecturerMaterial that owns it.
         This keeps the frontend status field in sync.
         """
-        from app.db.models.resource import StudentResource, LecturerMaterial
+        from app.db.models.resource import LecturerMaterial, StudentResource
 
         # Try to update StudentResource
         student_update = (

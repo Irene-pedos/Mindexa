@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
+from sqlalchemy.engine.reflection import Inspector
 
 # revision identifiers, used by Alembic
 revision: str = '0a02e34b2c50'
@@ -20,36 +20,41 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _has_column(table_name: str, column_name: str) -> bool:
+    conn = op.get_bind()
+    inspector = Inspector.from_engine(conn)
+    try:
+        cols = [col["name"] for col in inspector.get_columns(table_name)]
+    except Exception:
+        return False
+    return column_name in cols
+
+
 def upgrade() -> None:
-    # Add new study session columns if not existing
-    try:
+    if not _has_column('study_session', 'lesson_plan_json'):
         op.add_column('study_session', sa.Column('lesson_plan_json', sa.JSON(), nullable=True))
-    except Exception:
-        pass
 
-    try:
+    if not _has_column('study_session', 'student_notes'):
         op.add_column('study_session', sa.Column('student_notes', sa.Text(), nullable=True))
-    except Exception:
-        pass
 
-    try:
+    if not _has_column('study_session', 'tutor_chat_history'):
         op.add_column('study_session', sa.Column('tutor_chat_history', sa.JSON(), nullable=True))
-    except Exception:
-        pass
+
+    op.execute(sa.text("UPDATE study_session SET tutor_chat_history = '[]' WHERE tutor_chat_history IS NULL"))
+    op.alter_column(
+        'study_session',
+        'tutor_chat_history',
+        existing_type=sa.JSON(),
+        nullable=False,
+    )
 
 
 def downgrade() -> None:
-    try:
+    if _has_column('study_session', 'tutor_chat_history'):
         op.drop_column('study_session', 'tutor_chat_history')
-    except Exception:
-        pass
 
-    try:
+    if _has_column('study_session', 'student_notes'):
         op.drop_column('study_session', 'student_notes')
-    except Exception:
-        pass
 
-    try:
+    if _has_column('study_session', 'lesson_plan_json'):
         op.drop_column('study_session', 'lesson_plan_json')
-    except Exception:
-        pass

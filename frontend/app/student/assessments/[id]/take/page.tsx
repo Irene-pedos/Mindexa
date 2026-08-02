@@ -652,7 +652,7 @@ function FillInTheBlanksDnd({
 }: {
   q: AssessmentQuestion;
   attemptId: string | null;
-  currentVal: Record<number, string> | undefined;
+  currentVal: Record<number | string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
   return (
@@ -861,10 +861,10 @@ function seededShuffle<T>(array: T[], seed: string): T[] {
   const result = [...array];
   let h = 0;
   for (let i = 0; i < seed.length; i++) {
-    h = Math.imul(31, h) + seed.charCodeAt(i) | 0;
+    h = (Math.imul(31, h) + seed.charCodeAt(i)) | 0;
   }
   const lcg = () => {
-    h = Math.imul(h, 1664525) + 1013904223 | 0;
+    h = (Math.imul(h, 1664525) + 1013904223) | 0;
     return (h >>> 0) / 0xffffffff;
   };
   for (let i = result.length - 1; i > 0; i--) {
@@ -955,14 +955,26 @@ export default function TakeAssessmentPage() {
       (assessment as any)?.randomize_options ||
       (assessment as any)?.shuffleOptions
     );
-    
+
     questions.forEach((q) => {
-      const type = (q.type || q.question_type || "").toString().toLowerCase().replace(/[^a-z0-9_]/g, "");
-      const isMCQ = type === "mcq" || type === "multiplechoice" || type === "multiple_choice" || type === "multichoice" || type === "singleoption";
-      const isMulti = getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
-      
+      const type = (q.type || q.question_type || "")
+        .toString()
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, "");
+      const isMCQ =
+        type === "mcq" ||
+        type === "multiplechoice" ||
+        type === "multiple_choice" ||
+        type === "multichoice" ||
+        type === "singleoption";
+      const isMulti =
+        getAnswerType(q.type || q.question_type || "") === "MULTI_OPTION";
+
       if ((isMCQ || isMulti) && shuffleEnabled) {
-        map[q.id] = seededShuffle(q.options || [], `${attemptId || ""}-${q.id}`);
+        map[q.id] = seededShuffle(
+          q.options || [],
+          `${attemptId || ""}-${q.id}`,
+        );
       } else {
         map[q.id] = q.options || [];
       }
@@ -976,7 +988,8 @@ export default function TakeAssessmentPage() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isScreenBlurred, setIsScreenBlurred] = useState(false);
   const [autoSubmitModalOpen, setAutoSubmitModalOpen] = useState(false);
-  const [autoSubmitViolationMessage, setAutoSubmitViolationMessage] = useState("");
+  const [autoSubmitViolationMessage, setAutoSubmitViolationMessage] =
+    useState("");
   const [terminationReason, setTerminationReason] = useState<string | null>(
     null,
   );
@@ -986,8 +999,12 @@ export default function TakeAssessmentPage() {
   const [readinessChecked, setReadinessChecked] = useState(false);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [manualSubmitError, setManualSubmitError] = useState<string | null>(null);
-  const [interactedQuestions, setInteractedQuestions] = useState<Record<string, boolean>>({});
+  const [manualSubmitError, setManualSubmitError] = useState<string | null>(
+    null,
+  );
+  const [interactedQuestions, setInteractedQuestions] = useState<
+    Record<string, boolean>
+  >({});
   const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
 
   useEffect(() => {
@@ -1001,7 +1018,9 @@ export default function TakeAssessmentPage() {
   useEffect(() => {
     if (stage === "submitted") {
       const redirect = () => {
-        router.push(attemptId ? `/student/results/${attemptId}` : "/student/results");
+        router.push(
+          attemptId ? `/student/results/${attemptId}` : "/student/results",
+        );
       };
       redirect();
       const timer = setTimeout(redirect, 10000);
@@ -1043,7 +1062,9 @@ export default function TakeAssessmentPage() {
       ) => Promise<void>)
     | null
   >(null);
-  const saveAllPendingAnswersRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  const saveAllPendingAnswersRef = useRef<(() => Promise<void>) | undefined>(
+    undefined,
+  );
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -1100,7 +1121,9 @@ export default function TakeAssessmentPage() {
         return Array.isArray(val) && val.length > 0;
       }
       if (answerType === "ORDERED_LIST") {
-        return Array.isArray(val) && val.length > 0 && !!interactedQuestions[q.id];
+        return (
+          Array.isArray(val) && val.length > 0 && !!interactedQuestions[q.id]
+        );
       }
       if (answerType === "MATCH_PAIRS") {
         return typeof val === "object" && Object.keys(val).length > 0;
@@ -1203,7 +1226,7 @@ export default function TakeAssessmentPage() {
         if (res.action_required === "AUTO_SUBMIT") {
           setAutoSubmitViolationMessage(
             res.violation_details?.message ||
-              `Critical Non-Tolerated Integrity Violation (${type}). Assessment automatically submitted.`
+              `Critical Non-Tolerated Integrity Violation (${type}). Assessment automatically submitted.`,
           );
           setAutoSubmitModalOpen(true);
           autoSubmit();
@@ -1276,11 +1299,14 @@ export default function TakeAssessmentPage() {
       };
 
       if (answerType === "TEXT") {
-        const isCS = (qType || "").toLowerCase().replace(/[^a-z0-9_]/g, "") === "casestudy";
+        const isCS =
+          (qType || "").toLowerCase().replace(/[^a-z0-9_]/g, "") ===
+          "casestudy";
         if (isCS) {
-          payload.answer_text = typeof answerVal === "object" && answerVal !== null
-            ? JSON.stringify(answerVal)
-            : JSON.stringify({});
+          payload.answer_text =
+            typeof answerVal === "object" && answerVal !== null
+              ? JSON.stringify(answerVal)
+              : JSON.stringify({});
         } else {
           payload.answer_text =
             typeof answerVal === "string"
@@ -1375,9 +1401,11 @@ export default function TakeAssessmentPage() {
           s.answer_type === "ordering"
         ) {
           savedAnswers[s.question_id] = s.ordered_option_ids || [];
-          setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
-        }
-        else if (s.answer_type === "FILE")
+          setInteractedQuestions((prev) => ({
+            ...prev,
+            [s.question_id]: true,
+          }));
+        } else if (s.answer_type === "FILE")
           savedAnswers[s.question_id] = {
             file_url: s.file_url || "",
             filename: s.file_url
@@ -1666,7 +1694,10 @@ export default function TakeAssessmentPage() {
       }
     } catch (err: any) {
       setStage("submitted");
-      setSubmitError(err.message || "Failed to submit assessment automatically. Please check your network connection.");
+      setSubmitError(
+        err.message ||
+          "Failed to submit assessment automatically. Please check your network connection.",
+      );
       if (attemptId && attemptToken) {
         startPollingScore(attemptId, attemptToken);
       }
@@ -1686,7 +1717,10 @@ export default function TakeAssessmentPage() {
         startPollingScore(attemptId, attemptToken);
       }
     } catch (err: any) {
-      setSubmitError(err.message || "Failed to submit assessment. Please check your network connection.");
+      setSubmitError(
+        err.message ||
+          "Failed to submit assessment. Please check your network connection.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1842,7 +1876,10 @@ export default function TakeAssessmentPage() {
       startPollingScore(attemptId, attemptToken);
       setShowSubmitConfirm(false);
     } catch (err: any) {
-      setManualSubmitError(err.message || "Failed to submit assessment. Please check your network connection and try again.");
+      setManualSubmitError(
+        err.message ||
+          "Failed to submit assessment. Please check your network connection and try again.",
+      );
       toast.error("Submission failed.");
     } finally {
       setSubmitting(false);
@@ -1950,9 +1987,11 @@ export default function TakeAssessmentPage() {
             s.answer_type === "ordering"
           ) {
             savedAnswers[s.question_id] = s.ordered_option_ids || [];
-            setInteractedQuestions((prev) => ({ ...prev, [s.question_id]: true }));
-          }
-          else if (s.answer_type === "FILE")
+            setInteractedQuestions((prev) => ({
+              ...prev,
+              [s.question_id]: true,
+            }));
+          } else if (s.answer_type === "FILE")
             savedAnswers[s.question_id] = {
               file_url: s.file_url || "",
               filename: s.file_url
@@ -2746,14 +2785,18 @@ export default function TakeAssessmentPage() {
               <div className="mx-auto size-12 rounded-full bg-destructive/10 flex items-center justify-center mb-3">
                 <AlertTriangle className="size-6 text-destructive" />
               </div>
-              <CardTitle className="text-base text-destructive font-bold">Submission Failed</CardTitle>
+              <CardTitle className="text-base text-destructive font-bold">
+                Submission Failed
+              </CardTitle>
               <CardDescription className="text-xs">
-                We couldn&apos;t submit your assessment to the server automatically.
+                We couldn&apos;t submit your assessment to the server
+                automatically.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4 text-center">
               <p className="text-xs text-muted-foreground leading-relaxed">
-                Your answers are saved locally on this device. Please check your internet connection and click the button below to retry.
+                Your answers are saved locally on this device. Please check your
+                internet connection and click the button below to retry.
               </p>
               <div className="p-3 bg-destructive/[0.03] border border-destructive/10 rounded-lg text-left">
                 <p className="font-mono text-[10px] text-destructive leading-normal break-all">
@@ -2768,14 +2811,21 @@ export default function TakeAssessmentPage() {
                 >
                   {submitting ? (
                     <>
-                      <Loader2 className="mr-2 size-3 animate-spin" /> Submitting...
+                      <Loader2 className="mr-2 size-3 animate-spin" />{" "}
+                      Submitting...
                     </>
                   ) : (
                     "Retry Submission"
                   )}
                 </Button>
                 <Button
-                  onClick={() => router.push(attemptId ? `/student/results/${attemptId}` : "/student/results")}
+                  onClick={() =>
+                    router.push(
+                      attemptId
+                        ? `/student/results/${attemptId}`
+                        : "/student/results",
+                    )
+                  }
                   variant="outline"
                   className="w-full h-9 text-xs font-medium"
                 >
@@ -2791,7 +2841,9 @@ export default function TakeAssessmentPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4">
         <Loader2 className="size-8 animate-spin text-primary mb-2" />
-        <p className="text-sm text-muted-foreground font-semibold">Recording submission and redirecting to marks review...</p>
+        <p className="text-sm text-muted-foreground font-semibold">
+          Recording submission and redirecting to marks review...
+        </p>
       </div>
     );
   }
@@ -3871,12 +3923,19 @@ export default function TakeAssessmentPage() {
               <Shield className="size-6" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-foreground">Assessment Screen Blurred</h3>
+              <h3 className="text-lg font-bold text-foreground">
+                Assessment Screen Blurred
+              </h3>
               <p className="text-xs text-muted-foreground leading-relaxed font-medium">
-                Another application or external window was active above the assessment interface. This event has been logged with Warning + Log.
+                Another application or external window was active above the
+                assessment interface. This event has been logged with Warning +
+                Log.
               </p>
             </div>
-            <Button size="sm" className="w-full text-xs font-bold rounded-lg h-9">
+            <Button
+              size="sm"
+              className="w-full text-xs font-bold rounded-lg h-9"
+            >
               Click Anywhere to Refocus Assessment
             </Button>
           </div>
@@ -3894,12 +3953,15 @@ export default function TakeAssessmentPage() {
               Assessment Auto-Submitted
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              A Non-Tolerated Integrity Violation was recorded on your attempt session.
+              A Non-Tolerated Integrity Violation was recorded on your attempt
+              session.
             </DialogDescription>
           </DialogHeader>
 
           <div className="p-4 rounded-xl border border-destructive/20 bg-destructive/5 space-y-2 my-2 text-left">
-            <p className="text-xs font-bold text-destructive">Violation Details:</p>
+            <p className="text-xs font-bold text-destructive">
+              Violation Details:
+            </p>
             <p className="text-xs text-foreground/90 font-medium leading-relaxed">
               {autoSubmitViolationMessage ||
                 "Exceeded maximum allowed warnings or triggered a critical non-tolerated policy rule."}
@@ -3934,7 +3996,10 @@ export default function TakeAssessmentPage() {
           <DialogTitle className="text-lg font-semibold text-destructive tracking-tight">
             Integrity Protocols Alert
           </DialogTitle>
-          <DialogDescription id="warning-desc" className="text-xs text-muted-foreground mt-1">
+          <DialogDescription
+            id="warning-desc"
+            className="text-xs text-muted-foreground mt-1"
+          >
             An integrity warning has been flagged on your session. You must
             acknowledge this notice to return to the exam.
           </DialogDescription>
@@ -4066,7 +4131,9 @@ export default function TakeAssessmentPage() {
               <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-left flex items-start gap-2.5">
                 <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
                 <div className="text-xs text-red-700 leading-relaxed">
-                  <span className="font-semibold block mb-0.5">Submission Failed</span>
+                  <span className="font-semibold block mb-0.5">
+                    Submission Failed
+                  </span>
                   {manualSubmitError}
                 </div>
               </div>

@@ -3,26 +3,30 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 
-from sqlalchemy import or_, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.agents.student_support_agent import StudySupportAgent
 from app.core.ai.gateway import AIGateway
-from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+from app.core.ai.provider_factory import (get_ai_provider,
+                                          get_embedding_provider)
 from app.core.exceptions import PermissionDeniedError, ValidationError
 from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User
-from app.schemas.student_ai import (
-    StudentSupportContextRequest,
-    StudentSupportRequest,
-    StudentSupportResponse,
-)
+from app.schemas.student_ai import (StudentSupportContextRequest,
+                                    StudentSupportRequest,
+                                    StudentSupportResponse)
+from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 # No need for separate RAGService import if Agent handles it, but let's see.
 
 _BLOCKED_CONTEXT_PATTERN = re.compile(
-    r"(?:answer[ _-]?key|marking[ _-]?(?:guide|scheme|rubric)|hidden[ _-]?rubric|exam[ _-]?(?:paper|solution))",
+    r"(?:answer[ _-]?key|hidden[ _-]?rubric|exam[ _-]?(?:paper|solution))",
+    re.IGNORECASE,
+)
+
+_BLOCKED_QUESTION_PATTERN = re.compile(
+    r"(?:answer[ _-]?key|exam[ _-]?(?:paper|solution)|hidden[ _-]?rubric)",
     re.IGNORECASE,
 )
 
@@ -43,14 +47,21 @@ class StudentAIService:
 
         await self._assert_student_support_allowed(current_user.id)
 
-        # Validate question & injected context for safety against prohibited exam materials
-        if _BLOCKED_CONTEXT_PATTERN.search(body.question):
+        # Validate question & injected context for safety against prohibited exam materials.
+        # Only block question text when it explicitly seeks answer keys, exam solutions, or hidden rubrics,
+        # while allowing legitimate grading questions that are not trying to obtain prohibited content.
+        if _BLOCKED_QUESTION_PATTERN.search(body.question):
             raise PermissionDeniedError(
-                "Student AI support cannot process input containing prohibited materials (such as answer keys, marking schemes, or exam solutions).",
+                "Student AI support cannot process input containing prohibited materials (such as answer keys or exam solutions).",
                 code="AI_CONTEXT_NOT_ALLOWED",
             )
 
         if hasattr(body, "contexts") and body.contexts:
+            if _BLOCKED_CONTEXT_PATTERN.search(body.question):
+                raise PermissionDeniedError(
+                    "Student AI support cannot process input containing prohibited materials (such as answer keys or exam solutions).",
+                    code="AI_CONTEXT_NOT_ALLOWED",
+                )
             await self._assert_contexts_are_safe(body.contexts)
 
         # 1. Build Gateway
@@ -109,6 +120,8 @@ class StudentAIService:
     async def generate_revision_guide(
         self, body: Any, student_id: uuid.UUID
     ) -> Any:
+        await self._assert_student_support_allowed(student_id)
+
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
         gateway = AIGateway(self.db, chat_provider, embed_provider)

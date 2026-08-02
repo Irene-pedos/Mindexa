@@ -61,10 +61,10 @@ export function StudyPlanDashboard({
   const materialCoverage = summary?.material_coverage || [];
 
   const totalSessions =
-    activePlan?.sessions.length || summary?.total_sessions_count || 0;
+    activePlan?.sessions.length ?? summary?.total_sessions_count ?? 0;
   const completedSessions =
-    activePlan?.sessions.filter((s) => s.status === "COMPLETED").length ||
-    summary?.completed_sessions_count ||
+    activePlan?.sessions.filter((s) => s.status === "COMPLETED").length ??
+    summary?.completed_sessions_count ??
     0;
   const progressPercent =
     totalSessions > 0
@@ -223,7 +223,8 @@ export function StudyPlanDashboard({
                 Initial Readiness Baseline ({readinessScore}%)
               </span>
               <p className="text-xs text-muted-foreground font-medium">
-                Complete study sessions & knowledge checks to build your multi-point readiness trend timeline.
+                Complete study sessions & knowledge checks to build your
+                multi-point readiness trend timeline.
               </p>
             </div>
           )}
@@ -452,7 +453,15 @@ export function StudyPlanDashboard({
             {/* Weekly Habit Heatmap */}
             <div className="p-3 rounded-xl border border-border/30 bg-muted/10 space-y-1.5">
               {(() => {
-                const weeklyActivity = summary?.weekly_study_activity || [false, false, false, false, false, false, false];
+                const weeklyActivity = summary?.weekly_study_activity || [
+                  false,
+                  false,
+                  false,
+                  false,
+                  false,
+                  false,
+                  false,
+                ];
                 const activeDaysCount = weeklyActivity.filter(Boolean).length;
 
                 return (
@@ -460,7 +469,8 @@ export function StudyPlanDashboard({
                     <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-between">
                       <span>Weekly Study Habits Heatmap</span>
                       <span className="text-primary font-bold">
-                        {activeDaysCount} Day{activeDaysCount === 1 ? "" : "s"} Active
+                        {activeDaysCount} Day{activeDaysCount === 1 ? "" : "s"}{" "}
+                        Active
                       </span>
                     </div>
                     <div className="grid grid-cols-7 gap-1 text-center text-[10px]">

@@ -1,35 +1,33 @@
 from __future__ import annotations
 
-import uuid
 import random
+import uuid
 from datetime import UTC, datetime, timedelta
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
+from app.core.exceptions import ConflictError
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
-from sqlalchemy import select, func, and_
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
+from app.db.enums import NotificationChannel, NotificationType
 from app.db.models.academic import Course, TeachingWorkspace
 from app.db.models.assessment import Assessment
-from app.db.models.resource import LecturerMaterial
-from app.db.models.study_plan import StudyPlan, StudySession, DEFAULT_INITIAL_READINESS_SCORE
 from app.db.models.notification import Notification
-from app.db.enums import NotificationType, NotificationChannel
+from app.db.models.resource import LecturerMaterial
+from app.db.models.study_plan import (DEFAULT_INITIAL_READINESS_SCORE,
+                                      StudyPlan, StudySession)
 from app.db.repositories.study_planner_repo import StudyPlannerRepository
-from app.schemas.study_planner import (
-    CreateStudyPlanRequest,
-    GeneratePlanFromAssessmentRequest,
-    StudyPlanResponse,
-    StudySessionResponse,
-    StudyPlannerDashboardSummary,
-    ReadinessTimelinePoint,
-    MaterialCoverageItem,
-    ScheduleConflictWarning,
-)
+from app.schemas.study_planner import (CreateStudyPlanRequest,
+                                       GeneratePlanFromAssessmentRequest,
+                                       MaterialCoverageItem,
+                                       ReadinessTimelinePoint,
+                                       ScheduleConflictWarning,
+                                       StudyPlannerDashboardSummary,
+                                       StudyPlanResponse, StudySessionResponse)
+from sqlalchemy import and_, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 
 def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -332,7 +330,8 @@ class StudyPlannerService:
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+            from app.core.ai.provider_factory import (get_ai_provider,
+                                                      get_embedding_provider)
 
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()
@@ -403,7 +402,8 @@ class StudyPlannerService:
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+            from app.core.ai.provider_factory import (get_ai_provider,
+                                                      get_embedding_provider)
 
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()
@@ -536,8 +536,8 @@ class StudyPlannerService:
 
         # Proactive Assessment Suggestions - strictly exclude ended or already submitted assessments
         planned_assessment_ids = {p.assessment_id for p in plans if p.assessment_id}
-        from app.db.repositories.assessment_repo import AssessmentRepository
         from app.db.models.attempt import AssessmentAttempt
+        from app.db.repositories.assessment_repo import AssessmentRepository
         ass_repo = AssessmentRepository(self.db)
         available_assessments, _ = await ass_repo.list_available_for_student(student_id=student_id, page_size=20)
 
@@ -580,7 +580,7 @@ class StudyPlannerService:
         # Issue M9: Dynamic Material Coverage Calculation against live non-deleted materials
         material_coverage: List[MaterialCoverageItem] = []
         tw_ids = list({p.teaching_workspace_id for p in plans if p.teaching_workspace_id})
-        
+
         if tw_ids:
             for tw_id in tw_ids:
                 tw_stmt = select(TeachingWorkspace).options(selectinload(TeachingWorkspace.course)).where(TeachingWorkspace.id == tw_id, TeachingWorkspace.is_deleted == False)
@@ -758,7 +758,7 @@ class StudyPlannerService:
                                 s_end = _ensure_utc(getattr(s, "scheduled_end", None))
                                 if s_start and s_end and s_start < proposed_end and s_end > new_start_utc:
                                     conflict_title = getattr(s, "topic", None) or getattr(s, "title", "Existing Session")
-                                    raise ValueError(
+                                    raise ConflictError(
                                         f"Schedule conflict detected: proposed time overlaps with existing session '{conflict_title}' ({s_start.strftime('%b %d, %H:%M')}). Set force=True to proceed anyway."
                                     )
             except ValueError:
@@ -945,7 +945,8 @@ class StudyPlannerService:
     def _build_fallback_lesson_plan(
         self, session: StudySession, rag_citations: List[Dict[str, Any]]
     ) -> Any:
-        from app.agents.study_planner_agent import LessonPlanOutput, LessonSection
+        from app.agents.study_planner_agent import (LessonPlanOutput,
+                                                    LessonSection)
 
         duration = session.duration_minutes or 60
         if duration <= 30:
@@ -1145,7 +1146,8 @@ class StudyPlannerService:
             try:
                 from app.agents.study_planner_agent import StudyPlannerAgent
                 from app.core.ai.gateway import AIGateway
-                from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+                from app.core.ai.provider_factory import (
+                    get_ai_provider, get_embedding_provider)
 
                 chat_provider = get_ai_provider()
                 embed_provider = get_embedding_provider()
@@ -1206,7 +1208,8 @@ class StudyPlannerService:
 
         from app.agents.student_support_agent import StudySupportAgent
         from app.core.ai.gateway import AIGateway
-        from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+        from app.core.ai.provider_factory import (get_ai_provider,
+                                                  get_embedding_provider)
 
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
@@ -1246,6 +1249,7 @@ class StudyPlannerService:
         updated_history = existing_history + [user_msg, ai_msg]
         session.tutor_chat_history = updated_history
         await self.repo.update_session(session)
+        await self.db.commit()
 
         return {
             "answer": output.answer,
@@ -1278,7 +1282,7 @@ class StudyPlannerService:
             if plan and plan.teaching_workspace_id:
                 rag_res = await rag_service.retrieve_context_for_lecturer(
                     topic=sec_title,
-                    workspace_id=plan.teaching_workspace_id,
+                    teaching_workspace_id=plan.teaching_workspace_id,
                     top_k=3,
                 )
                 if rag_res and rag_res.context_string:
@@ -1297,7 +1301,8 @@ class StudyPlannerService:
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+            from app.core.ai.provider_factory import (get_ai_provider,
+                                                      get_embedding_provider)
 
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()
@@ -1371,7 +1376,8 @@ class StudyPlannerService:
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+            from app.core.ai.provider_factory import (get_ai_provider,
+                                                      get_embedding_provider)
 
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()
@@ -1395,7 +1401,8 @@ class StudyPlannerService:
             if total_q == 0:
                 raise ValueError("Unable to grade knowledge check: no questions found or grading evaluation failed.")
 
-            from app.agents.study_planner_agent import evaluate_question_response
+            from app.agents.study_planner_agent import \
+                evaluate_question_response
             correct_count = 0
             q_grades = []
             for i, q_item in enumerate(raw_questions):
@@ -1411,7 +1418,7 @@ class StudyPlannerService:
                 q_grades.append({
                     "question_id": q_id,
                     "is_correct": is_correct,
-                    "score": score_pct,
+                    "score": score_pct / 100.0,
                     "student_answer": student_ans_str,
                     "correct_answer": correct_ans_str,
                     "explanation": q_dict.get("explanation", "Evaluated based on answer verification key."),
@@ -1512,7 +1519,8 @@ class StudyPlannerService:
         try:
             from app.agents.study_planner_agent import StudyPlannerAgent
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+            from app.core.ai.provider_factory import (get_ai_provider,
+                                                      get_embedding_provider)
 
             chat_provider = get_ai_provider()
             embed_provider = get_embedding_provider()

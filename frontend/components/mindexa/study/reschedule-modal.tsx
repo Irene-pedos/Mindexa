@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Calendar as CalendarIcon,
   Clock,
@@ -48,17 +48,29 @@ export function RescheduleModal({
   const [dateStr, setDateStr] = useState(initialDateStr);
   const [timeStr, setTimeStr] = useState(initialTimeStr);
   const [durationMinutes, setDurationMinutes] = useState(
-    session?.duration_minutes || 60
+    session?.duration_minutes || 60,
   );
   const [submitting, setSubmitting] = useState(false);
   const [hasConflict, setHasConflict] = useState(false);
+
+  useEffect(() => {
+    if (!session) return;
+    const start = session.scheduled_start
+      ? new Date(session.scheduled_start)
+      : new Date();
+
+    setDateStr(start.toISOString().split("T")[0]);
+    setTimeStr(start.toTimeString().slice(0, 5));
+    setDurationMinutes(session.duration_minutes || 60);
+    setHasConflict(false);
+  }, [session?.scheduled_start, session?.duration_minutes, session, isOpen]);
 
   if (!session) return null;
 
   // Compute proposed start/end dates
   const proposedStart = new Date(`${dateStr}T${timeStr}:00`);
   const proposedEnd = new Date(
-    proposedStart.getTime() + durationMinutes * 60 * 1000
+    proposedStart.getTime() + durationMinutes * 60 * 1000,
   );
 
   // Suggested alternative time slots
@@ -92,7 +104,7 @@ export function RescheduleModal({
         session.id,
         startIso,
         durationMinutes,
-        forceOverride
+        forceOverride,
       );
       toast.success("Study session rescheduled successfully!");
       onSessionUpdated(updated);

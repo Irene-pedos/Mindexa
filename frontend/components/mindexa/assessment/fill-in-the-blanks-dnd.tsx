@@ -77,10 +77,12 @@ function DraggableFillBlankAnswer({
       {...attributes}
       className={cn(
         "inline-flex items-center px-3 py-1.5 rounded-md bg-background border border-primary/30 text-primary font-semibold text-xs transition-all shadow-sm select-none",
-        !disabled && !isUsed && "cursor-grab active:cursor-grabbing hover:border-primary hover:bg-primary/5",
+        !disabled &&
+          !isUsed &&
+          "cursor-grab active:cursor-grabbing hover:border-primary hover:bg-primary/5",
         isDragging && "shadow-md border-primary scale-105",
         isUsed && "opacity-25 grayscale pointer-events-none border-dashed",
-        disabled && "opacity-60 pointer-events-none"
+        disabled && "opacity-60 pointer-events-none",
       )}
     >
       {text}
@@ -118,8 +120,8 @@ function DroppableBlank({
         isOver
           ? "bg-primary/10 border-primary ring-2 ring-primary/20"
           : value
-          ? "border-primary/40 bg-primary/5 text-primary font-semibold shadow-xs"
-          : "border-dashed border-muted-foreground/40 bg-muted/20"
+            ? "border-primary/40 bg-primary/5 text-primary font-semibold shadow-xs"
+            : "border-dashed border-muted-foreground/40 bg-muted/20",
       )}
     >
       <select
@@ -136,7 +138,7 @@ function DroppableBlank({
         className={cn(
           "bg-transparent border-none text-xs font-bold focus:outline-none cursor-pointer w-full pr-5 appearance-none",
           value ? "text-primary" : "text-muted-foreground",
-          isDragging && "pointer-events-none"
+          isDragging && "pointer-events-none",
         )}
       >
         <option value="" className="text-muted-foreground">
@@ -174,22 +176,42 @@ export function SharedFillInTheBlanksDnd({
   disabled,
 }: FillInTheBlanksDndProps) {
   const rawText = questionText || "";
-  const parts = rawText.split(/\[blank\]|____|___/i);
+  const parts = rawText.split(/\[blank\]|_{3,4}/gi);
   const blankAnswers = currentVal || {};
   const [isDragging, setIsDragging] = useState(false);
 
   const pool = useMemo(() => {
-    const raw = (options || []).map((o: FillBlankOption, i: number) => ({
-      id: o.id || `pool-${i}`,
-      text: o.option_text || o.text || "",
-    })).filter((o) => o.text.trim().length > 0);
+    const raw = (options || [])
+      .map((o: FillBlankOption, i: number) => ({
+        id: o.id || `pool-${i}`,
+        text: o.option_text || o.text || "",
+      }))
+      .filter((o) => o.text.trim().length > 0);
 
     return seededShuffle(raw, `${attemptId || ""}-${questionId}`);
   }, [options, attemptId, questionId]);
 
+  const poolCountsByText = useMemo(() => {
+    const counts: Record<string, number> = {};
+    pool.forEach((entry) => {
+      counts[entry.text] = (counts[entry.text] || 0) + 1;
+    });
+    return counts;
+  }, [pool]);
+
+  const usedAnswerCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    Object.values(blankAnswers).forEach((value) => {
+      if (!value) return;
+      const text = String(value);
+      counts[text] = (counts[text] || 0) + 1;
+    });
+    return counts;
+  }, [blankAnswers]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor),
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -262,7 +284,10 @@ export function SharedFillInTheBlanksDnd({
                   key={ans.id}
                   id={ans.id}
                   text={ans.text}
-                  isUsed={usedAnswers.includes(ans.text)}
+                  isUsed={Boolean(
+                    poolCountsByText[ans.text] &&
+                    usedAnswerCounts[ans.text] >= poolCountsByText[ans.text],
+                  )}
                   disabled={disabled}
                 />
               ))}

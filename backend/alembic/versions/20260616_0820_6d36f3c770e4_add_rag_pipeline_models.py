@@ -9,10 +9,10 @@ from __future__ import annotations
 
 from typing import Sequence, Union
 
-from alembic import op
+import pgvector
 import sqlalchemy as sa
 import sqlmodel
-import pgvector
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic
@@ -53,7 +53,7 @@ def upgrade() -> None:
     sa.Column('chunk_index', sa.Integer(), nullable=False),
     sa.Column('content', sa.Text(), nullable=False),
     sa.Column('token_count', sa.Integer(), nullable=False),
-    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=768), nullable=True),
+    sa.Column('embedding', pgvector.sqlalchemy.vector.VECTOR(dim=1536), nullable=True),
     sa.Column('metadata_json', postgresql.JSONB(astext_type=sa.Text()), nullable=True),
     sa.ForeignKeyConstraint(['resource_id'], ['academic_resources.id'], ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('id')

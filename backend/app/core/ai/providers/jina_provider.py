@@ -1,17 +1,13 @@
 from __future__ import annotations
 
 import httpx
-
 from app.core.config import settings
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
+from app.core.logging import get_logger
 
-from .base_provider import (
-    AICompletionRequest,
-    AICompletionResponse,
-    AIEmbeddingRequest,
-    AIEmbeddingResponse,
-    BaseProvider,
-)
+from .base_provider import (AICompletionRequest, AICompletionResponse,
+                            AIEmbeddingRequest, AIEmbeddingResponse,
+                            BaseProvider)
 
 
 class JinaProvider(BaseProvider):
@@ -44,13 +40,13 @@ class JinaProvider(BaseProvider):
             )
 
         model = request.model or self.default_model
-        
+
         # Jina expects a list of strings
         inputs = request.input if isinstance(request.input, list) else [request.input]
-        
-        # Target dimension matching resource_chunks pgvector column (768)
-        target_dim = 768
-        jina_dim = 768
+
+        # Target dimension matching resource_chunks pgvector column
+        target_dim = settings.PGVECTOR_DIMENSION
+        jina_dim = settings.PGVECTOR_DIMENSION
 
         payload = {
             "model": model,
@@ -80,10 +76,20 @@ class JinaProvider(BaseProvider):
 
         data = response.json()
         raw_embeddings = [item["embedding"] for item in data.get("data", [])]
-        
+
         # Ensure returned embeddings match target PGVECTOR_DIMENSION
         embeddings = []
+        padded_or_truncated = False
         for emb in raw_embeddings:
+            if len(emb) != target_dim and not padded_or_truncated:
+                logger.warning(
+                    "Jina embedding dimension mismatch detected",
+                    provider=self.name,
+                    model=model,
+                    original_dimension=len(emb),
+                    target_dimension=target_dim,
+                )
+                padded_or_truncated = True
             if len(emb) < target_dim:
                 emb = emb + [0.0] * (target_dim - len(emb))
             elif len(emb) > target_dim:
@@ -91,7 +97,7 @@ class JinaProvider(BaseProvider):
             embeddings.append(emb)
 
         usage = data.get("usage") or {}
-        
+
         return AIEmbeddingResponse(
             embeddings=embeddings,
             provider=self.name,

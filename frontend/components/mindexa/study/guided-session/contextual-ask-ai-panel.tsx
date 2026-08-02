@@ -1,10 +1,25 @@
 "use client";
 
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, Send, Sparkles, X, Bot, User, Loader2, FileText } from "lucide-react";
+import {
+  MessageSquare,
+  Send,
+  Sparkles,
+  X,
+  Bot,
+  User,
+  Loader2,
+  FileText,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardHeader,
+  CardTitle,
+  CardContent,
+  CardFooter,
+} from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
@@ -46,8 +61,14 @@ export function ContextualAskAiPanel({
         text: item.content,
         citations: item.citations,
         timestamp: item.timestamp
-          ? new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          ? new Date(item.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
       }));
     }
     return [
@@ -55,7 +76,10 @@ export function ContextualAskAiPanel({
         id: "welcome",
         sender: "ai",
         text: `Hello! I am your AI Guided Study Tutor. Ask me any question about **${currentSectionTitle}** or related concepts in your study material!`,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       },
     ];
   });
@@ -64,19 +88,30 @@ export function ContextualAskAiPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (initialChatHistory && initialChatHistory.length > 0 && messages.length <= 1) {
+    if (
+      initialChatHistory &&
+      initialChatHistory.length > 0 &&
+      messages.length === 1 &&
+      messages[0]?.id === "welcome"
+    ) {
       const formatted = initialChatHistory.map((item, idx) => ({
         id: `hist-${idx}`,
         sender: (item.role === "user" ? "user" : "ai") as "user" | "ai",
         text: item.content,
         citations: item.citations,
         timestamp: item.timestamp
-          ? new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-          : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          ? new Date(item.timestamp).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : new Date().toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
       }));
       setMessages(formatted);
     }
-  }, [initialChatHistory, messages.length]);
+  }, [initialChatHistory, messages.length, messages]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -94,7 +129,10 @@ export function ContextualAskAiPanel({
       id: Date.now().toString(),
       sender: "user",
       text: userText,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      timestamp: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
     };
 
     setMessages((prev) => [...prev, userMsg]);
@@ -102,14 +140,21 @@ export function ContextualAskAiPanel({
 
     try {
       const sectionContext = `Section Title: ${currentSectionTitle}\nContent: ${currentSectionContent}`;
-      const res = await studyPlannerApi.askInSession(sessionId, userText, sectionContext);
+      const res = await studyPlannerApi.askInSession(
+        sessionId,
+        userText,
+        sectionContext,
+      );
 
       const aiMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         sender: "ai",
         text: res.answer,
         citations: res.citations,
-        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+        timestamp: new Date().toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
       };
 
       setMessages((prev) => [...prev, aiMsg]);
@@ -130,7 +175,10 @@ export function ContextualAskAiPanel({
         >
           <Sparkles className="size-5" />
           <span className="font-semibold text-xs">Ask AI Tutor</span>
-          <Badge variant="secondary" className="bg-white/20 text-white text-[10px] px-1.5 py-0.2">
+          <Badge
+            variant="secondary"
+            className="bg-white/20 text-white text-[10px] px-1.5 py-0.2"
+          >
             Contextual
           </Badge>
         </Button>
@@ -147,8 +195,13 @@ export function ContextualAskAiPanel({
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
-                  <CardTitle className="text-xs font-bold text-foreground">AI Study Tutor</CardTitle>
-                  <Badge variant="outline" className="text-[10px] border-emerald-500/30 text-emerald-600 dark:text-emerald-400">
+                  <CardTitle className="text-xs font-bold text-foreground">
+                    AI Study Tutor
+                  </CardTitle>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] border-emerald-500/30 text-emerald-600 dark:text-emerald-400"
+                  >
                     Live Session
                   </Badge>
                 </div>
@@ -168,7 +221,10 @@ export function ContextualAskAiPanel({
           </CardHeader>
 
           {/* Messages Area */}
-          <CardContent className="flex-1 p-4 overflow-y-auto space-y-4" ref={scrollRef}>
+          <CardContent
+            className="flex-1 p-4 overflow-y-auto space-y-4"
+            ref={scrollRef}
+          >
             {messages.map((msg) => (
               <div
                 key={msg.id}
@@ -198,10 +254,17 @@ export function ContextualAskAiPanel({
                         <FileText className="size-3 text-primary" /> Sources
                       </span>
                       {msg.citations.map((c, i) => (
-                        <div key={i} className="text-[10px] text-muted-foreground bg-background/50 p-1.5 rounded border border-border/30">
-                          <span className="font-medium">{c.resource_name || c.title || "Source"}</span>
+                        <div
+                          key={i}
+                          className="text-[10px] text-muted-foreground bg-background/50 p-1.5 rounded border border-border/30"
+                        >
+                          <span className="font-medium">
+                            {c.resource_name || c.title || "Source"}
+                          </span>
                           {c.page_number ? ` (p. ${c.page_number})` : ""}
-                          {(c.excerpt || c.snippet) ? `: ${c.excerpt || c.snippet}` : ""}
+                          {c.excerpt || c.snippet
+                            ? `: ${c.excerpt || c.snippet}`
+                            : ""}
                         </div>
                       ))}
                     </div>
@@ -209,7 +272,9 @@ export function ContextualAskAiPanel({
 
                   <div
                     className={`text-[9px] mt-1 ${
-                      msg.sender === "user" ? "text-primary-foreground/70 text-right" : "text-muted-foreground"
+                      msg.sender === "user"
+                        ? "text-primary-foreground/70 text-right"
+                        : "text-muted-foreground"
                     }`}
                   >
                     {msg.timestamp}

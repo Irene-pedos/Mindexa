@@ -1,29 +1,27 @@
 from __future__ import annotations
 
 import uuid
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import Any, Dict, List
 
+from app.core.exceptions import ConflictError
 from app.db.session import get_db
 from app.dependencies.auth import require_student
-from app.schemas.study_planner import (
-    CreateStudyPlanRequest,
-    GeneratePlanFromAssessmentRequest,
-    StudyPlanResponse,
-    StudySessionResponse,
-    CompleteSessionRequest,
-    GenerateQuizRequest,
-    RescheduleSessionRequest,
-    AdjustPlanRequest,
-    StudyPlannerDashboardSummary,
-    ScheduleConflictWarning,
-    GuidedSessionAskRequest,
-    GuidedSessionExerciseRequest,
-    SubmitKnowledgeCheckRequest,
-    SaveSessionNotesRequest,
-)
+from app.schemas.study_planner import (AdjustPlanRequest,
+                                       CompleteSessionRequest,
+                                       CreateStudyPlanRequest,
+                                       GeneratePlanFromAssessmentRequest,
+                                       GenerateQuizRequest,
+                                       GuidedSessionAskRequest,
+                                       GuidedSessionExerciseRequest,
+                                       RescheduleSessionRequest,
+                                       SaveSessionNotesRequest,
+                                       ScheduleConflictWarning,
+                                       StudyPlannerDashboardSummary,
+                                       StudyPlanResponse, StudySessionResponse,
+                                       SubmitKnowledgeCheckRequest)
 from app.services.study_planner_service import StudyPlannerService
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/students/study-plans", tags=["Study Planner"])
 
@@ -168,9 +166,15 @@ async def reschedule_session(
         return await service.reschedule_session(
             session_id, current_user.id, body.new_start, body.new_duration_minutes, force=body.force
         )
+    except ConflictError as err:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(err),
+        )
     except ValueError as err:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(err),
         )
 
 

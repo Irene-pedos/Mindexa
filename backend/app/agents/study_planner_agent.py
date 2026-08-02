@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field, field_validator
 
 from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
@@ -11,6 +11,7 @@ from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 from app.db.models.study_plan import StudySession
+from pydantic import BaseModel, Field, field_validator
 
 
 class SessionTopicPlan(BaseModel):
@@ -162,7 +163,7 @@ def evaluate_question_response(
 
         student_map = raw_ans if isinstance(raw_ans, dict) else {}
         if not target_map:
-            return True, 100.0, st_ans_str, json.dumps(target_map)
+            return False, 0.0, json.dumps(student_map), json.dumps(target_map)
 
         matches_count = 0
         total_pairs = len(target_map)
@@ -170,7 +171,7 @@ def evaluate_question_response(
             if str(student_map.get(k, "")).strip().lower() == str(v).strip().lower():
                 matches_count += 1
 
-        score_pct = (matches_count / total_pairs) * 100.0 if total_pairs > 0 else 100.0
+        score_pct = (matches_count / total_pairs) * 100.0 if total_pairs > 0 else 0.0
         return score_pct >= 80.0, score_pct, json.dumps(student_map), json.dumps(target_map)
 
     elif q_type == "FILL_BLANKS":
@@ -183,7 +184,7 @@ def evaluate_question_response(
             student_blanks = {str(idx): val for idx, val in enumerate(raw_ans)}
 
         if not target_blanks:
-            return True, 100.0, st_ans_str, json.dumps(target_blanks)
+            return False, 0.0, json.dumps(student_blanks), json.dumps(target_blanks)
 
         correct_blanks = 0
         total_blanks = len(target_blanks)
@@ -192,7 +193,7 @@ def evaluate_question_response(
             if st_val == str(b_val).strip().lower():
                 correct_blanks += 1
 
-        score_pct = (correct_blanks / total_blanks) * 100.0 if total_blanks > 0 else 100.0
+        score_pct = (correct_blanks / total_blanks) * 100.0 if total_blanks > 0 else 0.0
         return score_pct >= 80.0, score_pct, json.dumps(student_blanks), json.dumps(target_blanks)
 
     elif q_type == "TRUE_FALSE":
@@ -213,13 +214,16 @@ def evaluate_question_response(
             return is_valid, (100.0 if is_valid else 0.0), st_text, "Comprehensive answer expected"
 
         st_lower = st_text.lower()
-        cr_keywords = [w for w in cr_text.lower().split() if len(w) > 3]
-        matches = sum(1 for w in cr_keywords if w in st_lower)
+        cr_keywords = [w for w in re.findall(r"\b[\w'-]{4,}\b", cr_text.lower())]
+        matches = 0
+        for keyword in cr_keywords:
+            if re.search(rf"\b{re.escape(keyword)}\b", st_lower):
+                matches += 1
         pct = (matches / len(cr_keywords)) * 100.0 if cr_keywords else 100.0
         if st_lower == cr_text.lower():
             pct = 100.0
-        is_pass = pct >= 40.0 or len(st_text) >= 20
-        return is_pass, max(pct, 50.0 if is_pass else 0.0), st_text, cr_text
+        is_pass = pct >= 40.0
+        return is_pass, pct, st_text, cr_text
 
     else:
         is_correct = False
@@ -435,7 +439,13 @@ class StudyPlannerAgent(BaseAgent):
                 correct_count += 1
                 mastered.append(q_dict.get("question_text", f"Question {q_id}"))
             else:
-                weak.append(q_dict.get("question_text", f"Question {q_id}"))
+                weak.append(
+                    q_dict.get("concept_tag")
+                    or q_dict.get("topic_tag")
+                    or q_dict.get("topic")
+                    or session.topic
+                    or q_dict.get("question_text", f"Question {q_id}")
+                )
 
             question_grades.append(
                 KnowledgeCheckQuestionGrade(

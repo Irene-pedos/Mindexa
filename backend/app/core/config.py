@@ -4,16 +4,9 @@ import os
 from datetime import timedelta
 from typing import Annotated, Any, Literal
 
-from pydantic import (
-    AnyHttpUrl,
-    BeforeValidator,
-    Field,
-    PostgresDsn,
-    RedisDsn,
-    computed_field,
-    field_validator,
-    model_validator,
-)
+from pydantic import (AnyHttpUrl, BeforeValidator, Field, PostgresDsn,
+                      RedisDsn, computed_field, field_validator,
+                      model_validator)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -40,7 +33,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "mindexa-api"
     APP_VERSION: str = "1.0.0"
     FRONTEND_URL: str = "http://localhost:3000"
-    
+
     @property
     def docs_enabled(self) -> bool:
         """Enable Swagger UI only outside production."""
@@ -67,15 +60,15 @@ class Settings(BaseSettings):
     PASSWORD_MIN_LENGTH: int = 12
     MAX_FAILED_LOGIN_ATTEMPTS: int = 5
     ACCOUNT_LOCKOUT_MINUTES: int = 15
-    
+
     # JWT
     JWT_ALGORITHM: str = "HS256"
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days (legacy high value)
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
-    
+
     REFRESH_TOKEN_COOKIE_NAME: str = "mindexa_refresh_token"
     ACCESS_TOKEN_COOKIE_SECURE: bool = False
-    
+
     EMAIL_VERIFICATION_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
     PASSWORD_RESET_EXPIRE_MINUTES: int = 30
 
@@ -110,7 +103,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "postgres"
     POSTGRES_PASSWORD: str = "Postgre123"
     POSTGRES_DB: str = "mindexa_db"
-    
+
     DATABASE_URL: str | None = None
     DATABASE_ASYNC_URL: str | None = None
     DATABASE_ECHO: bool = False
@@ -150,7 +143,7 @@ class Settings(BaseSettings):
     REDIS_DB: int = 0
     REDIS_PASSWORD: str | None = None
     REDIS_MAX_CONNECTIONS: int = 10
-    
+
     REDIS_USER_PROFILE_TTL: int = 3600
     REDIS_ASSESSMENT_TTL: int = 3600
     REDIS_CACHE_DEFAULT_TTL: int = 3600
@@ -216,7 +209,7 @@ class Settings(BaseSettings):
     JINA_API_KEY: str = ""
     JINA_BASE_URL: str = "https://api.jina.ai/v1"
     JINA_DEFAULT_MODEL: str = "jina-embeddings-v3"
-    
+
     DEFAULT_LLM_PROVIDER: Literal["groq", "openai", "anthropic", "gemini"] = "groq"
     DEFAULT_EMBEDDING_PROVIDER: Literal["groq", "openai", "anthropic", "jina"] = "jina"
     DEFAULT_EMBEDDING_MODEL: str = "jina-embeddings-v3"
@@ -234,7 +227,7 @@ class Settings(BaseSettings):
 
     # ─── Vector Store ─────────────────────────────────────────────────────────
     VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"
-    PGVECTOR_DIMENSION: int = 768  # Updated to 768 for jina-embeddings-v3 per RAG spec
+    PGVECTOR_DIMENSION: int = 1536  # Default pgvector dimension for embeddings
 
     # ─── RAG Parameters ───────────────────────────────────────────────────────
     RAG_TOP_K: int = 5

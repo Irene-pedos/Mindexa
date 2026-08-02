@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any, Annotated, Self
+from typing import Annotated, Any, Dict, List, Optional, Self
 
-from pydantic import BaseModel, Field, AliasChoices, computed_field, model_validator
 from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
+from pydantic import (AliasChoices, BaseModel, Field, computed_field,
+                      model_validator)
 
 
 class StudySessionResponse(BaseModel):
@@ -171,6 +172,7 @@ class RescheduleSessionRequest(BaseModel):
         Optional[int],
         Field(
             default=None,
+            ge=1,
             validation_alias=AliasChoices("new_duration_minutes", "new_duration"),
         ),
     ] = None

@@ -833,13 +833,27 @@ def process_student_resource(self: MindexaTask, resource_id: str) -> dict[str, A
 async def _process_student_resource_async(resource_id: str) -> dict[str, Any]:
     from app.db.models.resource import StudentResource
     from app.db.session import AsyncSessionLocal
-    from app.services.document_processing_service import DocumentProcessingService
+    from app.services.document_processing_service import \
+        DocumentProcessingService
 
     async with AsyncSessionLocal() as session:
         sr = await session.get(StudentResource, uuid.UUID(resource_id))
-        if sr and sr.academic_resource_id:
-            service = DocumentProcessingService()
-            await service.process_resource(sr.academic_resource_id, session)
+        if not sr:
+            logger.warning(
+                "process_student_resource: StudentResource not found %s",
+                resource_id,
+            )
+            return {"resource_id": resource_id, "status": "not_found"}
+
+        if not sr.academic_resource_id:
+            logger.warning(
+                "process_student_resource: StudentResource missing academic_resource_id %s",
+                resource_id,
+            )
+            return {"resource_id": resource_id, "status": "skipped"}
+
+        service = DocumentProcessingService()
+        await service.process_resource(sr.academic_resource_id, session)
         return {"resource_id": resource_id, "status": "processed"}
 
 
@@ -866,13 +880,27 @@ def process_lecturer_material(self: MindexaTask, material_id: str) -> dict[str, 
 async def _process_lecturer_material_async(material_id: str) -> dict[str, Any]:
     from app.db.models.resource import LecturerMaterial
     from app.db.session import AsyncSessionLocal
-    from app.services.document_processing_service import DocumentProcessingService
+    from app.services.document_processing_service import \
+        DocumentProcessingService
 
     async with AsyncSessionLocal() as session:
         lm = await session.get(LecturerMaterial, uuid.UUID(material_id))
-        if lm and lm.academic_resource_id:
-            service = DocumentProcessingService()
-            await service.process_resource(lm.academic_resource_id, session)
+        if not lm:
+            logger.warning(
+                "process_lecturer_material: LecturerMaterial not found %s",
+                material_id,
+            )
+            return {"material_id": material_id, "status": "not_found"}
+
+        if not lm.academic_resource_id:
+            logger.warning(
+                "process_lecturer_material: LecturerMaterial missing academic_resource_id %s",
+                material_id,
+            )
+            return {"material_id": material_id, "status": "skipped"}
+
+        service = DocumentProcessingService()
+        await service.process_resource(lm.academic_resource_id, session)
         return {"material_id": material_id, "status": "processed"}
 
 

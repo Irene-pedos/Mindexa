@@ -1,18 +1,22 @@
 from __future__ import annotations
+
 import uuid
-import httpx
 from typing import Any, Dict, List, Optional
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, text, and_, or_, bindparam
-from sqlalchemy.dialects.postgresql import ARRAY, UUID as PG_UUID
-from app.db.enums import ResourceCategory, EnrollmentStatus
-from app.db.models.resource_chunk import ResourceChunk
-from app.db.models.academic_resource import AcademicResource
-from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk, StudentResource
-from app.db.models.academic import StudentEnrollment, TeachingWorkspace
-from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
+
+import httpx
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.db.enums import EnrollmentStatus, ResourceCategory
+from app.db.models.academic import StudentEnrollment, TeachingWorkspace
+from app.db.models.academic_resource import AcademicResource
+from app.db.models.resource import (LecturerMaterial, LecturerMaterialChunk,
+                                    StudentResource)
+from app.db.models.resource_chunk import ResourceChunk
+from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
+from sqlalchemy import and_, bindparam, or_, select, text
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger(__name__)
 
@@ -22,6 +26,12 @@ class RAGService:
         self.jina_api_key = settings.JINA_API_KEY
         self.jina_base_url = settings.JINA_BASE_URL
         self.embedding_model = settings.JINA_DEFAULT_MODEL
+
+    def _fit_dimension(self, vector: List[float]) -> List[float]:
+        target_dim = settings.PGVECTOR_DIMENSION
+        if len(vector) < target_dim:
+            return vector + [0.0] * (target_dim - len(vector))
+        return vector[:target_dim]
 
     # ── Lecturer-side RAG ─────────────────────────────────────────────────────
 
@@ -338,15 +348,15 @@ class RAGService:
                             for rid in allowed_resource_ids],
             "top_k": top_k,
         })
-        
+
         rows = result.fetchall()
         logger.info("Vector search complete", rows_returned=len(rows), top_k=top_k)
-        
+
         chunks = []
         citations = []
         chunk_ids = []
         total_similarity = 0.0
-        
+
         for row in rows:
             chunk_id, content, chunk_index, metadata, res_id, res_name, similarity = row
             logger.debug("Chunk retrieved", resource=res_name, chunk_index=chunk_index, similarity=round(float(similarity), 4))
@@ -357,7 +367,7 @@ class RAGService:
             })
             chunk_ids.append(chunk_id)
             total_similarity += similarity
-            
+
             citations.append(SourceCitation(
                 resource_name=res_name,
                 resource_id=res_id,
@@ -378,7 +388,7 @@ class RAGService:
         )
 
         context_string = self._build_context_string(chunks) if not fallback_used else ""
-        
+
         return RAGRetrievalResult(
             context_string=context_string,
             citations=citations if not fallback_used else [],
@@ -391,7 +401,8 @@ class RAGService:
         """Generate embedding for query text via audited AIGateway."""
         try:
             from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+            from app.core.ai.provider_factory import (get_ai_providers,
+                                                      get_embedding_providers)
             from app.core.ai.providers import AIEmbeddingRequest
 
             gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
@@ -403,12 +414,7 @@ class RAGService:
                 prompt_summary=f"RAG query embedding: {question[:50]}",
             )
             vec = res.embeddings[0]
-            target_dim = 768
-            if len(vec) > target_dim:
-                vec = vec[:target_dim]
-            elif len(vec) < target_dim:
-                vec = vec + [0.0] * (target_dim - len(vec))
-            return vec
+            return self._fit_dimension(vec)
         except Exception as exc:
             logger.warning("AIGateway embedding failed for RAG query, attempting direct fallback", error=str(exc))
 
@@ -426,14 +432,14 @@ class RAGService:
             "dimensions": settings.PGVECTOR_DIMENSION,
             "input": [question]
         }
-        
+
         try:
             async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
                     logger.error("Jina embedding failed", status=response.status_code, text=response.text)
                     raise Exception(f"Jina embedding request failed with status {response.status_code}")
-                
+
                 data = response.json()
                 return data["data"][0]["embedding"]
         except Exception as e:
@@ -458,8 +464,9 @@ class RAGService:
         own_ids = [r for r in res_own.scalars().all() if r]
 
         # 2. Lecturer materials for enrolled courses
+        from app.db.models.academic import (ClassGroup, ClassSection,
+                                            TeachingAssignment)
         from sqlalchemy import exists
-        from app.db.models.academic import TeachingAssignment, ClassSection, ClassGroup
 
         lecturer_conditions = [
             LecturerMaterial.is_student_visible == True,
@@ -539,7 +546,7 @@ class RAGService:
             if chunk['metadata'] and chunk['metadata'].get('page'):
                 source_label += f", Page {chunk['metadata']['page']}"
             source_label += "]"
-            
+
             parts.append(f"{source_label}\n{chunk['content']}\n")
-        
+
         return "\n".join(parts)

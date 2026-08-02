@@ -78,10 +78,12 @@ function DraggableMatchResponse({
       {...attributes}
       className={cn(
         "px-3.5 py-2 rounded-lg bg-background border border-primary/20 text-primary font-medium text-xs transition-all shadow-sm select-none",
-        !disabled && !isUsed && "cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5",
+        !disabled &&
+          !isUsed &&
+          "cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5",
         isDragging && "shadow-md border-primary scale-102",
         isUsed && "opacity-20 grayscale pointer-events-none border-dashed",
-        disabled && "opacity-60 pointer-events-none"
+        disabled && "opacity-60 pointer-events-none",
       )}
     >
       {text}
@@ -121,8 +123,8 @@ function DroppableMatchTarget({
         isOver
           ? "bg-primary/5 border-primary"
           : matchedValue
-          ? "border-primary/25 shadow-sm"
-          : "border-muted/70"
+            ? "border-primary/25 shadow-sm"
+            : "border-muted/70",
       )}
     >
       <div className="flex-1 text-xs md:text-sm font-semibold text-foreground/90 leading-relaxed">
@@ -136,7 +138,7 @@ function DroppableMatchTarget({
           "w-[220px] md:w-[240px] h-10 rounded-lg border flex items-center justify-between px-3 transition-all relative group bg-muted/5",
           matchedValue
             ? "border-primary/30"
-            : "border-dashed border-muted-foreground/20"
+            : "border-dashed border-muted-foreground/20",
         )}
       >
         <select
@@ -152,7 +154,7 @@ function DroppableMatchTarget({
           }}
           className={cn(
             "bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8",
-            isDragging && "pointer-events-none"
+            isDragging && "pointer-events-none",
           )}
         >
           <option value="" className="text-muted-foreground">
@@ -198,26 +200,46 @@ export function SharedMatchingDnd({
 
   const premises = useMemo(() => {
     return (options || []).filter(
-      (o: MatchingOption) => o.text || o.option_text
+      (o: MatchingOption) => o.text || o.option_text,
     );
   }, [options]);
 
   const responses = useMemo(() => {
-    const raw = (options || []).map(
-      (o: MatchingOption) =>
-        o.option_text_right || o.match_value || o.text || o.option_text
-    );
-    const uniqueRaw = Array.from(new Set(raw)).filter(Boolean);
-    const shuffled = seededShuffle(uniqueRaw, `${attemptId || ""}-${questionId}`);
+    const raw = (options || [])
+      .map(
+        (o: MatchingOption) =>
+          o.option_text_right || o.match_value || o.text || o.option_text,
+      )
+      .filter(Boolean) as string[];
+    const shuffled = seededShuffle(raw, `${attemptId || ""}-${questionId}`);
     return shuffled.map((text, i) => ({
       id: `resp-${i}`,
-      text: text as string,
+      text,
     }));
   }, [options, attemptId, questionId]);
 
+  const responseCountsByText = useMemo(() => {
+    const counts: Record<string, number> = {};
+    responses.forEach((resp) => {
+      if (!resp.text) return;
+      counts[resp.text] = (counts[resp.text] || 0) + 1;
+    });
+    return counts;
+  }, [responses]);
+
+  const usedResponseCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    Object.values(matchingAnswers).forEach((value) => {
+      if (!value) return;
+      const text = String(value);
+      counts[text] = (counts[text] || 0) + 1;
+    });
+    return counts;
+  }, [matchingAnswers]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor)
+    useSensor(KeyboardSensor),
   );
 
   const handleDragEnd = (event: DragEndEvent) => {
@@ -240,8 +262,6 @@ export function SharedMatchingDnd({
     delete newAnswers[premiseId];
     onAnswerChange(newAnswers);
   };
-
-  const usedResponses = Object.values(matchingAnswers);
 
   return (
     <DndContext
@@ -290,7 +310,11 @@ export function SharedMatchingDnd({
                 key={resp.id}
                 id={resp.id}
                 text={resp.text}
-                isUsed={usedResponses.includes(resp.text)}
+                isUsed={Boolean(
+                  responseCountsByText[resp.text] &&
+                  usedResponseCounts[resp.text] >=
+                    responseCountsByText[resp.text],
+                )}
                 disabled={disabled}
               />
             ))}

@@ -1,12 +1,20 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { FileText, Save, Check, Copy, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import {
+  FileText,
+  Save,
+  Check,
+  Copy,
+  ChevronDown,
+  ChevronUp,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { studyPlannerApi } from "@/lib/api/study-planner";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
-import { studyPlannerApi } from "@/lib/api/study-planner";
 
 interface SessionNotesPanelProps {
   sessionId: string;
@@ -48,6 +56,17 @@ export function SessionNotesPanel({
       saveNotesToBackend(val, true);
     }, 2500);
   };
+
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+        if (notes !== lastSavedNotes) {
+          studyPlannerApi.saveSessionNotes(sessionId, notes).catch(() => {});
+        }
+      }
+    };
+  }, [notes, lastSavedNotes, sessionId]);
 
   const saveNotesToBackend = async (textToSave: string, isAutoSave = false) => {
     if (textToSave === lastSavedNotes) return;
@@ -110,15 +129,26 @@ export function SessionNotesPanel({
               </div>
             </div>
           </div>
-          <Button variant="ghost" size="icon" className="size-7 text-muted-foreground">
-            {isOpen ? <ChevronDown className="size-4" /> : <ChevronUp className="size-4" />}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-7 text-muted-foreground"
+          >
+            {isOpen ? (
+              <ChevronDown className="size-4" />
+            ) : (
+              <ChevronUp className="size-4" />
+            )}
           </Button>
         </CardHeader>
 
         {isOpen && (
           <CardContent className="p-4 space-y-3 animate-in slide-in-from-bottom-2 duration-200">
             {currentSectionTitle && (
-              <Badge variant="outline" className="text-[10px] truncate max-w-full text-muted-foreground font-medium border-border/50">
+              <Badge
+                variant="outline"
+                className="text-[10px] truncate max-w-full text-muted-foreground font-medium border-border/50"
+              >
                 Context: {currentSectionTitle}
               </Badge>
             )}
@@ -138,7 +168,11 @@ export function SessionNotesPanel({
                 disabled={!notes.trim()}
                 className="text-[11px] h-8 px-2.5 font-semibold gap-1 text-muted-foreground hover:text-foreground"
               >
-                {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                {copied ? (
+                  <Check className="size-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="size-3.5" />
+                )}
                 {copied ? "Copied" : "Copy Notes"}
               </Button>
 

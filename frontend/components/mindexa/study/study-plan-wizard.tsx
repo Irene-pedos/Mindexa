@@ -1,17 +1,44 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Sparkles, Calendar as CalendarIcon, Clock, BookOpen, Layers, CheckCircle2, Zap, ArrowRight, Loader2, ShieldAlert } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Sparkles,
+  Calendar as CalendarIcon,
+  Clock,
+  BookOpen,
+  Layers,
+  CheckCircle2,
+  Zap,
+  ArrowRight,
+  Loader2,
+  ShieldAlert,
+} from "lucide-react";
 import { studentApi, StudentCourseListItem } from "@/lib/api/student";
 import { assessmentApi } from "@/lib/api/assessment";
-import { studyPlannerApi, CreateStudyPlanPayload, GeneratePlanFromAssessmentPayload } from "@/lib/api/study-planner";
+import {
+  studyPlannerApi,
+  CreateStudyPlanPayload,
+  GeneratePlanFromAssessmentPayload,
+} from "@/lib/api/study-planner";
 import { toast } from "sonner";
 import { format, addDays } from "date-fns";
 
@@ -22,7 +49,12 @@ interface StudyPlanWizardProps {
   initialAssessmentId?: string;
 }
 
-export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessmentId }: StudyPlanWizardProps) {
+export function StudyPlanWizard({
+  open,
+  onOpenChange,
+  onSuccess,
+  initialAssessmentId,
+}: StudyPlanWizardProps) {
   const [mode, setMode] = useState<"ai" | "manual">("ai");
   const [loading, setLoading] = useState(false);
   const [courses, setCourses] = useState<StudentCourseListItem[]>([]);
@@ -34,16 +66,29 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
   const [studyType, setStudyType] = useState("Assessment Preparation");
   const [courseId, setCourseId] = useState<string>("");
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
-  const [endDate, setEndDate] = useState(format(addDays(new Date(), 14), "yyyy-MM-dd"));
-  const [selectedDays, setSelectedDays] = useState<string[]>(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
+  const [endDate, setEndDate] = useState(
+    format(addDays(new Date(), 14), "yyyy-MM-dd"),
+  );
+  const [selectedDays, setSelectedDays] = useState<string[]>([
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+  ]);
   const [blackoutDatesInput, setBlackoutDatesInput] = useState<string>("");
   const [timeStart, setTimeStart] = useState("19:00");
   const [timeEnd, setTimeEnd] = useState("21:00");
   const [sessionDuration, setSessionDuration] = useState<number>(60);
   const [dailyGoal, setDailyGoal] = useState("Study 1 topic per session");
-  const [preferredDifficulty, setPreferredDifficulty] = useState<string>("Balanced");
+  const [preferredDifficulty, setPreferredDifficulty] =
+    useState<string>("Balanced");
   const [reminderPref, setReminderPref] = useState<number>(30);
-  const [reminderChannels, setReminderChannels] = useState<string[]>(["in_app", "browser"]);
+  const [reminderChannels, setReminderChannels] = useState<string[]>([
+    "in_app",
+    "browser",
+  ]);
   const [priority, setPriority] = useState<string>("High");
 
   useEffect(() => {
@@ -52,11 +97,13 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
         try {
           const [workspaces, assessRes] = await Promise.all([
             studentApi.getWorkspaces().catch(() => []),
-            assessmentApi.getAssessments({ page: 1, page_size: 20 }).catch(() => ({ items: [] })),
+            assessmentApi
+              .getAssessments({ page: 1, page_size: 20 })
+              .catch(() => ({ items: [] })),
           ]);
           setCourses(workspaces || []);
           setAssessments(assessRes.items || []);
-          
+
           if (initialAssessmentId) {
             setSelectedAssessmentId(initialAssessmentId);
           } else if (assessRes.items && assessRes.items.length > 0) {
@@ -71,25 +118,29 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
   }, [open, initialAssessmentId]);
 
   const toggleDay = (day: string) => {
-    setSelectedDays(prev =>
-      prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day]
+    setSelectedDays((prev) =>
+      prev.includes(day) ? prev.filter((d) => d !== day) : [...prev, day],
     );
   };
 
   const toggleChannel = (channel: string) => {
-    setReminderChannels(prev =>
-      prev.includes(channel) ? prev.filter(c => c !== channel) : [...prev, channel]
+    setReminderChannels((prev) =>
+      prev.includes(channel)
+        ? prev.filter((c) => c !== channel)
+        : [...prev, channel],
     );
   };
 
   const parseBlackoutDates = (): string[] => {
     if (!blackoutDatesInput.trim()) return [];
-    const raw = blackoutDatesInput.split(",").map((d) => d.trim()).filter(Boolean);
+    const raw = blackoutDatesInput
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean);
     const valid: string[] = [];
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
     for (const d of raw) {
       if (!dateRegex.test(d)) {
-        toast.error(`Invalid blackout date format "${d}". Expected YYYY-MM-DD.`);
         throw new Error(`Invalid blackout date format: ${d}`);
       }
       valid.push(d);
@@ -118,7 +169,9 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
         priority: priority,
       };
       await studyPlannerApi.generateFromAssessment(payload);
-      toast.success("AI Study Plan generated and synchronized with your calendar!");
+      toast.success(
+        "AI Study Plan generated and synchronized with your calendar!",
+      );
       onSuccess();
       onOpenChange(false);
     } catch (err: any) {
@@ -179,7 +232,8 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
             </DialogTitle>
           </div>
           <DialogDescription className="text-xs text-muted-foreground">
-            Build a personalized study schedule integrated with your courses, assessments, and notifications.
+            Build a personalized study schedule integrated with your courses,
+            assessments, and notifications.
           </DialogDescription>
         </DialogHeader>
 
@@ -216,20 +270,31 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
                 <Zap className="size-3.5" /> Smart Assessment Engine
               </p>
               <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-                AI will inspect remaining days until your assessment, extract course topics, check lecturer-uploaded materials, and distribute daily study, practice, and revision sessions into your academic calendar.
+                AI will inspect remaining days until your assessment, extract
+                course topics, check lecturer-uploaded materials, and distribute
+                daily study, practice, and revision sessions into your academic
+                calendar.
               </p>
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-bold">1. Select Target Assessment</Label>
-              <Select value={selectedAssessmentId} onValueChange={setSelectedAssessmentId}>
+              <Label className="text-xs font-bold">
+                1. Select Target Assessment
+              </Label>
+              <Select
+                value={selectedAssessmentId}
+                onValueChange={setSelectedAssessmentId}
+              >
                 <SelectTrigger className="h-10 text-xs rounded-xl border-border/60">
                   <SelectValue placeholder="Choose an upcoming CAT or exam..." />
                 </SelectTrigger>
                 <SelectContent>
                   {assessments.map((a) => (
                     <SelectItem key={a.id} value={a.id} className="text-xs">
-                      {a.title} ({a.course_code || "CAT"}) - Opens {a.window_start ? format(new Date(a.window_start), "MMM d") : "Soon"}
+                      {a.title} ({a.course_code || "CAT"}) - Opens{" "}
+                      {a.window_start
+                        ? format(new Date(a.window_start), "MMM d")
+                        : "Soon"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -237,9 +302,19 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-bold">2. Available Study Days</Label>
+              <Label className="text-xs font-bold">
+                2. Available Study Days
+              </Label>
               <div className="flex flex-wrap gap-1.5">
-                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day) => {
+                {[
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday",
+                  "Saturday",
+                  "Sunday",
+                ].map((day) => {
                   const active = selectedDays.includes(day);
                   return (
                     <button
@@ -261,7 +336,9 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs font-bold">3. Preferred Study Time</Label>
+                <Label className="text-xs font-bold">
+                  3. Preferred Study Time
+                </Label>
                 <div className="flex gap-2">
                   <Input
                     type="time"
@@ -269,7 +346,9 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
                     onChange={(e) => setTimeStart(e.target.value)}
                     className="h-9 text-xs rounded-lg border-border/60"
                   />
-                  <span className="text-xs self-center font-bold text-muted-foreground">to</span>
+                  <span className="text-xs self-center font-bold text-muted-foreground">
+                    to
+                  </span>
                   <Input
                     type="time"
                     value={timeEnd}
@@ -280,29 +359,42 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs font-bold">4. Study Intensity / Pace</Label>
-                <Select value={preferredDifficulty} onValueChange={setPreferredDifficulty}>
+                <Label className="text-xs font-bold">
+                  4. Study Intensity / Pace
+                </Label>
+                <Select
+                  value={preferredDifficulty}
+                  onValueChange={setPreferredDifficulty}
+                >
                   <SelectTrigger className="h-9 text-xs rounded-lg border-border/60">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="Balanced">Balanced Pace</SelectItem>
-                    <SelectItem value="Small daily sessions">Small Light Sessions</SelectItem>
-                    <SelectItem value="Intensive revision">Intensive Bootcamp</SelectItem>
+                    <SelectItem value="Small daily sessions">
+                      Small Light Sessions
+                    </SelectItem>
+                    <SelectItem value="Intensive revision">
+                      Intensive Bootcamp
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs font-bold">5. Vacation / Blackout Dates (Optional)</Label>
+              <Label className="text-xs font-bold">
+                5. Vacation / Blackout Dates (Optional)
+              </Label>
               <Input
                 placeholder="Comma separated dates e.g. 2026-08-05, 2026-08-06"
                 value={blackoutDatesInput}
                 onChange={(e) => setBlackoutDatesInput(e.target.value)}
                 className="h-9 text-xs rounded-lg border-border/60"
               />
-              <p className="text-[10px] text-muted-foreground">AI will avoid scheduling study sessions on these dates.</p>
+              <p className="text-[10px] text-muted-foreground">
+                AI will avoid scheduling study sessions on these dates.
+              </p>
             </div>
 
             <Button
@@ -310,7 +402,11 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
               disabled={loading || !selectedAssessmentId}
               className="w-full h-10 mt-4 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md gap-2"
             >
-              {loading ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+              {loading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Sparkles className="size-4" />
+              )}
               Generate AI Plan Now
             </Button>
           </div>
@@ -318,7 +414,9 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
           <div className="space-y-4 pt-1">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label className="text-xs font-bold">1. Study Goal / Title</Label>
+                <Label className="text-xs font-bold">
+                  1. Study Goal / Title
+                </Label>
                 <Input
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
@@ -334,11 +432,19 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Assessment Preparation">Assessment Preparation</SelectItem>
+                    <SelectItem value="Assessment Preparation">
+                      Assessment Preparation
+                    </SelectItem>
                     <SelectItem value="Homework">Homework</SelectItem>
-                    <SelectItem value="General Revision">General Revision</SelectItem>
-                    <SelectItem value="Weekly Learning">Weekly Learning</SelectItem>
-                    <SelectItem value="Personal Goal">Personal Learning Goal</SelectItem>
+                    <SelectItem value="General Revision">
+                      General Revision
+                    </SelectItem>
+                    <SelectItem value="Weekly Learning">
+                      Weekly Learning
+                    </SelectItem>
+                    <SelectItem value="Personal Goal">
+                      Personal Learning Goal
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -394,9 +500,19 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
             </div>
 
             <div className="space-y-2">
-              <Label className="text-xs font-bold">7. Available Study Days</Label>
+              <Label className="text-xs font-bold">
+                7. Available Study Days
+              </Label>
               <div className="flex flex-wrap gap-1.5">
-                {["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"].map((day) => {
+                {[
+                  "Monday",
+                  "Tuesday",
+                  "Wednesday",
+                  "Thursday",
+                  "Friday",
+                  "Saturday",
+                  "Sunday",
+                ].map((day) => {
                   const active = selectedDays.includes(day);
                   return (
                     <button
@@ -421,7 +537,11 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
               disabled={loading || !title}
               className="w-full h-10 mt-4 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md gap-2"
             >
-              {loading ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+              {loading ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="size-4" />
+              )}
               Create Study Plan
             </Button>
           </div>

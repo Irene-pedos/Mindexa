@@ -1,16 +1,17 @@
 import json
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
+from app.agents.base import BaseAgent
+from app.core.ai.gateway import AIGateway
+from app.core.ai.providers import AICompletionRequest, AIMessage
+from app.core.logging import get_logger
+from app.db.enums import AIActionType
+from app.db.models.study_support_session import StudySupportSession
+from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
+from app.services.rag_service import RAGService
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.agents.base import BaseAgent
-from app.services.rag_service import RAGService
-from app.db.schemas.rag import SourceCitation, RAGRetrievalResult
-from app.db.models.study_support_session import StudySupportSession
-from app.db.enums import AIActionType
-from app.core.ai.providers import AICompletionRequest, AIMessage
-from app.core.ai.gateway import AIGateway
-from app.core.logging import get_logger
 
 logger = get_logger(__name__)
 
@@ -139,8 +140,14 @@ class StudySupportAgent(BaseAgent):
         messages = [AIMessage(role="system", content=system_prompt)]
 
         # Add history
-        for msg in history[-5:]: # Last 5 messages for context
-            messages.append(AIMessage(role=msg["role"], content=msg["content"]))
+        for msg in history[-5:]:  # Last 5 messages for context
+            if not isinstance(msg, dict):
+                continue
+            role = msg.get("role")
+            content = msg.get("content")
+            if not role or not content:
+                continue
+            messages.append(AIMessage(role=role, content=content))
 
         messages.append(AIMessage(role="user", content=user_prompt))
 
@@ -152,7 +159,7 @@ class StudySupportAgent(BaseAgent):
             temperature=temp,
             max_tokens=max_tokens_budget,
         )
-        
+
         response = await self.gateway.complete(
             request,
             action_type=AIActionType.STUDY_SUPPORT,

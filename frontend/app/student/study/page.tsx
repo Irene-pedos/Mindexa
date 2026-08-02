@@ -53,12 +53,13 @@ export default function StudentStudyPage() {
 
   // Modals state
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [initialAssessmentForWizard, setInitialAssessmentForWizard] =
-    useState<string | undefined>(undefined);
+  const [initialAssessmentForWizard, setInitialAssessmentForWizard] = useState<
+    string | undefined
+  >(undefined);
   const [completeModalSession, setCompleteModalSession] =
     useState<StudySession | null>(null);
   const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(
-    null
+    null,
   );
   const [rescheduleSession, setRescheduleSession] =
     useState<StudySession | null>(null);
@@ -110,7 +111,7 @@ export default function StudentStudyPage() {
     allSessions.sort(
       (a, b) =>
         new Date(a.scheduled_start).getTime() -
-        new Date(b.scheduled_start).getTime()
+        new Date(b.scheduled_start).getTime(),
     );
 
     const now = new Date();
@@ -122,11 +123,7 @@ export default function StudentStudyPage() {
     allSessions.forEach((s) => {
       if (s.status === "COMPLETED") {
         completed.push(s);
-      } else if (
-        s.status === "MISSED" ||
-        s.status === "SKIPPED" ||
-        s.status === "RESCHEDULED"
-      ) {
+      } else if (s.status === "MISSED" || s.status === "SKIPPED") {
         missedOrRescheduled.push(s);
       } else {
         const start = new Date(s.scheduled_start);
@@ -289,9 +286,9 @@ export default function StudentStudyPage() {
                             <Clock className="size-3 mr-1" />
                             {format(
                               parseISO(
-                                categorizedSessions.nextSession.scheduled_start
+                                categorizedSessions.nextSession.scheduled_start,
                               ),
-                              "EEEE, MMM d 'at' HH:mm"
+                              "EEEE, MMM d 'at' HH:mm",
                             )}
                           </Badge>
                         </div>
@@ -311,7 +308,9 @@ export default function StudentStudyPage() {
                           variant="outline"
                           size="sm"
                           onClick={() =>
-                            setRescheduleSession(categorizedSessions.nextSession)
+                            setRescheduleSession(
+                              categorizedSessions.nextSession,
+                            )
                           }
                           className="h-9 text-xs font-semibold rounded-xl border-border/60"
                         >
@@ -322,7 +321,7 @@ export default function StudentStudyPage() {
                           size="sm"
                           onClick={() =>
                             router.push(
-                              `/student/study/session/${categorizedSessions.nextSession?.id}`
+                              `/student/study/session/${categorizedSessions.nextSession?.id}`,
                             )
                           }
                           className="h-9 px-4 text-xs font-bold rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-md gap-1.5"
@@ -339,8 +338,8 @@ export default function StudentStudyPage() {
                 {categorizedSessions.upcoming.length > 0 && (
                   <div className="space-y-3">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                      <Clock className="size-4 text-muted-foreground" /> Upcoming
-                      Sessions ({categorizedSessions.upcoming.length})
+                      <Clock className="size-4 text-muted-foreground" />{" "}
+                      Upcoming Sessions ({categorizedSessions.upcoming.length})
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {categorizedSessions.upcoming.map((s) => (
@@ -356,7 +355,7 @@ export default function StudentStudyPage() {
                               <CalendarIcon className="size-3" />
                               {format(
                                 parseISO(s.scheduled_start),
-                                "MMM d, HH:mm"
+                                "MMM d, HH:mm",
                               )}{" "}
                               ({s.duration_minutes}m)
                             </div>
@@ -392,8 +391,8 @@ export default function StudentStudyPage() {
                 {categorizedSessions.missedOrRescheduled.length > 0 && (
                   <div className="space-y-3">
                     <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <AlertTriangle className="size-4" /> Missed /
-                      Rescheduled ({categorizedSessions.missedOrRescheduled.length})
+                      <AlertTriangle className="size-4" /> Missed / Rescheduled
+                      ({categorizedSessions.missedOrRescheduled.length})
                     </h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       {categorizedSessions.missedOrRescheduled.map((s) => (
@@ -409,7 +408,7 @@ export default function StudentStudyPage() {
                               Originally:{" "}
                               {format(
                                 parseISO(s.scheduled_start),
-                                "MMM d, HH:mm"
+                                "MMM d, HH:mm",
                               )}
                             </div>
                           </div>
@@ -537,7 +536,10 @@ export default function StudentStudyPage() {
                                   </div>
                                   <div className="text-[10px] text-muted-foreground">
                                     {s.scheduled_start
-                                      ? format(parseISO(s.scheduled_start), "MMM d, HH:mm")
+                                      ? format(
+                                          parseISO(s.scheduled_start),
+                                          "MMM d, HH:mm",
+                                        )
                                       : "Unscheduled"}{" "}
                                     • {s.status}
                                   </div>
