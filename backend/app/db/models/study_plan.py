@@ -86,6 +86,7 @@ class StudySession(BaseModel, table=True):
 
     # AI Guided Study Session Fields
     lesson_sections_json: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
+    lesson_plan_json: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     lesson_status: str = Field(default="NOT_GENERATED", max_length=20)  # NOT_GENERATED | IN_PROGRESS | COMPLETED
     current_section_index: int = Field(default=0)
     lesson_generated_at: Optional[datetime] = Field(default=None, sa_type=DateTime(timezone=True))
@@ -93,5 +94,7 @@ class StudySession(BaseModel, table=True):
     knowledge_check_score: Optional[float] = Field(default=None)
     knowledge_check_report: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     session_summary_text: Optional[str] = Field(default=None, sa_column=Column(Text))
+    student_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
+    tutor_chat_history: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
 
     plan: Optional["StudyPlan"] = Relationship(sa_relationship=relationship("StudyPlan", back_populates="sessions"))

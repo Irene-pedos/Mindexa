@@ -831,25 +831,20 @@ def process_student_resource(self: MindexaTask, resource_id: str) -> dict[str, A
 
 
 async def _process_student_resource_async(resource_id: str) -> dict[str, Any]:
-    from app.core.ai.gateway import AIGateway
-    from app.core.ai.provider_factory import (get_ai_provider,
-                                              get_embedding_provider)
+    from app.db.models.resource import StudentResource
     from app.db.session import AsyncSessionLocal
-    from app.services.rag_service import RAGService
+    from app.services.document_processing_service import DocumentProcessingService
 
     async with AsyncSessionLocal() as session:
-        # Use embedding provider for RAG
-        chat_provider = get_ai_provider()
-        embed_provider = get_embedding_provider()
-        gateway = AIGateway(session, chat_provider, embed_provider)
-        rag_service = RAGService(session, gateway)
-
-        await rag_service.process_student_resource(uuid.UUID(resource_id))
+        sr = await session.get(StudentResource, uuid.UUID(resource_id))
+        if sr and sr.academic_resource_id:
+            service = DocumentProcessingService()
+            await service.process_resource(sr.academic_resource_id, session)
         return {"resource_id": resource_id, "status": "processed"}
 
 
 # ---------------------------------------------------------------------------
-# TASK 8 — PROCESS LECTURER MATERIAL (RAG)
+# TASK 8 - PROCESS LECTURER MATERIAL (RAG)
 # ---------------------------------------------------------------------------
 
 @celery.task(
@@ -869,19 +864,15 @@ def process_lecturer_material(self: MindexaTask, material_id: str) -> dict[str, 
 
 
 async def _process_lecturer_material_async(material_id: str) -> dict[str, Any]:
-    from app.core.ai.gateway import AIGateway
-    from app.core.ai.provider_factory import (get_ai_provider,
-                                              get_embedding_provider)
+    from app.db.models.resource import LecturerMaterial
     from app.db.session import AsyncSessionLocal
-    from app.services.rag_service import RAGService
+    from app.services.document_processing_service import DocumentProcessingService
 
     async with AsyncSessionLocal() as session:
-        chat_provider = get_ai_provider()
-        embed_provider = get_embedding_provider()
-        gateway = AIGateway(session, chat_provider, embed_provider)
-        rag_service = RAGService(session, gateway)
-
-        await rag_service.process_lecturer_material(uuid.UUID(material_id))
+        lm = await session.get(LecturerMaterial, uuid.UUID(material_id))
+        if lm and lm.academic_resource_id:
+            service = DocumentProcessingService()
+            await service.process_resource(lm.academic_resource_id, session)
         return {"material_id": material_id, "status": "processed"}
 
 

@@ -21,6 +21,7 @@ from app.schemas.study_planner import (
     GuidedSessionAskRequest,
     GuidedSessionExerciseRequest,
     SubmitKnowledgeCheckRequest,
+    SaveSessionNotesRequest,
 )
 from app.services.study_planner_service import StudyPlannerService
 
@@ -149,28 +150,6 @@ async def complete_session(
         )
 
 
-@router.post(
-    "/{plan_id}/sessions/{session_id}/generate-quiz",
-    response_model=List[Dict[str, Any]],
-    summary="Generate post-session AI checkpoint practice quiz",
-)
-async def generate_session_quiz(
-    plan_id: uuid.UUID,
-    session_id: uuid.UUID,
-    body: GenerateQuizRequest,
-    current_user=Depends(require_student),
-    db: AsyncSession = Depends(get_db),
-) -> List[Dict[str, Any]]:
-    service = StudyPlannerService(db)
-    try:
-        return await service.generate_session_quiz(
-            session_id, current_user.id, body.question_count
-        )
-    except ValueError as err:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(err)
-        )
-
 
 @router.post(
     "/{plan_id}/sessions/{session_id}/reschedule",
@@ -187,11 +166,11 @@ async def reschedule_session(
     service = StudyPlannerService(db)
     try:
         return await service.reschedule_session(
-            session_id, current_user.id, body.new_start, body.new_duration_minutes
+            session_id, current_user.id, body.new_start, body.new_duration_minutes, force=body.force
         )
     except ValueError as err:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail=str(err)
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(err)
         )
 
 
@@ -247,6 +226,24 @@ async def get_guided_session(
     service = StudyPlannerService(db)
     try:
         return await service.get_guided_session_detail(session_id, current_user.id)
+    except ValueError as err:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
+
+
+@router.patch(
+    "/sessions/{session_id}/notes",
+    response_model=StudySessionResponse,
+    summary="Save student personal notes for a study session",
+)
+async def save_session_notes(
+    session_id: uuid.UUID,
+    body: SaveSessionNotesRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> StudySessionResponse:
+    service = StudyPlannerService(db)
+    try:
+        return await service.save_session_notes(session_id, current_user.id, body.student_notes)
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))
 

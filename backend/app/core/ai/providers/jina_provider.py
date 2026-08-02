@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import httpx
 
+from app.core.config import settings
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
 
 from .base_provider import (
@@ -47,11 +48,15 @@ class JinaProvider(BaseProvider):
         # Jina expects a list of strings
         inputs = request.input if isinstance(request.input, list) else [request.input]
         
+        # Target dimension matching resource_chunks pgvector column (768)
+        target_dim = 768
+        jina_dim = 768
+
         payload = {
             "model": model,
             "input": inputs,
             "task": "retrieval.query" if len(inputs) == 1 else "retrieval.passage",
-            "dimensions": 1024, # Explicitly requested
+            "dimensions": jina_dim,
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
@@ -69,12 +74,22 @@ class JinaProvider(BaseProvider):
                     "Jina rate limit exceeded for embeddings.",
                     code="AI_PROVIDER_RATE_LIMITED",
                 ) from exc
-            raise ServiceUnavailableError(f"Jina embedding request failed: {exc}") from exc
+            raise ServiceUnavailableError(f"Jina embedding request failed with status {exc.response.status_code}: {exc.response.text}") from exc
         except httpx.HTTPError as exc:
             raise ServiceUnavailableError(f"Jina embedding service is unavailable: {exc}") from exc
 
         data = response.json()
-        embeddings = [item["embedding"] for item in data.get("data", [])]
+        raw_embeddings = [item["embedding"] for item in data.get("data", [])]
+        
+        # Ensure returned embeddings match target PGVECTOR_DIMENSION
+        embeddings = []
+        for emb in raw_embeddings:
+            if len(emb) < target_dim:
+                emb = emb + [0.0] * (target_dim - len(emb))
+            elif len(emb) > target_dim:
+                emb = emb[:target_dim]
+            embeddings.append(emb)
+
         usage = data.get("usage") or {}
         
         return AIEmbeddingResponse(

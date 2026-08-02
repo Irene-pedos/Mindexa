@@ -84,10 +84,17 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
 
   const parseBlackoutDates = (): string[] => {
     if (!blackoutDatesInput.trim()) return [];
-    return blackoutDatesInput
-      .split(",")
-      .map((d) => d.trim())
-      .filter((d) => Boolean(d));
+    const raw = blackoutDatesInput.split(",").map((d) => d.trim()).filter(Boolean);
+    const valid: string[] = [];
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    for (const d of raw) {
+      if (!dateRegex.test(d)) {
+        toast.error(`Invalid blackout date format "${d}". Expected YYYY-MM-DD.`);
+        throw new Error(`Invalid blackout date format: ${d}`);
+      }
+      valid.push(d);
+    }
+    return valid;
   };
 
   const handleGenerateAiPlan = async () => {
@@ -124,6 +131,10 @@ export function StudyPlanWizard({ open, onOpenChange, onSuccess, initialAssessme
   const handleCreateManualPlan = async () => {
     if (!title) {
       toast.error("Please provide a study plan title");
+      return;
+    }
+    if (new Date(endDate) <= new Date(startDate)) {
+      toast.error("Plan end date must be strictly after the start date.");
       return;
     }
     setLoading(true);

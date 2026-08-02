@@ -110,3 +110,18 @@ async def test_rag_service_retrieve_context_for_lecturer_filtered_by_material_id
     assert isinstance(res, RAGRetrievalResult)
     assert "Specific material chunk." in res.context_string
     db.execute.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_embed_question_truncates_dimension_to_768():
+    from unittest.mock import patch
+    db = AsyncMock()
+    service = RAGService(db)
+    
+    mock_gateway_res = MagicMock()
+    mock_gateway_res.embeddings = [[0.5] * 1536]
+    
+    with patch("app.core.ai.gateway.AIGateway.embed", new_callable=AsyncMock) as mock_embed:
+        mock_embed.return_value = mock_gateway_res
+        vec = await service._embed_question("Sample query string")
+        assert len(vec) == 768

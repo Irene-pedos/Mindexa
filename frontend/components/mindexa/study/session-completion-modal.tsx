@@ -34,10 +34,15 @@ export function SessionCompletionModal({
   const [completedResult, setCompletedResult] = useState<StudySession | null>(null);
 
   React.useEffect(() => {
-    if (session && session.checklist_items) {
-      setChecklist(session.checklist_items);
+    if (open && session) {
+      setUnderstanding("YES");
+      setDifficulty("Medium");
+      setConfidence(4);
+      setNotes("");
+      setChecklist(session.checklist_items || []);
+      setCompletedResult(null);
     }
-  }, [session]);
+  }, [session, open]);
 
   if (!session) return null;
 

@@ -23,25 +23,60 @@ interface ContextualAskAiPanelProps {
   sessionId: string;
   currentSectionTitle: string;
   currentSectionContent: string;
+  initialChatHistory?: Array<{
+    role: string;
+    content: string;
+    citations?: SourceCitation[];
+    timestamp?: string;
+  }> | null;
 }
 
 export function ContextualAskAiPanel({
   sessionId,
   currentSectionTitle,
   currentSectionContent,
+  initialChatHistory,
 }: ContextualAskAiPanelProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([
-    {
-      id: "welcome",
-      sender: "ai",
-      text: `Hello! I am your AI Guided Study Tutor. Ask me any question about **${currentSectionTitle}** or related concepts in your study material!`,
-      timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-    },
-  ]);
+  const [messages, setMessages] = useState<ChatMessage[]>(() => {
+    if (initialChatHistory && initialChatHistory.length > 0) {
+      return initialChatHistory.map((item, idx) => ({
+        id: `hist-${idx}`,
+        sender: item.role === "user" ? "user" : "ai",
+        text: item.content,
+        citations: item.citations,
+        timestamp: item.timestamp
+          ? new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }));
+    }
+    return [
+      {
+        id: "welcome",
+        sender: "ai",
+        text: `Hello! I am your AI Guided Study Tutor. Ask me any question about **${currentSectionTitle}** or related concepts in your study material!`,
+        timestamp: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      },
+    ];
+  });
   const [inputQuestion, setInputQuestion] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (initialChatHistory && initialChatHistory.length > 0 && messages.length <= 1) {
+      const formatted = initialChatHistory.map((item, idx) => ({
+        id: `hist-${idx}`,
+        sender: (item.role === "user" ? "user" : "ai") as "user" | "ai",
+        text: item.content,
+        citations: item.citations,
+        timestamp: item.timestamp
+          ? new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+          : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      }));
+      setMessages(formatted);
+    }
+  }, [initialChatHistory, messages.length]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -164,7 +199,9 @@ export function ContextualAskAiPanel({
                       </span>
                       {msg.citations.map((c, i) => (
                         <div key={i} className="text-[10px] text-muted-foreground bg-background/50 p-1.5 rounded border border-border/30">
-                          <span className="font-medium">{c.title}</span>: {c.snippet}
+                          <span className="font-medium">{c.resource_name || c.title || "Source"}</span>
+                          {c.page_number ? ` (p. ${c.page_number})` : ""}
+                          {(c.excerpt || c.snippet) ? `: ${c.excerpt || c.snippet}` : ""}
                         </div>
                       ))}
                     </div>

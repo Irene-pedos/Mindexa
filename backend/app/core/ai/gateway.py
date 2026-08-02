@@ -332,3 +332,37 @@ class AIGateway:
                     break
 
         raise ServiceUnavailableError("All configured embedding providers failed.")
+
+    async def log_action(
+        self,
+        *,
+        action_type: AIActionType,
+        actor_id: uuid.UUID | None = None,
+        actor_role: str | None = None,
+        subject_entity_type: str | None = None,
+        subject_entity_id: uuid.UUID | None = None,
+        prompt_summary: str | None = None,
+        prompt_version: str | None = None,
+        status: AIActionStatus = AIActionStatus.COMPLETED,
+        raw_output: dict | None = None,
+    ) -> AIActionLog:
+        """Record an audit log entry directly without making an LLM completion API request."""
+        log_entry = AIActionLog(
+            action_type=action_type,
+            status=status,
+            actor_id=actor_id,
+            actor_role=actor_role,
+            subject_entity_type=subject_entity_type,
+            subject_entity_id=subject_entity_id,
+            provider_name="deterministic_rule_engine",
+            model_name="deterministic_evaluator",
+            prompt_summary=prompt_summary,
+            prompt_version=prompt_version,
+            raw_output=raw_output,
+            total_tokens=0,
+            latency_ms=0,
+        )
+        self.db.add(log_entry)
+        await self.db.flush()
+        await self.db.commit()
+        return log_entry

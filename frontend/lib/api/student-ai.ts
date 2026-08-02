@@ -12,6 +12,10 @@ export interface StudentSupportRequest {
   question: string;
   conversation_history?: Array<{ role: string; content: string }>;
   selected_resource_id?: string;
+  selected_resource_ids?: string[];
+  teaching_workspace_id?: string;
+  thinking_mode?: boolean;
+  deep_search_mode?: boolean;
 }
 
 export interface StudentSupportResponse {
@@ -22,6 +26,20 @@ export interface StudentSupportResponse {
   provider?: string | null;
 }
 
+export interface RevisionGuideOutput {
+  summary: string;
+  checklist: string[];
+  readings: string[];
+}
+
+export interface StudentChatHistoryItem {
+  id: string;
+  question: string;
+  answer: string;
+  citations: SourceCitation[];
+  created_at: string;
+}
+
 export const studentAiApi = {
   /**
    * Request study support from the AI agent.
@@ -30,6 +48,23 @@ export const studentAiApi = {
     return apiClient("/student/ai/support", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  },
+
+  /**
+   * Load recent student AI chat history for conversation persistence.
+   */
+  async getHistory(): Promise<StudentChatHistoryItem[]> {
+    return apiClient("/student/ai/history");
+  },
+
+  /**
+   * Generate structured revision guide note.
+   */
+  async getRevisionGuide(topic: string, teachingWorkspaceId?: string): Promise<RevisionGuideOutput> {
+    return apiClient("/student/ai/revision", {
+      method: "POST",
+      body: JSON.stringify({ topic, teaching_workspace_id: teachingWorkspaceId }),
     });
   },
 };

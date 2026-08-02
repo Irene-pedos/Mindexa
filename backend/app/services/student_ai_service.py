@@ -42,7 +42,16 @@ class StudentAIService:
             raise ValidationError("Question cannot be empty.", code="EMPTY_AI_QUESTION")
 
         await self._assert_student_support_allowed(current_user.id)
-        # We'll skip context safety check for now as RAG handles it or it's being refactored
+
+        # Validate question & injected context for safety against prohibited exam materials
+        if _BLOCKED_CONTEXT_PATTERN.search(body.question):
+            raise PermissionDeniedError(
+                "Student AI support cannot process input containing prohibited materials (such as answer keys, marking schemes, or exam solutions).",
+                code="AI_CONTEXT_NOT_ALLOWED",
+            )
+
+        if hasattr(body, "contexts") and body.contexts:
+            await self._assert_contexts_are_safe(body.contexts)
 
         # 1. Build Gateway
         chat_provider = get_ai_provider()
@@ -56,15 +65,59 @@ class StudentAIService:
             student_id=current_user.id,
             conversation_history=body.conversation_history if hasattr(body, 'conversation_history') else [],
             selected_resource_id=body.selected_resource_id,
+            selected_resource_ids=getattr(body, "selected_resource_ids", []),
+            teaching_workspace_id=getattr(body, "teaching_workspace_id", None),
+            thinking_mode=getattr(body, "thinking_mode", False),
+            deep_search_mode=getattr(body, "deep_search_mode", False),
             db=self.db,
         )
-        
+
         return StudentSupportResponse(
             explanation=output.answer,
             citations=[c.model_dump() for c in output.citations],
             fallback_used=output.fallback_used,
             model=chat_provider.default_model,
             provider=chat_provider.name,
+        )
+
+    async def get_chat_history(self, student_id: uuid.UUID) -> list[Any]:
+        from app.db.models.study_support_session import StudySupportSession
+        from app.schemas.student_ai import StudentChatHistoryItem
+        stmt = (
+            select(StudySupportSession)
+            .where(
+                StudySupportSession.student_id == student_id,
+                StudySupportSession.is_deleted == False,
+            )
+            .order_by(StudySupportSession.created_at.desc())
+            .limit(20)
+        )
+        res = await self.db.execute(stmt)
+        sessions = list(res.scalars().all())
+        sessions.reverse()
+        return [
+            StudentChatHistoryItem(
+                id=s.id,
+                question=s.question,
+                answer=s.llm_response,
+                citations=s.source_citations or [],
+                created_at=s.created_at.isoformat(),
+            )
+            for s in sessions
+        ]
+
+    async def generate_revision_guide(
+        self, body: Any, student_id: uuid.UUID
+    ) -> Any:
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudySupportAgent(gateway)
+        return await agent.generate_revision_guide(
+            topic=body.topic,
+            student_id=student_id,
+            teaching_workspace_id=body.teaching_workspace_id,
+            db=self.db,
         )
 
     async def _assert_student_support_allowed(self, student_id) -> None:

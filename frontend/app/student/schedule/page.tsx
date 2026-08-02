@@ -117,7 +117,7 @@ export default function StudentSchedulePage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            {/* Calendar Grid — add first-day-of-week offset to align dates correctly */}
+            {/* Calendar Grid - add first-day-of-week offset to align dates correctly */}
             <div className="grid grid-cols-7 gap-1 text-center mb-6">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
                 <div

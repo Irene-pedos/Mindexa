@@ -66,7 +66,7 @@ class DocumentProcessingService:
             
             # 6. Generate embeddings
             texts = [c["content"] for c in chunks_data]
-            embeddings = await self._generate_embeddings(texts)
+            embeddings = await self._generate_embeddings(texts, resource_id=resource.id, db=db)
             
             # 7. Store ResourceChunk records
             await self._store_chunks(resource.id, chunks_data, embeddings, db)
@@ -189,14 +189,40 @@ class DocumentProcessingService:
             return len(self.tokenizer.encode(text))
         return len(text) // 4
 
-    async def _generate_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """Call Jina Embeddings API."""
+    async def _generate_embeddings(
+        self,
+        texts: List[str],
+        resource_id: Optional[uuid.UUID] = None,
+        db: Optional[AsyncSession] = None,
+    ) -> List[List[float]]:
+        """Generate document passage embeddings via audited AIGateway."""
+        if db is not None:
+            try:
+                from app.core.ai.gateway import AIGateway
+                from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+                from app.core.ai.providers import AIEmbeddingRequest
+
+                gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
+                req = AIEmbeddingRequest(input=texts)
+                res = await gateway.embed(
+                    req,
+                    subject_entity_type="academic_resource",
+                    subject_entity_id=resource_id,
+                    prompt_summary=f"Document embedding batch for resource {resource_id}",
+                )
+                return res.embeddings
+            except Exception as exc:
+                logger.warning(
+                    "AIGateway document embedding failed, attempting direct provider fallback",
+                    error=str(exc),
+                )
+
         if not self.jina_api_key:
             raise EmbeddingGenerationError("JINA_API_KEY not configured")
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.jina_api_key}"
+            "Authorization": f"Bearer {self.jina_api_key}",
         }
         
         # Jina supports batching.
@@ -204,8 +230,8 @@ class DocumentProcessingService:
         payload = {
             "model": self.embedding_model,
             "task": "retrieval.passage",
-            "dimensions": 768, # Specified in handoff
-            "input": texts
+            "dimensions": settings.PGVECTOR_DIMENSION,
+            "input": texts,
         }
         
         async with httpx.AsyncClient(timeout=60.0) as client:

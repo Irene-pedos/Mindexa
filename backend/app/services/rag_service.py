@@ -28,7 +28,8 @@ class RAGService:
     async def retrieve_context_for_lecturer(
         self,
         topic: str,
-        teaching_workspace_id: uuid.UUID,
+        teaching_workspace_id: Optional[uuid.UUID] = None,
+        workspace_id: Optional[uuid.UUID] = None,
         material_ids: Optional[List[uuid.UUID]] = None,
         top_k: int = 8,
     ) -> RAGRetrievalResult:
@@ -36,19 +37,21 @@ class RAGService:
         Retrieve relevant text chunks from lecturer-uploaded materials for a given topic.
 
         Used to ground AI question generation in actual course content.
-
-        Args:
-            topic: The question topic / subject the AI is generating for.
-            teaching_workspace_id: The teaching workspace whose materials to search.
-            material_ids: Optional list of specific lecturer material IDs to filter search to.
-            top_k: Max number of chunks to retrieve.
-
-        Returns:
-            A RAGRetrievalResult containing the context string and citations.
         """
+        resolved_workspace_id = teaching_workspace_id or workspace_id
+        if not resolved_workspace_id:
+            logger.warning("Lecturer RAG called without workspace_id")
+            return RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True,
+            )
+
         logger.info(
             "Lecturer RAG retrieval started",
-            workspace_id=str(teaching_workspace_id),
+            workspace_id=str(resolved_workspace_id),
             topic_preview=topic[:80],
             material_ids_count=len(material_ids) if material_ids else 0,
         )
@@ -103,7 +106,7 @@ class RAGService:
                 stmt,
                 {
                     "query_embedding": embedding_literal,
-                    "workspace_id": str(teaching_workspace_id),
+                    "workspace_id": str(resolved_workspace_id),
                     "material_ids": [uuid.UUID(str(m)) for m in material_ids]
                     if material_ids
                     else [],
@@ -218,10 +221,12 @@ class RAGService:
         question: str,
         student_id: uuid.UUID,
         selected_resource_id: uuid.UUID | None = None,
+        selected_resource_ids: list[uuid.UUID] | None = None,
+        teaching_workspace_id: uuid.UUID | None = None,
         top_k: int = None,
     ) -> RAGRetrievalResult:
         """
-        Full RAG retrieval pipeline.
+        Full RAG retrieval pipeline with multi-resource and workspace scoping support.
         """
         top_k = top_k or settings.RAG_TOP_K
         logger.info(
@@ -229,11 +234,12 @@ class RAGService:
             student_id=str(student_id),
             question_preview=question[:80],
             selected_resource_id=str(selected_resource_id) if selected_resource_id else None,
+            teaching_workspace_id=str(teaching_workspace_id) if teaching_workspace_id else None,
         )
 
         # 1. Generate embedding for the student's question
         try:
-            query_embedding = await self._embed_question(question)
+            query_embedding = await self._embed_question(question, student_id=student_id)
             logger.info("Query embedding generated", dim=len(query_embedding))
         except Exception as exc:
             logger.warning(
@@ -248,59 +254,47 @@ class RAGService:
                 fallback_used=True,
             )
 
-        # 2. Get allowed academic_resource_ids
-        allowed_resource_ids = await self._get_allowed_resource_ids(student_id)
-        logger.info(
-            "Allowed resource IDs found",
-            count=len(allowed_resource_ids),
-            ids=[str(r) for r in allowed_resource_ids],
+        # 2. Get allowed academic_resource_ids (optionally workspace-scoped)
+        allowed_resource_ids = await self._get_allowed_resource_ids(
+            student_id, teaching_workspace_id=teaching_workspace_id
         )
 
+        # Combine single resource ID into list
+        resource_id_list: list[uuid.UUID] = []
         if selected_resource_id:
-            resolved_id = None
-            # Check student resources
-            stmt_own = select(StudentResource.academic_resource_id).where(
-                and_(
-                    StudentResource.id == selected_resource_id,
-                    StudentResource.student_id == student_id,
-                    StudentResource.is_deleted == False,
-                )
-            )
-            resolved_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
+            resource_id_list.append(selected_resource_id)
+        if selected_resource_ids:
+            for rid in selected_resource_ids:
+                if rid not in resource_id_list:
+                    resource_id_list.append(rid)
 
-            # Check lecturer materials
-            if not resolved_id:
-                stmt_lecturer = (
-                    select(LecturerMaterial.academic_resource_id)
-                    .join(
-                        TeachingWorkspace,
-                        LecturerMaterial.teaching_workspace_id == TeachingWorkspace.id,
+        if resource_id_list:
+            resolved_ids = set()
+            for rid in resource_id_list:
+                res_id = None
+                stmt_own = select(StudentResource.academic_resource_id).where(
+                    and_(
+                        StudentResource.id == rid,
+                        StudentResource.student_id == student_id,
+                        StudentResource.is_deleted == False,
                     )
-                    .join(
-                        StudentEnrollment,
+                )
+                res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
+
+                if not res_id:
+                    stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
                         and_(
-                            StudentEnrollment.class_section_id
-                            == TeachingWorkspace.class_section_id,
-                            TeachingWorkspace.class_section_id.is_not(None),
-                        ),
-                    )
-                    .where(
-                        and_(
-                            LecturerMaterial.id == selected_resource_id,
-                            StudentEnrollment.student_id == student_id,
-                            StudentEnrollment.enrollment_status == EnrollmentStatus.ACTIVE,
+                            LecturerMaterial.id == rid,
                             LecturerMaterial.is_student_visible == True,
                             LecturerMaterial.is_deleted == False,
-                            LecturerMaterial.is_current == True,
                         )
                     )
-                )
-                resolved_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
+                    res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
 
-            if resolved_id and resolved_id in allowed_resource_ids:
-                allowed_resource_ids = [resolved_id]
-            else:
-                allowed_resource_ids = []
+                if res_id and res_id in allowed_resource_ids:
+                    resolved_ids.add(res_id)
+
+            allowed_resource_ids = list(resolved_ids)
 
         if not allowed_resource_ids:
             logger.warning(
@@ -393,8 +387,31 @@ class RAGService:
             fallback_used=fallback_used
         )
 
-    async def _embed_question(self, question: str) -> List[float]:
-        """Generate embedding for query text using Jina API."""
+    async def _embed_question(self, question: str, student_id: Optional[uuid.UUID] = None) -> List[float]:
+        """Generate embedding for query text via audited AIGateway."""
+        try:
+            from app.core.ai.gateway import AIGateway
+            from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
+            from app.core.ai.providers import AIEmbeddingRequest
+
+            gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
+            req = AIEmbeddingRequest(input=question)
+            res = await gateway.embed(
+                req,
+                actor_id=student_id,
+                actor_role="student" if student_id else None,
+                prompt_summary=f"RAG query embedding: {question[:50]}",
+            )
+            vec = res.embeddings[0]
+            target_dim = 768
+            if len(vec) > target_dim:
+                vec = vec[:target_dim]
+            elif len(vec) < target_dim:
+                vec = vec + [0.0] * (target_dim - len(vec))
+            return vec
+        except Exception as exc:
+            logger.warning("AIGateway embedding failed for RAG query, attempting direct fallback", error=str(exc))
+
         if not self.jina_api_key or not self.jina_api_key.strip():
             raise Exception("Jina API key is not configured")
 
@@ -406,7 +423,7 @@ class RAGService:
         payload = {
             "model": self.embedding_model,
             "task": "retrieval.query",
-            "dimensions": 768,
+            "dimensions": settings.PGVECTOR_DIMENSION,
             "input": [question]
         }
         
@@ -423,14 +440,11 @@ class RAGService:
             logger.warning("Jina embedding error", error=str(e))
             raise e
 
-    async def _get_allowed_resource_ids(self, student_id: uuid.UUID) -> List[uuid.UUID]:
+    async def _get_allowed_resource_ids(
+        self, student_id: uuid.UUID, teaching_workspace_id: Optional[uuid.UUID] = None
+    ) -> List[uuid.UUID]:
         """
-        Get academic_resource_ids allowed for this student.
-        Rules:
-        1. Student's own personal study resources.
-        2. Lecturer materials for enrolled courses IF student-visible.
-        3. STRICTLY EXCLUDE: Lecturer-private, Question Banks, Unreleased Assessments,
-           Answer keys, Materials from other courses.
+        Get academic_resource_ids allowed for this student, optionally filtered by teaching_workspace_id.
         """
         # 1. Own resources — select the academic_resource_id FK
         stmt_own = select(StudentResource.academic_resource_id).where(
@@ -442,12 +456,21 @@ class RAGService:
         )
         res_own = await self.db.execute(stmt_own)
         own_ids = [r for r in res_own.scalars().all() if r]
-        logger.info("Own resource IDs", student_id=str(student_id), count=len(own_ids), ids=[str(i) for i in own_ids])
 
         # 2. Lecturer materials for enrolled courses
-        # Access path: Student → Enrollment (ACTIVE) → ClassSection → Workspace → Material → AcademicResource
         from sqlalchemy import exists
         from app.db.models.academic import TeachingAssignment, ClassSection, ClassGroup
+
+        lecturer_conditions = [
+            LecturerMaterial.is_student_visible == True,
+            LecturerMaterial.is_deleted == False,
+            LecturerMaterial.is_current == True,
+            LecturerMaterial.assessment_id.is_(None),
+            AcademicResource.resource_category != ResourceCategory.QUESTION_BANK,
+            AcademicResource.resource_category != ResourceCategory.ANSWER_KEY,
+        ]
+        if teaching_workspace_id:
+            lecturer_conditions.append(LecturerMaterial.teaching_workspace_id == teaching_workspace_id)
 
         stmt_lecturer = (
             select(LecturerMaterial.academic_resource_id)
@@ -456,12 +479,7 @@ class RAGService:
             .join(AcademicResource, LecturerMaterial.academic_resource_id == AcademicResource.id)
             .where(
                 and_(
-                    LecturerMaterial.is_student_visible == True,
-                    LecturerMaterial.is_deleted == False,
-                    LecturerMaterial.is_current == True,
-                    LecturerMaterial.assessment_id.is_(None),
-                    AcademicResource.resource_category != ResourceCategory.QUESTION_BANK,
-                    AcademicResource.resource_category != ResourceCategory.ANSWER_KEY,
+                    *lecturer_conditions,
                     # Student enrollment check (direct or global workspace visibility)
                     or_(
                         # Direct section link

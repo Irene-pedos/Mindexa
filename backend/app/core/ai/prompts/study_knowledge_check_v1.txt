@@ -5,18 +5,28 @@ Known Weak Topics: {{weak_topics}}
 
 Generate {{question_count}} knowledge check questions to test the student's understanding of {{topic}}.
 Ensure each question explicitly mentions or references {{topic}}.
-Use a mix of question types: MCQ, TRUE_FALSE, SHORT_ANSWER, FILL_BLANK.
-Note: Knowledge check results are strictly for personal self-evaluation and learning improvement.
+Use a rich mix of question types: MCQ, TRUE_FALSE, MATCHING, FILL_BLANKS, SHORT_ANSWER, OPEN_QUESTION.
+
+CRITICAL RULES FOR QUESTION TYPES & JSON SCHEMA:
+1. MCQ: Provide 4 distinct options. Vary correct_option_index (0-3).
+2. TRUE_FALSE: Options must be ["True", "False"]. Set correct_answer to "True" or "False".
+3. MATCHING: Provide 'options' (left side premises to match) and 'premises' / 'matches' (right side targets). Also populate 'blank_answers' as a dict mapping premise to target match value.
+4. FILL_BLANKS: Question text should include '[blank]' placeholder. Provide candidate options in 'options' array and a 'blank_answers' dictionary mapping blank index (e.g. "0") to target answer string.
+5. SHORT_ANSWER: Provide concise response expectation in 'correct_answer'.
+6. OPEN_QUESTION: Provide rubrics and expected concepts in 'correct_answer' and 'explanation'.
 
 Return ONLY a JSON array matching this schema:
 [
   {
     "id": "q1",
-    "question_text": "Regarding {{topic}}, what is...",
-    "question_type": "MCQ",
-    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "question_text": "Regarding {{topic}}, match each concept to its definition or complete the statement.",
+    "question_type": "MATCHING",
+    "options": ["Concept A", "Concept B"],
+    "premises": ["Concept A", "Concept B"],
+    "matches": ["Definition A", "Definition B"],
+    "blank_answers": {"Concept A": "Definition A", "Concept B": "Definition B"},
     "correct_option_index": 0,
-    "correct_answer": "Option A",
-    "explanation": "Detailed explanation why Option A is correct..."
+    "correct_answer": "Matching pairs verified",
+    "explanation": "Detailed explanation..."
   }
 ]

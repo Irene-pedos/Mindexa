@@ -1,12 +1,16 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { CheckCircle2, AlertTriangle, ArrowRight, Loader2, Award, Sparkles, RefreshCw, BarChart2 } from "lucide-react";
+import { CheckCircle2, AlertTriangle, ArrowRight, Loader2, Award, Sparkles } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { studyPlannerApi, QuizQuestion, KnowledgeCheckReport } from "@/lib/api/study-planner";
+import { SharedMatchingDnd } from "@/components/mindexa/assessment/matching-dnd";
+import { SharedFillInTheBlanksDnd } from "@/components/mindexa/assessment/fill-in-the-blanks-dnd";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -23,7 +27,7 @@ export function KnowledgeCheckFlow({
 }: KnowledgeCheckFlowProps) {
   const [questions, setQuestions] = useState<QuizQuestion[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
@@ -43,8 +47,8 @@ export function KnowledgeCheckFlow({
     loadQuestions();
   }, [sessionId]);
 
-  const handleSelect = (questionId: string, optionStr: string) => {
-    setAnswers((prev) => ({ ...prev, [questionId]: optionStr }));
+  const handleSelect = (questionId: string, val: any) => {
+    setAnswers((prev) => ({ ...prev, [questionId]: val }));
   };
 
   const handleSubmit = async () => {
@@ -97,7 +101,6 @@ export function KnowledgeCheckFlow({
         </CardHeader>
 
         <CardContent className="px-8 space-y-6">
-          {/* Metrics breakdown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
               <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">Estimated Confidence</span>
@@ -109,7 +112,6 @@ export function KnowledgeCheckFlow({
             </div>
           </div>
 
-          {/* Mastered vs Weak Concepts */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {report.mastered_concepts && report.mastered_concepts.length > 0 && (
               <div className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 space-y-2">
@@ -142,7 +144,6 @@ export function KnowledgeCheckFlow({
             )}
           </div>
 
-          {/* Recommendations */}
           {report.recommendations && report.recommendations.length > 0 && (
             <div className="p-4 rounded-xl border border-primary/20 bg-primary/5 space-y-2">
               <span className="text-xs font-bold text-primary flex items-center gap-1.5">
@@ -153,6 +154,69 @@ export function KnowledgeCheckFlow({
                   <li key={i}>{rec}</li>
                 ))}
               </ul>
+            </div>
+          )}
+
+          {/* Per-Question Detailed Review */}
+          {report.question_grades && report.question_grades.length > 0 && (
+            <div className="space-y-4 pt-2">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                Detailed Question Breakdown
+              </h4>
+              <div className="space-y-3">
+                {report.question_grades.map((qg, idx) => {
+                  const matchingQ = questions.find((q) => q.id === qg.question_id);
+                  const qText = matchingQ ? matchingQ.question_text : `Question ${idx + 1}`;
+                  return (
+                    <div
+                      key={qg.question_id || idx}
+                      className={cn(
+                        "p-4 rounded-xl border space-y-2.5 transition-all text-xs",
+                        qg.is_correct
+                          ? "border-emerald-500/30 bg-emerald-500/5 dark:bg-emerald-500/10"
+                          : "border-rose-500/30 bg-rose-500/5 dark:bg-rose-500/10"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-bold text-foreground leading-snug">
+                          {idx + 1}. {qText}
+                        </span>
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "shrink-0 font-semibold text-[10px]",
+                            qg.is_correct
+                              ? "border-emerald-500 text-emerald-600 dark:text-emerald-400 bg-emerald-500/10"
+                              : "border-rose-500 text-rose-600 dark:text-rose-400 bg-rose-500/10"
+                          )}
+                        >
+                          {qg.is_correct ? "Correct (+100%)" : "Incorrect"}
+                        </Badge>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px]">
+                        <div className="p-2 rounded bg-background/60 border border-border/40">
+                          <span className="font-semibold text-muted-foreground block text-[10px]">Your Answer</span>
+                          <span className="font-medium text-foreground">{qg.student_answer || "No answer provided"}</span>
+                        </div>
+                        {!qg.is_correct && (
+                          <div className="p-2 rounded bg-emerald-500/10 border border-emerald-500/20">
+                            <span className="font-semibold text-emerald-600 dark:text-emerald-400 block text-[10px]">Correct Answer</span>
+                            <span className="font-medium text-foreground">{qg.correct_answer || "N/A"}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {qg.explanation && (
+                        <p className="text-[11px] text-muted-foreground bg-background/40 p-2 rounded border border-border/30 italic">
+                          <span className="font-semibold not-italic text-foreground">Explanation: </span>
+                          {qg.explanation}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
         </CardContent>
@@ -169,19 +233,24 @@ export function KnowledgeCheckFlow({
     );
   }
 
-  // ── QUESTION NAVIGATOR ──────────────────────────────────────────────────────
   if (questions.length === 0) return null;
 
   const currentQ = questions[currentIdx];
+  const qType = (currentQ.question_type || "MCQ").toUpperCase();
   const answeredCount = Object.keys(answers).length;
 
   return (
     <Card className="border-border/70 bg-card shadow-lg rounded-2xl overflow-hidden">
       <CardHeader className="border-b border-border/50 bg-muted/20 px-6 py-5 space-y-3">
         <div className="flex items-center justify-between">
-          <Badge variant="outline" className="text-xs font-semibold text-primary border-primary/30">
-            Question {currentIdx + 1} of {questions.length}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs font-semibold text-primary border-primary/30">
+              Question {currentIdx + 1} of {questions.length}
+            </Badge>
+            <Badge variant="secondary" className="text-[10px] font-bold text-muted-foreground uppercase">
+              {qType.replace("_", " ")}
+            </Badge>
+          </div>
           <span className="text-xs text-muted-foreground font-medium">
             Answered: {answeredCount}/{questions.length}
           </span>
@@ -192,29 +261,119 @@ export function KnowledgeCheckFlow({
         </CardTitle>
       </CardHeader>
 
-      <CardContent className="p-6 space-y-3">
-        {currentQ.options.map((opt, idx) => {
-          const isSelected = answers[currentQ.id] === opt;
+      <CardContent className="p-6 space-y-4">
+        {/* 1. MATCHING Question Type */}
+        {qType === "MATCHING" && (
+          <SharedMatchingDnd
+            options={(currentQ.options || []).map((optStr, idx) => ({
+              id: `opt-${idx}`,
+              text: (currentQ as any).premises?.[idx] || optStr,
+              match_value: (currentQ as any).matches?.[idx] || optStr,
+            }))}
+            questionId={currentQ.id}
+            sessionId={sessionId}
+            currentVal={answers[currentQ.id]}
+            onAnswerChange={(val) => handleSelect(currentQ.id, val)}
+          />
+        )}
 
-          return (
-            <button
-              key={idx}
-              type="button"
-              onClick={() => handleSelect(currentQ.id, opt)}
-              className={cn(
-                "w-full text-left p-4 rounded-xl border text-xs transition-all duration-200 flex items-center gap-3",
-                isSelected
-                  ? "border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary"
-                  : "border-border/60 hover:border-primary/50 hover:bg-muted/30"
-              )}
-            >
-              <span className="size-6 rounded-full border border-current flex items-center justify-center text-[11px] font-bold shrink-0">
-                {String.fromCharCode(65 + idx)}
-              </span>
-              <span>{opt}</span>
-            </button>
-          );
-        })}
+        {/* 2. FILL_BLANKS Question Type */}
+        {(qType === "FILL_BLANKS" || qType === "FILL_BLANK" || qType === "FILL_IN_BLANK") && (
+          <SharedFillInTheBlanksDnd
+            questionText={currentQ.question_text}
+            options={(currentQ.options || []).map((optStr, idx) => ({
+              id: `pool-${idx}`,
+              text: optStr,
+            }))}
+            questionId={currentQ.id}
+            sessionId={sessionId}
+            currentVal={answers[currentQ.id]}
+            onAnswerChange={(val) => handleSelect(currentQ.id, val)}
+          />
+        )}
+
+        {/* 3. TRUE_FALSE Question Type */}
+        {qType === "TRUE_FALSE" && (
+          <div className="grid grid-cols-2 gap-4 max-w-md mx-auto pt-2">
+            {["True", "False"].map((opt, idx) => {
+              const isSelected = answers[currentQ.id] === opt;
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSelect(currentQ.id, opt)}
+                  className={cn(
+                    "p-4 rounded-xl border text-sm font-bold transition-all duration-200 text-center shadow-xs",
+                    isSelected
+                      ? "border-primary bg-primary/10 text-primary ring-2 ring-primary/20"
+                      : "border-border/60 hover:border-primary/50 hover:bg-muted/30"
+                  )}
+                >
+                  {opt}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* 4. SHORT_ANSWER Question Type */}
+        {qType === "SHORT_ANSWER" && (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground block">
+              Provide your concise written response:
+            </label>
+            <Input
+              value={answers[currentQ.id] || ""}
+              onChange={(e) => handleSelect(currentQ.id, e.target.value)}
+              placeholder="Type your answer here..."
+              className="text-xs p-3 rounded-xl border-border/60 focus-visible:ring-primary h-11"
+            />
+          </div>
+        )}
+
+        {/* 5. OPEN_QUESTION / Essay Question Type */}
+        {qType === "OPEN_QUESTION" && (
+          <div className="space-y-2">
+            <label className="text-xs font-semibold text-muted-foreground block">
+              Provide your detailed explanation:
+            </label>
+            <Textarea
+              value={answers[currentQ.id] || ""}
+              onChange={(e) => handleSelect(currentQ.id, e.target.value)}
+              placeholder="Write your explanation or reflection here..."
+              rows={4}
+              className="text-xs p-3 rounded-xl border-border/60 focus-visible:ring-primary min-h-[120px]"
+            />
+          </div>
+        )}
+
+        {/* 6. MCQ / Multiple Choice Question Type */}
+        {(qType === "MCQ" || (!["MATCHING", "FILL_BLANKS", "FILL_BLANK", "FILL_IN_BLANK", "TRUE_FALSE", "SHORT_ANSWER", "OPEN_QUESTION"].includes(qType))) && (
+          <div className="space-y-3">
+            {(currentQ.options || []).map((opt, idx) => {
+              const isSelected = answers[currentQ.id] === opt || answers[currentQ.id] === String(idx);
+
+              return (
+                <button
+                  key={idx}
+                  type="button"
+                  onClick={() => handleSelect(currentQ.id, opt)}
+                  className={cn(
+                    "w-full text-left p-4 rounded-xl border text-xs transition-all duration-200 flex items-center gap-3",
+                    isSelected
+                      ? "border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary"
+                      : "border-border/60 hover:border-primary/50 hover:bg-muted/30"
+                  )}
+                >
+                  <span className="size-6 rounded-full border border-current flex items-center justify-center text-[11px] font-bold shrink-0">
+                    {String.fromCharCode(65 + idx)}
+                  </span>
+                  <span>{opt}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
       </CardContent>
 
       <CardFooter className="p-6 border-t border-border/50 flex items-center justify-between gap-4">
@@ -222,7 +381,7 @@ export function KnowledgeCheckFlow({
           variant="outline"
           onClick={() => setCurrentIdx((p) => Math.max(0, p - 1))}
           disabled={currentIdx === 0}
-          className="text-xs"
+          className="text-xs font-semibold"
         >
           Previous
         </Button>
@@ -238,8 +397,8 @@ export function KnowledgeCheckFlow({
           ) : (
             <Button
               onClick={handleSubmit}
-              disabled={submitting || answeredCount < questions.length}
-              className="text-xs font-semibold px-6 gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md"
+              disabled={submitting}
+              className="text-xs font-bold px-6 gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white shadow-md"
             >
               {submitting ? <Loader2 className="size-4 animate-spin" /> : "Submit Knowledge Check"}
             </Button>

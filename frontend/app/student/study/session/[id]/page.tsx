@@ -14,6 +14,7 @@ import { ContextualAskAiPanel } from "@/components/mindexa/study/guided-session/
 import { InlinePracticeExercise } from "@/components/mindexa/study/guided-session/inline-practice-exercise";
 import { KnowledgeCheckFlow } from "@/components/mindexa/study/guided-session/knowledge-check-flow";
 import { SessionSummaryReport } from "@/components/mindexa/study/guided-session/session-summary-report";
+import { SessionNotesPanel } from "@/components/mindexa/study/guided-session/session-notes-panel";
 
 export default function GuidedStudySessionPage() {
   const params = useParams();
@@ -138,9 +139,20 @@ export default function GuidedStudySessionPage() {
               <div className="mx-auto size-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-1">
                 <Sparkles className="size-8" />
               </div>
-              <Badge variant="outline" className="mx-auto text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1">
-                Personal Learning Workspace
-              </Badge>
+              <div className="flex items-center justify-center gap-2">
+                <Badge variant="outline" className="text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1">
+                  Personal Learning Workspace
+                </Badge>
+                {session.lesson_plan_json?.generated_by === "fallback" ? (
+                  <Badge variant="outline" className="text-[11px] font-semibold border-amber-500/40 text-amber-600 bg-amber-500/10 px-2.5 py-0.5">
+                    Standard Lesson Mode
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-[11px] font-semibold border-emerald-500/40 text-emerald-600 bg-emerald-500/10 px-2.5 py-0.5">
+                    AI-Personalized
+                  </Badge>
+                )}
+              </div>
               <CardTitle className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">
                 {session.topic}
               </CardTitle>
@@ -236,14 +248,20 @@ export default function GuidedStudySessionPage() {
         )}
       </main>
 
-      {/* Floating Contextual Ask AI Panel (Available during lesson & practice stages) */}
-      {(stage === "lesson" || stage === "practice") && (
-        <ContextualAskAiPanel
-          sessionId={sessionId}
-          currentSectionTitle={currentSection.section_title}
-          currentSectionContent={currentSection.content}
-        />
-      )}
+      {/* Floating Contextual Ask AI Panel (Available throughout all session stages) */}
+      <ContextualAskAiPanel
+        sessionId={sessionId}
+        currentSectionTitle={currentSection.section_title}
+        currentSectionContent={currentSection.content}
+        initialChatHistory={session.tutor_chat_history}
+      />
+
+      {/* Floating Personal Session Notes Panel */}
+      <SessionNotesPanel
+        sessionId={sessionId}
+        initialNotes={session.student_notes}
+        currentSectionTitle={currentSection.section_title}
+      />
     </div>
   );
 }

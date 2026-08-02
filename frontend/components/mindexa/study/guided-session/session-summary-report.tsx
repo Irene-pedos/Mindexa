@@ -68,7 +68,35 @@ export function SessionSummaryReport({
               <Sparkles className="size-4" /> AI Session Takeaways & Summary
             </h4>
             <div className="text-xs leading-relaxed text-foreground/90 font-sans">
-              <RichMessageRenderer content={session.session_summary_text} />
+              <RichMessageRenderer
+                content={(() => {
+                  const raw = session.session_summary_text.trim();
+                  if (raw.startsWith("{") && raw.endsWith("}")) {
+                    try {
+                      // Attempt to parse JSON / python dict representation
+                      const jsonStr = raw.replace(/'/g, '"');
+                      const data = JSON.parse(jsonStr);
+                      const parts = [];
+                      if (data.key_takeaways && Array.isArray(data.key_takeaways)) {
+                        parts.push("**Key Takeaways:**\n" + data.key_takeaways.map((t: string) => `- ${t}`).join("\n"));
+                      }
+                      if (data.concepts_covered && Array.isArray(data.concepts_covered)) {
+                        parts.push("**Concepts Covered:** " + data.concepts_covered.map((c: string) => `\`${c}\``).join(", "));
+                      }
+                      if (data.common_mistakes_to_avoid && Array.isArray(data.common_mistakes_to_avoid)) {
+                        parts.push("**Common Pitfalls to Avoid:**\n" + data.common_mistakes_to_avoid.map((m: string) => `- ${m}`).join("\n"));
+                      }
+                      if (data.recommendations_for_future_revision && Array.isArray(data.recommendations_for_future_revision)) {
+                        parts.push("**Recommendations for Revision:**\n" + data.recommendations_for_future_revision.map((r: string) => `- ${r}`).join("\n"));
+                      }
+                      if (parts.length > 0) return parts.join("\n\n");
+                    } catch (e) {
+                      // Return raw if JSON parsing fails
+                    }
+                  }
+                  return raw;
+                })()}
+              />
             </div>
           </div>
         )}

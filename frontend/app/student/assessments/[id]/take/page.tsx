@@ -47,6 +47,8 @@ import {
   Info,
   Menu,
 } from "lucide-react";
+import { SharedMatchingDnd } from "@/components/mindexa/assessment/matching-dnd";
+import { SharedFillInTheBlanksDnd } from "@/components/mindexa/assessment/fill-in-the-blanks-dnd";
 import {
   Sheet,
   SheetContent,
@@ -613,136 +615,7 @@ function useOfflineSync({
   return { isOnline, queueLocalSave, flushOfflineQueue };
 }
 
-// --- DnD Components for Matching Pairs ---
-
-function DraggableMatchResponse({
-  id,
-  text,
-  isUsed,
-}: {
-  id: string;
-  text: string;
-  isUsed: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id,
-      data: { text },
-    });
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    zIndex: isDragging ? 100 : 1,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      className={cn(
-        "px-3.5 py-2 rounded-lg bg-background border border-primary/20 text-primary font-medium text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
-        isDragging && "shadow-md border-primary scale-102",
-        isUsed && "opacity-20 grayscale pointer-events-none border-dashed",
-      )}
-    >
-      {text}
-    </div>
-  );
-}
-
-function DroppableMatchTarget({
-  premiseId,
-  premiseText,
-  matchedValue,
-  onRemove,
-  optionsPool,
-  onSelect,
-  isDragging,
-}: {
-  premiseId: string;
-  premiseText: string;
-  matchedValue?: string;
-  onRemove: () => void;
-  optionsPool: string[];
-  onSelect: (val: string) => void;
-  isDragging?: boolean;
-}) {
-  const { isOver, setNodeRef } = useDroppable({
-    id: `target-${premiseId}`,
-  });
-
-  return (
-    <div
-      ref={setNodeRef}
-      className={cn(
-        "flex items-center gap-4 p-4 rounded-xl border transition-all duration-200 bg-background",
-        isOver
-          ? "bg-primary/5 border-primary"
-          : matchedValue
-            ? "border-primary/25 shadow-sm"
-            : "border-muted/70",
-      )}
-    >
-      <div className="flex-1 text-sm font-semibold text-foreground/80">
-        {premiseText}
-      </div>
-      <div className="shrink-0 text-muted-foreground/30">
-        <ArrowRight className="size-4" />
-      </div>
-      <div
-        className={cn(
-          "w-[240px] h-10 rounded-lg border flex items-center justify-between px-3 transition-all relative group bg-muted/5",
-          matchedValue
-            ? "border-primary/30"
-            : "border-dashed border-muted-foreground/20",
-        )}
-      >
-        <select
-          value={matchedValue || ""}
-          onChange={(e) => {
-            const val = e.target.value;
-            if (val === "") {
-              onRemove();
-            } else {
-              onSelect(val);
-            }
-          }}
-          className={cn(
-            "bg-transparent border-none text-xs font-semibold text-foreground focus:outline-none cursor-pointer w-full pr-8",
-            isDragging && "pointer-events-none",
-          )}
-        >
-          <option value="" className="text-muted-foreground">
-            Select or Drop match...
-          </option>
-          {optionsPool.map((opt, i) => (
-            <option
-              key={i}
-              value={opt}
-              className="text-foreground bg-background"
-            >
-              {opt}
-            </option>
-          ))}
-        </select>
-        {matchedValue && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onRemove();
-            }}
-            className="absolute right-3 text-destructive hover:text-destructive/80 transition-colors"
-          >
-            <X className="size-3.5" />
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+// --- DnD Components for Matching Pairs & Fill In The Blanks ---
 
 function MatchingDnd({
   q,
@@ -755,203 +628,19 @@ function MatchingDnd({
   currentVal: Record<string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
-  const matchingAnswers = currentVal || {};
-  const [isDragging, setIsDragging] = useState(false);
-
-  const premises = useMemo(() => {
-    return (q.options || []).filter(
-      (o: QuestionOption) => o.text || o.option_text,
-    );
-  }, [q.options]);
-
-  const responses = useMemo(() => {
-    const raw = (q.options || []).map(
-      (o: QuestionOption) =>
-        o.option_text_right || o.match_value || o.text || o.option_text,
-    );
-    const uniqueRaw = Array.from(new Set(raw)).filter(Boolean);
-    const shuffled = seededShuffle(uniqueRaw, `${attemptId || ""}-${q.id}`);
-    return shuffled.map((text, i) => ({
-      id: `resp-${i}`,
-      text: text as string,
-    }));
-  }, [q.options, attemptId, q.id]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor),
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && over.id.toString().startsWith("target-")) {
-      const premiseId = over.id.toString().replace("target-", "");
-      const droppedText = active.data.current?.text;
-
-      if (droppedText) {
-        setAnswers((prev: Answers) => ({
+  return (
+    <SharedMatchingDnd
+      options={q.options || []}
+      questionId={q.id}
+      attemptId={attemptId}
+      currentVal={currentVal}
+      onAnswerChange={(newAnswers) => {
+        setAnswers((prev) => ({
           ...prev,
-          [q.id]: { ...matchingAnswers, [premiseId]: droppedText },
+          [q.id]: newAnswers,
         }));
-      }
-    }
-  };
-
-  const removeMatch = (premiseId: string) => {
-    const newMatches = { ...matchingAnswers };
-    delete newMatches[premiseId];
-    setAnswers((prev: Answers) => ({
-      ...prev,
-      [q.id]: newMatches,
-    }));
-  };
-
-  const matchedValues = Object.values(matchingAnswers) as string[];
-
-  return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={() => setIsDragging(true)}
-      onDragEnd={(e) => {
-        setIsDragging(false);
-        handleDragEnd(e);
       }}
-      onDragCancel={() => setIsDragging(false)}
-    >
-      <div className="space-y-4">
-        <div className="grid gap-2">
-          {premises.map((p: QuestionOption) => (
-            <DroppableMatchTarget
-              key={p.id}
-              premiseId={p.id}
-              premiseText={p.text || p.option_text || ""}
-              matchedValue={matchingAnswers[p.id]}
-              onRemove={() => removeMatch(p.id)}
-              optionsPool={responses.map((r) => r.text)}
-              isDragging={isDragging}
-              onSelect={(val) => {
-                setAnswers((prev: Answers) => ({
-                  ...prev,
-                  [q.id]: { ...matchingAnswers, [p.id]: val },
-                }));
-              }}
-            />
-          ))}
-        </div>
-
-        <div className="pt-4 border-t border-dashed border-border/40">
-          <div className="flex flex-wrap justify-center gap-2 p-4 rounded-lg bg-muted/5 border border-dashed border-muted/40">
-            {responses.map((r) => (
-              <DraggableMatchResponse
-                key={r.id}
-                id={r.id}
-                text={r.text}
-                isUsed={matchedValues.includes(r.text)}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    </DndContext>
-  );
-}
-
-// --- DnD Components for Fill-in-the-Blanks ---
-
-function DraggableFillBlankAnswer({
-  id,
-  text,
-  isUsed,
-}: {
-  id: string;
-  text: string;
-  isUsed: boolean;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } =
-    useDraggable({
-      id,
-      data: { text },
-    });
-
-  const style = {
-    transform: CSS.Translate.toString(transform),
-    zIndex: isDragging ? 100 : 1,
-  };
-
-  return (
-    <div
-      ref={setNodeRef}
-      style={style}
-      {...listeners}
-      {...attributes}
-      className={cn(
-        "px-3.5 py-2 rounded-lg bg-background border border-primary/20 text-primary font-medium text-xs cursor-grab active:cursor-grabbing hover:border-primary/40 hover:bg-primary/5 transition-all shadow-sm",
-        isDragging && "shadow-md border-primary scale-102",
-        isUsed && "opacity-20 grayscale pointer-events-none border-dashed",
-      )}
-    >
-      {text}
-    </div>
-  );
-}
-
-function DroppableBlank({
-  index,
-  value,
-  onRemove,
-  optionsPool,
-  onSelect,
-  isDragging,
-}: {
-  index: number;
-  value?: string;
-  onRemove: () => void;
-  optionsPool: string[];
-  onSelect: (val: string) => void;
-  isDragging?: boolean;
-}) {
-  const { isOver, setNodeRef } = useDroppable({
-    id: `blank-${index}`,
-  });
-
-  return (
-    <span
-      ref={setNodeRef}
-      className={cn(
-        "inline-flex items-center justify-center min-w-[140px] h-8 mx-1.5 border-b-2 transition-all px-2.5 relative top-0.5 rounded bg-muted/10",
-        isOver
-          ? "bg-primary/10 border-primary"
-          : value
-            ? "bg-primary/[0.03] border-primary/30"
-            : "border-muted-foreground/20",
-      )}
-    >
-      <select
-        value={value || ""}
-        onChange={(e) => {
-          const val = e.target.value;
-          if (val === "") {
-            onRemove();
-          } else {
-            onSelect(val);
-          }
-        }}
-        className={cn(
-          "bg-transparent border-none text-xs font-semibold text-primary focus:outline-none cursor-pointer w-full text-center",
-          isDragging && "pointer-events-none",
-        )}
-      >
-        <option value="" className="text-muted-foreground/60">
-          Select or Drop...
-        </option>
-        {optionsPool.map((opt, i) => (
-          <option key={i} value={opt} className="text-foreground bg-background">
-            {opt}
-          </option>
-        ))}
-      </select>
-    </span>
+    />
   );
 }
 
@@ -966,97 +655,20 @@ function FillInTheBlanksDnd({
   currentVal: Record<number, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
 }) {
-  const rawText = q.text || q.content || "";
-  const parts = rawText.split("[blank]");
-  const blankAnswers = currentVal || {};
-  const [isDragging, setIsDragging] = useState(false);
-
-  const pool = useMemo(() => {
-    const raw = (q.options || []).map((o: QuestionOption, i: number) => ({
-      id: o.id || `pool-${i}`,
-      text: o.option_text || o.text || "",
-    }));
-    return seededShuffle(raw, `${attemptId || ""}-${q.id}`);
-  }, [q.options, attemptId, q.id]);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(KeyboardSensor),
-  );
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    const { active, over } = event;
-    if (over && over.id.toString().startsWith("blank-")) {
-      const blankIndex = parseInt(over.id.toString().split("-")[1]);
-      const droppedText = active.data.current?.text;
-
-      if (droppedText) {
-        setAnswers((prev: Answers) => ({
-          ...prev,
-          [q.id]: { ...blankAnswers, [blankIndex]: droppedText },
-        }));
-      }
-    }
-  };
-
-  const removeAnswer = (index: number) => {
-    const newAnswers = { ...blankAnswers };
-    delete newAnswers[index];
-    setAnswers((prev: Answers) => ({
-      ...prev,
-      [q.id]: newAnswers,
-    }));
-  };
-
-  const usedAnswers = Object.values(blankAnswers) as string[];
-
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={() => setIsDragging(true)}
-      onDragEnd={(e) => {
-        setIsDragging(false);
-        handleDragEnd(e);
+    <SharedFillInTheBlanksDnd
+      questionText={q.text || q.content || ""}
+      options={q.options || []}
+      questionId={q.id}
+      attemptId={attemptId}
+      currentVal={currentVal}
+      onAnswerChange={(newAnswers) => {
+        setAnswers((prev) => ({
+          ...prev,
+          [q.id]: newAnswers,
+        }));
       }}
-      onDragCancel={() => setIsDragging(false)}
-    >
-      <div className="space-y-6">
-        <div className="p-6 rounded-lg border border-border/60 bg-white leading-[2.5] text-[15px] font-medium text-foreground/80">
-          {parts.map((part: string, i: number) => (
-            <React.Fragment key={i}>
-              <span className="whitespace-pre-wrap">{part}</span>
-              {i < parts.length - 1 && (
-                <DroppableBlank
-                  index={i}
-                  value={blankAnswers[i]}
-                  onRemove={() => removeAnswer(i)}
-                  optionsPool={pool.map((p) => p.text)}
-                  isDragging={isDragging}
-                  onSelect={(val) => {
-                    setAnswers((prev: Answers) => ({
-                      ...prev,
-                      [q.id]: { ...blankAnswers, [i]: val },
-                    }));
-                  }}
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap justify-center gap-2 p-4 rounded-lg bg-muted/5 border border-dashed border-muted/40">
-          {pool.map((ans) => (
-            <DraggableFillBlankAnswer
-              key={ans.id}
-              id={ans.id}
-              text={ans.text}
-              isUsed={usedAnswers.includes(ans.text)}
-            />
-          ))}
-        </div>
-      </div>
-    </DndContext>
+    />
   );
 }
 

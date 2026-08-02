@@ -174,11 +174,12 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     async function loadData() {
       try {
         setLoadingResources(true);
-        const [personalResData, attemptsData, workspacesData] =
+        const [personalResData, attemptsData, workspacesData, historyData] =
           await Promise.all([
             studentApi.getPersonalResources(),
             apiClient("/attempts/me"),
             studentApi.getWorkspaces().catch(() => []),
+            studentAiApi.getHistory().catch(() => []),
           ]);
 
         setResources(personalResData);
@@ -202,27 +203,41 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         ).flat();
         setLecturerMaterials(allWorkspaceMaterials);
 
-        // Active assessment blocking check
+        // Restore chat conversation history from server
+        if (historyData && historyData.length > 0) {
+          const loadedMessages: Message[] = historyData.flatMap((item) => [
+            {
+              id: item.id + "-q",
+              sender: "student",
+              text: item.question,
+              timestamp: new Date(item.created_at),
+            },
+            {
+              id: item.id + "-a",
+              sender: "ai",
+              text: item.answer,
+              citations: item.citations,
+              timestamp: new Date(item.created_at),
+            },
+          ]);
+          setMessages(loadedMessages);
+        }
+
+        // Active assessment blocking check - eliminate N+1 fetch loop
         const activeAttempts = (attemptsData.items || []).filter(
           (a: any) => a.status === "IN_PROGRESS" || a.status === "PAUSED",
         );
         if (activeAttempts.length > 0) {
-          for (const attempt of activeAttempts) {
-            const assessment = await assessmentApi.getAssessmentById(
-              attempt.assessment_id,
-            );
-            const isExamStyle =
-              assessment.assessment_type === "CAT" ||
-              assessment.assessment_type === "SUMMATIVE" ||
-              assessment.is_supervised === true;
-            const isAiDisallowed = !assessment.ai_assistance_allowed;
+          const blocking = activeAttempts.find(
+            (a: any) =>
+              a.assessment_type === "CAT" ||
+              a.assessment_type === "SUMMATIVE" ||
+              a.is_supervised ||
+              a.ai_assistance_allowed === false,
+          ) || activeAttempts[0];
 
-            if (isExamStyle || isAiDisallowed) {
-              setIsBlockedByActiveExam(true);
-              setBlockingExamTitle(assessment.title);
-              break;
-            }
-          }
+          setIsBlockedByActiveExam(true);
+          setBlockingExamTitle(blocking.title || blocking.assessment_title || "Active Assessment");
         }
       } catch (err) {
         console.error(
@@ -347,11 +362,9 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     let promptWithContext = userQuery;
 
     if (isThinkingMode) {
-      promptWithContext = `[THINKING & DEEP REASONING MODE ACTIVE]\n${promptWithContext}`;
       toast.info("Deep Reasoning mode active");
     }
     if (isDeepSearchMode) {
-      promptWithContext = `[DEEP RAG SEARCH ACTIVE]\n${promptWithContext}`;
       toast.info("Deep Document RAG Search active");
     }
 
@@ -374,7 +387,7 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
             const formData = new FormData();
             formData.append("file", (att as any).file);
             await studentApi.uploadPersonalResource(formData);
-            toast.success(`Uploaded ${att.name} to personal study resources.`);
+            toast.success(`Uploaded ${att.name} to personal study resources. Attachment used for current turn & queued for background indexing.`);
           } catch (uploadErr) {
             console.warn("Auto-upload error:", uploadErr);
           }
@@ -407,6 +420,8 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         question: promptWithContext,
         conversation_history: history,
         selected_resource_id: selectedResource || undefined,
+        thinking_mode: isThinkingMode,
+        deep_search_mode: isDeepSearchMode,
       });
 
       const newAiMessage: Message = {
@@ -420,13 +435,16 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
 
       setMessages((prev) => [...prev, newAiMessage]);
     } catch (err: any) {
+      if (err?.status === 403 || err?.code === "AI_BLOCKED_DURING_ACTIVE_ASSESSMENT" || String(err?.message || "").includes("during an active")) {
+        setIsBlockedByActiveExam(true);
+      }
       handleApiError(err, "Failed to retrieve AI explanation.");
     } finally {
       setIsThinking(false);
     }
   };
 
-  // Revision Center Handler
+  // Revision Center Handler - uses structured Pydantic schema backend endpoint (T3)
   const handleGenerateRevision = async () => {
     if (!revisionTopic.trim()) {
       toast.error("Please enter a topic or concept name.");
@@ -436,74 +454,15 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     setRevisionResult(null);
     setError(null);
 
-    const questionText = `Generate a structured, comprehensive revision note for the topic: "${revisionTopic}".
-Format your response exactly as follows in clean markdown:
-### Summary
-[Detailed concept summary, rules, formulas, examples in clear educational language]
-
-### Key Checklist
-- [Important point to master 1]
-- [Important point to master 2]
-
-### Recommended Readings
-- [Reference book/chapter/article 1]
-- [Reference book/chapter/article 2]`;
-
     try {
-      const res = await studentAiApi.getSupport({
-        question: questionText,
-        selected_resource_id: selectedResource || undefined,
-      });
-
-      const text = res.explanation;
-      let summary = "";
-      const checklist: string[] = [];
-      const readings: string[] = [];
-
-      const lines = text.split("\n");
-      let currentSection: "summary" | "checklist" | "readings" | null = null;
-
-      for (const line of lines) {
-        const cleanLine = line.trim();
-        const lower = cleanLine.toLowerCase();
-        if (lower.startsWith("### summary") || lower.startsWith("**summary**") || lower.startsWith("## summary")) {
-          currentSection = "summary";
-          continue;
-        } else if (lower.startsWith("### key checklist") || lower.startsWith("**key checklist**") || lower.startsWith("## key checklist") || lower.startsWith("### checklist") || lower.startsWith("**checklist**")) {
-          currentSection = "checklist";
-          continue;
-        } else if (lower.startsWith("### recommended readings") || lower.startsWith("**recommended readings**") || lower.startsWith("## recommended readings") || lower.startsWith("### readings") || lower.startsWith("**readings**")) {
-          currentSection = "readings";
-          continue;
-        }
-
-        if (currentSection === "summary") {
-          summary += line + "\n";
-        } else if (currentSection === "checklist") {
-          if (cleanLine.startsWith("-") || cleanLine.startsWith("*") || /^\d+[\s:.)]+/.test(cleanLine)) {
-            checklist.push(cleanLine.replace(/^[-*\s\d.]+/, ""));
-          } else if (cleanLine) {
-            checklist.push(cleanLine);
-          }
-        } else if (currentSection === "readings") {
-          if (cleanLine.startsWith("-") || cleanLine.startsWith("*") || /^\d+[\s:.)]+/.test(cleanLine)) {
-            readings.push(cleanLine.replace(/^[-*\s\d.]+/, ""));
-          } else if (cleanLine) {
-            readings.push(cleanLine);
-          }
-        }
-      }
-
-      if (!summary.trim()) {
-        summary = text;
-      }
+      const guide = await studentAiApi.getRevisionGuide(revisionTopic);
 
       setRevisionResult({
-        summary: summary.trim(),
-        checklist,
-        readings,
+        summary: guide.summary,
+        checklist: guide.checklist,
+        readings: guide.readings,
       });
-      toast.success("Revision guide generated!");
+      toast.success("Structured revision guide generated!");
     } catch (err: any) {
       handleApiError(err, "Failed to generate revision guide.");
     } finally {

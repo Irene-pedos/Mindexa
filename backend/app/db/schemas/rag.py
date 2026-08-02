@@ -1,6 +1,6 @@
 from __future__ import annotations
 import uuid
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 from typing import List, Optional
 
 class SourceCitation(BaseModel):
@@ -9,6 +9,16 @@ class SourceCitation(BaseModel):
     page_number: Optional[int] = None
     chunk_index: int
     excerpt: str  # first 120 chars of the chunk for display
+
+    @computed_field
+    @property
+    def title(self) -> str:
+        return self.resource_name
+
+    @computed_field
+    @property
+    def snippet(self) -> str:
+        return self.excerpt
 
 class RAGRetrievalResult(BaseModel):
     context_string: str

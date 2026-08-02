@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Annotated, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, AliasChoices, computed_field, model_validator
 from app.db.models.study_plan import DEFAULT_INITIAL_READINESS_SCORE
 
 
@@ -27,6 +27,7 @@ class StudySessionResponse(BaseModel):
     quiz_questions: List[Dict[str, Any]] = []
     recommended_resource_ids: List[str] = []
     lesson_sections_json: List[Dict[str, Any]] = []
+    lesson_plan_json: Optional[Dict[str, Any]] = None
     lesson_status: str = "NOT_GENERATED"
     current_section_index: int = 0
     lesson_generated_at: Optional[datetime] = None
@@ -34,6 +35,12 @@ class StudySessionResponse(BaseModel):
     knowledge_check_score: Optional[float] = None
     knowledge_check_report: Optional[Dict[str, Any]] = None
     session_summary_text: Optional[str] = None
+    student_notes: Optional[str] = None
+    tutor_chat_history: List[Dict[str, Any]] = []
+
+
+class SaveSessionNotesRequest(BaseModel):
+    student_notes: str = Field(default="", description="Personal notes written by the student for this study session")
 
 
 class GuidedSessionAskRequest(BaseModel):
@@ -99,6 +106,23 @@ class CreateStudyPlanRequest(BaseModel):
     priority: str = "Medium"
     auto_generate_sessions: bool = True
 
+    @model_validator(mode="after")
+    def validate_dates_and_blackouts(self) -> Self:
+        if self.end_date <= self.start_date:
+            raise ValueError("End date must be strictly after start date")
+        cleaned_blackouts = []
+        for d in self.blackout_dates:
+            d_str = str(d).strip()
+            if not d_str:
+                continue
+            try:
+                datetime.strptime(d_str, "%Y-%m-%d")
+                cleaned_blackouts.append(d_str)
+            except ValueError:
+                raise ValueError(f"Invalid blackout date format '{d}'. Expected YYYY-MM-DD.")
+        self.blackout_dates = cleaned_blackouts
+        return self
+
 
 class GeneratePlanFromAssessmentRequest(BaseModel):
     assessment_id: uuid.UUID
@@ -113,6 +137,21 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
     reminder_channels: List[str] = ["in_app", "browser"]
     priority: str = "High"
 
+    @model_validator(mode="after")
+    def validate_blackouts(self) -> Self:
+        cleaned_blackouts = []
+        for d in self.blackout_dates:
+            d_str = str(d).strip()
+            if not d_str:
+                continue
+            try:
+                datetime.strptime(d_str, "%Y-%m-%d")
+                cleaned_blackouts.append(d_str)
+            except ValueError:
+                raise ValueError(f"Invalid blackout date format '{d}'. Expected YYYY-MM-DD.")
+        self.blackout_dates = cleaned_blackouts
+        return self
+
 
 class CompleteSessionRequest(BaseModel):
     understanding_level: str = Field(description="YES, PARTIAL, NO")
@@ -123,16 +162,27 @@ class CompleteSessionRequest(BaseModel):
 
 
 class GenerateQuizRequest(BaseModel):
-    question_count: int = Field(default=5, ge=1, le=20)
+    question_count: int = Field(default=5, ge=1, le=10)
 
 
 class RescheduleSessionRequest(BaseModel):
     new_start: datetime
-    new_duration: Optional[int] = None
+    new_duration_minutes: Annotated[
+        Optional[int],
+        Field(
+            default=None,
+            validation_alias=AliasChoices("new_duration_minutes", "new_duration"),
+        ),
+    ] = None
+    force: bool = False
+
+    @property
+    def new_duration(self) -> Optional[int]:
+        return self.new_duration_minutes
 
 
 class AdjustPlanRequest(BaseModel):
-    action: str = Field(description="reduce_duration, shift_weekends, add_topics")
+    action: str = Field(description="reduce_duration | shift_weekends | rebalance_topics")
 
 
 class ReadinessTimelinePoint(BaseModel):
@@ -145,7 +195,7 @@ class MaterialCoverageItem(BaseModel):
     course_title: str
     covered_count: int
     total_count: int
-    percentage: int
+    coverage_percentage: float
 
 
 class ScheduleConflictWarning(BaseModel):
@@ -163,6 +213,7 @@ class StudyPlannerDashboardSummary(BaseModel):
     total_sessions_count: int = 0
     streak_days: int = 0
     hours_studied_this_week: float = 0.0
+    weekly_study_activity: List[bool] = Field(default_factory=lambda: [False]*7)
     today_session: Optional[StudySessionResponse] = None
     next_upcoming_session: Optional[StudySessionResponse] = None
     assessment_readiness_score: int = DEFAULT_INITIAL_READINESS_SCORE

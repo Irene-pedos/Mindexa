@@ -9,8 +9,10 @@ export interface ChecklistItem {
 export interface QuizQuestion {
   id: string;
   question_text: string;
+  question_type?: string;
   options: string[];
-  correct_option_index: number;
+  correct_option_index?: number;
+  correct_answer?: string;
   explanation: string;
 }
 
@@ -18,13 +20,37 @@ export interface LessonSection {
   section_title: string;
   content: string;
   key_points?: string[];
+  diagram_prompt?: string;
+  estimated_minutes?: number;
+  examples?: Array<{ title?: string; code?: string; explanation?: string }>;
+  tables?: Array<{ title?: string; headers?: string[]; rows?: string[][] }>;
+  charts?: Array<Record<string, any>>;
+  activities?: string[];
+}
+
+export interface LessonPlanOutput {
+  title: string;
+  topic: string;
+  estimated_duration_minutes?: number;
+  objectives?: string[];
+  introduction?: string;
+  sections: LessonSection[];
+  lecturer_references?: string[];
+  summary?: string;
+  citations?: SourceCitation[];
+  glossary?: Array<{ term: string; definition: string }>;
+  references?: string[];
+  generated_by?: "ai" | "fallback" | string;
 }
 
 export interface KnowledgeCheckQuestionGrade {
   question_id: string;
   is_correct: boolean;
   score: number;
-  feedback: string;
+  student_answer?: string;
+  correct_answer?: string;
+  explanation?: string;
+  feedback?: string;
 }
 
 export interface KnowledgeCheckReport {
@@ -35,12 +61,17 @@ export interface KnowledgeCheckReport {
   weak_concepts: string[];
   estimated_confidence_level: number;
   recommendations: string[];
+  generated_by?: "ai" | "fallback" | string;
 }
 
 export interface SourceCitation {
   resource_id?: string;
-  title: string;
-  snippet: string;
+  resource_name?: string;
+  title?: string;
+  snippet?: string;
+  excerpt?: string;
+  page_number?: number | null;
+  chunk_index?: number;
   relevance_score?: number;
 }
 
@@ -63,6 +94,7 @@ export interface StudySession {
   quiz_questions?: QuizQuestion[];
   recommended_resource_ids?: string[];
   lesson_sections_json?: LessonSection[];
+  lesson_plan_json?: LessonPlanOutput | null;
   lesson_status?: "NOT_GENERATED" | "IN_PROGRESS" | "COMPLETED" | string;
   current_section_index?: number;
   lesson_generated_at?: string | null;
@@ -70,6 +102,13 @@ export interface StudySession {
   knowledge_check_score?: number | null;
   knowledge_check_report?: KnowledgeCheckReport | null;
   session_summary_text?: string | null;
+  student_notes?: string | null;
+  tutor_chat_history?: Array<{
+    role: string;
+    content: string;
+    citations?: SourceCitation[];
+    timestamp?: string;
+  }> | null;
 }
 
 export interface ReadinessTimelinePoint {
@@ -173,6 +212,7 @@ export interface StudyPlannerSummary {
   total_sessions_count: number;
   streak_days: number;
   hours_studied_this_week: number;
+  weekly_study_activity?: boolean[];
   today_session?: StudySession | null;
   next_upcoming_session?: StudySession | null;
   assessment_readiness_score: number;
@@ -231,25 +271,17 @@ export const studyPlannerApi = {
       }),
     });
   },
-  generateQuiz: async (
-    planId: string,
-    sessionId: string,
-    question_count: number = 5
-  ): Promise<QuizQuestion[]> => {
-    return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/generate-quiz`, {
-      method: "POST",
-      body: JSON.stringify({ question_count }),
-    });
-  },
+
   rescheduleSession: async (
     planId: string,
     sessionId: string,
     new_start: string,
-    new_duration_minutes?: number
+    new_duration_minutes?: number,
+    force: boolean = false
   ): Promise<StudySession> => {
     return apiClient(`/students/study-plans/${planId}/sessions/${sessionId}/reschedule`, {
       method: "POST",
-      body: JSON.stringify({ new_start, new_duration_minutes }),
+      body: JSON.stringify({ new_start, new_duration_minutes, force }),
     });
   },
   adjustPlan: async (
@@ -268,6 +300,15 @@ export const studyPlannerApi = {
   },
   getGuidedSession: async (sessionId: string): Promise<StudySession> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided`);
+  },
+  saveSessionNotes: async (
+    sessionId: string,
+    studentNotes: string
+  ): Promise<StudySession> => {
+    return apiClient(`/students/study-plans/sessions/${sessionId}/notes`, {
+      method: "PATCH",
+      body: JSON.stringify({ student_notes: studentNotes }),
+    });
   },
   askInSession: async (
     sessionId: string,
