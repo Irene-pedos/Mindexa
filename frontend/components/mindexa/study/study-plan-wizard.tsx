@@ -65,6 +65,9 @@ export function StudyPlanWizard({
   const [title, setTitle] = useState("");
   const [studyType, setStudyType] = useState("Assessment Preparation");
   const [courseId, setCourseId] = useState<string>("");
+  const [targetMode, setTargetMode] = useState<"full_assessment_coverage" | "up_to_learning_unit">("full_assessment_coverage");
+  const [targetLearningUnitId, setTargetLearningUnitId] = useState<string>("");
+  const [learningUnits, setLearningUnits] = useState<any[]>([]);
   const [startDate, setStartDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(
     format(addDays(new Date(), 14), "yyyy-MM-dd"),
@@ -108,6 +111,10 @@ export function StudyPlanWizard({
             setSelectedAssessmentId(initialAssessmentId);
           } else if (assessRes.items && assessRes.items.length > 0) {
             setSelectedAssessmentId(assessRes.items[0].id);
+          }
+          if (workspaces && workspaces.length > 0) {
+            const wsId = workspaces[0].id;
+            studyPlannerApi.getLearningUnits(wsId).then(setLearningUnits).catch(() => {});
           }
         } catch (err) {
           console.error(err);
@@ -157,6 +164,8 @@ export function StudyPlanWizard({
     try {
       const payload: GeneratePlanFromAssessmentPayload = {
         assessment_id: selectedAssessmentId,
+        target_mode: targetMode,
+        target_learning_unit_id: targetMode === "up_to_learning_unit" && targetLearningUnitId ? targetLearningUnitId : undefined,
         available_days: selectedDays,
         blackout_dates: parseBlackoutDates(),
         preferred_time_start: timeStart,
@@ -168,10 +177,16 @@ export function StudyPlanWizard({
         reminder_channels: reminderChannels,
         priority: priority,
       };
-      await studyPlannerApi.generateFromAssessment(payload);
-      toast.success(
-        "AI Study Plan generated and synchronized with your calendar!",
-      );
+      const res = await studyPlannerApi.generateFromAssessment(payload);
+      if (res.creation_warnings && res.creation_warnings.length > 0) {
+        toast.warning(
+          `Study plan created with ${res.creation_warnings.length} schedule conflict warnings. Review schedule conflicts on your dashboard.`
+        );
+      } else {
+        toast.success(
+          "AI Study Plan generated and synchronized with your calendar!"
+        );
+      }
       onSuccess();
       onOpenChange(false);
     } catch (err: any) {
@@ -196,6 +211,8 @@ export function StudyPlanWizard({
         title,
         study_type: studyType,
         course_id: courseId || undefined,
+        target_mode: targetMode,
+        target_learning_unit_id: targetMode === "up_to_learning_unit" && targetLearningUnitId ? targetLearningUnitId : undefined,
         start_date: new Date(startDate).toISOString(),
         end_date: new Date(endDate).toISOString(),
         available_days: selectedDays,
@@ -210,8 +227,14 @@ export function StudyPlanWizard({
         priority: priority,
         auto_generate_sessions: true,
       };
-      await studyPlannerApi.createManualPlan(payload);
-      toast.success("Study plan created successfully!");
+      const res = await studyPlannerApi.createManualPlan(payload);
+      if (res.creation_warnings && res.creation_warnings.length > 0) {
+        toast.warning(
+          `Study plan created with ${res.creation_warnings.length} schedule conflict warnings. Review schedule conflicts on your dashboard.`
+        );
+      } else {
+        toast.success("Study plan created successfully!");
+      }
       onSuccess();
       onOpenChange(false);
     } catch (err: any) {
@@ -299,6 +322,57 @@ export function StudyPlanWizard({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Target Learning Unit Coverage Selector (5d) */}
+            <div className="space-y-2 p-3 rounded-xl border border-primary/20 bg-primary/5">
+              <Label className="text-xs font-bold text-foreground">
+                Target Curriculum Goal
+              </Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setTargetMode("full_assessment_coverage")}
+                  className={`p-2.5 rounded-lg text-xs text-left font-semibold border transition-all ${
+                    targetMode === "full_assessment_coverage"
+                      ? "border-primary bg-primary/10 text-primary font-bold shadow-xs"
+                      : "border-border/50 text-muted-foreground hover:bg-muted/10"
+                  }`}
+                >
+                  <div className="font-bold">Full Assessment Coverage</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">Prepare for all materials in assessment</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTargetMode("up_to_learning_unit")}
+                  className={`p-2.5 rounded-lg text-xs text-left font-semibold border transition-all ${
+                    targetMode === "up_to_learning_unit"
+                      ? "border-primary bg-primary/10 text-primary font-bold shadow-xs"
+                      : "border-border/50 text-muted-foreground hover:bg-muted/10"
+                  }`}
+                >
+                  <div className="font-bold">Up to Specific Unit</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">Cover units 1 through target unit</div>
+                </button>
+              </div>
+
+              {targetMode === "up_to_learning_unit" && (
+                <div className="pt-2 space-y-1 animate-in fade-in duration-200">
+                  <Label className="text-[11px] font-bold text-muted-foreground">Select Target Learning Unit</Label>
+                  <Select value={targetLearningUnitId} onValueChange={setTargetLearningUnitId}>
+                    <SelectTrigger className="h-9 text-xs rounded-lg border-border/60 bg-background">
+                      <SelectValue placeholder={learningUnits.length > 0 ? "Select target unit..." : "No units found (covers all)"} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {learningUnits.map((lu) => (
+                        <SelectItem key={lu.id} value={lu.id} className="text-xs">
+                          {lu.order_index}. {lu.title} ({lu.estimated_study_minutes} mins)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -529,6 +603,53 @@ export function StudyPlanWizard({
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold">
+                  8. Preferred Study Time
+                </Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="time"
+                    value={timeStart}
+                    onChange={(e) => setTimeStart(e.target.value)}
+                    className="h-9 text-xs rounded-lg border-border/60"
+                  />
+                  <span className="text-xs self-center font-bold text-muted-foreground">
+                    to
+                  </span>
+                  <Input
+                    type="time"
+                    value={timeEnd}
+                    onChange={(e) => setTimeEnd(e.target.value)}
+                    className="h-9 text-xs rounded-lg border-border/60"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs font-bold">
+                  9. Session Duration
+                </Label>
+                <div className="flex flex-wrap gap-1.5 pt-0.5">
+                  {[30, 45, 60, 90, 120].map((mins) => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setSessionDuration(mins)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold border transition-all ${
+                        sessionDuration === mins
+                          ? "border-primary bg-primary/10 text-primary font-bold"
+                          : "border-border/40 text-muted-foreground hover:bg-muted/10"
+                      }`}
+                    >
+                      {mins}m
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

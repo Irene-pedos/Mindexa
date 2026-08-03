@@ -13,6 +13,7 @@ from app.schemas.study_planner import (AdjustPlanRequest,
                                        GenerateQuizRequest,
                                        GuidedSessionAskRequest,
                                        GuidedSessionExerciseRequest,
+                                       LearningUnitResponse,
                                        RescheduleSessionRequest,
                                        SaveSessionNotesRequest,
                                        ScheduleConflictWarning,
@@ -24,6 +25,20 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/students/study-plans", tags=["Study Planner"])
+
+
+@router.get(
+    "/workspaces/{workspace_id}/learning-units",
+    response_model=List[LearningUnitResponse],
+    summary="Get ordered Learning Units and student completion status for a workspace",
+)
+async def get_workspace_learning_units(
+    workspace_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> List[LearningUnitResponse]:
+    service = StudyPlannerService(db)
+    return await service.get_workspace_learning_units(workspace_id, current_user.id)
 
 
 @router.get(

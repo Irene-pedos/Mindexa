@@ -197,6 +197,9 @@ class DocumentProcessingService:
         db: Optional[AsyncSession] = None,
     ) -> List[List[float]]:
         """Generate document passage embeddings via audited AIGateway."""
+        import asyncio
+
+        batch_size = 16
         if db is not None:
             try:
                 from app.core.ai.gateway import AIGateway
@@ -205,20 +208,28 @@ class DocumentProcessingService:
                 from app.core.ai.providers import AIEmbeddingRequest
 
                 gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
-                req = AIEmbeddingRequest(input=texts)
-                res = await gateway.embed(
-                    req,
-                    subject_entity_type="academic_resource",
-                    subject_entity_id=resource_id,
-                    prompt_summary=f"Document embedding batch for resource {resource_id}",
-                )
-                if len(res.embeddings) != len(texts):
-                    raise EmbeddingGenerationError(
-                        f"AIGateway returned {len(res.embeddings)} embeddings for {len(texts)} inputs"
+                all_gateway_embeddings: List[List[float]] = []
+
+                for batch_start in range(0, len(texts), batch_size):
+                    sub_batch = texts[batch_start : batch_start + batch_size]
+                    req = AIEmbeddingRequest(input=sub_batch)
+                    res = await gateway.embed(
+                        req,
+                        subject_entity_type="academic_resource",
+                        subject_entity_id=resource_id,
+                        prompt_summary=f"Document embedding batch for resource {resource_id}",
                     )
-                return res.embeddings
+                    if len(res.embeddings) != len(sub_batch):
+                        raise EmbeddingGenerationError(
+                            f"AIGateway returned {len(res.embeddings)} embeddings for {len(sub_batch)} inputs"
+                        )
+                    all_gateway_embeddings.extend(res.embeddings)
+                    if batch_start + batch_size < len(texts):
+                        await asyncio.sleep(0.3)
+
+                return all_gateway_embeddings
             except Exception as exc:
-                logger.exception(
+                logger.warning(
                     "AIGateway document embedding failed, attempting direct provider fallback",
                     error=str(exc),
                 )
@@ -230,28 +241,52 @@ class DocumentProcessingService:
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.jina_api_key}",
         }
-
-        # Jina supports batching.
         url = f"{self.jina_base_url}/embeddings"
-        payload = {
-            "model": self.embedding_model,
-            "task": "retrieval.passage",
-            "dimensions": settings.PGVECTOR_DIMENSION,
-            "input": texts,
-        }
+        jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
+        target_dim = settings.PGVECTOR_DIMENSION
+
+        all_direct_embeddings: List[List[float]] = []
 
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(url, headers=headers, json=payload)
-            if response.status_code != 200:
-                raise EmbeddingGenerationError(f"Jina API failed: {response.text}")
+            for batch_start in range(0, len(texts), batch_size):
+                sub_batch = texts[batch_start : batch_start + batch_size]
+                payload = {
+                    "model": self.embedding_model,
+                    "task": "retrieval.passage",
+                    "dimensions": jina_dim,
+                    "input": sub_batch,
+                }
 
-            data = response.json()
-            embeddings = [item["embedding"] for item in data["data"]]
-            if len(embeddings) != len(texts):
-                raise EmbeddingGenerationError(
-                    f"Jina direct provider returned {len(embeddings)} embeddings for {len(texts)} inputs"
-                )
-            return embeddings
+                response = None
+                for attempt in range(3):
+                    response = await client.post(url, headers=headers, json=payload)
+                    if response.status_code == 429 or "RATE_TOKEN_LIMIT_EXCEEDED" in response.text:
+                        await asyncio.sleep(2.0 * (attempt + 1))
+                        continue
+                    break
+
+                if response is None or response.status_code != 200:
+                    err_text = response.text if response else "No response"
+                    raise EmbeddingGenerationError(f"Jina API failed: {err_text}")
+
+                data = response.json()
+                raw_embeddings = [item["embedding"] for item in data.get("data", [])]
+                if len(raw_embeddings) != len(sub_batch):
+                    raise EmbeddingGenerationError(
+                        f"Jina direct provider returned {len(raw_embeddings)} embeddings for {len(sub_batch)} inputs"
+                    )
+
+                for emb in raw_embeddings:
+                    if len(emb) < target_dim:
+                        emb = emb + [0.0] * (target_dim - len(emb))
+                    elif len(emb) > target_dim:
+                        emb = emb[:target_dim]
+                    all_direct_embeddings.append(emb)
+
+                if batch_start + batch_size < len(texts):
+                    await asyncio.sleep(0.3)
+
+        return all_direct_embeddings
 
     async def _store_chunks(self, resource_id: uuid.UUID, chunks_data: List[Dict[str, Any]], embeddings: List[List[float]], db: AsyncSession) -> None:
         """Bulk insert ResourceChunk records."""

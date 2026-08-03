@@ -14,6 +14,14 @@ from app.db.models.study_plan import StudySession
 from pydantic import BaseModel, Field, field_validator
 
 
+class LearningUnitSegment(BaseModel):
+    """Schema for AI segmentation of material chunks into coherent Learning Units."""
+    title: str = Field(..., description="Coherent title of the learning unit")
+    summary: str = Field(default="", description="Short abstract of the unit content")
+    chunk_indices: List[int] = Field(default_factory=list, description="0-indexed chunk indices included in this unit")
+    estimated_minutes: int = Field(default=45, description="Estimated study duration in minutes")
+
+
 class SessionTopicPlan(BaseModel):
     """Schema for AI-generated session topic breakdown."""
     topic: str = Field(..., description="Topic or module name")
@@ -33,6 +41,11 @@ class LessonSection(BaseModel):
     tables: List[Dict[str, Any]] = Field(default_factory=list)
     charts: List[Dict[str, Any]] = Field(default_factory=list)
     activities: List[str] = Field(default_factory=list)
+    micro_check: Optional[Dict[str, Any]] = None
+    faded_example: Optional[Dict[str, Any]] = None
+    self_explanation_prompt: Optional[str] = None
+    suggested_video_search: Optional[str] = None
+    source_learning_unit_id: Optional[str] = None
 
 
 class LessonPlanOutput(BaseModel):
@@ -568,7 +581,6 @@ class StudyPlannerAgent(BaseAgent):
         if output.options and len(output.options) >= 2:
             import random
             options_with_idx = list(enumerate(output.options))
-            random.shuffle(options_with_idx)
             new_options = [opt for _, opt in options_with_idx]
             new_correct_idx = next(
                 (new_i for new_i, (old_i, _) in enumerate(options_with_idx) if old_i == output.correct_option_index),
@@ -578,3 +590,69 @@ class StudyPlannerAgent(BaseAgent):
             output.correct_option_index = new_correct_idx
 
         return output
+
+    async def segment_into_learning_units(
+        self, material_title: str, chunks: List[Dict[str, Any]], actor_id: Optional[uuid.UUID] = None
+    ) -> List[LearningUnitSegment]:
+        """
+        Groups sequential document chunks into logically coherent, teachable Learning Units (5b).
+        """
+        chunk_summaries = []
+        for idx, ch in enumerate(chunks[:30]):
+            text = ch.get("content") or ch.get("text") or ch.get("snippet") or ""
+            chunk_summaries.append(f"Chunk {idx}: {text[:180]}")
+
+        prompt = (
+            f"You are Mindexa's Curriculum Architect.\n"
+            f"Document Title: '{material_title}'\n\n"
+            f"Given these sequential document chunks, group them into 3 to 10 logically coherent Learning Units in the order they appear.\n"
+            f"Each unit should be teachable in one 30-60 minute study session.\n\n"
+            f"Sequential Chunks:\n" + "\n".join(chunk_summaries) + "\n\n"
+            f"Return ONLY a JSON list of objects matching this schema:\n"
+            f"[{{\"title\": \"LU 1: ...\", \"summary\": \"...\", \"chunk_indices\": [0, 1], \"estimated_minutes\": 45}}]"
+        )
+
+        request = AICompletionRequest(
+            messages=[
+                AIMessage(role="system", content="You extract structured Learning Units from academic materials. Return valid JSON only."),
+                AIMessage(role="user", content=prompt),
+            ],
+            temperature=0.2,
+            max_tokens=2000,
+        )
+
+        try:
+            response = await self.gateway.complete(
+                request,
+                action_type=AIActionType.GENERATE_STUDY_PLAN,
+                actor_id=actor_id or uuid.UUID("00000000-0000-0000-0000-000000000000"),
+                actor_role="system",
+                subject_entity_type="lecturer_material",
+                prompt_summary=f"Extract Learning Units for material '{material_title}'",
+            )
+            res = self._parse_json_output(response.content, LearningUnitSegment, extract_list=True)
+            return res if isinstance(res, list) else [res]
+        except Exception as exc:
+            logger.warning("AI Learning Unit segmentation failed; using fallback segmentation", error=str(exc))
+            units = []
+            chunk_count = len(chunks)
+            step = max(1, chunk_count // 5)
+            for i in range(0, chunk_count, step):
+                indices = list(range(i, min(i + step, chunk_count)))
+                u_num = (i // step) + 1
+                units.append(
+                    LearningUnitSegment(
+                        title=f"Learning Unit {u_num}: Core Concepts of {material_title}",
+                        summary=f"Covers key principles in material sections {i+1} to {min(i+step, chunk_count)}.",
+                        chunk_indices=indices,
+                        estimated_minutes=45,
+                    )
+                )
+            return units if units else [
+                LearningUnitSegment(
+                    title=f"Learning Unit 1: Foundations of {material_title}",
+                    summary=f"Comprehensive overview of {material_title}.",
+                    chunk_indices=[0],
+                    estimated_minutes=45,
+                )
+            ]

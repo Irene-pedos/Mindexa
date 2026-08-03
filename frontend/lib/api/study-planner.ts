@@ -26,6 +26,11 @@ export interface LessonSection {
   tables?: Array<{ title?: string; headers?: string[]; rows?: string[][] }>;
   charts?: Array<Record<string, any>>;
   activities?: string[];
+  micro_check?: { question: string; answer: string; hint?: string } | null;
+  faded_example?: { problem: string; solution_steps?: string[]; completion_prompt: string; blank_index?: number } | null;
+  self_explanation_prompt?: string | null;
+  suggested_video_search?: string | null;
+  source_learning_unit_id?: string | null;
 }
 
 export interface LessonPlanOutput {
@@ -75,9 +80,24 @@ export interface SourceCitation {
   relevance_score?: number;
 }
 
+export interface LearningUnit {
+  id: string;
+  teaching_workspace_id: string;
+  source_material_id?: string | null;
+  order_index: number;
+  title: string;
+  summary?: string | null;
+  source_chunk_ids?: string[];
+  estimated_study_minutes: number;
+  is_active: boolean;
+  status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "NEEDS_REVIEW" | string;
+  confidence_score?: number | null;
+}
+
 export interface StudySession {
   id: string;
   study_plan_id: string;
+  learning_unit_id?: string | null;
   title: string;
   topic: string;
   session_type: "STUDY" | "PRACTICE" | "REVISION" | string;
@@ -93,6 +113,7 @@ export interface StudySession {
   checklist_items?: ChecklistItem[];
   quiz_questions?: QuizQuestion[];
   recommended_resource_ids?: string[];
+  source_material_ids?: string[];
   lesson_sections_json?: LessonSection[];
   lesson_plan_json?: LessonPlanOutput | null;
   lesson_status?: "NOT_GENERATED" | "IN_PROGRESS" | "COMPLETED" | string;
@@ -140,6 +161,8 @@ export interface StudyPlan {
   course_id?: string | null;
   teaching_workspace_id?: string | null;
   assessment_id?: string | null;
+  target_mode?: "full_assessment_coverage" | "up_to_learning_unit" | string;
+  target_learning_unit_id?: string | null;
   start_date: string;
   end_date: string;
   available_days: string[];
@@ -159,7 +182,8 @@ export interface StudyPlan {
   readiness_history?: ReadinessTimelinePoint[];
   covered_material_ids?: string[];
   created_at: string;
-  sessions: StudySession[];
+  sessions?: StudySession[];
+  creation_warnings?: string[];
 }
 
 export interface CreateStudyPlanPayload {
@@ -168,6 +192,8 @@ export interface CreateStudyPlanPayload {
   course_id?: string;
   teaching_workspace_id?: string;
   assessment_id?: string;
+  target_mode?: "full_assessment_coverage" | "up_to_learning_unit";
+  target_learning_unit_id?: string;
   start_date: string;
   end_date: string;
   available_days?: string[];
@@ -185,6 +211,8 @@ export interface CreateStudyPlanPayload {
 
 export interface GeneratePlanFromAssessmentPayload {
   assessment_id: string;
+  target_mode?: "full_assessment_coverage" | "up_to_learning_unit";
+  target_learning_unit_id?: string;
   available_days?: string[];
   blackout_dates?: string[];
   preferred_time_start?: string;
@@ -366,5 +394,8 @@ export const studyPlannerApi = {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/complete`, {
       method: "POST",
     });
+  },
+  getLearningUnits: async (workspaceId: string): Promise<LearningUnit[]> => {
+    return apiClient(`/students/study-plans/workspaces/${workspaceId}/learning-units`);
   },
 };

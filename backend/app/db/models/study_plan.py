@@ -49,6 +49,8 @@ class StudyPlan(BaseModel, table=True):
 
     readiness_history: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     covered_material_ids: List[str] = Field(default=[], sa_column=Column(JSON))
+    target_mode: str = Field(default="full_assessment_coverage", max_length=50)
+    target_learning_unit_id: Optional[uuid.UUID] = Field(default=None, foreign_key="learning_unit.id", nullable=True)
 
     sessions: List["StudySession"] = Relationship(sa_relationship=relationship("StudySession", back_populates="plan"))
 
@@ -64,6 +66,7 @@ class StudySession(BaseModel, table=True):
 
     study_plan_id: uuid.UUID = Field(foreign_key="study_plan.id", index=True, nullable=False)
     student_id: uuid.UUID = Field(foreign_key="user.id", index=True, nullable=False)
+    learning_unit_id: Optional[uuid.UUID] = Field(default=None, foreign_key="learning_unit.id", index=True, nullable=True)
 
     title: str = Field(max_length=255, nullable=False)
     topic: str = Field(max_length=255, nullable=False)
@@ -83,6 +86,7 @@ class StudySession(BaseModel, table=True):
     checklist_items: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     quiz_questions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     recommended_resource_ids: List[str] = Field(default=[], sa_column=Column(JSON))
+    source_material_ids: List[str] = Field(default=[], sa_column=Column(JSON))
 
     # AI Guided Study Session Fields
     lesson_sections_json: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))

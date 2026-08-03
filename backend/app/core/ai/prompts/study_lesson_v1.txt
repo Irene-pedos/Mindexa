@@ -10,11 +10,12 @@ Lecturer Course Material (RAG Context & References):
 CRITICAL INSTRUCTIONS FOR LESSON GENERATION & DURATION DEPTH:
 1. Match the depth and coverage of the lesson to the {{duration_minutes}}-minute session target. Provide exactly {{target_sections}} comprehensive, highly detailed sections.
 2. EVERY section "content" MUST be thorough, detailed, and fully written out. Include executable code blocks (fenced with markdown), step-by-step annotated examples, markdown tables comparing concepts, and line-by-line walkthroughs.
-3. "key_points" MUST be formatted as descriptive takeaway sentences in the structure: "Concept Name: Detailed explanation of what to keep in mind about this concept".
-4. "diagram_prompt" SHOULD contain valid Mermaid diagram syntax (e.g., `graph TD`, `flowchart LR`, `sequenceDiagram`, `classDiagram`, `stateDiagram`) whenever visual representation enhances understanding.
-5. Provide per-section estimated minutes (`estimated_minutes`) summing up to approximately {{duration_minutes}} minutes.
-6. Explicitly incorporate lecturer materials retrieved in the RAG Context as `citations` (with document/chunk reference metadata) and `lecturer_references`.
-7. Add interactive elements: `examples` array, `tables` array, `charts` array (JSON or Mermaid data), `activities` (practice tasks), and a `glossary` mapping key terms to clear definitions.
+3. ANALOGY PERSONALIZATION: If {{learning_profile}} lists high confidence topics, draw explicit analogies ("This works similarly to X, which you already understand well").
+4. MERMAID DIAGRAM MANDATE: If a section describes a process, sequence, hierarchy, multi-branch concept map, or system with 3+ parts, you MUST include a `diagram_prompt` using valid Mermaid syntax (`graph TD`, `flowchart LR`, `sequenceDiagram`, `classDiagram`, `stateDiagram`).
+5. EMBEDDED RETRIEVAL PRACTICE (`micro_check`): EVERY section MUST include a `micro_check` object `{"question": "...", "answer": "...", "hint": "..."}` testing immediate recall.
+6. PROGRESSIVE FADING (`faded_example`): EVERY section with a worked example MUST include a companion `faded_example` object `{"problem": "...", "solution_steps": ["step 1", "step 2..."], "completion_prompt": "Fill in the missing line: ...", "blank_index": 1}` for active student completion.
+7. FEYNMAN SELF-EXPLANATION (`self_explanation_prompt`): EVERY section MUST include a `self_explanation_prompt` string ("In your own words, explain why...").
+8. REALISTIC VIDEO RESEARCH (`suggested_video_search`): EVERY section MUST include a concise YouTube search query string (`suggested_video_search`, e.g. "Python memory allocation stack vs heap tutorial").
 
 Return ONLY a JSON object matching this schema:
 {
@@ -31,9 +32,22 @@ Return ONLY a JSON object matching this schema:
       "diagram_prompt": "graph TD\n A[Source Code] --> B[Tokenizer]\n B --> C[AST Syntax Tree]",
       "estimated_minutes": 15,
       "examples": [{"title": "Basic Example", "code": "const value = 42;", "explanation": "Simple declaration illustrating memory binding."}],
+      "faded_example": {
+        "problem": "Calculate memory offset for dynamic stack allocation.",
+        "solution_steps": ["1. Identify base address PTR", "2. Multiply index by element size S", "3. Return PTR + (i * S)"],
+        "completion_prompt": "Fill in missing step 2 formula: offset = base + (____ * element_size)",
+        "blank_index": 2
+      },
       "tables": [{"title": "Comparison Matrix", "headers": ["Feature", "Approach A", "Approach B"], "rows": [["Speed", "Fast", "Moderate"]]}],
       "charts": [],
-      "activities": ["Trace the memory stack during call invocation."]
+      "activities": ["Trace the memory stack during call invocation."],
+      "micro_check": {
+        "question": "What is the key difference between stack and heap memory allocation?",
+        "answer": "Stack allocation is fixed-size and LIFO-managed at compile time, whereas heap allocation is dynamic and runtime-managed.",
+        "hint": "Think about execution context lifespan vs dynamic data lifetime."
+      },
+      "self_explanation_prompt": "In your own words, explain why dynamic heap allocation requires manual or garbage-collected deallocation while stack allocation does not.",
+      "suggested_video_search": "{{topic}} stack vs heap memory management"
     }
   ],
   "lecturer_references": ["Lecturer Slide Set 2: Memory & AST"],

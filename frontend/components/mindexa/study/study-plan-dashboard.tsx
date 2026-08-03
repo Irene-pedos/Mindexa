@@ -29,6 +29,8 @@ import {
   StudyPlan,
   StudySession,
   StudyPlannerSummary,
+  LearningUnit,
+  studyPlannerApi,
 } from "@/lib/api/study-planner";
 import { format, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -60,10 +62,21 @@ export function StudyPlanDashboard({
   const readinessTimeline = summary?.readiness_timeline || [];
   const materialCoverage = summary?.material_coverage || [];
 
+  const [learningUnits, setLearningUnits] = useState<LearningUnit[]>([]);
+
+  useEffect(() => {
+    if (activePlan?.teaching_workspace_id) {
+      studyPlannerApi
+        .getLearningUnits(activePlan.teaching_workspace_id)
+        .then(setLearningUnits)
+        .catch(() => setLearningUnits([]));
+    }
+  }, [activePlan?.teaching_workspace_id]);
+
   const totalSessions =
-    activePlan?.sessions.length ?? summary?.total_sessions_count ?? 0;
+    activePlan?.sessions?.length ?? summary?.total_sessions_count ?? 0;
   const completedSessions =
-    activePlan?.sessions.filter((s) => s.status === "COMPLETED").length ??
+    activePlan?.sessions?.filter((s) => s.status === "COMPLETED").length ??
     summary?.completed_sessions_count ??
     0;
   const progressPercent =
@@ -265,6 +278,48 @@ export function StudyPlanDashboard({
                 />
               </div>
             ))}
+
+            {/* Learning Unit Sequence Coverage Bar (5e) */}
+            {learningUnits.length > 0 && (
+              <div className="pt-3 border-t border-border/30 space-y-2 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between text-[11px] font-semibold">
+                  <span className="text-foreground flex items-center gap-1.5 font-bold">
+                    <BookOpen className="size-3 text-primary" /> Learning Unit Sequence
+                  </span>
+                  <span className="text-xs font-bold text-primary">
+                    {learningUnits.filter((u) => u.status === "COMPLETED").length}/{learningUnits.length} Units Done
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 overflow-x-auto py-1">
+                  {learningUnits.map((lu) => {
+                    const isDone = lu.status === "COMPLETED";
+                    const isReview = lu.status === "NEEDS_REVIEW";
+                    const isProgress = lu.status === "IN_PROGRESS";
+                    return (
+                      <div
+                        key={lu.id}
+                        title={`LU ${lu.order_index}: ${lu.title} (${lu.status})`}
+                        className={`size-3 rounded-full shrink-0 transition-transform hover:scale-125 cursor-pointer ${
+                          isDone
+                            ? "bg-emerald-500 shadow-xs"
+                            : isReview
+                            ? "bg-amber-500 animate-pulse"
+                            : isProgress
+                            ? "bg-primary"
+                            : "bg-muted border border-border/60"
+                        }`}
+                      />
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+                  <span>LU 1: Start</span>
+                  <span>LU {learningUnits.length}: Final</span>
+                </div>
+              </div>
+            )}
           </div>
         </Card>
       </div>
@@ -342,12 +397,19 @@ export function StudyPlanDashboard({
                     <h3 className="text-base font-bold text-foreground tracking-tight">
                       {todaySession.title}
                     </h3>
-                    <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                      Topic:{" "}
-                      <span className="text-foreground font-semibold">
-                        {todaySession.topic}
-                      </span>{" "}
-                      &bull; {todaySession.duration_minutes} mins
+                    <p className="text-xs text-muted-foreground font-medium mt-0.5 flex items-center gap-2 flex-wrap">
+                      <span>
+                        Topic:{" "}
+                        <span className="text-foreground font-semibold">
+                          {todaySession.topic}
+                        </span>
+                      </span>
+                      <span>&bull; {todaySession.duration_minutes} mins</span>
+                      {todaySession.source_material_ids && todaySession.source_material_ids.length > 0 && (
+                        <Badge variant="secondary" className="text-[10px] font-semibold bg-muted text-muted-foreground gap-1 px-1.5 py-0">
+                          <FileText className="size-3" /> {todaySession.source_material_ids.length} materials
+                        </Badge>
+                      )}
                     </p>
                   </div>
                   <Badge

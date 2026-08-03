@@ -349,15 +349,22 @@ export default function StudentStudyPage() {
                         >
                           <div className="space-y-1 min-w-0 flex-1">
                             <div className="font-semibold text-xs text-foreground truncate">
-                              {s.topic || s.title}
+                              {s.title || s.topic}
                             </div>
-                            <div className="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
-                              <CalendarIcon className="size-3" />
-                              {format(
-                                parseISO(s.scheduled_start),
-                                "MMM d, HH:mm",
-                              )}{" "}
-                              ({s.duration_minutes}m)
+                            <div className="text-[11px] text-muted-foreground font-medium flex items-center gap-2 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <CalendarIcon className="size-3" />
+                                {format(
+                                  parseISO(s.scheduled_start),
+                                  "MMM d, HH:mm",
+                                )}{" "}
+                                ({s.duration_minutes}m)
+                              </span>
+                              {s.source_material_ids && s.source_material_ids.length > 0 && (
+                                <Badge variant="secondary" className="text-[9px] font-semibold bg-muted text-muted-foreground gap-1 px-1.5 py-0">
+                                  📄 {s.source_material_ids.length} materials
+                                </Badge>
+                              )}
                             </div>
                           </div>
 

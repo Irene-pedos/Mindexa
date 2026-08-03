@@ -297,7 +297,6 @@ export function KnowledgeCheckFlow({
 
   const currentQ = questions[currentIdx];
   const qType = (currentQ.question_type || "MCQ").toUpperCase();
-  const answeredCount = Object.keys(answers).length;
 
   return (
     <Card className="border-border/70 bg-card shadow-lg rounded-2xl overflow-hidden">

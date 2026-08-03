@@ -426,10 +426,12 @@ class RAGService:
             "Authorization": f"Bearer {self.jina_api_key}"
         }
         url = f"{self.jina_base_url}/embeddings"
+        jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
+        target_dim = settings.PGVECTOR_DIMENSION
         payload = {
             "model": self.embedding_model,
             "task": "retrieval.query",
-            "dimensions": settings.PGVECTOR_DIMENSION,
+            "dimensions": jina_dim,
             "input": [question]
         }
 
@@ -441,7 +443,12 @@ class RAGService:
                     raise Exception(f"Jina embedding request failed with status {response.status_code}")
 
                 data = response.json()
-                return data["data"][0]["embedding"]
+                emb = data["data"][0]["embedding"]
+                if len(emb) < target_dim:
+                    emb = emb + [0.0] * (target_dim - len(emb))
+                elif len(emb) > target_dim:
+                    emb = emb[:target_dim]
+                return emb
         except Exception as e:
             logger.warning("Jina embedding error", error=str(e))
             raise e

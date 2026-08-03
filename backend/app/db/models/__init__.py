@@ -125,6 +125,11 @@ from app.db.models.study_support_session import StudySupportSession
 from app.db.models.result import AssessmentResult, ResultBreakdown
 from app.db.models.study_plan import StudyPlan, StudySession
 from app.db.models.learning_profile import StudentLearningProfile
+from app.db.models.learning_unit import (
+    LearningUnit,
+    StudentLearningUnitProgress,
+    AssessmentLearningUnitCoverage,
+)
 
 __all__: list[str] = [
     # ── Audit ──────────────────────────────────────────────────────────────────
@@ -211,4 +216,8 @@ __all__: list[str] = [
     "StudyPlan",
     "StudySession",
     "StudentLearningProfile",
+    # ── Learning Units ─────────────────────────────────────────────────────────
+    "LearningUnit",
+    "StudentLearningUnitProgress",
+    "AssessmentLearningUnitCoverage",
 ]

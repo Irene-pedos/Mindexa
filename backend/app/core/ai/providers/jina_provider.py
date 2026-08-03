@@ -9,6 +9,8 @@ from .base_provider import (AICompletionRequest, AICompletionResponse,
                             AIEmbeddingRequest, AIEmbeddingResponse,
                             BaseProvider)
 
+logger = get_logger(__name__)
+
 
 class JinaProvider(BaseProvider):
     """Jina AI provider implementation."""
@@ -46,7 +48,7 @@ class JinaProvider(BaseProvider):
 
         # Target dimension matching resource_chunks pgvector column
         target_dim = settings.PGVECTOR_DIMENSION
-        jina_dim = settings.PGVECTOR_DIMENSION
+        jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
 
         payload = {
             "model": model,
@@ -82,8 +84,8 @@ class JinaProvider(BaseProvider):
         padded_or_truncated = False
         for emb in raw_embeddings:
             if len(emb) != target_dim and not padded_or_truncated:
-                logger.warning(
-                    "Jina embedding dimension mismatch detected",
+                logger.debug(
+                    "Jina embedding zero-padded/truncated to target dimension",
                     provider=self.name,
                     model=model,
                     original_dimension=len(emb),

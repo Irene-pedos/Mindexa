@@ -12,6 +12,7 @@ from pydantic import (AliasChoices, BaseModel, Field, computed_field,
 class StudySessionResponse(BaseModel):
     id: uuid.UUID
     study_plan_id: uuid.UUID
+    learning_unit_id: Optional[uuid.UUID] = None
     title: str
     topic: str
     session_type: str
@@ -27,6 +28,7 @@ class StudySessionResponse(BaseModel):
     checklist_items: List[Dict[str, Any]] = []
     quiz_questions: List[Dict[str, Any]] = []
     recommended_resource_ids: List[str] = []
+    source_material_ids: List[str] = []
     lesson_sections_json: List[Dict[str, Any]] = []
     lesson_plan_json: Optional[Dict[str, Any]] = None
     lesson_status: str = "NOT_GENERATED"
@@ -38,6 +40,28 @@ class StudySessionResponse(BaseModel):
     session_summary_text: Optional[str] = None
     student_notes: Optional[str] = None
     tutor_chat_history: List[Dict[str, Any]] = []
+
+
+class LearningUnitResponse(BaseModel):
+    id: uuid.UUID
+    teaching_workspace_id: uuid.UUID
+    source_material_id: Optional[uuid.UUID] = None
+    order_index: int
+    title: str
+    summary: Optional[str] = None
+    source_chunk_ids: List[str] = []
+    estimated_study_minutes: int = 45
+    is_active: bool = True
+    status: str = "NOT_STARTED"
+    confidence_score: Optional[int] = None
+
+
+class StudentLearningUnitProgressResponse(BaseModel):
+    learning_unit_id: uuid.UUID
+    status: str
+    confidence_score: Optional[int] = None
+    completed_at: Optional[datetime] = None
+    linked_session_id: Optional[uuid.UUID] = None
 
 
 class SaveSessionNotesRequest(BaseModel):
@@ -65,6 +89,8 @@ class StudyPlanResponse(BaseModel):
     course_id: Optional[uuid.UUID] = None
     teaching_workspace_id: Optional[uuid.UUID] = None
     assessment_id: Optional[uuid.UUID] = None
+    target_mode: str = "full_assessment_coverage"
+    target_learning_unit_id: Optional[uuid.UUID] = None
     start_date: datetime
     end_date: datetime
     available_days: List[str] = []
@@ -85,6 +111,7 @@ class StudyPlanResponse(BaseModel):
     covered_material_ids: List[str] = []
     created_at: datetime
     sessions: List[StudySessionResponse] = []
+    creation_warnings: List[str] = []
 
 
 class CreateStudyPlanRequest(BaseModel):
@@ -93,6 +120,8 @@ class CreateStudyPlanRequest(BaseModel):
     course_id: Optional[uuid.UUID] = None
     teaching_workspace_id: Optional[uuid.UUID] = None
     assessment_id: Optional[uuid.UUID] = None
+    target_mode: str = Field(default="full_assessment_coverage")
+    target_learning_unit_id: Optional[uuid.UUID] = None
     start_date: datetime
     end_date: datetime
     available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -127,6 +156,8 @@ class CreateStudyPlanRequest(BaseModel):
 
 class GeneratePlanFromAssessmentRequest(BaseModel):
     assessment_id: uuid.UUID
+    target_mode: str = Field(default="full_assessment_coverage")
+    target_learning_unit_id: Optional[uuid.UUID] = None
     available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
     blackout_dates: List[str] = []
     preferred_time_start: str = "19:00"
@@ -168,14 +199,11 @@ class GenerateQuizRequest(BaseModel):
 
 class RescheduleSessionRequest(BaseModel):
     new_start: datetime
-    new_duration_minutes: Annotated[
-        Optional[int],
-        Field(
-            default=None,
-            ge=1,
-            validation_alias=AliasChoices("new_duration_minutes", "new_duration"),
-        ),
-    ] = None
+    new_duration_minutes: Optional[int] = Field(
+        default=None,
+        ge=1,
+        validation_alias=AliasChoices("new_duration_minutes", "new_duration"),
+    )
     force: bool = False
 
     @property

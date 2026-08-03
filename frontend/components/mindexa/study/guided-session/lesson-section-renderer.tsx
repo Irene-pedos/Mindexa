@@ -98,6 +98,30 @@ export function LessonSectionRenderer({
           </div>
         )}
 
+        {/* 3b. Faded Example / Progressive Fading Block */}
+        {section.faded_example && (
+          <div className="rounded-xl border border-violet-500/25 bg-violet-500/5 p-5 space-y-3">
+            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-violet-600 dark:text-violet-400">
+              <Sparkles className="size-4" /> Your Turn — Progressive Fading Practice
+            </h4>
+            <p className="text-xs text-foreground font-semibold">
+              {section.faded_example.problem}
+            </p>
+            {section.faded_example.solution_steps && section.faded_example.solution_steps.length > 0 && (
+              <div className="space-y-1.5 pl-2 border-l-2 border-violet-500/30">
+                {section.faded_example.solution_steps.map((step, sIdx) => (
+                  <p key={sIdx} className="text-xs text-muted-foreground font-medium">
+                    {step}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="bg-background/80 rounded-lg p-3 border border-violet-500/20 text-xs font-mono text-foreground">
+              {section.faded_example.completion_prompt}
+            </div>
+          </div>
+        )}
+
         {/* 4. Structured Tables Block */}
         {section.tables && section.tables.length > 0 && (
           <div className="space-y-4">
@@ -166,6 +190,49 @@ export function LessonSectionRenderer({
             </div>
           );
         })()}
+
+        {/* 5b. Micro Check (Embedded Retrieval Practice) */}
+        {section.micro_check && (
+          <MicroCheckCard microCheck={section.micro_check} />
+        )}
+
+        {/* 5c. Feynman Self-Explanation Prompt */}
+        {section.self_explanation_prompt && (
+          <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 p-5 space-y-3">
+            <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-600 dark:text-teal-400">
+              <FileText className="size-4" /> Feynman Self-Explanation Nudge
+            </h4>
+            <p className="text-xs text-foreground font-medium">
+              {section.self_explanation_prompt}
+            </p>
+            <textarea
+              placeholder="Explain in your own words before continuing..."
+              className="w-full min-h-[70px] p-3 text-xs rounded-lg border border-teal-500/20 bg-background text-foreground focus:outline-hidden focus:ring-1 focus:ring-teal-500"
+            />
+          </div>
+        )}
+
+        {/* 5d. Video Search Link */}
+        {section.suggested_video_search && (
+          <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-4 flex items-center justify-between gap-3">
+            <div className="space-y-0.5 min-w-0">
+              <span className="text-xs font-bold text-rose-700 dark:text-rose-300 block">
+                Recommended Video Research
+              </span>
+              <p className="text-[11px] text-muted-foreground truncate">
+                Search YouTube for: &quot;{section.suggested_video_search}&quot;
+              </p>
+            </div>
+            <a
+              href={`https://www.youtube.com/results?search_query=${encodeURIComponent(section.suggested_video_search)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs shrink-0 transition-colors"
+            >
+              🔎 Search YouTube
+            </a>
+          </div>
+        )}
 
         {/* 6. Key Concept Takeaways */}
         {section.key_points && section.key_points.length > 0 && (
@@ -255,5 +322,70 @@ export function LessonSectionRenderer({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function MicroCheckCard({
+  microCheck,
+}: {
+  microCheck: { question: string; answer: string; hint?: string };
+}) {
+  const [showAnswer, setShowAnswer] = React.useState(false);
+  const [showHint, setShowHint] = React.useState(false);
+
+  return (
+    <div className="rounded-xl border border-amber-500/25 bg-amber-500/5 p-5 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
+          <HelpCircle className="size-4" /> Quick Micro-Check (Embedded Retrieval)
+        </h4>
+        <Badge variant="outline" className="text-[10px] font-semibold text-amber-600 border-amber-500/30">
+          Section Check
+        </Badge>
+      </div>
+
+      <p className="text-xs text-foreground font-semibold">
+        {microCheck.question}
+      </p>
+
+      {microCheck.hint && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowHint(!showHint)}
+            className="text-[11px] font-semibold text-amber-600 dark:text-amber-400 underline hover:text-amber-700"
+          >
+            {showHint ? "Hide hint" : "💡 Need a hint?"}
+          </button>
+          {showHint && (
+            <p className="text-xs text-muted-foreground italic mt-1 pl-2 border-l-2 border-amber-500/30">
+              {microCheck.hint}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="pt-2 flex items-center justify-between gap-3">
+        {!showAnswer ? (
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowAnswer(true)}
+            className="text-xs font-semibold border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+          >
+            Check Answer →
+          </Button>
+        ) : (
+          <div className="space-y-1 w-full animate-in fade-in duration-200">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 block">
+              ✓ Model Answer:
+            </span>
+            <p className="text-xs font-medium text-foreground bg-background/80 p-3 rounded-lg border border-emerald-500/20">
+              {microCheck.answer}
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }

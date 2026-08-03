@@ -130,8 +130,9 @@ class StudyPlannerService:
         )
         plan = await self.repo.create_plan(plan)
 
+        creation_warnings: List[str] = []
         if data.auto_generate_sessions:
-            await self._generate_session_slots(plan)
+            creation_warnings = await self._generate_session_slots(plan)
 
         notif = Notification(
             recipient_id=student_id,
@@ -146,7 +147,7 @@ class StudyPlannerService:
         self.db.add(notif)
         await self.db.commit()
 
-        return await self._format_plan_response(plan.id, student_id)
+        return await self._format_plan_response(plan.id, student_id, creation_warnings=creation_warnings)
 
     async def generate_ai_plan_from_assessment(
         self, student_id: uuid.UUID, data: GeneratePlanFromAssessmentRequest
@@ -205,7 +206,7 @@ class StudyPlannerService:
         plan = await self.repo.create_plan(plan)
 
         profile = await self.repo.get_or_create_learning_profile(student_id, assessment.course_id)
-        await self._generate_ai_session_schedule(plan, assessment, material_titles, profile=profile)
+        creation_warnings = await self._generate_ai_session_schedule(plan, assessment, material_titles, profile=profile)
 
         notif = Notification(
             recipient_id=student_id,
@@ -220,7 +221,7 @@ class StudyPlannerService:
         self.db.add(notif)
         await self.db.commit()
 
-        return await self._format_plan_response(plan.id, student_id)
+        return await self._format_plan_response(plan.id, student_id, creation_warnings=creation_warnings)
 
     async def _default_checklist(self, topic: str, s_type: str) -> List[Dict[str, Any]]:
         return [
@@ -231,7 +232,173 @@ class StudyPlannerService:
           {"id": "c5", "text": "Review any mistaken questions", "completed": False},
         ]
 
-    async def _generate_session_slots(self, plan: StudyPlan) -> None:
+    async def _find_conflicts_for_slot(
+        self,
+        student_id: uuid.UUID,
+        proposed_start: datetime,
+        proposed_end: datetime,
+        exclude_session_id: Optional[uuid.UUID] = None,
+        exclude_plan_id: Optional[uuid.UUID] = None,
+    ) -> Optional[StudySession]:
+        """
+        Shared conflict-checking utility across all active student plans.
+        Returns conflicting StudySession if proposed_start < s.scheduled_end and proposed_end > s.scheduled_start.
+        """
+        plans = await self.repo.list_plans_for_student(student_id)
+        if not isinstance(plans, list):
+            return None
+
+        p_start = _ensure_utc(proposed_start)
+        p_end = _ensure_utc(proposed_end)
+
+        for p in plans:
+            if exclude_plan_id and getattr(p, "id", None) == exclude_plan_id:
+                continue
+            for s in (getattr(p, "sessions", []) or []):
+                if getattr(s, "is_deleted", False):
+                    continue
+                if exclude_session_id and getattr(s, "id", None) == exclude_session_id:
+                    continue
+                if getattr(s, "status", None) not in ["SCHEDULED", "RESCHEDULED", "IN_PROGRESS"]:
+                    continue
+
+                s_start = _ensure_utc(getattr(s, "scheduled_start", None))
+                s_end = _ensure_utc(getattr(s, "scheduled_end", None))
+
+                if s_start and s_end and s_start < p_end and s_end > p_start:
+                    return s
+        return None
+
+    def _build_session_title(self, plan: StudyPlan, topic: str, session_type: str, course_code: Optional[str] = None) -> str:
+        prefix = f"{course_code} — " if course_code else ""
+        return f"{prefix}{topic}"
+
+    async def _resolve_topic_list(self, plan: StudyPlan, estimated_session_count: int = 10) -> List[Tuple[str, str, List[str], Optional[uuid.UUID]]]:
+        """
+        Generates Learning Unit (LU)-aware course-grounded topics, session types, material IDs, and LU IDs.
+        Returns a list of (topic_name, session_type, source_material_ids, learning_unit_id) tuples.
+        """
+        if plan.teaching_workspace_id:
+            try:
+                from app.db.models.learning_unit import (
+                    LearningUnit, StudentLearningUnitProgress, AssessmentLearningUnitCoverage
+                )
+                lu_stmt = select(LearningUnit).where(
+                    LearningUnit.teaching_workspace_id == plan.teaching_workspace_id,
+                    LearningUnit.is_active == True,
+                    LearningUnit.is_deleted == False,
+                ).order_by(LearningUnit.order_index.asc())
+                lu_res = await self.db.execute(lu_stmt)
+                lus = list(lu_res.scalars().all())
+
+                if lus:
+                    lu_ids = [lu.id for lu in lus]
+                    prog_stmt = select(StudentLearningUnitProgress).where(
+                        StudentLearningUnitProgress.student_id == plan.student_id,
+                        StudentLearningUnitProgress.learning_unit_id.in_(lu_ids),
+                    )
+                    prog_res = await self.db.execute(prog_stmt)
+                    progress_map = {p.learning_unit_id: p.status for p in prog_res.scalars().all()}
+
+                    candidate_lus = lus
+                    if getattr(plan, "target_mode", None) == "up_to_learning_unit" and getattr(plan, "target_learning_unit_id", None):
+                        target_idx = next((i for i, lu in enumerate(lus) if lu.id == plan.target_learning_unit_id), len(lus) - 1)
+                        candidate_lus = lus[: target_idx + 1]
+                    elif plan.assessment_id:
+                        cov_stmt = select(AssessmentLearningUnitCoverage.learning_unit_id).where(
+                            AssessmentLearningUnitCoverage.assessment_id == plan.assessment_id
+                        )
+                        cov_res = await self.db.execute(cov_stmt)
+                        covered_ids = set(cov_res.scalars().all())
+                        if covered_ids:
+                            candidate_lus = [lu for lu in lus if lu.id in covered_ids]
+
+                    review_first = [lu for lu in candidate_lus if progress_map.get(lu.id) == "NEEDS_REVIEW"]
+                    remaining = [lu for lu in candidate_lus if progress_map.get(lu.id) not in ("COMPLETED", "NEEDS_REVIEW")]
+                    ordered_lus = review_first + remaining
+                    if not ordered_lus:
+                        ordered_lus = candidate_lus
+
+                    result = []
+                    for idx in range(estimated_session_count):
+                        lu = ordered_lus[idx % len(ordered_lus)]
+                        s_type = "REVISION" if progress_map.get(lu.id) == "NEEDS_REVIEW" else ("PRACTICE" if idx % 3 == 2 else "STUDY")
+                        m_ids = [str(lu.source_material_id)] if lu.source_material_id else []
+                        result.append((lu.title, s_type, m_ids, lu.id))
+                    return result
+            except Exception as exc:
+                logger.warning("Failed to resolve Learning Units for plan topic list, attempting AI fallback", error=str(exc))
+
+        course_name = plan.title
+        materials = []
+
+        if plan.teaching_workspace_id:
+            try:
+                from app.db.models.academic import TeachingWorkspace, LecturerMaterial
+                ws = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+                if ws and hasattr(ws, "title") and ws.title:
+                    course_name = ws.title
+
+                mats_stmt = select(LecturerMaterial).where(
+                    and_(
+                        LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
+                        LecturerMaterial.is_student_visible == True,
+                        LecturerMaterial.is_deleted == False,
+                        LecturerMaterial.is_current == True,
+                    )
+                )
+                mats_res = await self.db.execute(mats_stmt)
+                materials = list(mats_res.scalars().all())
+            except Exception as exc:
+                logger.warning("Failed to load workspace materials for topic resolution", error=str(exc))
+
+        material_titles = [m.title for m in materials if getattr(m, "title", None)]
+        material_ids = [str(m.id) for m in materials if getattr(m, "id", None)]
+
+        try:
+            from app.agents.study_planner_agent import StudyPlannerAgent
+            from app.core.ai.gateway import AIGateway
+            from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+
+            chat_provider = get_ai_provider()
+            embed_provider = get_embedding_provider()
+            gateway = AIGateway(self.db, chat_provider, embed_provider)
+            agent = StudyPlannerAgent(gateway)
+
+            profile = await self.repo.get_or_create_learning_profile(plan.student_id)
+
+            topic_plans = await agent.generate_session_topics(
+                student_id=plan.student_id,
+                assessment_title=plan.title,
+                course_context=course_name,
+                material_titles=material_titles if material_titles else ["Core Study Notes"],
+                session_count=estimated_session_count,
+                difficulty_pace=plan.preferred_difficulty or "Balanced",
+                weak_topics=getattr(profile, "weak_topics", None),
+                topic_confidence=getattr(profile, "topic_confidence", None),
+            )
+            return [
+                (tp.topic, tp.session_type, material_ids[:3] if material_ids else [], None)
+                for tp in topic_plans
+            ]
+        except Exception as exc:
+            logger.warning("AI topic resolution failed for plan, using fallback topics", error=str(exc))
+
+        fallbacks = [
+            (f"Foundations of {plan.title}", "STUDY", material_ids[:2] if material_ids else []),
+            ("Key Terms & Core Concepts Practice", "PRACTICE", material_ids[:1] if material_ids else []),
+            ("Practical Application & Problem Solving", "STUDY", material_ids[:2] if material_ids else []),
+            ("Comprehensive Topic Revision", "REVISION", material_ids[:2] if material_ids else []),
+        ]
+        result = []
+        for i in range(estimated_session_count):
+            base_topic, s_type, m_ids = fallbacks[i % len(fallbacks)]
+            topic_str = f"{base_topic} (Module {i + 1})" if i >= len(fallbacks) else base_topic
+            result.append((topic_str, s_type, m_ids, None))
+        return result
+
+    async def _generate_session_slots(self, plan: StudyPlan) -> List[str]:
+        warnings: List[str] = []
         curr = _ensure_utc(plan.start_date)
         end = _ensure_utc(plan.end_date)
         day_map = {
@@ -249,40 +416,93 @@ class StudyPlannerService:
         except Exception:
             pass
 
-        session_count = 1
+        end_hour, end_min = None, None
+        if plan.preferred_time_end:
+            try:
+                parts_end = plan.preferred_time_end.split(":")
+                end_hour, end_min = int(parts_end[0]), int(parts_end[1])
+            except Exception:
+                pass
+
         blackout_set = set(plan.blackout_dates or [])
-        while curr <= end and session_count <= 30:
+        total_days = max(1, (end - curr).days + 1)
+        available_days_count = sum(
+            1 for d in range(total_days)
+            if (curr + timedelta(days=d)).weekday() in allowed_weekdays
+            and (curr + timedelta(days=d)).strftime("%Y-%m-%d") not in blackout_set
+        )
+        estimated_session_count = min(30, max(5, available_days_count))
+
+        topic_tuples = await self._resolve_topic_list(plan, estimated_session_count=estimated_session_count)
+
+        course_code = None
+        if plan.teaching_workspace_id:
+            try:
+                from app.db.models.academic import TeachingWorkspace
+                ws = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+                if ws and hasattr(ws, "code"):
+                    course_code = ws.code
+            except Exception:
+                pass
+
+        session_count = 1
+        while curr <= end and session_count <= estimated_session_count:
             date_str = curr.strftime("%Y-%m-%d")
             if curr.weekday() in allowed_weekdays and date_str not in blackout_set:
                 sched_start = curr.replace(hour=start_hour, minute=start_min, second=0, microsecond=0, tzinfo=UTC)
-                sched_end = sched_start + timedelta(minutes=plan.session_duration_minutes)
+                dur = plan.session_duration_minutes
+                if end_hour is not None and end_min is not None:
+                    window_limit = curr.replace(hour=end_hour, minute=end_min, second=0, microsecond=0, tzinfo=UTC)
+                    if window_limit > sched_start:
+                        max_window = int((window_limit - sched_start).total_seconds() / 60)
+                        dur = min(dur, max_window)
+                sched_end = sched_start + timedelta(minutes=dur)
 
-                s_type = "STUDY"
-                if session_count % 3 == 0:
-                    s_type = "PRACTICE"
-                elif session_count % 5 == 0:
-                    s_type = "REVISION"
+                # Conflict Avoidance & Auto-Shift Check
+                conflict = await self._find_conflicts_for_slot(plan.student_id, sched_start, sched_end, exclude_plan_id=plan.id)
+                if conflict:
+                    shifted_start = _ensure_utc(conflict.scheduled_end)
+                    if shifted_start < sched_end:
+                        shifted_start = sched_start + timedelta(minutes=30)
+                    shifted_end = shifted_start + timedelta(minutes=dur)
 
-                topic_name = f"Topic Module {session_count}"
+                    day_limit = curr.replace(hour=end_hour or 23, minute=end_min or 59, second=0, microsecond=0, tzinfo=UTC)
+                    if shifted_end <= day_limit and not await self._find_conflicts_for_slot(plan.student_id, shifted_start, shifted_end, exclude_plan_id=plan.id):
+                        sched_start = shifted_start
+                        sched_end = shifted_end
+                    else:
+                        conflict_title = getattr(conflict, "title", None) or getattr(conflict, "topic", "Existing Session")
+                        warnings.append(
+                            f"Session {session_count} on {date_str} overlaps with existing session '{conflict_title}' ({_ensure_utc(conflict.scheduled_start).strftime('%b %d, %H:%M')})."
+                        )
+
+                topic_name, s_type, source_mats, lu_id = topic_tuples[(session_count - 1) % len(topic_tuples)]
+                session_title = self._build_session_title(plan, topic_name, s_type, course_code)
+
                 session = StudySession(
                     study_plan_id=plan.id,
                     student_id=plan.student_id,
-                    title=f"Session {session_count}: {plan.daily_goal}",
+                    learning_unit_id=lu_id,
+                    title=session_title,
                     topic=topic_name,
                     session_type=s_type,
                     scheduled_start=sched_start,
                     scheduled_end=sched_end,
-                    duration_minutes=plan.session_duration_minutes,
+                    duration_minutes=dur,
                     status="SCHEDULED",
+                    source_material_ids=source_mats,
                     checklist_items=await self._default_checklist(topic_name, s_type),
                 )
                 await self.repo.create_session(session)
                 session_count += 1
             curr += timedelta(days=1)
 
+        return warnings
+
     async def _generate_ai_session_schedule(
         self, plan: StudyPlan, assessment: Assessment, material_titles: List[str], profile: Optional[Any] = None
-    ) -> None:
+    ) -> List[str]:
+        warnings: List[str] = []
         curr = _ensure_utc(plan.start_date)
         end = _ensure_utc(plan.end_date)
         day_map = {
@@ -299,6 +519,14 @@ class StudyPlannerService:
             start_hour, start_min = int(parts[0]), int(parts[1])
         except Exception:
             pass
+
+        end_hour, end_min = None, None
+        if plan.preferred_time_end:
+            try:
+                parts_end = plan.preferred_time_end.split(":")
+                end_hour, end_min = int(parts_end[0]), int(parts_end[1])
+            except Exception:
+                pass
 
         blackout_set = set(plan.blackout_dates or [])
 
@@ -325,6 +553,10 @@ class StudyPlannerService:
         # Issue M1: Pass student profile weak topics & confidence
         weak_topics = getattr(profile, "weak_topics", None)
         topic_confidence = getattr(profile, "topic_confidence", None)
+
+        course_code = None
+        if assessment and hasattr(assessment, "course") and assessment.course:
+            course_code = getattr(assessment.course, "code", None)
 
         # Call StudyPlannerAgent to generate dynamic topics
         try:
@@ -370,10 +602,34 @@ class StudyPlannerService:
                 matching_day_counter += 1
                 if step_interval == 1 or (matching_day_counter % step_interval == 1):
                     sched_start = curr.replace(hour=start_hour, minute=start_min, second=0, microsecond=0, tzinfo=UTC)
-                    sched_end = sched_start + timedelta(minutes=duration_minutes)
+                    actual_dur = duration_minutes
+                    if end_hour is not None and end_min is not None:
+                        window_limit = curr.replace(hour=end_hour, minute=end_min, second=0, microsecond=0, tzinfo=UTC)
+                        if window_limit > sched_start:
+                            max_window = int((window_limit - sched_start).total_seconds() / 60)
+                            actual_dur = min(actual_dur, max_window)
+                    sched_end = sched_start + timedelta(minutes=actual_dur)
+
+                    # Conflict Avoidance & Auto-Shift Check
+                    conflict = await self._find_conflicts_for_slot(plan.student_id, sched_start, sched_end, exclude_plan_id=plan.id)
+                    if conflict:
+                        shifted_start = _ensure_utc(conflict.scheduled_end)
+                        if shifted_start < sched_end:
+                            shifted_start = sched_start + timedelta(minutes=30)
+                        shifted_end = shifted_start + timedelta(minutes=actual_dur)
+
+                        day_limit = curr.replace(hour=end_hour or 23, minute=end_min or 59, second=0, microsecond=0, tzinfo=UTC)
+                        if shifted_end <= day_limit and not await self._find_conflicts_for_slot(plan.student_id, shifted_start, shifted_end, exclude_plan_id=plan.id):
+                            sched_start = shifted_start
+                            sched_end = shifted_end
+                        else:
+                            conflict_title = getattr(conflict, "title", None) or getattr(conflict, "topic", "Existing Session")
+                            warnings.append(
+                                f"Session {session_idx + 1} on {date_str} overlaps with existing session '{conflict_title}' ({_ensure_utc(conflict.scheduled_start).strftime('%b %d, %H:%M')})."
+                            )
 
                     topic_name, s_type = topics[session_idx % len(topics)]
-                    s_title = f"{s_type.title()} Session: {topic_name}"
+                    s_title = self._build_session_title(plan, topic_name, s_type, course_code)
 
                     session = StudySession(
                         study_plan_id=plan.id,
@@ -383,13 +639,15 @@ class StudyPlannerService:
                         session_type=s_type,
                         scheduled_start=sched_start,
                         scheduled_end=sched_end,
-                        duration_minutes=duration_minutes,
+                        duration_minutes=actual_dur,
                         status="SCHEDULED",
                         checklist_items=await self._default_checklist(topic_name, s_type),
                     )
                     await self.repo.create_session(session)
                     session_idx += 1
             curr += timedelta(days=1)
+
+        return warnings
 
     async def generate_session_quiz(
         self, session_id: uuid.UUID, student_id: uuid.UUID, question_count: int = 5
@@ -850,11 +1108,16 @@ class StudyPlannerService:
     async def get_plan_detail(self, plan_id: uuid.UUID, student_id: uuid.UUID) -> StudyPlanResponse:
         return await self._format_plan_response(plan_id, student_id)
 
-    async def _format_plan_response(self, plan_id: uuid.UUID, student_id: uuid.UUID) -> StudyPlanResponse:
+    async def _format_plan_response(
+        self, plan_id: uuid.UUID, student_id: uuid.UUID, creation_warnings: Optional[List[str]] = None
+    ) -> StudyPlanResponse:
         plan = await self.repo.get_plan_by_id(plan_id, student_id)
         if not plan:
             raise ValueError("Study plan not found")
-        return self._format_plan(plan)
+        resp = self._format_plan(plan)
+        if creation_warnings:
+            resp.creation_warnings = creation_warnings
+        return resp
 
     def _format_plan(self, plan: StudyPlan) -> StudyPlanResponse:
         sessions = [self._format_session(s) for s in (plan.sessions or []) if not s.is_deleted]
@@ -1499,8 +1762,68 @@ class StudyPlannerService:
         except Exception as exc:
             logger.warning("Failed to auto-recommend materials for knowledge check", error=str(exc))
 
+        # Issue 4c: Spaced repetition auto-scheduling for weak topics
+        weak_concepts = report.get("weak_concepts", [])
+        if weak_concepts or score < 70:
+            try:
+                spaced_topics = weak_concepts if weak_concepts else [session.topic]
+                await self.schedule_spaced_repetition_session(student_id, session.study_plan_id, spaced_topics, days_ahead=2)
+            except Exception as exc:
+                logger.warning("Spaced repetition auto-scheduling failed", error=str(exc))
+
         await self.db.commit()
         return report
+
+    async def schedule_spaced_repetition_session(
+        self,
+        student_id: uuid.UUID,
+        plan_id: uuid.UUID,
+        weak_topics: List[str],
+        days_ahead: int = 2,
+    ) -> Optional[StudySession]:
+        """
+        Spaced Repetition Auto-Scheduling (4c):
+        Schedule a short 20-min REVISION session 2-3 days after a weak performance / weak concept check.
+        """
+        if not weak_topics:
+            return None
+
+        plan = await self.repo.get_plan_by_id(plan_id, student_id)
+        if not plan:
+            return None
+
+        now = datetime.now(UTC)
+        target_date = now + timedelta(days=days_ahead)
+
+        start_hour, start_min = 19, 0
+        try:
+            parts = plan.preferred_time_start.split(":")
+            start_hour, start_min = int(parts[0]), int(parts[1])
+        except Exception:
+            pass
+
+        sched_start = target_date.replace(hour=start_hour, minute=start_min, second=0, microsecond=0, tzinfo=UTC)
+        sched_end = sched_start + timedelta(minutes=20)
+
+        conflict = await self._find_conflicts_for_slot(student_id, sched_start, sched_end)
+        if conflict:
+            sched_start = _ensure_utc(conflict.scheduled_end) + timedelta(minutes=15)
+            sched_end = sched_start + timedelta(minutes=20)
+
+        topic_name = f"Spaced Revision: {', '.join(weak_topics[:2])}"
+        session = StudySession(
+            study_plan_id=plan.id,
+            student_id=student_id,
+            title=f"Spaced Repetition Review: {weak_topics[0]}",
+            topic=topic_name,
+            session_type="REVISION",
+            scheduled_start=sched_start,
+            scheduled_end=sched_end,
+            duration_minutes=20,
+            status="SCHEDULED",
+            checklist_items=await self._default_checklist(topic_name, "REVISION"),
+        )
+        return await self.repo.create_session(session)
 
     async def complete_guided_session(
         self,
@@ -1570,5 +1893,137 @@ class StudyPlannerService:
                 last_studied_at=datetime.now(UTC),
             )
 
+        # Update StudentLearningUnitProgress if linked to a Learning Unit
+        if session.learning_unit_id:
+            try:
+                from app.db.models.learning_unit import StudentLearningUnitProgress
+                prog_stmt = select(StudentLearningUnitProgress).where(
+                    StudentLearningUnitProgress.student_id == student_id,
+                    StudentLearningUnitProgress.learning_unit_id == session.learning_unit_id,
+                )
+                prog_res = await self.db.execute(prog_stmt)
+                prog = prog_res.scalar_one_or_none()
+                if not prog:
+                    prog = StudentLearningUnitProgress(
+                        student_id=student_id,
+                        learning_unit_id=session.learning_unit_id,
+                        status="COMPLETED",
+                        completed_at=datetime.now(UTC),
+                        linked_session_id=session.id,
+                    )
+                    self.db.add(prog)
+                else:
+                    prog.status = "COMPLETED"
+                    prog.completed_at = datetime.now(UTC)
+                    prog.linked_session_id = session.id
+                    self.db.add(prog)
+            except Exception as exc:
+                logger.warning("Failed to update StudentLearningUnitProgress on session completion", error=str(exc))
+
         await self.db.commit()
         return self._format_session(session)
+
+    async def extract_learning_units(self, material_id: uuid.UUID) -> List[Any]:
+        """
+        AI Extraction Pipeline (5b): Extract structured Learning Units from material chunks and persist.
+        """
+        from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk
+        from app.db.models.learning_unit import LearningUnit
+
+        material = await self.db.get(LecturerMaterial, material_id)
+        if not material or not material.teaching_workspace_id:
+            return []
+
+        chunks_stmt = select(LecturerMaterialChunk).where(
+            LecturerMaterialChunk.lecturer_material_id == material_id
+        ).order_by(LecturerMaterialChunk.chunk_index.asc())
+        chunks_res = await self.db.execute(chunks_stmt)
+        chunks = list(chunks_res.scalars().all())
+
+        if not chunks:
+            return []
+
+        max_idx_stmt = select(func.max(LearningUnit.order_index)).where(
+            LearningUnit.teaching_workspace_id == material.teaching_workspace_id,
+            LearningUnit.is_deleted == False,
+        )
+        max_res = await self.db.execute(max_idx_stmt)
+        current_max = max_res.scalar() or 0
+
+        from app.agents.study_planner_agent import StudyPlannerAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudyPlannerAgent(gateway)
+
+        chunk_dicts = [
+            {"chunk_index": c.chunk_index, "content": getattr(c, "content", None) or getattr(c, "snippet", "") or ""}
+            for c in chunks
+        ]
+        segments = await agent.segment_into_learning_units(material.title or "Material", chunk_dicts)
+
+        created_units = []
+        for i, seg in enumerate(segments):
+            chunk_ids = [str(chunks[c_i].id) for c_i in seg.chunk_indices if 0 <= c_i < len(chunks)]
+            lu = LearningUnit(
+                teaching_workspace_id=material.teaching_workspace_id,
+                source_material_id=material.id,
+                order_index=current_max + i + 1,
+                title=seg.title,
+                summary=seg.summary,
+                source_chunk_ids=chunk_ids,
+                estimated_study_minutes=seg.estimated_minutes,
+                is_active=True,
+            )
+            self.db.add(lu)
+            created_units.append(lu)
+
+        await self.db.commit()
+        return created_units
+
+    async def get_workspace_learning_units(
+        self, workspace_id: uuid.UUID, student_id: uuid.UUID
+    ) -> List[LearningUnitResponse]:
+        """Fetch ordered Learning Units for workspace with student progress (5d)."""
+        from app.db.models.learning_unit import LearningUnit, StudentLearningUnitProgress
+        stmt = select(LearningUnit).where(
+            LearningUnit.teaching_workspace_id == workspace_id,
+            LearningUnit.is_active == True,
+            LearningUnit.is_deleted == False,
+        ).order_by(LearningUnit.order_index.asc())
+        res = await self.db.execute(stmt)
+        lus = list(res.scalars().all())
+
+        if not lus:
+            return []
+
+        lu_ids = [lu.id for lu in lus]
+        prog_stmt = select(StudentLearningUnitProgress).where(
+            StudentLearningUnitProgress.student_id == student_id,
+            StudentLearningUnitProgress.learning_unit_id.in_(lu_ids),
+        )
+        prog_res = await self.db.execute(prog_stmt)
+        prog_map = {p.learning_unit_id: p for p in prog_res.scalars().all()}
+
+        output = []
+        for lu in lus:
+            p = prog_map.get(lu.id)
+            output.append(
+                LearningUnitResponse(
+                    id=lu.id,
+                    teaching_workspace_id=lu.teaching_workspace_id,
+                    source_material_id=lu.source_material_id,
+                    order_index=lu.order_index,
+                    title=lu.title,
+                    summary=lu.summary,
+                    source_chunk_ids=lu.source_chunk_ids or [],
+                    estimated_study_minutes=lu.estimated_study_minutes,
+                    is_active=lu.is_active,
+                    status=p.status if p else "NOT_STARTED",
+                    confidence_score=p.confidence_score if p else None,
+                )
+            )
+        return output
