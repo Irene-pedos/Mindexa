@@ -362,15 +362,15 @@ export default function AcademicStructurePage() {
                         key={step.id}
                         onClick={() => setActiveStep(step.id)}
                         className={cn(
-                            "flex items-center gap-3 p-2.5 rounded-lg transition-all text-left group relative border",
+                            "flex items-center gap-3 p-2.5 rounded-lg transition-all text-left group relative border shadow-xs",
                             isActive 
-                                ? "bg-primary/5 text-primary border-primary/20" 
+                                ? "bg-primary text-primary-foreground border-primary font-semibold" 
                                 : "hover:bg-muted/10 text-muted-foreground border-transparent"
                         )}
                     >
                         <div className={cn(
                             "size-7 rounded flex items-center justify-center border transition-colors",
-                            isActive ? "bg-primary text-primary-foreground border-primary" : 
+                            isActive ? "bg-white/20 text-white border-white/30" : 
                             isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
                             "bg-muted/10 border-muted/40 group-hover:bg-white"
                         )}>
@@ -645,7 +645,7 @@ export default function AcademicStructurePage() {
 
       {/* Forms */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-          <DialogContent className="sm:max-w-[380px] rounded-xl p-0 overflow-hidden border border-muted/20 shadow-none">
+          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-0 overflow-hidden border border-border bg-card shadow-xl">
               <div className="bg-primary p-5 text-primary-foreground">
                   <DialogTitle className="text-sm font-semibold uppercase tracking-widest">
                       New {activeStep === "sections" ? "Class Group / Cohort" : activeStep.slice(0, -1)}
@@ -750,7 +750,7 @@ export default function AcademicStructurePage() {
       </Dialog>
 
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-          <DialogContent className="sm:max-w-[380px] rounded-xl p-0 overflow-hidden border border-muted/20 shadow-none">
+          <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-0 overflow-hidden border border-border bg-card shadow-xl">
               <div className="bg-primary p-5 text-primary-foreground">
                   <DialogTitle className="text-sm font-semibold uppercase tracking-widest">Update Metadata</DialogTitle>
                   <DialogDescription className="text-primary-foreground/60 text-[10px] mt-0.5 font-medium uppercase tracking-tighter">

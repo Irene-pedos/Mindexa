@@ -48,7 +48,6 @@ import {
   Pin,
   Trash,
   BookOpen,
-  LayoutDashboard,
   ShieldAlert,
   AlertTriangle,
 } from "lucide-react";

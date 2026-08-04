@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Loader2, Sparkles, BookOpen, ChevronRight, CheckCircle2, Trophy, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,12 @@ export default function GuidedStudySessionPage() {
   const [stage, setStage] = useState<GuidedStage>("intro");
   const [currentSectionIdx, setCurrentSectionIdx] = useState(0);
   const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
+  const mainRef = useRef<HTMLElement>(null);
+
+  // Reset scroll to top on every section/stage transition
+  useEffect(() => {
+    mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }, [currentSectionIdx, stage]);
 
   useEffect(() => {
     async function initSession() {
@@ -130,123 +136,123 @@ export default function GuidedStudySessionPage() {
         onExit={handleExit}
       />
 
-      {/* Main Learning Workspace Container */}
-      <main className="flex-1 overflow-y-auto px-4 py-6 md:px-8 max-w-5xl mx-auto w-full space-y-6">
-        {/* STAGE 1: INTRO / OVERVIEW */}
-        {stage === "intro" && (
-          <Card className="border-border/70 bg-card shadow-xl rounded-2xl overflow-hidden space-y-6 animate-in fade-in duration-300">
-            <CardHeader className="border-b border-border/50 bg-gradient-to-r from-primary/10 via-indigo-500/10 to-emerald-500/10 p-8 text-center space-y-3">
-              <div className="mx-auto size-16 rounded-full bg-primary/10 flex items-center justify-center text-primary mb-1">
-                <Sparkles className="size-8" />
-              </div>
-              <div className="flex items-center justify-center gap-2">
-                <Badge variant="outline" className="text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1">
-                  Personal Learning Workspace
-                </Badge>
-                {session.lesson_plan_json?.generated_by === "fallback" ? (
-                  <Badge variant="outline" className="text-[11px] font-semibold border-amber-500/40 text-amber-600 bg-amber-500/10 px-2.5 py-0.5">
-                    Standard Lesson Mode
+      {/* Main Learning Workspace Outer Scroll Container */}
+      <div ref={mainRef as any} className="flex-1 overflow-y-auto w-full">
+        <main className="w-full px-4 py-5 md:px-6 space-y-5">
+          {/* STAGE 1: INTRO / OVERVIEW */}
+          {stage === "intro" && (
+            <Card className="border-border/60 bg-card shadow-xs rounded-xl overflow-hidden animate-in fade-in duration-300">
+              <CardHeader className="border-b border-border/60 bg-card p-5 md:p-6 space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Badge variant="outline" className="text-xs font-semibold border-primary/20 text-primary bg-primary/5 px-2.5 py-0.5">
+                    Personal Learning Workspace
                   </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-[11px] font-semibold border-emerald-500/40 text-emerald-600 bg-emerald-500/10 px-2.5 py-0.5">
-                    AI-Personalized
-                  </Badge>
-                )}
-              </div>
-              <CardTitle className="text-2xl md:text-3xl font-extrabold text-foreground tracking-tight">
-                {session.topic}
-              </CardTitle>
-              <p className="text-xs md:text-sm text-muted-foreground font-medium max-w-lg mx-auto">
-                {session.title} &bull; Scheduled Duration: {session.duration_minutes} minutes
-              </p>
-            </CardHeader>
+                  {session.lesson_plan_json?.generated_by === "fallback" ? (
+                    <Badge variant="outline" className="text-[11px] font-medium border-amber-500/30 text-amber-600 bg-amber-500/5 px-2 py-0.5">
+                      Standard Lesson Mode
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-[11px] font-medium border-emerald-500/30 text-emerald-600 bg-emerald-500/5 px-2 py-0.5">
+                      AI-Personalized
+                    </Badge>
+                  )}
+                </div>
+                <CardTitle className="text-lg md:text-xl font-semibold text-foreground tracking-tight">
+                  {session.topic}
+                </CardTitle>
+                <p className="text-xs text-muted-foreground font-medium">
+                  {session.title} &bull; Scheduled Duration: {session.duration_minutes} minutes
+                </p>
+              </CardHeader>
 
-            <CardContent className="p-8 space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Lesson Sections</span>
-                  <p className="text-lg font-bold text-foreground">{sections.length} Modules</p>
+              <CardContent className="p-5 md:p-6 space-y-5">
+                {/* Bento Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Lesson Sections</span>
+                    <p className="text-sm font-semibold text-foreground">{sections.length} Modules</p>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Practice Activities</span>
+                    <p className="text-sm font-semibold text-foreground">Interactive Exercises</p>
+                  </div>
+
+                  <div className="p-4 rounded-xl border border-border/60 bg-card space-y-1 shadow-xs">
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Final Evaluation</span>
+                    <p className="text-sm font-semibold text-foreground">Self Knowledge Check</p>
+                  </div>
                 </div>
 
-                <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Practice Activities</span>
-                  <p className="text-lg font-bold text-foreground">Interactive Exercises</p>
+                <div className="rounded-xl border border-border/60 bg-card p-4 space-y-2.5 shadow-xs">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-2">
+                    <BookOpen className="size-4 text-primary" /> Lesson Overview
+                  </h4>
+                  <div className="space-y-2">
+                    {sections.map((sec, idx) => (
+                      <div key={idx} className="flex items-center gap-2.5 text-xs text-foreground/90 font-medium">
+                        <span className="size-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-semibold text-[10px]">
+                          {idx + 1}
+                        </span>
+                        <span>{sec.section_title}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
+              </CardContent>
 
-                <div className="p-4 rounded-xl border border-border/60 bg-muted/20 space-y-1">
-                  <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Final Check</span>
-                  <p className="text-lg font-bold text-foreground">5-Min Self Evaluation</p>
-                </div>
-              </div>
+              <CardFooter className="p-4 border-t border-border/60 flex justify-end bg-card">
+                <Button
+                  onClick={handleStartLesson}
+                  className="text-xs font-semibold px-4 h-8.5 rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs gap-1.5"
+                >
+                  Begin Guided Lesson <ChevronRight className="size-3.5" />
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
 
-              <div className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
-                  <BookOpen className="size-4" /> Lesson Overview
-                </h4>
-                <div className="space-y-2">
-                  {sections.map((sec, idx) => (
-                    <div key={idx} className="flex items-center gap-3 text-xs text-foreground/90 font-medium">
-                      <span className="size-5 rounded-full bg-primary/10 text-primary flex items-center justify-center font-bold text-[10px]">
-                        {idx + 1}
-                      </span>
-                      <span>{sec.section_title}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </CardContent>
+          {/* STAGE 2: LESSON CONTENT */}
+          {stage === "lesson" && (
+            <LessonSectionRenderer
+              section={currentSection}
+              sectionIndex={currentSectionIdx}
+              totalSections={sections.length}
+              onNextSection={handleNextSection}
+              onPrevSection={handlePrevSection}
+              onStartPractice={() => setStage("practice")}
+            />
+          )}
 
-            <CardFooter className="p-8 border-t border-border/50 flex justify-end">
-              <Button
-                onClick={handleStartLesson}
-                className="text-xs font-bold px-8 h-11 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-lg gap-2"
-              >
-                Begin Guided Lesson <ChevronRight className="size-4" />
-              </Button>
-            </CardFooter>
-          </Card>
-        )}
+          {/* STAGE 3: INLINE PRACTICE EXERCISE */}
+          {stage === "practice" && (
+            <InlinePracticeExercise
+              sessionId={sessionId}
+              sectionIndex={currentSectionIdx}
+              sectionTitle={currentSection.section_title}
+              onProceedToKnowledgeCheck={() => setStage("knowledge_check")}
+            />
+          )}
 
-        {/* STAGE 2: LESSON CONTENT */}
-        {stage === "lesson" && (
-          <LessonSectionRenderer
-            section={currentSection}
-            sectionIndex={currentSectionIdx}
-            totalSections={sections.length}
-            onNextSection={handleNextSection}
-            onPrevSection={handlePrevSection}
-            onStartPractice={() => setStage("practice")}
-          />
-        )}
+          {/* STAGE 4: KNOWLEDGE CHECK */}
+          {stage === "knowledge_check" && (
+            <KnowledgeCheckFlow
+              sessionId={sessionId}
+              topic={session.topic}
+              onCompleteKnowledgeCheck={handleKnowledgeCheckComplete}
+            />
+          )}
 
-        {/* STAGE 3: INLINE PRACTICE EXERCISE */}
-        {stage === "practice" && (
-          <InlinePracticeExercise
-            sessionId={sessionId}
-            sectionIndex={currentSectionIdx}
-            sectionTitle={currentSection.section_title}
-            onProceedToKnowledgeCheck={() => setStage("knowledge_check")}
-          />
-        )}
-
-        {/* STAGE 4: KNOWLEDGE CHECK */}
-        {stage === "knowledge_check" && (
-          <KnowledgeCheckFlow
-            sessionId={sessionId}
-            topic={session.topic}
-            onCompleteKnowledgeCheck={handleKnowledgeCheckComplete}
-          />
-        )}
-
-        {/* STAGE 5: SESSION SUMMARY */}
-        {stage === "summary" && (
-          <SessionSummaryReport
-            session={session}
-            report={report || session.knowledge_check_report}
-            onReturnToPlanner={handleExit}
-          />
-        )}
-      </main>
+          {/* STAGE 5: SESSION SUMMARY */}
+          {stage === "summary" && (
+            <SessionSummaryReport
+              session={session}
+              report={report || session.knowledge_check_report}
+              onReturnToPlanner={handleExit}
+            />
+          )}
+        </main>
+      </div>
 
       {/* Floating Contextual Ask AI Panel (Available throughout all session stages) */}
       <ContextualAskAiPanel

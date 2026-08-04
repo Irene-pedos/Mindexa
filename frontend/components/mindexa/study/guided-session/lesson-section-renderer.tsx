@@ -74,26 +74,29 @@ export function LessonSectionRenderer({
               <Code2 className="size-4" /> Worked Code Examples & Walkthroughs
             </h4>
             <div className="grid gap-4">
-              {section.examples.map((ex, idx) => (
-                <div key={idx} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:p-5 space-y-3">
-                  {ex.title && (
-                    <div className="text-xs font-bold text-foreground flex items-center gap-2">
-                      <span className="size-2 rounded-full bg-emerald-500" />
-                      {ex.title}
-                    </div>
-                  )}
-                  {ex.code && (
-                    <div className="bg-background/90 rounded-lg p-3 border border-emerald-500/15 font-mono text-xs overflow-x-auto text-foreground/90 leading-relaxed">
-                      <RichMessageRenderer content={ex.code.startsWith("```") ? ex.code : `\`\`\`javascript\n${ex.code}\n\`\`\``} />
-                    </div>
-                  )}
-                  {ex.explanation && (
-                    <p className="text-xs text-muted-foreground font-medium leading-relaxed">
-                      <strong className="text-foreground">Walkthrough:</strong> {ex.explanation}
-                    </p>
-                  )}
-                </div>
-              ))}
+              {section.examples.map((rawEx, idx) => {
+                const ex = typeof rawEx === "string" ? { code: rawEx, title: "Example" } : rawEx;
+                return (
+                  <div key={idx} className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 md:p-5 space-y-3">
+                    {ex?.title && (
+                      <div className="text-xs font-bold text-foreground flex items-center gap-2">
+                        <span className="size-2 rounded-full bg-emerald-500" />
+                        {ex.title}
+                      </div>
+                    )}
+                    {ex?.code && (
+                      <div className="bg-background/90 rounded-lg p-3 border border-emerald-500/15 font-mono text-xs overflow-x-auto text-foreground/90 leading-relaxed">
+                        <RichMessageRenderer content={ex.code.startsWith("```") ? ex.code : `\`\`\`javascript\n${ex.code}\n\`\`\``} />
+                      </div>
+                    )}
+                    {ex?.explanation && (
+                      <p className="text-xs text-muted-foreground font-medium leading-relaxed">
+                        <strong className="text-foreground">Walkthrough:</strong> {ex.explanation}
+                      </p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

@@ -5,6 +5,8 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional
 
+from pydantic import model_validator
+
 from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
@@ -46,6 +48,59 @@ class LessonSection(BaseModel):
     self_explanation_prompt: Optional[str] = None
     suggested_video_search: Optional[str] = None
     source_learning_unit_id: Optional[str] = None
+    technique_justification: Optional[str] = Field(
+        default=None,
+        description=(
+            "Explainability field: the AI's reasoning for which visual techniques "
+            "(code, table, diagram) were selected or omitted for this section. "
+            "Supports auditability of AI-generated lesson structure."
+        ),
+    )
+
+    @field_validator("examples", mode="before")
+    @classmethod
+    def _coerce_examples(cls, v: Any) -> List[Dict[str, Any]]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [{"title": "Example", "code": v, "explanation": ""}]
+        if isinstance(v, dict):
+            return [v]
+        if isinstance(v, list):
+            result: List[Dict[str, Any]] = []
+            for item in v:
+                if isinstance(item, str):
+                    result.append({"title": "Example", "code": item, "explanation": ""})
+                elif isinstance(item, dict):
+                    result.append(item)
+            return result
+        return []
+
+    @field_validator("tables", "charts", mode="before")
+    @classmethod
+    def _coerce_dict_lists(cls, v: Any) -> List[Dict[str, Any]]:
+        if not v:
+            return []
+        if isinstance(v, dict):
+            return [v]
+        if isinstance(v, list):
+            result: List[Dict[str, Any]] = []
+            for item in v:
+                if isinstance(item, dict):
+                    result.append(item)
+            return result
+        return []
+
+    @field_validator("key_points", "activities", mode="before")
+    @classmethod
+    def _coerce_string_lists(cls, v: Any) -> List[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(item) if not isinstance(item, str) else item for item in v]
+        return []
 
 
 class LessonPlanOutput(BaseModel):
@@ -62,6 +117,36 @@ class LessonPlanOutput(BaseModel):
     glossary: List[Dict[str, str]] = Field(default_factory=list)
     references: List[str] = Field(default_factory=list)
     generated_by: str = Field(default="ai", description="ai or fallback")
+
+    @field_validator("objectives", "lecturer_references", "references", mode="before")
+    @classmethod
+    def _coerce_string_lists(cls, v: Any) -> List[str]:
+        if not v:
+            return []
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(item) if not isinstance(item, str) else item for item in v]
+        return []
+
+    @field_validator("glossary", mode="before")
+    @classmethod
+    def _coerce_glossary(cls, v: Any) -> List[Dict[str, str]]:
+        if not v:
+            return []
+        if isinstance(v, list):
+            res = []
+            for item in v:
+                if isinstance(item, dict):
+                    res.append({str(k): str(val) for k, val in item.items()})
+                elif isinstance(item, str):
+                    if ":" in item:
+                        t, d = item.split(":", 1)
+                        res.append({"term": t.strip(), "definition": d.strip()})
+                    else:
+                        res.append({"term": item.strip(), "definition": item.strip()})
+            return res
+        return []
 
 
 class KnowledgeCheckQuestion(BaseModel):
@@ -91,6 +176,53 @@ class KnowledgeCheckQuestion(BaseModel):
         if isinstance(v, bool):
             return str(v)
         return v
+
+    # Pattern that catches generic placeholder text the model sometimes emits instead of
+    # real domain content — e.g. "Concept A", "Definition B", "Term 1", "Item C".
+    _PLACEHOLDER_RE: re.Pattern[str] = re.compile(
+        r"^(Concept|Definition|Term|Item|Match|Option|Premise|Category|Label)\s+[A-Z0-9]$",
+        re.IGNORECASE,
+    )
+
+    @model_validator(mode="after")
+    def _validate_matching_structure(self) -> "KnowledgeCheckQuestion":
+        """Enforce structural integrity of MATCHING questions.
+
+        Raises ValueError (caught by the caller as a generation failure) when:
+        - premises or matches are empty
+        - they have different lengths
+        - any entry looks like a generic placeholder ("Concept A", "Definition B", …)
+        - question_text is suspiciously long (>200 chars), which typically means the
+          model leaked the answer key into the instruction field.
+        """
+        if self.question_type != "MATCHING":
+            return self
+
+        if not self.premises or not self.matches:
+            raise ValueError(
+                "MATCHING question must have non-empty premises and matches arrays."
+            )
+
+        if len(self.premises) != len(self.matches):
+            raise ValueError(
+                f"MATCHING question premises ({len(self.premises)}) and "
+                f"matches ({len(self.matches)}) must be the same length."
+            )
+
+        for entry in (*self.premises, *self.matches):
+            if self._PLACEHOLDER_RE.match(entry.strip()):
+                raise ValueError(
+                    f"MATCHING question contains placeholder text: {entry!r}. "
+                    "Real domain-specific content is required."
+                )
+
+        if len(self.question_text) > 200:
+            raise ValueError(
+                "MATCHING question_text is too long (>200 chars). "
+                "It must be a short instruction only — the answer key must not appear in question_text."
+            )
+
+        return self
 
 
 class KnowledgeCheckQuestionGrade(BaseModel):
@@ -349,7 +481,7 @@ class StudyPlannerAgent(BaseAgent):
                 AIMessage(role="system", content=system_content),
                 AIMessage(
                     role="user",
-                    content=f"Teach me today's {duration}-minute lesson on '{session.topic}' with full depth, code examples, diagrams, and {target_sections} structured sections.",
+                    content=f"Teach me today's {duration}-minute lesson on '{session.topic}' with {target_sections} well-structured sections. Use the formatting techniques specified in the system prompt only where they genuinely add clarity for this specific topic.",
                 ),
             ],
             temperature=0.4,
@@ -407,13 +539,51 @@ class StudyPlannerAgent(BaseAgent):
             prompt_version="study_knowledge_check_v1",
         )
 
-        res = self._parse_json_output(response.content, KnowledgeCheckQuestion, extract_list=True)
-        questions_list = res if isinstance(res, list) else [res]
-        for q in questions_list:
+        import random
+        import json as _json
+        from pydantic import ValidationError as _PydanticValidationError
+
+        # Parse raw JSON array inline so we can validate per-item and filter out
+        # malformed questions (e.g. MATCHING with placeholder text) without failing
+        # the entire batch.
+        content_str = response.content.strip()
+        _md_match = re.search(r"```json\s*(.*?)\s*```", content_str, re.DOTALL) or \
+                    re.search(r"```\s*(.*?)\s*```", content_str, re.DOTALL)
+        if _md_match:
+            content_str = _md_match.group(1).strip()
+        else:
+            first_sq = content_str.find("[")
+            last_sq = content_str.rfind("]")
+            if first_sq != -1 and last_sq != -1 and first_sq < last_sq:
+                content_str = content_str[first_sq:last_sq + 1]
+
+        try:
+            raw_items: list[dict] = _json.loads(content_str)
+            if not isinstance(raw_items, list):
+                raw_items = [raw_items]
+        except _json.JSONDecodeError:
+            # Fall back to the base class helper which raises a structured error
+            res = self._parse_json_output(response.content, KnowledgeCheckQuestion, extract_list=True)
+            raw_items = [q.model_dump() for q in (res if isinstance(res, list) else [res])]
+
+        questions_list: List[KnowledgeCheckQuestion] = []
+        import structlog as _structlog
+        _log = _structlog.get_logger(__name__)
+        for item in raw_items:
+            try:
+                q = KnowledgeCheckQuestion.model_validate(item)
+            except _PydanticValidationError as exc:
+                _log.warning(
+                    "knowledge_check_question_invalid",
+                    question_id=item.get("id"),
+                    question_type=item.get("question_type"),
+                    error=str(exc),
+                    session_id=str(session.id),
+                )
+                continue
             if session.topic and session.topic not in q.question_text:
                 q.question_text = f"Regarding {session.topic}: {q.question_text}"
             if q.options and len(q.options) >= 2 and q.question_type == "MCQ":
-                import random
                 options_with_idx = list(enumerate(q.options))
                 random.shuffle(options_with_idx)
                 new_options = [opt for _, opt in options_with_idx]
@@ -425,6 +595,8 @@ class StudyPlannerAgent(BaseAgent):
                     q.correct_option_index = new_correct_idx
                     q.correct_answer = new_options[new_correct_idx]
                 q.options = new_options
+            questions_list.append(q)
+
         return questions_list
 
     async def grade_knowledge_check(
@@ -434,6 +606,7 @@ class StudyPlannerAgent(BaseAgent):
         session_id: uuid.UUID,
         questions: List[dict[str, Any]],
         student_answers: dict[str, Any],
+        session_topic: str = "",
     ) -> KnowledgeCheckReport:
         """Evaluate student responses to a knowledge check and generate personal learning report."""
         question_grades: List[KnowledgeCheckQuestionGrade] = []
@@ -456,7 +629,7 @@ class StudyPlannerAgent(BaseAgent):
                     q_dict.get("concept_tag")
                     or q_dict.get("topic_tag")
                     or q_dict.get("topic")
-                    or session.topic
+                    or session_topic
                     or q_dict.get("question_text", f"Question {q_id}")
                 )
 

@@ -49,11 +49,11 @@ export default function LecturerOnboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col items-center justify-center p-4">
-      <div className="max-w-3xl w-full flex flex-col gap-8">
-        <div className="text-center space-y-2">
-            <h1 className="text-2xl font-bold text-black tracking-tight uppercase">Lecturer Onboarding</h1>
-            <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-widest">Establish your professional profile</p>
+    <div className="min-h-screen bg-background flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
+      <div className="max-w-4xl w-full flex flex-col gap-6">
+        <div className="text-center space-y-1">
+            <h1 className="text-xl font-semibold text-foreground tracking-tight uppercase">Lecturer Onboarding</h1>
+            <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Establish your professional profile</p>
         </div>
 
         <div className="bg-white border border-muted/20 p-8 rounded-3xl shadow-sm space-y-10">

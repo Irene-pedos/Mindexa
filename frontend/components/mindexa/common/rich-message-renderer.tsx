@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo } from "react";
+import { MermaidDiagram } from "@/components/mindexa/common/mermaid-diagram";
 import {
   Copy,
   Check,
@@ -8,7 +9,6 @@ import {
   Table as TableIcon,
   Sparkles,
   BarChart2,
-  GitBranch,
   FileText,
   CheckSquare,
   Globe,
@@ -177,36 +177,7 @@ function CodeBlock({ language, code }: { language: string; code: string }) {
   );
 }
 
-/** Simple Inline Mermaid / Workflow Graph Renderer */
-function MermaidRenderer({ code }: { code: string }) {
-  const nodes = useMemo(() => {
-    return code
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l && !l.startsWith("graph") && !l.startsWith("sequenceDiagram"));
-  }, [code]);
 
-  return (
-    <Card className="my-3.5 border border-border/60 bg-muted/20 p-4 rounded-xl space-y-3">
-      <div className="flex items-center gap-2 text-xs font-semibold text-foreground border-b border-border/40 pb-2">
-        <GitBranch className="size-4 text-primary" />
-        <span>Visual Process Diagram</span>
-      </div>
-      <div className="flex flex-wrap items-center justify-center gap-2 py-2">
-        {nodes.map((node, i) => (
-          <React.Fragment key={i}>
-            <div className="px-3 py-1.5 rounded-lg border border-border bg-background text-xs font-medium text-foreground shadow-2xs">
-              {node.replace(/-->|--|\[|\]|\(|\)/g, " ").trim()}
-            </div>
-            {i < nodes.length - 1 && (
-              <span className="text-muted-foreground/60 font-bold text-xs">➔</span>
-            )}
-          </React.Fragment>
-        ))}
-      </div>
-    </Card>
-  );
-}
 
 /** Inline Recharts Bar Chart Renderer for JSON chart blocks */
 function ChartRenderer({ jsonStr }: { jsonStr: string }) {
@@ -519,7 +490,7 @@ export function RichMessageRenderer({ content, citations, className }: RichMessa
           return <CodeBlock key={i} language={block.language || "text"} code={block.content} />;
         }
         if (block.type === "mermaid") {
-          return <MermaidRenderer key={i} code={block.content} />;
+          return <MermaidDiagram key={i} code={block.content} />;
         }
         if (block.type === "chart") {
           return <ChartRenderer key={i} jsonStr={block.content} />;

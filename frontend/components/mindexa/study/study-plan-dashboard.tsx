@@ -85,36 +85,35 @@ export function StudyPlanDashboard({
       : 0;
 
   return (
-    <div className="space-y-6 w-full animate-in fade-in duration-300">
+    <div className="space-y-5 w-full animate-in fade-in duration-300">
       {/* Proactive Study Plan Suggestion Banner */}
       {proactive && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-background shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-xl border border-primary/30 bg-gradient-to-r from-primary/10 via-primary/5 to-background shadow-xs">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-primary text-white shrink-0">
-              <Sparkles className="size-5" />
+            <div className="p-2 rounded-lg bg-primary text-white shrink-0">
+              <Sparkles className="size-4" />
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <Badge
                   variant="outline"
-                  className="text-[9px] uppercase font-bold bg-primary/10 text-primary border-primary/20"
+                  className="text-[9px] uppercase font-semibold bg-primary/10 text-primary border-primary/20"
                 >
                   New Assessment Published
                 </Badge>
-                <span className="text-xs font-bold text-foreground">
+                <span className="text-xs font-semibold text-foreground">
                   {proactive.title} ({proactive.course_code})
                 </span>
               </div>
               <p className="text-xs text-muted-foreground font-medium mt-0.5">
-                Would you like AI to generate a targeted study plan to prepare
-                for this assessment?
+                Would you like AI to generate a targeted study plan to prepare for this assessment?
               </p>
             </div>
           </div>
           <Button
             onClick={() => onOpenWizard(proactive.id)}
             size="sm"
-            className="h-9 px-4 text-xs font-bold uppercase tracking-wider rounded-xl shrink-0 shadow-sm gap-1.5"
+            className="h-8 text-xs font-semibold uppercase tracking-wider rounded-lg shrink-0 shadow-xs gap-1.5"
           >
             <Zap className="size-3.5" /> 1-Click Generate Plan
           </Button>
@@ -122,27 +121,27 @@ export function StudyPlanDashboard({
       )}
 
       {/* Top Banner Overview & Sticky Continue Bar */}
-      <div className="relative overflow-hidden rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/10 via-background to-primary/5 p-6 shadow-sm">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <div className="flex items-center gap-2">
+      <div className="relative overflow-hidden rounded-xl border border-border/60 bg-card p-5 shadow-xs">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-5">
+          <div className="space-y-1.5 max-w-xl">
+            <div className="flex items-center gap-2 flex-wrap">
               <Badge
                 variant="outline"
-                className="bg-primary/10 text-primary border-primary/20 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5"
+                className="bg-primary/10 text-primary border-primary/20 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5"
               >
-                <Sparkles className="size-3 mr-1" /> AI Personal Academic Coach
+                <Sparkles className="size-3 mr-1" /> AI Academic Coach
               </Badge>
               {summary && summary.streak_days > 0 && (
                 <Badge
                   variant="outline"
-                  className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"
+                  className="bg-amber-500/10 text-amber-600 border-amber-500/20 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 flex items-center gap-1"
                 >
                   <Flame className="size-3 text-amber-500" />{" "}
                   {summary.streak_days} Day Streak (Consistent Learner)
                 </Badge>
               )}
             </div>
-            <h2 className="text-xl md:text-2xl font-bold tracking-tight text-foreground">
+            <h2 className="text-lg md:text-xl font-semibold tracking-tight text-foreground">
               {activePlan
                 ? activePlan.title
                 : "AI Personal Study Operating System"}
@@ -154,31 +153,30 @@ export function StudyPlanDashboard({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
             {todaySession && (
               <Button
                 onClick={() =>
                   router.push(`/student/study/session/${todaySession.id}`)
                 }
-                className="h-10 px-4 text-xs font-bold uppercase tracking-wider rounded-xl shadow-md gap-2 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground"
+                className="h-8.5 px-3.5 text-xs font-semibold uppercase tracking-wider rounded-lg shadow-xs gap-1.5 bg-primary hover:bg-primary/90 text-primary-foreground"
               >
-                <Play className="size-3.5 fill-white" /> Start Guided Study
-                Session
+                <Play className="size-3.5 fill-white" /> Start Guided Session
               </Button>
             )}
             <Button
               onClick={() => onOpenWizard()}
               variant="outline"
-              className="h-10 px-4 text-xs font-bold uppercase tracking-wider rounded-xl border-border/60 gap-2 bg-background/80"
+              className="h-8.5 px-3.5 text-xs font-semibold uppercase tracking-wider rounded-lg border-border/60 gap-1.5 bg-background/80"
             >
-              <Plus className="size-4" /> New Plan
+              <Plus className="size-3.5" /> New Plan
             </Button>
           </div>
         </div>
 
         {/* Active Plan Progress Bar & Readiness Badge */}
         {activePlan && (
-          <div className="mt-6 pt-5 border-t border-border/40 space-y-2">
+          <div className="mt-5 pt-4 border-t border-border/30 space-y-1.5">
             <div className="flex items-center justify-between text-xs font-semibold">
               <span className="text-foreground flex items-center gap-2">
                 <BookOpen className="size-3.5 text-primary" />
@@ -191,7 +189,7 @@ export function StudyPlanDashboard({
             </div>
             <Progress
               value={progressPercent}
-              className="h-2.5 rounded-full bg-primary/10"
+              className="h-2 rounded-full bg-primary/10"
             />
           </div>
         )}
@@ -200,7 +198,7 @@ export function StudyPlanDashboard({
       {/* Readiness Score & Timeline Row */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
         {/* Assessment Readiness Score Widget & Timeline */}
-        <Card className="lg:col-span-8 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 shadow-sm">
+        <Card className="lg:col-span-8 rounded-xl border border-border/60 bg-card p-4 space-y-3 shadow-xs">
           <div className="flex items-center justify-between">
             <div className="text-xs font-bold text-primary flex items-center gap-2">
               <Award className="size-4 text-primary" /> Assessment Readiness

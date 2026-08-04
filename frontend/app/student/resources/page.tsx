@@ -172,17 +172,19 @@ export default function StudentResourcesPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">My Study Resources</h1>
-          <p className="text-muted-foreground mt-1">Personal uploaded materials for revision and study support</p>
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-border/25">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <FileText className="size-4.5 text-primary" /> My Study Resources
+          </h1>
+          <p className="text-xs text-muted-foreground font-medium">Personal uploaded materials for revision and study support</p>
         </div>
 
         <label className="cursor-pointer">
-          <Button asChild size="lg" className="font-medium">
+          <Button asChild size="sm" className="h-8.5 text-xs font-semibold px-4 rounded-lg shadow-xs">
             <span>
-              <Upload className="mr-2 size-5" />
+              <Upload className="mr-1.5 size-4" />
               Upload Files
             </span>
           </Button>

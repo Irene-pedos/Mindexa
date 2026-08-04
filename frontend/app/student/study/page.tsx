@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useRouter } from "next/navigation";
+import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import {
   Sparkles,
   Calendar as CalendarIcon,
@@ -148,33 +149,31 @@ export default function StudentStudyPage() {
   }, [plans]);
 
   return (
-    <div className="space-y-6 w-full max-w-7xl mx-auto p-4 md:p-6 animate-in fade-in duration-300">
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
       {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/25 pb-4">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-foreground flex items-center gap-2">
-            <Sparkles className="size-5 text-primary shrink-0" /> AI Study
-            Planner & Personal Academic Coach
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <SparklesIcon size={20} className="text-primary shrink-0" /> Study Planner & Academic Coach
           </h1>
           <p className="text-xs text-muted-foreground font-medium">
-            AI-powered study scheduling, assessment readiness scoring, and
-            intelligent academic tutoring.
+            AI-powered study scheduling, assessment readiness scoring, and intelligent academic tutoring.
           </p>
         </div>
 
         {/* Action Controls: AI Tutor & New Study Plan */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2">
           <Button
             variant="outline"
             onClick={() => setAiTutorModalOpen(true)}
             size="sm"
-            className="h-9 px-3.5 rounded-xl text-xs font-bold gap-2 border-primary/40 bg-primary/5 hover:bg-primary/10 text-primary shadow-xs transition-all"
+            className="h-8.5 px-3 rounded-lg text-xs font-semibold gap-1.5 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary shadow-xs transition-all"
           >
-            <Bot className="size-4 text-primary animate-pulse" />
+            <SparklesIcon size={16} className="text-primary" />
             <span>Study AI Tutor</span>
             {selectedTopicContext && (
-              <Badge variant="secondary" className="text-[9px] px-1.5 py-0.2">
-                Topic Filter
+              <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                Filtered
               </Badge>
             )}
           </Button>
@@ -182,9 +181,9 @@ export default function StudentStudyPage() {
           <Button
             onClick={() => handleOpenWizardWithAssessment()}
             size="sm"
-            className="h-9 px-4 rounded-xl text-xs font-bold uppercase tracking-wider gap-1.5 shadow-sm bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground"
+            className="h-8.5 px-3.5 rounded-lg text-xs font-semibold uppercase tracking-wider gap-1.5 shadow-xs bg-primary hover:bg-primary/90 text-primary-foreground"
           >
-            <Plus className="size-4" /> New Study Plan
+            <Plus className="size-3.5" /> New Study Plan
           </Button>
         </div>
       </div>
@@ -199,7 +198,7 @@ export default function StudentStudyPage() {
           <HeroUITabs.List aria-label="Study views">
             <HeroUITabs.Tab
               id="overview"
-              className="text-xs font-medium px-2 pb-3 pt-1.5 transition-all"
+              className="text-xs font-medium px-2 pb-2.5 pt-1 transition-all"
             >
               <span className="flex items-center gap-1.5">
                 <Layers className="size-3.5" /> Planner Overview
@@ -208,11 +207,10 @@ export default function StudentStudyPage() {
             </HeroUITabs.Tab>
             <HeroUITabs.Tab
               id="plans"
-              className="text-xs font-medium px-2 pb-3 pt-1.5 transition-all"
+              className="text-xs font-medium px-2 pb-2.5 pt-1 transition-all"
             >
               <span className="flex items-center gap-1.5">
-                <BookOpen className="size-3.5" /> My Active Plans (
-                {plans.length})
+                <BookOpen className="size-3.5" /> My Active Plans ({plans.length})
               </span>
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
@@ -221,11 +219,11 @@ export default function StudentStudyPage() {
 
         {/* Tab 1: Planner Overview */}
         {activeTab === "overview" && (
-          <div className="pt-4">
+          <div className="pt-3">
             {loading ? (
               <div className="space-y-4">
-                <Skeleton className="h-44 w-full rounded-2xl" />
-                <div className="grid grid-cols-4 gap-4">
+                <Skeleton className="h-40 w-full rounded-xl" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                   {[1, 2, 3, 4].map((i) => (
                     <Skeleton key={i} className="h-20 w-full rounded-xl" />
                   ))}
@@ -247,9 +245,9 @@ export default function StudentStudyPage() {
 
         {/* Tab 2: Reorganized Active Plans & Grouped Sessions */}
         {activeTab === "plans" && (
-          <div className="pt-4 space-y-6">
+          <div className="pt-3 space-y-5">
             {plans.length === 0 ? (
-              <div className="py-16 text-center border-2 border-dashed rounded-2xl bg-muted/5 border-border/30 space-y-3">
+              <div className="py-14 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30 space-y-2.5">
                 <BookOpen className="mx-auto size-8 text-muted-foreground/30" />
                 <p className="text-xs font-semibold text-muted-foreground">
                   You haven&apos;t created any study plans yet.
@@ -257,7 +255,7 @@ export default function StudentStudyPage() {
                 <Button
                   onClick={() => handleOpenWizardWithAssessment()}
                   size="sm"
-                  className="h-8 text-xs font-bold uppercase tracking-wider rounded-lg"
+                  className="h-8 text-xs font-semibold uppercase tracking-wider rounded-lg"
                 >
                   Create First Plan
                 </Button>
@@ -267,15 +265,15 @@ export default function StudentStudyPage() {
                 {/* 1. Next Session (Hero Highlight Card) */}
                 {categorizedSessions.nextSession && (
                   <div className="space-y-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                      <Sparkles className="size-4" /> Next Up Guided Session
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                      <Sparkles className="size-3.5" /> Next Up Guided Session
                     </h3>
-                    <Card className="rounded-2xl border-2 border-primary/40 bg-primary/5 p-5 md:p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1.5">
+                    <Card className="rounded-xl border border-primary/30 bg-primary/5 p-4 md:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+                      <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <Badge
                             variant="outline"
-                            className="text-[10px] font-bold border-primary/30 text-primary bg-primary/10"
+                            className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/10"
                           >
                             Next Up
                           </Badge>
@@ -292,7 +290,7 @@ export default function StudentStudyPage() {
                             )}
                           </Badge>
                         </div>
-                        <h4 className="text-lg font-extrabold text-foreground">
+                        <h4 className="text-base font-semibold text-foreground">
                           {categorizedSessions.nextSession.topic ||
                             categorizedSessions.nextSession.title}
                         </h4>
@@ -303,7 +301,7 @@ export default function StudentStudyPage() {
                         </p>
                       </div>
 
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex items-center gap-2">
                         <Button
                           variant="outline"
                           size="sm"
@@ -312,7 +310,7 @@ export default function StudentStudyPage() {
                               categorizedSessions.nextSession,
                             )
                           }
-                          className="h-9 text-xs font-semibold rounded-xl border-border/60"
+                          className="h-8 text-xs font-medium rounded-lg border-border/60"
                         >
                           <RotateCcw className="size-3.5 mr-1" /> Reschedule
                         </Button>
@@ -324,10 +322,9 @@ export default function StudentStudyPage() {
                               `/student/study/session/${categorizedSessions.nextSession?.id}`,
                             )
                           }
-                          className="h-9 px-4 text-xs font-bold rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-md gap-1.5"
+                          className="h-8 px-3.5 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs gap-1.5"
                         >
-                          <Play className="size-3.5 fill-white" /> Start Guided
-                          Session
+                          <Play className="size-3.5 fill-white" /> Start Guided Session
                         </Button>
                       </div>
                     </Card>
@@ -336,18 +333,18 @@ export default function StudentStudyPage() {
 
                 {/* 2. Upcoming Sessions Section */}
                 {categorizedSessions.upcoming.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                      <Clock className="size-4 text-muted-foreground" />{" "}
+                  <div className="space-y-2.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-1.5">
+                      <Clock className="size-3.5 text-muted-foreground" />{" "}
                       Upcoming Sessions ({categorizedSessions.upcoming.length})
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {categorizedSessions.upcoming.map((s) => (
                         <div
                           key={s.id}
-                          className="p-4 rounded-xl border border-border/60 bg-card/60 hover:bg-card transition-all flex items-center justify-between gap-3 shadow-xs"
+                          className="p-3.5 rounded-xl border border-border/50 bg-card/50 hover:bg-card transition-all flex items-center justify-between gap-3 shadow-xs"
                         >
-                          <div className="space-y-1 min-w-0 flex-1">
+                          <div className="space-y-0.5 min-w-0 flex-1">
                             <div className="font-semibold text-xs text-foreground truncate">
                               {s.title || s.topic}
                             </div>
@@ -368,12 +365,12 @@ export default function StudentStudyPage() {
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-1 shrink-0">
                             <Button
                               variant="ghost"
                               size="sm"
                               onClick={() => setRescheduleSession(s)}
-                              className="h-8 text-[11px] font-semibold text-muted-foreground hover:text-foreground"
+                              className="h-7 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2"
                             >
                               Reschedule
                             </Button>
@@ -383,7 +380,7 @@ export default function StudentStudyPage() {
                               onClick={() =>
                                 router.push(`/student/study/session/${s.id}`)
                               }
-                              className="h-8 text-[11px] font-bold rounded-lg gap-1"
+                              className="h-7 text-[11px] font-semibold rounded-lg gap-1 px-2.5"
                             >
                               <Play className="size-3 fill-white" /> Start
                             </Button>
@@ -396,18 +393,18 @@ export default function StudentStudyPage() {
 
                 {/* 3. Missed or Rescheduled Sessions Section */}
                 {categorizedSessions.missedOrRescheduled.length > 0 && (
-                  <div className="space-y-3">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <AlertTriangle className="size-4" /> Missed / Rescheduled
+                  <div className="space-y-2.5">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <AlertTriangle className="size-3.5" /> Missed / Rescheduled
                       ({categorizedSessions.missedOrRescheduled.length})
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {categorizedSessions.missedOrRescheduled.map((s) => (
                         <div
                           key={s.id}
-                          className="p-4 rounded-xl border border-amber-500/20 bg-amber-500/5 flex items-center justify-between gap-3"
+                          className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 flex items-center justify-between gap-3"
                         >
-                          <div className="space-y-1 min-w-0 flex-1">
+                          <div className="space-y-0.5 min-w-0 flex-1">
                             <div className="font-semibold text-xs text-foreground truncate">
                               {s.topic || s.title}
                             </div>
@@ -424,9 +421,9 @@ export default function StudentStudyPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => setRescheduleSession(s)}
-                            className="h-8 text-[11px] font-semibold border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10"
+                            className="h-7 text-[11px] font-semibold border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 px-2.5"
                           >
-                            Reschedule Now
+                            Reschedule
                           </Button>
                         </div>
                       ))}
@@ -436,18 +433,18 @@ export default function StudentStudyPage() {
 
                 {/* 4. Completed Sessions Section */}
                 {categorizedSessions.completed.length > 0 && (
-                  <div className="space-y-3 pt-2">
-                    <h3 className="text-xs font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <CheckCircle2 className="size-4" /> Completed Sessions (
+                  <div className="space-y-2.5 pt-1">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
+                      <CheckCircle2 className="size-3.5" /> Completed Sessions (
                       {categorizedSessions.completed.length})
                     </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                       {categorizedSessions.completed.map((s) => (
                         <div
                           key={s.id}
-                          className="p-4 rounded-xl border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between gap-3"
+                          className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between gap-3"
                         >
-                          <div className="space-y-1 min-w-0 flex-1">
+                          <div className="space-y-0.5 min-w-0 flex-1">
                             <div className="font-semibold text-xs text-foreground truncate">
                               {s.topic || s.title}
                             </div>
@@ -465,9 +462,9 @@ export default function StudentStudyPage() {
                             onClick={() =>
                               router.push(`/student/study/session/${s.id}`)
                             }
-                            className="h-8 text-[11px] font-semibold border-emerald-500/30 text-emerald-700 dark:text-emerald-300"
+                            className="h-7 text-[11px] font-semibold border-emerald-500/30 text-emerald-700 dark:text-emerald-300 px-2.5"
                           >
-                            Review Lesson
+                            Review
                           </Button>
                         </div>
                       ))}
@@ -476,38 +473,38 @@ export default function StudentStudyPage() {
                 )}
 
                 {/* Active Plans List Overview */}
-                <div className="pt-6 border-t border-border/50 space-y-4">
-                  <h3 className="text-sm font-bold text-foreground">
+                <div className="pt-4 border-t border-border/40 space-y-3">
+                  <h3 className="text-sm font-semibold text-foreground">
                     Active Study Plans ({plans.length})
                   </h3>
                   {plans.map((plan) => (
                     <Card
                       key={plan.id}
-                      className="rounded-2xl border border-border/60 bg-card p-5 space-y-4 shadow-xs"
+                      className="rounded-xl border border-border/50 bg-card p-4 space-y-3 shadow-xs"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/30 pb-3">
                         <div>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <Badge
                               variant="outline"
-                              className="text-[9px] uppercase font-bold px-2 py-0.5 bg-primary/10 text-primary border-primary/20"
+                              className="text-[9px] uppercase font-semibold px-2 py-0.5 bg-primary/10 text-primary border-primary/20"
                             >
                               {plan.study_type}
                             </Badge>
                             <Badge
                               variant="secondary"
-                              className="text-[9px] uppercase font-bold"
+                              className="text-[9px] uppercase font-semibold"
                             >
                               {plan.priority} Priority
                             </Badge>
                             <Badge
                               variant="outline"
-                              className="text-[9px] uppercase font-bold bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                              className="text-[9px] uppercase font-semibold bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                             >
                               Readiness: {plan.readiness_score ?? 0}%
                             </Badge>
                           </div>
-                          <h4 className="text-base font-bold text-foreground tracking-tight mt-1">
+                          <h4 className="text-base font-semibold text-foreground tracking-tight mt-1">
                             {plan.title}
                           </h4>
                           <p className="text-xs text-muted-foreground font-medium">
@@ -520,22 +517,22 @@ export default function StudentStudyPage() {
                           variant="outline"
                           size="sm"
                           onClick={() => setAdjustModalPlan(plan)}
-                          className="h-8 text-xs font-semibold rounded-lg border-border/60 gap-1.5 self-start sm:self-auto"
+                          className="h-8 text-xs font-medium rounded-lg border-border/60 gap-1.5 self-start sm:self-auto"
                         >
                           <SlidersHorizontal className="size-3.5" /> Adjust Plan
                         </Button>
                       </div>
 
                       {plan.sessions && plan.sessions.length > 0 && (
-                        <div className="space-y-2 pt-1">
-                          <span className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider">
+                        <div className="space-y-2 pt-0.5">
+                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                             Plan Sessions ({plan.sessions.length})
                           </span>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
                             {plan.sessions.map((s) => (
                               <div
                                 key={s.id}
-                                className="p-2.5 rounded-xl border border-border/50 bg-muted/20 flex items-center justify-between text-xs gap-2"
+                                className="p-2.5 rounded-lg border border-border/40 bg-muted/20 flex items-center justify-between text-xs gap-2"
                               >
                                 <div className="min-w-0 flex-1">
                                   <div className="font-semibold text-foreground truncate">
@@ -556,7 +553,7 @@ export default function StudentStudyPage() {
                                     variant="ghost"
                                     size="sm"
                                     onClick={() => setRescheduleSession(s)}
-                                    className="h-7 text-[10px] px-2 font-semibold text-primary hover:bg-primary/10 shrink-0"
+                                    className="h-6 text-[10px] px-1.5 font-medium text-primary hover:bg-primary/10 shrink-0"
                                   >
                                     Reschedule
                                   </Button>
@@ -577,7 +574,7 @@ export default function StudentStudyPage() {
 
       {/* Full-Screen Distraction-Free AI Tutor Modal */}
       <Dialog open={aiTutorModalOpen} onOpenChange={setAiTutorModalOpen}>
-        <DialogContent className="max-w-5xl w-[95vw] h-[85vh] p-0 rounded-2xl border-border/80 bg-background overflow-hidden flex flex-col">
+        <DialogContent className="fixed inset-2 sm:inset-4 md:inset-6 max-w-none max-h-none w-auto h-auto translate-x-0 translate-y-0 p-0 rounded-2xl border border-border bg-background shadow-2xl flex flex-col overflow-hidden sm:max-w-none">
           <DialogHeader className="p-4 border-b border-border/60 bg-muted/30 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div className="flex items-center gap-3">
               <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center text-primary">

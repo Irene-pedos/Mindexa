@@ -332,7 +332,7 @@ export default function AcademicPeriodsPage() {
 
       {/* Forms */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-xl p-0 overflow-hidden border border-muted/20 shadow-none">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-0 overflow-hidden border border-border bg-card shadow-xl">
           <div className="bg-primary p-5 text-primary-foreground">
             <DialogTitle className="text-sm font-semibold uppercase tracking-widest">New Academic Period</DialogTitle>
             <DialogDescription className="text-primary-foreground/60 text-[10px] mt-0.5 font-medium uppercase tracking-tighter">
@@ -429,7 +429,7 @@ export default function AcademicPeriodsPage() {
 
       {/* Edit Dialog */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-xl p-0 overflow-hidden border border-muted/20 shadow-none">
+        <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto rounded-2xl p-0 overflow-hidden border border-border bg-card shadow-xl">
           <div className="bg-primary p-5 text-primary-foreground">
             <DialogTitle className="text-sm font-semibold uppercase tracking-widest">Update Period</DialogTitle>
             <DialogDescription className="text-primary-foreground/60 text-[10px] mt-0.5 font-medium uppercase tracking-tighter">

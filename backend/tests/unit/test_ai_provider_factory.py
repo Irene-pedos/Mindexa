@@ -49,7 +49,7 @@ async def test_jina_provider_targets_pgvector_dimension(monkeypatch) -> None:
 
         res = await provider.embed(AIEmbeddingRequest(input="test query"))
 
-        # Verify posted payload dimensions matches resource_chunks Vector(settings.PGVECTOR_DIMENSION)
+        # Verify posted payload dimensions matches Jina cap min(settings.PGVECTOR_DIMENSION, 1024)
         posted_json = mock_post.call_args.kwargs["json"]
-        assert posted_json["dimensions"] == settings.PGVECTOR_DIMENSION
+        assert posted_json["dimensions"] == min(settings.PGVECTOR_DIMENSION, 1024)
         assert len(res.embeddings[0]) == settings.PGVECTOR_DIMENSION

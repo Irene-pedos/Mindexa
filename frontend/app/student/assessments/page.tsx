@@ -392,27 +392,26 @@ export default function StudentAssessmentsPage() {
 
 
   return (
-    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
-
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
       {/* Precision Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-border/25">
-        <div className="space-y-1">
-          <h1 className="text-xl font-bold tracking-tight text-foreground">My Evaluations</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border/25">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground">My Evaluations</h1>
           <p className="text-xs text-muted-foreground font-medium">Manage and track your active, upcoming, and completed academic tasks.</p>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
           <div className="relative w-full sm:w-60">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground/55" />
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/55" />
             <Input
               placeholder="Search assessments..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors"
+              className="pl-9 h-8.5 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors"
             />
           </div>
           <Select value={filterType} onValueChange={setFilterType}>
-            <SelectTrigger className="w-full sm:w-36 h-9 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
+            <SelectTrigger className="w-full sm:w-36 h-8.5 text-xs rounded-lg border-border/60 bg-background/50 hover:bg-background/80 transition-colors">
               <SelectValue placeholder="Assessment Type" />
             </SelectTrigger>
             <SelectContent>
@@ -431,33 +430,33 @@ export default function StudentAssessmentsPage() {
       <HeroUITabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
         <HeroUITabs.ListContainer>
           <HeroUITabs.List aria-label="Assessment categories">
-            <HeroUITabs.Tab id="active" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
-              Active <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("active")}</span>
+            <HeroUITabs.Tab id="active" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
+              Active <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("active")}</span>
               {hasNewInCategory("active") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="upcoming" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
-              Upcoming <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("upcoming")}</span>
+            <HeroUITabs.Tab id="upcoming" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
+              Upcoming <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("upcoming")}</span>
               {hasNewInCategory("upcoming") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="submitted" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
-              Submitted <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("submitted")}</span>
+            <HeroUITabs.Tab id="submitted" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
+              Submitted <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("submitted")}</span>
               {hasNewInCategory("submitted") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="missed" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all">
-              Missed <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-bold">{getCount("missed")}</span>
+            <HeroUITabs.Tab id="missed" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
+              Missed <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("missed")}</span>
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="violations" className="text-xs font-medium px-1 pb-3 pt-1.5 relative transition-all data-[selected=true]:text-destructive">
-              Violations <span className="ml-1.5 bg-destructive/10 px-1.5 py-0.5 rounded text-[10px] text-destructive font-bold">{getCount("violations")}</span>
+            <HeroUITabs.Tab id="violations" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all data-[selected=true]:text-destructive">
+              Violations <span className="ml-1.5 bg-destructive/10 px-1.5 py-0.5 rounded text-[10px] text-destructive font-semibold">{getCount("violations")}</span>
               <HeroUITabs.Indicator />
             </HeroUITabs.Tab>
           </HeroUITabs.List>
         </HeroUITabs.ListContainer>
 
-        <div className="space-y-3 pt-4">
+        <div className="space-y-3 pt-3">
           {loading ? (
             [1, 2, 3].map((i) => (
               <Skeleton key={i} variant="media" className="h-24 w-full rounded-xl" />
@@ -465,7 +464,7 @@ export default function StudentAssessmentsPage() {
           ) : filteredAssessments.length > 0 ? (
             filteredAssessments.map(renderAssessmentCard)
           ) : (
-            <div className="py-16 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
+            <div className="py-14 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
               <p className="text-xs font-semibold text-muted-foreground">{getEmptyMessage()}</p>
             </div>
           )}
@@ -474,7 +473,7 @@ export default function StudentAssessmentsPage() {
 
       {/* Pagination Controls */}
       {total > pageSize && (
-        <div className="flex items-center justify-between pt-4 border-t border-border/20">
+        <div className="flex items-center justify-between pt-3 border-t border-border/20">
           <p className="text-xs text-muted-foreground font-medium">
             Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} assessments
           </p>
@@ -484,7 +483,7 @@ export default function StudentAssessmentsPage() {
               size="sm"
               onClick={() => setPage(p => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="h-8 text-xs font-semibold px-3 rounded-lg border-border/60"
+              className="h-8 text-xs font-medium px-3 rounded-lg border-border/60"
             >
               Previous
             </Button>
@@ -493,7 +492,7 @@ export default function StudentAssessmentsPage() {
               size="sm"
               onClick={() => setPage(p => p + 1)}
               disabled={page * pageSize >= total}
-              className="h-8 text-xs font-semibold px-3 rounded-lg border-border/60"
+              className="h-8 text-xs font-medium px-3 rounded-lg border-border/60"
             >
               Next
             </Button>
@@ -502,22 +501,22 @@ export default function StudentAssessmentsPage() {
       )}
 
       {/* Integrity Notice - Compact */}
-      <div className="p-4 rounded-xl border border-warning/15 bg-warning/5 flex items-start gap-3.5 transition-all duration-300">
-        <ShieldAlert className="size-5 text-warning mt-0.5 shrink-0" />
-        <div className="space-y-1">
-          <p className="text-xs font-bold text-warning">Integrity Protocol Notice</p>
+      <div className="p-3.5 rounded-xl border border-warning/15 bg-warning/5 flex items-start gap-3 transition-all duration-300">
+        <ShieldAlert className="size-4.5 text-warning mt-0.5 shrink-0" />
+        <div className="space-y-0.5">
+          <p className="text-xs font-semibold text-warning">Integrity Protocol Notice</p>
           <p className="text-[11px] text-muted-foreground leading-relaxed max-w-4xl font-medium">
             High-security testing environments enforce strict environment locking. Switching tabs or applications will register as a violation, which may result in session termination and immediate automated submission.
           </p>
         </div>
       </div>
 
-      {/* Pre-flight Checklist Modal */}
+      {/* Pre-flight Checklist Modal - Larger size & scrollable */}
       <Dialog 
         open={!!selectedAssessmentForStart} 
         onOpenChange={(open) => { if (!open) setSelectedAssessmentForStart(null); }}
       >
-        <DialogContent className="max-w-md p-6 rounded-xl border border-border bg-card">
+        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
           <DialogHeader className="space-y-1">
             <DialogTitle className="text-base font-semibold text-foreground">
               Pre-flight Security Check-in
@@ -527,12 +526,12 @@ export default function StudentAssessmentsPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 my-4">
+          <div className="space-y-3.5 my-3">
             {/* Fullscreen Rules */}
-            <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
-              <ShieldAlert className="size-4.5 text-primary shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+              <ShieldAlert className="size-4 text-primary shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-bold text-foreground">Fullscreen Environment</p>
+                <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   {selectedAssessmentForStart?.fullscreen_required 
                     ? "This exam enforces lock-down fullscreen. You must not exit fullscreen mode." 
@@ -542,10 +541,10 @@ export default function StudentAssessmentsPage() {
             </div>
 
             {/* Tab Switching Rules */}
-            <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
-              <ShieldAlert className="size-4.5 text-red-500 shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+              <ShieldAlert className="size-4 text-red-500 shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-bold text-foreground">Tab and App Switching Prohibited</p>
+                <p className="text-xs font-semibold text-foreground">Tab and App Switching Prohibited</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   Switching tabs, opening developer tools, or resizing the window registers as a violation. Multiple violations will cause automatic submission.
                 </p>
@@ -553,10 +552,10 @@ export default function StudentAssessmentsPage() {
             </div>
 
             {/* Attempt Limits */}
-            <div className="flex items-start gap-3 p-3 rounded-lg border border-border/40 bg-muted/10">
-              <History className="size-4.5 text-primary shrink-0 mt-0.5" />
+            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+              <History className="size-4 text-primary shrink-0 mt-0.5" />
               <div className="space-y-0.5">
-                <p className="text-xs font-bold text-foreground">Attempt Tracking</p>
+                <p className="text-xs font-semibold text-foreground">Attempt Tracking</p>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   Attempt {Math.min(selectedAssessmentForStart?.max_attempts, (selectedAssessmentForStart?.attempts_used || 0) + 1)} of {selectedAssessmentForStart?.max_attempts}. 
                   Remaining attempts: {Math.max(0, (selectedAssessmentForStart?.max_attempts || 1) - (selectedAssessmentForStart?.attempts_used || 0))}.
@@ -565,7 +564,7 @@ export default function StudentAssessmentsPage() {
             </div>
 
             {/* Checkbox Agreement */}
-            <div className="flex items-start gap-2.5 pt-2">
+            <div className="flex items-start gap-2.5 pt-1">
               <Checkbox 
                 id="integrity-agree" 
                 checked={checklistAgreed} 
@@ -583,7 +582,7 @@ export default function StudentAssessmentsPage() {
               variant="outline" 
               size="sm" 
               onClick={() => setSelectedAssessmentForStart(null)}
-              className="h-9 text-xs font-semibold rounded-lg border-border/60"
+              className="h-8.5 text-xs font-medium rounded-lg border-border/60"
             >
               Cancel
             </Button>
@@ -596,7 +595,7 @@ export default function StudentAssessmentsPage() {
                   setSelectedAssessmentForStart(null);
                 }
               }}
-              className="h-9 text-xs font-semibold rounded-lg shadow-none"
+              className="h-8.5 text-xs font-semibold rounded-lg shadow-none"
             >
               Start Assessment
             </Button>

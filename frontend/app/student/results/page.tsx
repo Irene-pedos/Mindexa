@@ -258,50 +258,50 @@ export default function StudentResultsPage() {
   }, {});
 
   return (
-    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-border/20">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
-            Results & Feedback
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border/25">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Trophy className="size-4.5 text-primary" /> Results & Feedback
           </h1>
-          <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5 font-medium">
-            <TrendingUp className="size-4 text-primary animate-pulse" /> Active academic evaluations and performance ledger.
+          <p className="text-xs text-muted-foreground flex items-center gap-1.5 font-medium">
+            <TrendingUp className="size-3.5 text-primary animate-pulse" /> Active academic evaluations and performance ledger.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => window.print()} className="h-9 rounded-xl text-xs font-semibold gap-2 border-border/60">
-          <FileText className="size-4" /> Export Result Slip (PDF)
+        <Button variant="outline" size="sm" onClick={() => window.print()} className="h-8.5 rounded-lg text-xs font-semibold gap-1.5 border-border/60">
+          <FileText className="size-3.5" /> Export Result Slip (PDF)
         </Button>
       </div>
 
       {/* Main Ledger */}
       <HeroUITabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 border-b border-border/30 pb-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-border/25 pb-2.5">
           <HeroUITabs.ListContainer className="border-none w-fit">
             <HeroUITabs.List aria-label="Results filter">
-              <HeroUITabs.Tab id="all" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+              <HeroUITabs.Tab id="all" className="text-xs font-medium relative px-1 pb-2.5 pt-1 transition-all">
                 Performance Ledger
                 <HeroUITabs.Indicator />
               </HeroUITabs.Tab>
-              <HeroUITabs.Tab id="graded" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+              <HeroUITabs.Tab id="graded" className="text-xs font-medium relative px-1 pb-2.5 pt-1 transition-all">
                 Graded
                 <HeroUITabs.Indicator />
               </HeroUITabs.Tab>
-              <HeroUITabs.Tab id="pending" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all">
+              <HeroUITabs.Tab id="pending" className="text-xs font-medium relative px-1 pb-2.5 pt-1 transition-all">
                 Under Review
                 <HeroUITabs.Indicator />
               </HeroUITabs.Tab>
-              <HeroUITabs.Tab id="violations" className="text-xs font-medium relative px-1 pb-3 pt-1.5 transition-all data-[selected=true]:text-destructive">
+              <HeroUITabs.Tab id="violations" className="text-xs font-medium relative px-1 pb-2.5 pt-1 transition-all data-[selected=true]:text-destructive">
                 Violations
                 <HeroUITabs.Indicator />
               </HeroUITabs.Tab>
             </HeroUITabs.List>
           </HeroUITabs.ListContainer>
           
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2.5">
-               <ArrowUpDown className="size-4 text-muted-foreground/60" />
+          <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2">
+               <ArrowUpDown className="size-3.5 text-muted-foreground/60" />
                <Select value={sortBy} onValueChange={setSortBy}>
-                  <SelectTrigger className="h-9 text-xs font-medium w-36 border border-border/60 bg-background/50 hover:bg-background/80 transition-colors rounded-lg shadow-none">
+                  <SelectTrigger className="h-8.5 text-xs font-medium w-36 border border-border/60 bg-background/50 hover:bg-background/80 transition-colors rounded-lg shadow-none">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -312,20 +312,20 @@ export default function StudentResultsPage() {
                   </SelectContent>
                </Select>
             </div>
-            <Separator orientation="vertical" className="h-5" />
-            <div className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground select-none">
+            <Separator orientation="vertical" className="h-4" />
+            <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground select-none">
               <Filter className="size-3.5" /> Filter by Module
             </div>
           </div>
         </div>
 
-        <div className="pt-4">
+        <div className="pt-3">
            {filteredAndSortedResults.length === 0 ? (
-             <div className="py-16 text-center border border-dashed rounded-xl bg-muted/5 border-border/30 animate-in fade-in duration-200">
+             <div className="py-14 text-center border border-dashed rounded-xl bg-muted/5 border-border/30 animate-in fade-in duration-200">
                 <p className="text-xs font-semibold text-muted-foreground">No matching evaluations identified in academic records.</p>
              </div>
            ) : (
-             <div className="space-y-6 animate-in fade-in duration-300">
+             <div className="space-y-5 animate-in fade-in duration-300">
                  {Object.entries(groupedResults).map(([course, courseResults]: any) => (
                    <div key={course} className="space-y-2">
                      <div className="flex items-center gap-3 px-1">
@@ -333,7 +333,7 @@ export default function StudentResultsPage() {
                         <div className="h-[1px] flex-1 bg-border/40" />
                         <span className="text-[10px] font-bold text-muted-foreground/45 uppercase">{courseResults.length} Items</span>
                      </div>
-                     <Card className="shadow-none border rounded-xl overflow-hidden bg-card/30 border-border/45 hover:border-primary/20 backdrop-blur-sm transition-all duration-300">
+                     <Card className="shadow-xs border rounded-xl overflow-hidden bg-card border-border/60 hover:border-primary/20 transition-all duration-200">
                         <div className="divide-y divide-border/20">
                            {courseResults.map(renderResultItem)}
                         </div>
@@ -347,14 +347,14 @@ export default function StudentResultsPage() {
 
       {/* Appeals Warning */}
       <Card className="bg-amber-500/5 border border-amber-500/15 rounded-xl overflow-hidden shadow-none">
-        <CardContent className="p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <CardContent className="p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="flex items-start gap-3">
-             <AlertCircle className="size-5 text-amber-600 shrink-0 mt-0.5" />
+             <AlertCircle className="size-4.5 text-amber-600 shrink-0 mt-0.5" />
              <p className="text-xs text-amber-900/80 font-medium leading-relaxed max-w-xl">
                Formal assessment appeals or grade reviews must be requested within 7 business days of the release of results. All instructor and administrator determinations are subject to institutional academic policies.
              </p>
           </div>
-          <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs font-semibold border-amber-500/35 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 transition-colors shadow-none shrink-0">
+          <Button variant="outline" size="sm" className="h-8 rounded-lg text-xs font-medium border-amber-500/35 text-amber-700 hover:bg-amber-500/10 hover:text-amber-800 transition-colors shadow-none shrink-0">
             Appeal Guidelines
           </Button>
         </CardContent>

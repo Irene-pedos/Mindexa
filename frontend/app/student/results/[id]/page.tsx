@@ -710,7 +710,7 @@ export default function ResultDetailPage() {
   const title = result.assessment_title || "Assessment Result";
 
   return (
-    <div className="result-paper space-y-4">
+    <div className="result-paper space-y-5 w-full mx-auto animate-in fade-in duration-300">
       <style jsx global>{`
         @media print {
           body { background: white !important; }
@@ -721,17 +721,17 @@ export default function ResultDetailPage() {
         }
       `}</style>
 
-      <div className="no-print flex items-center justify-between gap-3">
-        <Button variant="ghost" size="sm" onClick={() => router.push("/student/results")} className="h-8 gap-1.5 border border-border/55 text-xs">
+      <div className="no-print flex items-center justify-between gap-3 pb-3 border-b border-border/25">
+        <Button variant="ghost" size="sm" onClick={() => router.push("/student/results")} className="h-8.5 gap-1.5 border border-border/60 text-xs rounded-lg">
           <ArrowLeft className="size-3.5" />
           Results
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={requestReview} className="h-8 gap-1.5 text-xs">
+          <Button variant="outline" size="sm" onClick={requestReview} className="h-8.5 gap-1.5 text-xs rounded-lg border-border/60">
             <MessageCircle className="size-3.5" />
             Request review
           </Button>
-          <Button variant="outline" size="sm" onClick={() => window.print()} className="h-8 gap-1.5 text-xs">
+          <Button variant="outline" size="sm" onClick={() => window.print()} className="h-8.5 gap-1.5 text-xs rounded-lg border-border/60">
             <Download className="size-3.5" />
             Download PDF
           </Button>
@@ -739,7 +739,7 @@ export default function ResultDetailPage() {
       </div>
 
       {result.integrity_hold && (
-        <section className="flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3">
+        <section className="flex items-start gap-2.5 rounded-xl border border-red-300 bg-red-50 p-3.5">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-red-600" />
           <p className="text-xs font-medium text-red-800">
             This result is provisional and under integrity review. The final result may differ after the audit is completed.
@@ -747,7 +747,7 @@ export default function ResultDetailPage() {
         </section>
       )}
 
-      <section className="rounded-2xl border border-border/50 bg-card/40 p-5 print:bg-white">
+      <section className="rounded-xl border border-border/60 bg-card p-5 shadow-xs print:bg-white">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
             <Image src="/icons/logo/Mindexa-logo.svg" alt="Mindexa" width={154} height={40} className="h-10 w-auto print:h-9" />

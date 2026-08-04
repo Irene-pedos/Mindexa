@@ -294,4 +294,68 @@ def test_create_study_plan_request_date_and_blackout_validation():
         )
 
 
+def test_lesson_plan_output_coercion_for_string_examples():
+    from app.agents.study_planner_agent import LessonPlanOutput
+
+    raw_data = {
+        "title": "Responsive Web Design",
+        "topic": "CSS Media Queries",
+        "estimated_duration_minutes": 60,
+        "sections": [
+            {
+                "section_title": "1. Media Queries",
+                "content": "Explanation of media queries...",
+                "examples": ["@media only screen and (max-width: 600px) { body { background-color: lightblue; } }"],
+            }
+        ],
+        "glossary": ["CSS: Cascading Style Sheets"],
+    }
+
+    parsed = LessonPlanOutput.model_validate(raw_data)
+    assert len(parsed.sections) == 1
+    assert parsed.sections[0].examples == [
+        {
+            "title": "Example",
+            "code": "@media only screen and (max-width: 600px) { body { background-color: lightblue; } }",
+            "explanation": "",
+        }
+    ]
+    assert parsed.glossary == [{"term": "CSS", "definition": "Cascading Style Sheets"}]
+
+
+@pytest.mark.asyncio
+async def test_grade_knowledge_check_session_topic_handling():
+    from app.agents.study_planner_agent import StudyPlannerAgent
+
+    gateway = AsyncMock()
+    gateway.log_action = AsyncMock()
+    agent = StudyPlannerAgent(gateway)
+
+    student_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    questions = [
+        {
+            "id": "q1",
+            "question_text": "What is mobile-first design?",
+            "question_type": "MCQ",
+            "options": ["Designing for mobile screens first", "Designing for desktop screens first"],
+            "correct_option_index": 0,
+        }
+    ]
+
+    report = await agent.grade_knowledge_check(
+        student_id=student_id,
+        session_id=session_id,
+        questions=questions,
+        student_answers={"q1": "Designing for desktop screens first"},
+        session_topic="Responsive Web Design",
+    )
+
+    assert report.total_questions == 1
+    assert report.score_percentage == 0.0
+    assert "Responsive Web Design" in report.weak_concepts
+
+
+
+
 

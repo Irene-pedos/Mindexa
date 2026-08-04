@@ -51,6 +51,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { assessmentApi } from "@/lib/api/assessment";
 import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -952,32 +953,38 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
   }, [activeWorkspaceDetail, activeWorkspace]);
 
   return (
-    <div className={cn("w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200", isFullScreen && "fixed inset-0 z-50 bg-white p-4 overflow-y-auto flex flex-col")}>
+    <div className={cn("w-full space-y-4 mx-auto animate-in fade-in duration-300", isFullScreen && "fixed inset-0 z-50 bg-background p-4 overflow-y-auto flex flex-col")}>
 
-      {/* Top Action Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-3">
-        <div className="flex items-center gap-2">
-          <Badge variant="outline" className="text-xs font-medium px-3 py-1 bg-card border-border/80 text-foreground">
+      {/* Top Header & Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <SparklesIcon size={20} className="text-primary" /> Lecturer Academic AI Copilot
+          </h1>
+          <p className="text-xs text-muted-foreground font-medium">Co-create assessments, analyze performance, and review student submissions.</p>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge variant="outline" className="text-xs font-medium px-2.5 py-1 bg-card border-border/60 text-foreground rounded-lg">
             <Folder className="size-3.5 mr-1.5 text-primary" />
             <span className="text-muted-foreground mr-1">Workspace:</span> {activeWorkspaceName}
           </Badge>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          {/* Unified Context Drawer button for all screens */}
+
+          {/* Unified Context Drawer button */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setIsContextSheetOpen(true)}
-            className="h-8 text-xs font-medium rounded-lg border-border/80 bg-background"
+            className="h-8.5 text-xs font-semibold rounded-lg border-border/60"
           >
-            <Folder className="size-3.5 mr-1.5 text-muted-foreground" /> Workspace Context
+            <Folder className="size-3.5 mr-1.5 text-muted-foreground" /> Context
           </Button>
 
           {/* Fullscreen Trigger */}
           <Button
             variant="outline"
             size="icon"
-            className="h-8 w-8 text-muted-foreground hover:text-foreground rounded-lg border-border/80 bg-background"
+            className="h-8.5 w-8.5 text-muted-foreground hover:text-foreground rounded-lg border-border/60"
             onClick={() => setIsFullScreen(!isFullScreen)}
             title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
           >

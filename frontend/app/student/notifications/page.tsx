@@ -111,14 +111,14 @@ export default function NotificationsPage() {
   });
 
   return (
-    <div className="space-y-5 w-full max-w-7xl mx-auto p-4 md:p-6">
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
       {/* Header Container */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-4">
-        <div>
-          <h1 className="text-lg font-bold tracking-tight text-zinc-900 flex items-center gap-2">
-            <Bell className="size-5 text-primary shrink-0" /> Notifications
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Bell className="size-4.5 text-primary shrink-0" /> Notifications & Activity Stream
           </h1>
-          <p className="text-[10px]">
+          <p className="text-xs text-muted-foreground font-medium">
             Registry Feed • Real-time Monitoring Active
           </p>
         </div>
@@ -127,7 +127,7 @@ export default function NotificationsPage() {
           size="sm"
           onClick={handleMarkAllRead}
           disabled={notifications.every((n) => n.is_read)}
-          className="h-8 px-3.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border-zinc-200 bg-white"
+          className="h-8.5 px-3.5 rounded-lg text-xs font-semibold border-border/60"
         >
           <CheckCheck className="mr-1.5 size-3.5" /> Mark all read
         </Button>

@@ -76,7 +76,7 @@ export function SessionCompletionModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
+      <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
         <DialogHeader className="space-y-1">
           <DialogTitle className="text-base font-bold flex items-center gap-2">
             <CheckCircle2 className="size-5 text-emerald-500" />

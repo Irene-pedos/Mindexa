@@ -25,6 +25,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
 import { studyPlannerApi, SourceCitation } from "@/lib/api/study-planner";
 import { toast } from "sonner";
+import { SparklesIcon } from "@/components/ui/sparkles-icon";
 
 interface ChatMessage {
   id: string;
@@ -167,31 +168,26 @@ export function ContextualAskAiPanel({
 
   return (
     <>
-      {/* Floating Action Button */}
+      {/* Icon-Only Floating Action Button */}
       {!isOpen && (
         <Button
           onClick={() => setIsOpen(true)}
-          className="fixed bottom-6 right-6 z-50 rounded-full h-12 px-5 bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 hover:to-indigo-600/90 text-primary-foreground shadow-xl flex items-center gap-2.5 transition-all duration-300 transform hover:scale-105"
+          size="icon"
+          className="fixed bottom-6 right-6 z-50 rounded-full size-11 bg-card border border-border/60 shadow-xs text-primary hover:bg-muted transition-all"
+          title="Ask AI Tutor"
         >
-          <Sparkles className="size-5" />
-          <span className="font-semibold text-xs">Ask AI Tutor</span>
-          <Badge
-            variant="secondary"
-            className="bg-white/20 text-white text-[10px] px-1.5 py-0.2"
-          >
-            Contextual
-          </Badge>
+          <SparklesIcon size={20} className="text-primary" />
         </Button>
       )}
 
       {/* Floating Chat Drawer / Panel */}
       {isOpen && (
-        <Card className="fixed bottom-6 right-6 z-50 w-[90vw] max-w-[420px] h-[580px] max-h-[80vh] border-border/80 bg-background/95 backdrop-blur-lg shadow-2xl rounded-2xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-300">
+        <Card className="fixed bottom-6 right-6 z-50 w-[90vw] max-w-[400px] h-[540px] max-h-[80vh] border border-border/60 bg-card shadow-xs rounded-xl flex flex-col overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
           {/* Header */}
           <CardHeader className="p-4 border-b border-border/60 bg-muted/30 flex flex-row items-center justify-between space-y-0">
             <div className="flex items-center gap-2.5">
               <div className="size-8 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <Bot className="size-4" />
+                <SparklesIcon size={16} className="text-primary" />
               </div>
               <div>
                 <div className="flex items-center gap-1.5">
@@ -232,7 +228,7 @@ export function ContextualAskAiPanel({
               >
                 {msg.sender === "ai" && (
                   <div className="size-7 rounded-full bg-primary/10 flex items-center justify-center text-primary shrink-0 mt-0.5">
-                    <Bot className="size-3.5" />
+                    <SparklesIcon size={14} className="text-primary" />
                   </div>
                 )}
                 <div

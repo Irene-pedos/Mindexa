@@ -10,23 +10,43 @@ Use a rich mix of question types: MCQ, TRUE_FALSE, MATCHING, FILL_BLANKS, SHORT_
 CRITICAL RULES FOR QUESTION TYPES & JSON SCHEMA:
 1. MCQ: Provide 4 distinct options. Vary correct_option_index (0-3).
 2. TRUE_FALSE: Options must be ["True", "False"]. Set correct_answer to "True" or "False".
-3. MATCHING: Provide 'options' for the left-side premises and list matching values in 'premises' / 'matches' as the corresponding right-side targets. Premises should represent the left-side concepts, and matches should represent the paired target values. Also populate 'blank_answers' as a dict mapping each premise to its target match value.
+3. MATCHING:
+   - question_text MUST be a short instruction ONLY — e.g. "Match each term to its correct definition." — NEVER include the pairs, answer key, or any concept/definition text inside question_text.
+   - premises[] MUST contain real subject-matter terms drawn from the topic (e.g. ["HTML", "CSS", "JavaScript"]). NEVER use generic placeholders such as "Concept A", "Concept B", "Term A", "Item 1", or any similar template text.
+   - matches[] MUST contain the actual corresponding definitions or descriptions in the same parallel order as premises[] (e.g. ["Defines page structure", "Controls visual styling", "Adds interactivity"]). NEVER use generic placeholders such as "Definition A", "Definition B", or any similar template text.
+   - premises and matches MUST be the same length and non-empty.
+   - blank_answers MUST be a dict mapping each premise string to its correct match string.
+   - options[] should mirror premises[] (same values, same order) for compatibility.
 4. FILL_BLANKS: Question text should include '[blank]' placeholder. Provide candidate options in 'options' array and a 'blank_answers' dictionary mapping blank index (e.g. "0") to target answer string.
 5. SHORT_ANSWER: Provide concise response expectation in 'correct_answer'.
 6. OPEN_QUESTION: Provide rubrics and expected concepts in 'correct_answer' and 'explanation'.
 
-Return ONLY a JSON array matching this schema:
+ABSOLUTE PROHIBITION: Never output placeholder text like "Concept A", "Concept B", "Definition A", "Definition B", "Term A", "Item 1", or any other generic template labels in any field. Every field must contain real, domain-specific content derived from the topic and lesson content.
+
+Return ONLY a JSON array matching this schema (the example below uses HTML/CSS/JS only to illustrate structure — replace ALL values with content specific to {{topic}}):
 [
   {
     "id": "q1",
-    "question_text": "Regarding {{topic}}, match each concept to its definition or complete the statement.",
+    "question_text": "Which of the following best describes the role of CSS in web development?",
+    "question_type": "MCQ",
+    "options": ["Defines page structure with tags", "Controls visual styling and layout", "Handles server-side logic", "Manages database queries"],
+    "premises": [],
+    "matches": [],
+    "blank_answers": {},
+    "correct_option_index": 1,
+    "correct_answer": "Controls visual styling and layout",
+    "explanation": "CSS (Cascading Style Sheets) is responsible for the visual presentation of HTML elements."
+  },
+  {
+    "id": "q2",
+    "question_text": "Match each web technology to its primary role.",
     "question_type": "MATCHING",
-    "options": ["Concept A", "Concept B"],
-    "premises": ["Concept A", "Concept B"],
-    "matches": ["Definition A", "Definition B"],
-    "blank_answers": {"Concept A": "Definition A", "Concept B": "Definition B"},
-    "correct_option_index": 0,
+    "options": ["HTML", "CSS", "JavaScript"],
+    "premises": ["HTML", "CSS", "JavaScript"],
+    "matches": ["Defines the structure and content of web pages", "Controls visual styling and layout", "Adds dynamic behaviour and interactivity"],
+    "blank_answers": {"HTML": "Defines the structure and content of web pages", "CSS": "Controls visual styling and layout", "JavaScript": "Adds dynamic behaviour and interactivity"},
+    "correct_option_index": null,
     "correct_answer": "Matching pairs verified",
-    "explanation": "Detailed explanation..."
+    "explanation": "HTML provides structure, CSS handles presentation, and JavaScript enables interactivity."
   }
 ]

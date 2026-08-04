@@ -1205,6 +1205,38 @@ class StudyPlannerService:
         await self.db.commit()
         return self._format_session(session)
 
+    @staticmethod
+    def _is_valid_mermaid(diagram: str | None) -> bool:
+        """
+        Lightweight structural validation for Mermaid diagram strings.
+
+        A diagram is considered valid if it:
+        1. Starts with a recognised Mermaid diagram-type keyword.
+        2. Contains at least one proper node declaration (NodeID[Label]) or
+           a labelled edge (A --> B), indicating a real graph was produced.
+
+        If the AI emits prose, a plain label with no syntax, or a truncated
+        string, this returns False and the caller should null out the field
+        rather than storing something guaranteed to render badly.
+        """
+        import re
+        if not diagram or not isinstance(diagram, str):
+            return False
+        trimmed = diagram.strip()
+        _VALID_PREFIXES = (
+            "graph ", "graph\n",
+            "flowchart ", "flowchart\n",
+            "sequenceDiagram", "classDiagram",
+            "stateDiagram", "erDiagram",
+            "gantt", "pie", "mindmap",
+        )
+        if not any(trimmed.lower().startswith(p.lower()) for p in _VALID_PREFIXES):
+            return False
+        # Must contain at least one node definition (NodeId[Label]) or arrow edge
+        has_node = bool(re.search(r"\w+\s*[\[\(\{]", trimmed))
+        has_edge = bool(re.search(r"-->|->>|--|\.\.\.>", trimmed))
+        return has_node or has_edge
+
     def _build_fallback_lesson_plan(
         self, session: StudySession, rag_citations: List[Dict[str, Any]]
     ) -> Any:
@@ -1221,51 +1253,113 @@ class StudyPlannerService:
 
         sec_duration = max(5, duration // section_count)
 
+        # ── Detect whether the topic is technical/procedural ─────────────────────────────
+        _TECHNICAL_KEYWORDS = {
+            "python", "java", "javascript", "typescript", "sql", "html", "css",
+            "react", "algorithm", "data structure", "network", "api", "database",
+            "programming", "code", "software", "machine learning", "neural",
+            "statistics", "calculus", "physics", "circuit", "engineering",
+            "protocol", "compiler", "runtime", "operating system", "linux",
+        }
+        _PROCESS_KEYWORDS = {
+            "process", "flow", "pipeline", "cycle", "sequence", "hierarchy",
+            "architecture", "system", "stage", "workflow", "lifecycle",
+        }
+        topic_lower = (session.topic or "").lower()
+        is_technical = any(kw in topic_lower for kw in _TECHNICAL_KEYWORDS)
+
         sections = []
+        diagram_added = False  # Cap: at most ONE diagram per lesson
+
         for i in range(1, section_count + 1):
+            examples: list = []
+            tables: list = []
+            diagram: str | None = None
+            activities: list = [
+                f"In your own words, explain how the concepts in section {i} apply to {session.topic}."
+            ]
+
             if i == 1:
-                title = f"1. Core Concepts & Overview of {session.topic}"
+                title = f"{i}. Core Concepts & Overview of {session.topic}"
                 content = (
                     f"### Introduction & Definitions\n"
                     f"Welcome to today's {duration}-minute guided study session focusing on **{session.topic}**.\n\n"
-                    f"In this section, we cover foundational principles and structural definitions to prepare for deep problem-solving.\n\n"
-                    f"```python\n# Practical snippet demonstrating {session.topic} core setup\ndef initialize_topic():\n    return {{'topic': '{session.topic}', 'status': 'initialized'}}\n```"
+                    f"In this section we cover foundational principles and structural definitions that "
+                    f"will anchor everything in the sections that follow.\n\n"
+                    f"#### Core Principles\n"
+                    f"Begin by identifying the key actors, concepts, or mechanisms that define {session.topic}. "
+                    f"Understanding these building blocks is essential before moving to applied analysis."
                 )
                 key_points = [
-                    f"Foundational Definition: Clear understanding of core mechanisms governing {session.topic}.",
-                    "Systematic Approach: Organizing concepts into actionable steps before implementation.",
+                    f"Foundational Definition: A clear understanding of the core mechanisms governing {session.topic}.",
+                    "Systematic Approach: Organising concepts into coherent groups before applying them.",
                 ]
-                diagram = "graph TD\n A[Inputs & Context] --> B[Core Processing]\n B --> C[Validated Outputs]"
+                # Diagram: only if the topic has a detectable process/flow dimension
+                if not diagram_added and any(kw in topic_lower for kw in _PROCESS_KEYWORDS):
+                    diagram = (
+                        "graph TD\n"
+                        f" A[Input / Context] --> B[Core Processing: {session.topic}]\n"
+                        " B --> C[Analysis & Evaluation]\n"
+                        " C --> D[Output / Conclusion]"
+                    )
+                    diagram_added = True
+
             elif i == section_count:
                 title = f"{i}. Review, Key Takeaways & Self-Check"
                 content = (
                     f"### Session Summary & Self-Evaluation\n"
-                    f"To solidify your mastery of **{session.topic}**, review these core principles and complete the end-of-section exercises.\n\n"
-                    f"| Concept Component | Target Goal | Status |\n"
-                    f"| :--- | :--- | :--- |\n"
-                    f"| Theoretical Knowledge | High retention of definitions | Validated |\n"
-                    f"| Practical Application | Executable code / problem solving | In Progress |\n"
+                    f"To solidify your mastery of **{session.topic}**, revisit the core principles from each section.\n\n"
+                    f"Ask yourself: can you explain each concept without notes? "
+                    f"If a concept feels unclear, mark it as a revision target and return to it tomorrow."
                 )
                 key_points = [
                     "Active Recall: Test yourself on key definitions without looking at notes.",
-                    "Practical Synthesis: Combine multiple concepts learned into a full solution.",
+                    "Practical Synthesis: Combine multiple concepts into a cohesive explanation.",
                 ]
-                diagram = None
+                tables = [
+                    {
+                        "title": f"{session.topic}: Session Concept Review",
+                        "headers": ["Concept Covered", "Core Principle", "Confidence Level"],
+                        "rows": [
+                            ["Foundational Definitions", "Core mechanisms and terminology", "Self-rate: 1–5"],
+                            ["Applied Analysis", "Applying concepts to real scenarios", "Self-rate: 1–5"],
+                            ["Critical Evaluation", "Comparing and contrasting approaches", "Self-rate: 1–5"],
+                        ],
+                    }
+                ]
+
             else:
-                title = f"{i}. Deep Dive Part {i-1}: Structural Execution & Practical Mechanics"
+                title = f"{i}. Deep Dive Part {i - 1}: Analysis & Application"
                 content = (
-                    f"### Detailed Section Analysis ({sec_duration} Minutes)\n"
-                    f"Continuing our exploration of **{session.topic}**, section {i} examines execution patterns and practical edge cases.\n\n"
-                    f"```javascript\n// Step-by-step example for section {i}\nfunction processStep{i}(data) {{\n    console.log('Processing step {i} for {session.topic}');\n    return data ? Object.assign({{}}, data, {{ step: {i} }}) : null;\n}}\n```\n\n"
-                    f"#### Line-by-Line Breakdown:\n"
-                    f"1. **Line 1-2**: Validates incoming parameter and logs context.\n"
-                    f"2. **Line 3**: Returns an enriched object with step metadata.\n"
+                    f"### Section {i} — Detailed Analysis ({sec_duration} Minutes)\n"
+                    f"Continuing our exploration of **{session.topic}**, this section examines how "
+                    f"core principles are applied in context.\n\n"
+                    f"Focus on understanding **why** each mechanism works the way it does, not just "
+                    f"**what** it does. Connect this material back to the foundational concepts in Section 1.\n\n"
+                    f"#### Key Considerations\n"
+                    f"Think critically about edge cases, exceptions, and real-world scenarios where "
+                    f"{session.topic} principles are tested."
                 )
                 key_points = [
-                    f"Pattern {i}: Standard architectural pattern for handling {session.topic} workflows.",
-                    "Edge Case Handling: Always check for null pointers, unexpected inputs, or boundary values.",
+                    f"Contextual Application: How core {session.topic} principles manifest in practical scenarios.",
+                    "Critical Thinking: Identifying exceptions and edge cases that challenge simple rules.",
                 ]
-                diagram = f"flowchart LR\n Step{i}Start --> Step{i}Execute --> Step{i}Verify" if i % 2 == 0 else None
+                # Code example: only on the second section and only for technical topics
+                if i == 2 and is_technical:
+                    examples = [
+                        {
+                            "title": f"Illustrative Example: {session.topic}",
+                            "code": (
+                                f"# Pseudocode sketch for {session.topic}\n"
+                                f"# Replace with a real worked example from your course notes\n"
+                                f"result = process({session.topic!r})"
+                            ),
+                            "explanation": (
+                                f"This pseudocode outlines the core operation pattern for {session.topic}. "
+                                f"Adapt it using your actual course material."
+                            ),
+                        }
+                    ]
 
             sections.append(
                 LessonSection(
@@ -1274,10 +1368,10 @@ class StudyPlannerService:
                     key_points=key_points,
                     diagram_prompt=diagram,
                     estimated_minutes=sec_duration,
-                    examples=[{"title": f"Example for Section {i}", "code": f"// Example {i}\nconst result = true;", "explanation": f"Demonstrates core mechanism for section {i}."}],
-                    tables=[{"title": f"Section {i} Reference", "headers": ["Parameter", "Description"], "rows": [["input", "Raw data string"], ["output", "Processed result"]]}],
+                    examples=examples,
+                    tables=tables,
                     charts=[],
-                    activities=[f"Write a short response explaining how section {i} applies to {session.topic}."],
+                    activities=activities,
                 )
             )
 
@@ -1289,14 +1383,14 @@ class StudyPlannerService:
             estimated_duration_minutes=duration,
             objectives=[
                 f"Master core concepts and principles of {session.topic}",
-                f"Analyze practical code/worked examples across {section_count} structured sections",
+                f"Apply and analyse key ideas across {section_count} structured sections",
                 f"Evaluate comprehension with interactive self-check questions",
             ],
             introduction=f"Welcome to today's {duration}-minute comprehensive study session on {session.topic}. This guided lesson breaks down complex principles into {section_count} structured, time-allocated sections.",
             sections=sections,
             lecturer_references=refs,
             citations=rag_citations,
-            summary=f"In this session on {session.topic}, you mastered {section_count} key sections ranging from core definitions to practical code implementations and review exercises.",
+            summary=f"In this session on {session.topic}, you worked through {section_count} structured sections covering core definitions, applied analysis, and a final self-check review.",
             glossary=[
                 {"term": session.topic, "definition": f"The primary subject area covered in this study session."},
                 {"term": "Active Recall", "definition": "A learning strategy involving retrieving information from memory without looking at notes."},
@@ -1430,13 +1524,26 @@ class StudyPlannerService:
                     lesson_output.lecturer_references = grounded_refs
 
                 session.lesson_plan_json = lesson_output.model_dump()
-                session.lesson_sections_json = [sec.model_dump() for sec in lesson_output.sections]
+                # Guard: null out any diagram_prompt that doesn't pass structural Mermaid validation
+                # before persisting so the frontend renderer never receives malformed syntax.
+                sanitised_sections = []
+                for sec in lesson_output.sections:
+                    if not self._is_valid_mermaid(sec.diagram_prompt):
+                        sec.diagram_prompt = None
+                    sanitised_sections.append(sec)
+                session.lesson_sections_json = [sec.model_dump() for sec in sanitised_sections]
                 session.session_summary_text = getattr(lesson_output, "summary", "") or session.session_summary_text
             except Exception as exc:
                 logger.warning("Guided lesson AI generation failed, using fallback lesson content", error=str(exc))
                 fallback_output = self._build_fallback_lesson_plan(session, rag_citations)
                 session.lesson_plan_json = fallback_output.model_dump()
-                session.lesson_sections_json = [sec.model_dump() for sec in fallback_output.sections]
+                # Same guard for the fallback path
+                sanitised_fallback = []
+                for sec in fallback_output.sections:
+                    if not self._is_valid_mermaid(sec.diagram_prompt):
+                        sec.diagram_prompt = None
+                    sanitised_fallback.append(sec)
+                session.lesson_sections_json = [sec.model_dump() for sec in sanitised_fallback]
                 session.session_summary_text = fallback_output.summary
 
             session.lesson_status = "IN_PROGRESS"
@@ -1496,6 +1603,7 @@ class StudyPlannerService:
             conversation_history=conv_history,
             selected_resource_id=None,
             db=self.db,
+            log_to_global_history=False,  # Guided-lesson panel must not pollute the global Study AI Tutor history
         )
 
         citations_data = [c.model_dump() for c in output.citations]
@@ -1652,6 +1760,7 @@ class StudyPlannerService:
                 session_id=session_id,
                 questions=questions,
                 student_answers=answers,
+                session_topic=session.topic,
             )
             report = report_obj.model_dump()
         except Exception as exc:
@@ -1747,7 +1856,11 @@ class StudyPlannerService:
                 weak_set = set(report.get("weak_concepts", []) or [session.topic])
                 rec_ids = [
                     str(m.id) for m in mats
-                    if any(w.lower() in (m.title or "").lower() or (m.title or "").lower() in w.lower() for w in weak_set)
+                    if any(
+                        w.lower() in (getattr(m, "display_name", None) or getattr(m, "original_filename", "") or "").lower()
+                        or (getattr(m, "display_name", None) or getattr(m, "original_filename", "") or "").lower() in w.lower()
+                        for w in weak_set
+                    )
                 ]
                 if not rec_ids:
                     rec_ids = [str(mats[0].id)]

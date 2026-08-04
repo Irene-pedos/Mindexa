@@ -2,7 +2,6 @@
 
 import React, { createContext, useContext, useState } from "react"
 import { cn } from "@/lib/utils"
-import { motion } from "framer-motion"
 
 interface TabsContextType {
   activeTab: string
@@ -40,7 +39,7 @@ export function Tabs({
 }
 
 function ListContainer({ children, className }: { children: React.ReactNode; className?: string }) {
-  return <div className={cn("w-full border-b border-border/40", className)}>{children}</div>
+  return <div className={cn("w-full border-none py-1", className)}>{children}</div>
 }
 
 function List({ ariaLabel, children, className }: { ariaLabel?: string; children: React.ReactNode; className?: string }) {
@@ -48,7 +47,7 @@ function List({ ariaLabel, children, className }: { ariaLabel?: string; children
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className={cn("flex gap-6 overflow-x-auto scrollbar-none", className)}
+      className={cn("flex gap-2 p-1 bg-muted/30 rounded-xl w-fit items-center flex-wrap overflow-x-auto scrollbar-none", className)}
     >
       {children}
     </div>
@@ -79,8 +78,10 @@ function Tab({
         aria-selected={isActive}
         onClick={() => setActiveTab(id)}
         className={cn(
-          "text-xs font-medium pb-3 pt-1.5 transition-colors relative focus-visible:outline-none",
-          isActive ? "text-foreground font-semibold" : "text-muted-foreground hover:text-foreground",
+          "text-xs font-semibold px-4 py-2 rounded-lg transition-all flex items-center justify-center gap-1.5 text-center focus-visible:outline-none",
+          isActive
+            ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+            : "text-muted-foreground hover:text-foreground hover:bg-muted/50",
           className
         )}
       >
@@ -90,21 +91,8 @@ function Tab({
   )
 }
 
-function Indicator({ className }: { className?: string }) {
-  const tabContext = useContext(TabContext)
-  const tabsContext = useContext(TabsContext)
-  if (!tabsContext) throw new Error("Tabs.Indicator must be used within Tabs")
-
-  const isActive = tabContext ? tabContext.isActive : false
-  if (!isActive) return null
-
-  return (
-    <motion.div
-      layoutId="active-tab-indicator"
-      className={cn("absolute bottom-0 left-0 right-0 h-0.5 bg-primary", className)}
-      transition={{ type: "spring", stiffness: 380, damping: 30 }}
-    />
-  )
+function Indicator() {
+  return null
 }
 
 function Panel({

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   BookOpen,
@@ -33,15 +34,18 @@ import {
   SidebarMenuItem,
   SidebarRail,
   SidebarMenuSub,
-  SidebarMenuSubButton,
   SidebarMenuSubItem,
+  SidebarMenuSubButton,
 } from "@/components/ui/sidebar";
+import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { BorderTrail } from "@/components/ui/border-trail";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
 import { notificationApi } from "@/lib/api/notification";
@@ -215,6 +219,11 @@ export function LecturerSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "transition-all duration-200",
+                      isActive &&
+                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                    )}
                   >
                     <Link href={item.url} className="relative">
                       <item.icon className="size-5" aria-hidden="true" />
@@ -246,7 +255,14 @@ export function LecturerSidebar({
             >
               <SidebarMenuItem>
                 <CollapsibleTrigger asChild>
-                  <SidebarMenuButton tooltip="Grading Center">
+                  <SidebarMenuButton
+                    tooltip="Grading Center"
+                    className={cn(
+                      "transition-all duration-200",
+                      pathname.startsWith("/lecturer/grading") &&
+                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                    )}
+                  >
                     <Users className="size-5" aria-hidden="true" />
                     <span>Grading Center</span>
                     {pendingGradingCount > 0 &&
@@ -267,7 +283,15 @@ export function LecturerSidebar({
                         pathname.startsWith(subItem.url + "/");
                       return (
                         <SidebarMenuSubItem key={subItem.title}>
-                          <SidebarMenuSubButton asChild isActive={isActive}>
+                          <SidebarMenuSubButton
+                            asChild
+                            isActive={isActive}
+                            className={cn(
+                              "transition-all duration-200",
+                              isActive &&
+                                "!bg-primary !text-primary-foreground font-semibold shadow-xs",
+                            )}
+                          >
                             <Link href={subItem.url}>
                               <span>{subItem.title}</span>
                             </Link>
@@ -297,6 +321,11 @@ export function LecturerSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "transition-all duration-200",
+                      isActive &&
+                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                    )}
                   >
                     <Link href={item.url}>
                       <item.icon className="size-5" aria-hidden="true" />
@@ -310,7 +339,25 @@ export function LecturerSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="gap-2">
+        <div className="group-data-[collapsible=icon]:hidden px-1">
+          <div className="relative rounded-xl border border-primary/40 bg-card p-3 shadow-xs space-y-2 text-left transition-all duration-300 hover:border-primary/70 overflow-hidden">
+            <div className="absolute -inset-px rounded-xl border border-primary/30 animate-pulse pointer-events-none" />
+            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+              <SparklesIcon size={16} className="text-primary" /> Lecturer AI Assistant
+            </div>
+            <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
+              Create assessments, generate questions, review AI grading, and improve feedback.
+            </p>
+            <Button
+              asChild
+              size="sm"
+              className="w-full h-7.5 text-xs font-semibold rounded-lg shadow-xs"
+            >
+              <Link href="/lecturer/ai-assistant">Open AI Assistant</Link>
+            </Button>
+          </div>
+        </div>
         <NavUser />
       </SidebarFooter>
 

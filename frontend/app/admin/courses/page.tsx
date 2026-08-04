@@ -315,14 +315,14 @@ export default function AdminCoursesPage() {
   const totalPages = Math.ceil(totalCourses / pageSize);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight text-foreground/90">
-            Courses & Classes
+    <div className="space-y-4 animate-in fade-in duration-300">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-border/25">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <BookOpen className="size-4.5 text-primary" /> Courses & Academic Modules
           </h1>
-          <p className="text-muted-foreground text-xs font-medium tracking-tight">
-            Registry of official academic modules and active sessions
+          <p className="text-xs text-muted-foreground font-medium">
+            Registry of official academic modules, credit allocations, and active course offerings.
           </p>
         </div>
 
@@ -336,13 +336,13 @@ export default function AdminCoursesPage() {
           <DialogTrigger asChild>
             <Button
               size="sm"
-              className="rounded-full gap-2 shadow-none px-5 h-9 font-semibold text-xs tracking-tight"
+              className="h-8.5 rounded-lg gap-2 shadow-xs px-4 font-semibold text-xs tracking-tight"
             >
               <Plus className="size-3.5" />
               Create Official Module
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto rounded-3xl">
+          <DialogContent className="max-w-2xl w-full max-h-[85vh] overflow-y-auto rounded-2xl p-6 border border-border bg-card">
             <DialogHeader>
               <DialogTitle className="text-lg font-semibold tracking-tight">
                 New Institutional Module

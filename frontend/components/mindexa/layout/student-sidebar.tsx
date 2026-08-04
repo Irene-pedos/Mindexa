@@ -5,6 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   BookOpen,
@@ -13,6 +14,7 @@ import {
   Trophy,
   Brain,
   Upload,
+  Lightbulb,
 } from "lucide-react";
 
 import {
@@ -27,7 +29,10 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
+import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { BorderTrail } from "@/components/ui/border-trail";
 import { NavUser } from "@/components/nav-user";
 import { useAuth } from "@/hooks/use-auth";
 import { studentApi } from "@/lib/api/student";
@@ -157,6 +162,11 @@ export function StudentSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "transition-all duration-200",
+                      isActive &&
+                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                    )}
                   >
                     <Link
                       href={item.url}
@@ -192,6 +202,11 @@ export function StudentSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "transition-all duration-200",
+                      isActive &&
+                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                    )}
                   >
                     <Link href={item.url}>
                       <item.icon className="size-5" />
@@ -205,7 +220,27 @@ export function StudentSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="gap-2">
+        <div className="group-data-[collapsible=icon]:hidden px-1">
+          <div className="relative rounded-xl border border-primary/40 bg-card p-3 shadow-xs space-y-2 text-left transition-all duration-300 hover:border-primary/70 overflow-hidden">
+            <div className="absolute -inset-px rounded-xl border border-primary/30 animate-pulse pointer-events-none" />
+            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
+              <SparklesIcon size={16} className="text-primary" />
+              Study with AI
+            </div>
+            <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
+              Get explanations from your course materials, ask questions, and
+              practice before assessments.
+            </p>
+            <Button
+              asChild
+              size="sm"
+              className="w-full h-7.5 text-xs font-semibold rounded-lg shadow-xs"
+            >
+              <Link href="/student/study">Open Study AI</Link>
+            </Button>
+          </div>
+        </div>
         <NavUser />
       </SidebarFooter>
 

@@ -82,16 +82,18 @@ export default function StudentWorkspacesPage() {
   }
 
   return (
-    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/25 pb-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">My Courses</h1>
-          <p className="text-xs text-muted-foreground mt-1">Overview of your enrolled academic modules and study progress</p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
+        <div className="space-y-0.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <GraduationCap className="size-4.5 text-primary" /> My Enrolled Courses
+          </h1>
+          <p className="text-xs text-muted-foreground font-medium">Overview of your enrolled academic modules and study progress</p>
         </div>
-        <Button variant="outline" size="sm" asChild className="h-9 px-4 rounded-xl border-border/60">
+        <Button variant="outline" size="sm" asChild className="h-8.5 px-3.5 rounded-lg border-border/60 text-xs font-semibold">
           <Link href="/student/schedule">
-            <Calendar className="mr-2 size-4 text-muted-foreground" /> View Schedule
+            <Calendar className="mr-1.5 size-3.5 text-muted-foreground" /> View Schedule
           </Link>
         </Button>
       </div>
@@ -99,13 +101,13 @@ export default function StudentWorkspacesPage() {
       {/* Modules Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {workspaces.length === 0 ? (
-          <div className="col-span-full py-20 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
-            <BookOpen className="size-12 text-muted-foreground/30 mx-auto mb-4" />
+          <div className="col-span-full py-16 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
+            <BookOpen className="size-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-xs font-semibold text-muted-foreground">No enrolled courses found.</p>
           </div>
         ) : (
           workspaces.map((ws) => (
-            <Card key={ws.id} className="flex flex-col hover:bg-card/45 bg-card/30 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
+            <Card key={ws.id} className="flex flex-col bg-card hover:border-primary/20 shadow-xs transition-all duration-200 rounded-xl border border-border/60 overflow-hidden">
               <CardHeader className="pb-1.5 pt-3.5 px-4">
                 <div className="flex items-start justify-between gap-3 min-w-0 w-full">
                   <div className="space-y-0.5 min-w-0 flex-1">
@@ -154,7 +156,7 @@ export default function StudentWorkspacesPage() {
                   </Button>
                   <Button asChild variant="outline" size="sm" className="w-8 h-8 p-0 rounded-lg border-border/60">
                     <Link href="/student/assessments" title="Assessments">
-                      <FileText className="size-4 text-muted-foreground" />
+                      <FileText className="size-3.5 text-muted-foreground" />
                     </Link>
                   </Button>
                 </div>

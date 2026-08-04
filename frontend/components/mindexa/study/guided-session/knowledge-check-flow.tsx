@@ -337,10 +337,10 @@ export function KnowledgeCheckFlow({
         {/* 1. MATCHING Question Type */}
         {qType === "MATCHING" && (
           <SharedMatchingDnd
-            options={(currentQ.options || []).map((optStr, idx) => ({
+            options={((currentQ as any).premises || []).map((premiseText: string, idx: number) => ({
               id: `opt-${idx}`,
-              text: (currentQ as any).premises?.[idx] || optStr,
-              match_value: (currentQ as any).matches?.[idx] || optStr,
+              text: premiseText,
+              match_value: (currentQ as any).matches?.[idx] ?? "",
             }))}
             questionId={currentQ.id}
             attemptId={sessionId}

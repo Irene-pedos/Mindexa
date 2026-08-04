@@ -583,15 +583,15 @@ export default function AdminAssignmentPanel() {
                         key={step.id}
                         onClick={() => isValid && setActiveStep(step.id)}
                         className={cn(
-                            "flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative border w-full",
+                            "flex items-center gap-3 p-3 rounded-xl transition-all text-left group relative border w-full shadow-xs",
                             isActive
-                                ? "bg-primary/5 text-primary border-primary/20"
+                                ? "bg-primary text-primary-foreground border-primary font-semibold"
                                 : !isValid ? "opacity-40 cursor-not-allowed border-transparent" : "hover:bg-muted/10 text-muted-foreground border-transparent"
                         )}
                     >
                         <div className={cn(
                             "size-8 rounded-lg flex items-center justify-center border transition-colors",
-                            isActive ? "bg-primary text-primary-foreground border-primary" :
+                            isActive ? "bg-white/20 text-white border-white/30" :
                             isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
                             "bg-muted/10 border-muted/40 group-hover:bg-white"
                         )}>

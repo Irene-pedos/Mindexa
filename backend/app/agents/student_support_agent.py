@@ -40,6 +40,7 @@ class StudySupportAgent(BaseAgent):
         teaching_workspace_id: Optional[uuid.UUID] = None,
         thinking_mode: bool = False,
         deep_search_mode: bool = False,
+        log_to_global_history: bool = True,
     ) -> StudySupportAgentResponse:
 
         self.rag_service = RAGService(db)
@@ -70,14 +71,15 @@ class StudySupportAgent(BaseAgent):
             system_prompt, user_prompt, conversation_history, student_id, thinking_mode=thinking_mode
         )
 
-        # Step 5: Audit log
-        await self._log_session(
-            student_id=student_id,
-            question=question,
-            rag_result=rag_result,
-            llm_response=llm_response,
-            db=db,
-        )
+        # Step 5: Audit log (skipped for guided-lesson calls to avoid leaking into global tutor history)
+        if log_to_global_history:
+            await self._log_session(
+                student_id=student_id,
+                question=question,
+                rag_result=rag_result,
+                llm_response=llm_response,
+                db=db,
+            )
 
         # Step 6: Return response with citations
         return StudySupportAgentResponse(

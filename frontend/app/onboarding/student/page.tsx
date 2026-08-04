@@ -223,10 +223,10 @@ export default function StudentOnboarding() {
   };
 
   return (
-    <div className="min-h-screen bg-muted/5 flex flex-col items-center justify-center p-4">
-      <div className="max-w-4xl w-full flex flex-col gap-6">
+    <div className="min-h-screen bg-muted/5 flex flex-col items-center justify-center p-4 sm:p-6 md:p-8">
+      <div className="max-w-5xl w-full flex flex-col gap-5">
         {/* Header */}
-        <div className="flex items-center justify-between px-2">
+        <div className="flex items-center justify-between px-1">
             <div>
                 <h1 className="text-xl font-semibold text-primary tracking-tight uppercase">Student Onboarding</h1>
                 <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-widest">Complete your academic profile</p>

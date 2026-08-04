@@ -246,7 +246,7 @@ export function StudyPlanWizard({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
+      <DialogContent className="max-w-5xl w-full max-h-[90vh] overflow-y-auto p-6 md:p-8 rounded-2xl border border-border bg-card">
         <DialogHeader className="space-y-1">
           <div className="flex items-center gap-2">
             <Sparkles className="size-5 text-primary" />

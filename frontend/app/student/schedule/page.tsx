@@ -5,7 +5,7 @@ import React, { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar as CalendarIcon, Clock, AlertCircle, Link as LinkIcon, ChevronRight, ChevronLeft } from "lucide-react";
+import { Calendar as CalendarIcon, Clock, AlertCircle, Link as LinkIcon, ChevronRight, ChevronLeft, Database } from "lucide-react";
 import {
   format,
   startOfMonth,
@@ -76,9 +76,9 @@ export default function StudentSchedulePage() {
   }
 
   return (
-    <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
-      <div className="space-y-0.5 border-b border-border/25 pb-4">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
+      <div className="space-y-0.5 border-b border-border/25 pb-3">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
           Academic Schedule
         </h1>
         <p className="text-xs text-muted-foreground font-medium">
@@ -86,29 +86,28 @@ export default function StudentSchedulePage() {
         </p>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-12 gap-6 items-start">
+      <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
         {/* Interactive Calendar */}
-        <Card className="xl:col-span-5 bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
-          <CardHeader className="border-b border-border/45 bg-muted/5 py-3 px-4">
+        <Card className="xl:col-span-5 bg-card hover:border-primary/20 shadow-xs transition-all duration-200 rounded-xl border border-border/60 overflow-hidden">
+          <CardHeader className="border-b border-border/40 bg-muted/10 py-3 px-4">
             <CardTitle className="flex items-center justify-between text-sm">
-              {/* BUG-15 fix: previous/next month navigation */}
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 rounded-md"
+                className="h-7 w-7 rounded-lg"
                 onClick={() => setSelectedDate(d => subMonths(d, 1))}
                 aria-label="Previous month"
               >
                 <ChevronLeft className="size-4" />
               </Button>
-              <span className="flex items-center gap-2 font-semibold">
+              <span className="flex items-center gap-2 font-semibold text-xs text-foreground">
                 <CalendarIcon className="size-4 text-primary" />
                 {format(selectedDate, "MMMM yyyy")}
               </span>
               <Button
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 rounded-md"
+                className="h-7 w-7 rounded-lg"
                 onClick={() => setSelectedDate(d => addMonths(d, 1))}
                 aria-label="Next month"
               >
@@ -117,8 +116,8 @@ export default function StudentSchedulePage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="p-4">
-            {/* Calendar Grid - add first-day-of-week offset to align dates correctly */}
-            <div className="grid grid-cols-7 gap-1 text-center mb-6">
+            {/* Calendar Grid */}
+            <div className="grid grid-cols-7 gap-1 text-center mb-5">
               {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => (
                 <div
                   key={day}
@@ -127,7 +126,7 @@ export default function StudentSchedulePage() {
                   {day}
                 </div>
               ))}
-              {/* Empty offset cells so day 1 falls on the correct weekday */}
+              {/* Empty offset cells */}
               {Array.from({ length: startOfMonth(selectedDate).getDay() }).map((_, i) => (
                 <div key={`offset-${i}`} />
               ))}
@@ -141,11 +140,11 @@ export default function StudentSchedulePage() {
                     key={idx}
                     onClick={() => setSelectedDate(day)}
                     className={cn(
-                      "flex flex-col items-center justify-center rounded border transition-all h-10 w-full",
+                      "flex flex-col items-center justify-center rounded-lg border transition-all h-9.5 w-full",
                       isToday && "border-primary bg-primary/5",
                       isSelected 
-                        ? "border-primary bg-primary text-primary-foreground shadow-sm z-10" 
-                        : "bg-card/25 border-transparent hover:bg-card/45 hover:border-border/45 text-foreground"
+                        ? "border-primary bg-primary text-primary-foreground shadow-xs z-10 font-bold" 
+                        : "bg-card/20 border-transparent hover:bg-card/50 hover:border-border/40 text-foreground"
                     )}
                   >
                     <span
@@ -175,34 +174,34 @@ export default function StudentSchedulePage() {
             </div>
 
             {/* Selected Day Details */}
-            <div className="pt-4 border-t border-dashed">
-              <h3 className="font-semibold text-sm text-foreground/80 flex items-center gap-1.5 mb-4">
+            <div className="pt-3 border-t border-dashed border-border/40">
+              <h3 className="font-semibold text-xs text-foreground flex items-center gap-1.5 mb-3">
                  <ChevronRight className="size-3.5 text-primary" />
                  {format(selectedDate, "EEEE, MMM d")}
               </h3>
 
               {selectedEvents.length > 0 ? (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {selectedEvents.map((event) => (
                     <div
                       key={event.id}
-                      className="flex gap-3 p-3 rounded-lg border border-border/30 bg-card/20 transition-all hover:bg-card/40"
+                      className="flex gap-3 p-3 rounded-lg border border-border/40 bg-card/40 transition-all hover:bg-card/70"
                     >
                       <div className="flex-1 min-w-0">
                         <div className="font-semibold text-xs truncate">
                           {event.title}
                         </div>
-                        <div className="text-[10px] text-muted-foreground mt-1 font-medium uppercase flex items-center gap-1">
+                        <div className="text-[10px] text-muted-foreground mt-0.5 font-medium uppercase flex items-center gap-1">
                           <Clock className="size-3" />{" "}
                           {format(new Date(event.start_at), "HH:mm")}
                         </div>
                       </div>
-                      <Badge variant="outline" className={cn("h-4 text-[9px] font-bold uppercase shrink-0", event.color_hint)}>{event.type}</Badge>
+                      <Badge variant="outline" className={cn("h-4.5 text-[9px] font-semibold uppercase shrink-0", event.color_hint)}>{event.type}</Badge>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="text-center py-8 bg-card/10 rounded-xl border border-dashed border-border/30 text-muted-foreground text-[11px] font-semibold">
+                <div className="text-center py-6 bg-card/10 rounded-xl border border-dashed border-border/30 text-muted-foreground text-xs font-medium">
                   No records for this date.
                 </div>
               )}
@@ -210,45 +209,45 @@ export default function StudentSchedulePage() {
           </CardContent>
         </Card>
 
-        <div className="xl:col-span-7 space-y-6">
+        <div className="xl:col-span-7 space-y-5">
           {/* Today’s Agenda Card */}
-          <Card className="bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
-            <CardHeader className="bg-primary/5 border-b border-border/25 py-3 px-4">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-2">
+          <Card className="bg-card/40 hover:bg-card/60 hover:border-primary/20 backdrop-blur-xs shadow-xs transition-all duration-200 rounded-xl border border-border/50 overflow-hidden">
+            <CardHeader className="bg-primary/5 border-b border-border/30 py-3 px-4">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-2">
                 Live Agenda
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-6">
+            <CardContent className="p-5">
               <div className="flex items-center gap-4 mb-4">
-                <div className="text-4xl font-bold tabular-nums tracking-tighter text-foreground">
+                <div className="text-3xl font-semibold tabular-nums tracking-tight text-foreground">
                     {format(today, "d")}
                 </div>
                 <div className="space-y-0">
-                    <div className="text-sm font-semibold text-foreground/80">{format(today, "MMMM yyyy")}</div>
-                    <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider">{format(today, "EEEE")}</div>
+                    <div className="text-xs font-semibold text-foreground">{format(today, "MMMM yyyy")}</div>
+                    <div className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">{format(today, "EEEE")}</div>
                 </div>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2.5">
                 {todayEvents.length > 0 ? (
                   todayEvents.map((event) => (
-                    <div key={event.id} className="flex gap-3 p-3 rounded-lg border border-primary/10 bg-primary/5">
-                      <div className="text-primary">
+                    <div key={event.id} className="flex gap-3 p-3 rounded-lg border border-primary/15 bg-primary/5">
+                      <div className="text-primary mt-0.5">
                         <AlertCircle className="size-4" />
                       </div>
-                      <div className="flex-1">
-                        <div className="font-semibold text-sm text-foreground/90">{event.title}</div>
-                        <div className="text-[10px] text-primary/80 font-bold mt-0.5 uppercase">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-semibold text-xs text-foreground">{event.title}</div>
+                        <div className="text-[10px] text-primary/80 font-medium mt-0.5 uppercase">
                           Starts at {format(new Date(event.start_at), "HH:mm")}
                         </div>
                       </div>
-                      <Badge variant="default" className="h-4 text-[8px] font-bold uppercase tracking-tight">Immediate</Badge>
+                      <Badge variant="default" className="h-4.5 text-[8px] font-semibold uppercase tracking-tight shrink-0">Immediate</Badge>
                     </div>
                   ))
                 ) : (
-                  <div className="p-6 text-center bg-card/10 rounded-xl border border-dashed border-border/30">
-                    <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-tight">
-                        No critical tasks for today.
+                  <div className="p-5 text-center bg-card/10 rounded-xl border border-dashed border-border/30">
+                    <p className="text-xs text-muted-foreground font-medium">
+                        No critical tasks scheduled for today.
                     </p>
                   </div>
                 )}
@@ -257,30 +256,30 @@ export default function StudentSchedulePage() {
           </Card>
 
           {/* Upcoming Deadlines */}
-          <Card className="bg-card/30 hover:bg-card/45 hover:border-primary/20 backdrop-blur-sm shadow-sm transition-all duration-300 rounded-xl border border-border/45 overflow-hidden">
-            <CardHeader className="border-b border-border/25 py-3 px-4">
-              <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+          <Card className="bg-card/40 hover:bg-card/60 hover:border-primary/20 backdrop-blur-xs shadow-xs transition-all duration-200 rounded-xl border border-border/50 overflow-hidden">
+            <CardHeader className="border-b border-border/30 py-3 px-4">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
                 Sequential Activities
               </CardTitle>
             </CardHeader>
             <CardContent className="p-4">
-              <div className="space-y-1.5">
+              <div className="space-y-2">
               {events
                 .filter((e) => new Date(e.start_at) >= today)
                 .slice(0, 5)
                 .map((event, i) => (
-                  <div key={i} className="flex justify-between items-center p-2 rounded hover:bg-card/45 bg-card/10 transition-colors border border-border/20 mb-2">
-                    <div className="flex-1 min-w-0 pr-4">
-                      <div className="font-semibold text-xs truncate text-foreground/90">
+                  <div key={i} className="flex justify-between items-center p-2.5 rounded-lg hover:bg-card/60 bg-card/20 transition-colors border border-border/30">
+                    <div className="flex-1 min-w-0 pr-3">
+                      <div className="font-semibold text-xs truncate text-foreground">
                         {event.title}
                       </div>
-                      <div className="text-[9px] text-muted-foreground font-medium uppercase tracking-tight">
+                      <div className="text-[10px] text-muted-foreground font-medium uppercase tracking-tight">
                         {event.type}
                       </div>
                     </div>
                     <Badge
                       variant="outline"
-                      className="text-[9px] font-bold uppercase whitespace-nowrap shrink-0 border-primary/10 bg-primary/5 text-primary h-5 px-1.5"
+                      className="text-[9px] font-semibold uppercase whitespace-nowrap shrink-0 border-primary/20 bg-primary/5 text-primary h-5 px-2"
                     >
                       {format(new Date(event.start_at), "MMM d")}
                     </Badge>
@@ -288,12 +287,15 @@ export default function StudentSchedulePage() {
                 ))}
               </div>
 
-              <div className="pt-4 mt-3 border-t border-dashed border-border/40">
-                <Button variant="outline" size="sm" className="w-full h-9 font-semibold text-[11px] uppercase tracking-wide gap-1.5 rounded-lg border-border/60" asChild>
-                    <Link href="/student/assessments">
-                    <LinkIcon className="size-3 text-primary" />
-                    Registry Database
-                    </Link>
+              <div className="pt-3 mt-3 border-t border-border/40">
+                <Button variant="outline" size="sm" className="w-full h-8.5 font-semibold text-xs rounded-lg border-border/60 shadow-none hover:bg-muted transition-all" asChild>
+                  <Link href="/student/assessments" className="flex items-center justify-between w-full px-1">
+                    <span className="flex items-center gap-1.5">
+                      <Database className="size-3.5 text-primary" />
+                      View Assessments Registry
+                    </span>
+                    <ChevronRight className="size-3.5 text-muted-foreground" />
+                  </Link>
                 </Button>
               </div>
             </CardContent>
