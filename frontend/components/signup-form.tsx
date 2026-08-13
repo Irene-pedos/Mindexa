@@ -134,7 +134,7 @@ export function SignupForm({
       setShowVerification(true);
     } catch (err: any) {
       const errorMsg = err.message || "Failed to create account";
-      
+
       // Handle field-specific backend errors
       if (errorMsg.includes("Registration Number")) {
         setErrors({ regNumber: "This Student ID is already registered" });
@@ -145,7 +145,7 @@ export function SignupForm({
       } else {
         setErrors({ form: errorMsg });
       }
-      
+
       toast.error(errorMsg);
     } finally {
       setLoading(false);
@@ -293,7 +293,7 @@ export function SignupForm({
                     </TabsTrigger>
                     <TabsTrigger
                       value="LECTURER"
-                      className="font-semibold text-xs rounded-full data-[state=active]:bg-background data-[state=active]:shadow-sm"
+                      className="font-semibold  text-xs rounded-full data-[state=active]:bg-background data-[state=active]:shadow-sm"
                     >
                       Lecturer
                     </TabsTrigger>

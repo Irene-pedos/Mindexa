@@ -263,6 +263,18 @@ class UserProfileUpdate(MindexaSchema):
         max_length=30,
         description="Contact phone number.",
     )
+    simple_mode_enabled: bool | None = Field(
+        default=None,
+        description="Enable simplified high-clarity UI mode.",
+    )
+    large_text_default: bool | None = Field(
+        default=None,
+        description="Enable enlarged text scale default.",
+    )
+    reduced_motion_default: bool | None = Field(
+        default=None,
+        description="Reduce non-essential animations.",
+    )
 
     @model_validator(mode="after")
     def at_least_one_field(self) -> UserProfileUpdate:
@@ -272,6 +284,36 @@ class UserProfileUpdate(MindexaSchema):
         if not values:
             raise ValueError("At least one field must be provided for profile update.")
         return self
+
+
+class TourProgressUpdateRequest(MindexaSchema):
+    """Update onboarding guided tour progress."""
+    onboarding_tour_step: int | None = Field(default=None, ge=0, description="Current tour step index.")
+    onboarding_tour_completed: bool | None = Field(default=None, description="Whether the tour is completed.")
+    onboarding_tour_variant: str | None = Field(default=None, max_length=50, description="Tour variant or role key.")
+    step: int | None = Field(default=None, ge=0, description="Alternative key for step index.")
+    completed: bool | None = Field(default=None, description="Alternative key for completed.")
+    variant: str | None = Field(default=None, max_length=50, description="Alternative key for variant.")
+
+    @property
+    def resolved_step(self) -> int:
+        if self.onboarding_tour_step is not None:
+            return self.onboarding_tour_step
+        if self.step is not None:
+            return self.step
+        return 0
+
+    @property
+    def resolved_completed(self) -> bool:
+        if self.onboarding_tour_completed is not None:
+            return self.onboarding_tour_completed
+        if self.completed is not None:
+            return self.completed
+        return False
+
+    @property
+    def resolved_variant(self) -> str | None:
+        return self.onboarding_tour_variant if self.onboarding_tour_variant is not None else self.variant
 
 
 class StudentOnboardingRequest(MindexaSchema):
@@ -368,6 +410,13 @@ class UserProfileResponse(MindexaSchema):
     option_id: uuid.UUID | None = None
     class_section_id: uuid.UUID | None = None
     
+    # Accessibility & Accommodations
+    simple_mode_enabled: bool = False
+    extra_time_percent: int = 0
+    requires_screen_reader_mode: bool = False
+    large_text_default: bool = False
+    reduced_motion_default: bool = False
+
     # Lecturer specific (populated when role is LECTURER)
     assigned_courses: list[str] = Field(default_factory=list, description="List of course codes assigned to the lecturer.")
 
@@ -389,6 +438,9 @@ class UserResponse(BaseAuditedResponse):
     status: UserStatus
     email_verified: bool
     onboarding_completed: bool
+    onboarding_tour_completed: bool = False
+    onboarding_tour_step: int = 0
+    onboarding_tour_variant: str | None = None
     email_verified_at: datetime | None = None
     last_login_at: datetime | None = None
     profile: UserProfileResponse | None = None
@@ -459,3 +511,4 @@ UserProfileResponse.model_rebuild()
 UserResponse.model_rebuild()
 UserSummaryResponse.model_rebuild()
 LoginResponse.model_rebuild()
+TourProgressUpdateRequest.model_rebuild()

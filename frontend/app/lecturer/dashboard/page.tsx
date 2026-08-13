@@ -140,7 +140,7 @@ export default function LecturerDashboard() {
   }
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto pb-12">
+    <div data-tour="lecturer-dashboard" className="space-y-8 max-w-7xl mx-auto pb-12">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 px-2">
         <div className="space-y-0.5">
           <h1 className="text-2xl font-semibold tracking-tight">

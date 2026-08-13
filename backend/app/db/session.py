@@ -44,11 +44,15 @@ def _build_engine() -> AsyncEngine:
     # for each task. Connection pools (like QueuePool) are bound to the loop that created them.
     # If a pooled connection is used across loops, or if the pool tries to close a connection
     # after the task's loop has died, it results in "Event loop is closed" errors.
-    is_celery = os.environ.get("MINDEXA_RUNTIME") == "celery"
-    is_pytest = "pytest" in sys.modules
+    is_celery = (
+        os.environ.get("MINDEXA_RUNTIME") == "celery"
+        or any("celery" in arg.lower() for arg in sys.argv)
+        or ("celery" in sys.modules and any("worker" in arg.lower() or "beat" in arg.lower() for arg in sys.argv))
+    )
+    is_pytest = "pytest" in sys.modules or any("pytest" in arg.lower() for arg in sys.argv)
 
     if is_celery or is_pytest:
-        logger.info("Initializing AsyncEngine with NullPool for Celery worker or pytest runner")
+        logger.info("Initializing AsyncEngine with NullPool for Celery worker or test runner")
         return create_async_engine(
             settings.DATABASE_ASYNC_URL,
             echo=getattr(settings, "SQLALCHEMY_ECHO", False),

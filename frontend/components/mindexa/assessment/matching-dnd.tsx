@@ -13,7 +13,8 @@ import {
   DragEndEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowRight, X } from "lucide-react";
+import { ArrowRight, X, ListFilter, Move } from "lucide-react";
+import { useAccessibility } from "@/components/providers/accessibility-provider";
 import { cn } from "@/lib/utils";
 
 export interface MatchingOption {
@@ -31,6 +32,7 @@ export interface MatchingDndProps {
   currentVal?: Record<string, string>;
   onAnswerChange: (val: Record<string, string>) => void;
   disabled?: boolean;
+  interactionMode?: "drag" | "list" | "auto";
 }
 
 function seededShuffle<T>(array: T[], seedStr: string): T[] {
@@ -194,9 +196,23 @@ export function SharedMatchingDnd({
   currentVal,
   onAnswerChange,
   disabled,
+  interactionMode = "auto",
 }: MatchingDndProps) {
-  const matchingAnswers = currentVal || {};
+  const { isSimpleMode, isScreenReaderMode } = useAccessibility();
+  const matchingAnswers = useMemo(() => currentVal || {}, [currentVal]);
   const [isDragging, setIsDragging] = useState(false);
+
+  const defaultMode = useMemo<"dnd" | "list">(() => {
+    if (interactionMode === "list") return "list";
+    if (interactionMode === "drag") return "dnd";
+    return isSimpleMode || isScreenReaderMode ? "list" : "dnd";
+  }, [interactionMode, isSimpleMode, isScreenReaderMode]);
+
+  const [viewMode, setViewMode] = useState<"dnd" | "list">(defaultMode);
+
+  React.useEffect(() => {
+    setViewMode(defaultMode);
+  }, [defaultMode]);
 
   const premises = useMemo(() => {
     return (options || []).filter(
@@ -264,63 +280,154 @@ export function SharedMatchingDnd({
   };
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={() => setIsDragging(true)}
-      onDragEnd={(e) => {
-        setIsDragging(false);
-        handleDragEnd(e);
-      }}
-      onDragCancel={() => setIsDragging(false)}
-    >
-      <div className="space-y-6">
-        <div className="space-y-3">
+    <div className="space-y-4">
+      {/* Accessible Mode Switcher */}
+      <div className="flex items-center justify-between p-2.5 rounded-lg bg-muted/20 border border-border/40">
+        <span className="text-xs font-semibold text-foreground/80 flex items-center gap-1.5">
+          {viewMode === "list" ? (
+            <>
+              <ListFilter className="size-3.5 text-primary" />
+              <span>List Mode Active (Accessible Dropdowns)</span>
+            </>
+          ) : (
+            <>
+              <Move className="size-3.5 text-primary" />
+              <span>Drag & Drop Mode Active</span>
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setViewMode((prev) => (prev === "list" ? "dnd" : "list"))}
+          className="text-xs font-medium text-primary hover:underline px-2 py-0.5 rounded focus:outline-none"
+        >
+          {viewMode === "list" ? "Switch to Drag & Drop" : "Switch to List Mode"}
+        </button>
+      </div>
+
+      {viewMode === "list" ? (
+        /* ACCESSIBLE LIST MODE */
+        <div className="space-y-4">
           {premises.map((p, idx) => {
             const pId = p.id || `premise-${idx}`;
             const pText = (p.text || p.option_text || "") as string;
+            const matchedValue = matchingAnswers[pId];
+
             return (
-              <DroppableMatchTarget
+              <div
                 key={pId}
-                premiseId={pId}
-                premiseText={pText}
-                matchedValue={matchingAnswers[pId]}
-                onRemove={() => removeAnswer(pId)}
-                optionsPool={responses.map((r) => r.text)}
-                isDragging={isDragging}
-                disabled={disabled}
-                onSelect={(val) => {
-                  onAnswerChange({
-                    ...matchingAnswers,
-                    [pId]: val,
-                  });
-                }}
-              />
+                className="p-3.5 rounded-xl border border-border/70 bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+              >
+                <div className="flex-1 text-xs md:text-sm font-semibold text-foreground leading-relaxed">
+                  <span className="font-bold text-muted-foreground mr-2">{idx + 1}.</span>
+                  {pText}
+                </div>
+                <div className="w-full sm:w-64">
+                  <select
+                    disabled={disabled}
+                    value={matchedValue || ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "") {
+                        removeAnswer(pId);
+                      } else {
+                        onAnswerChange({
+                          ...matchingAnswers,
+                          [pId]: val,
+                        });
+                      }
+                    }}
+                    className="w-full h-11 px-3 rounded-lg border border-border/80 bg-background text-xs font-semibold text-foreground focus:ring-2 focus:ring-primary/20"
+                    aria-label={`Match for ${pText}`}
+                  >
+                    <option value="">-- Select matching answer --</option>
+                    {responses
+                      .filter((r, _, arr) => {
+                        // Deduplicate: only render each unique text once in the option list
+                        const firstIndex = arr.findIndex((x) => x.text === r.text);
+                        return arr.indexOf(r) === firstIndex;
+                      })
+                      .map((r, i) => {
+                        const totalAvailable = responseCountsByText[r.text] || 1;
+                        const timesUsed = usedResponseCounts[r.text] || 0;
+                        // Allow the option if: it's the current selection for this premise,
+                        // OR there are still unused copies left
+                        const isCurrentSelection = matchedValue === r.text;
+                        const hasCapacityLeft = timesUsed < totalAvailable;
+                        if (!isCurrentSelection && !hasCapacityLeft) return null;
+                        return (
+                          <option key={i} value={r.text}>
+                            {r.text}
+                          </option>
+                        );
+                      })}
+                  </select>
+                </div>
+              </div>
             );
           })}
         </div>
+      ) : (
+        /* INTERACTIVE DRAG & DROP MODE */
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={(e) => {
+            setIsDragging(false);
+            handleDragEnd(e);
+          }}
+          onDragCancel={() => setIsDragging(false)}
+        >
+          <div className="space-y-6">
+            <div className="space-y-3">
+              {premises.map((p, idx) => {
+                const pId = p.id || `premise-${idx}`;
+                const pText = (p.text || p.option_text || "") as string;
+                return (
+                  <DroppableMatchTarget
+                    key={pId}
+                    premiseId={pId}
+                    premiseText={pText}
+                    matchedValue={matchingAnswers[pId]}
+                    onRemove={() => removeAnswer(pId)}
+                    optionsPool={responses.map((r) => r.text)}
+                    isDragging={isDragging}
+                    disabled={disabled}
+                    onSelect={(val) => {
+                      onAnswerChange({
+                        ...matchingAnswers,
+                        [pId]: val,
+                      });
+                    }}
+                  />
+                );
+              })}
+            </div>
 
-        <div className="space-y-2 p-4 rounded-xl bg-muted/10 border border-dashed border-border/60">
-          <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
-            Available Matches (Drag or Select from dropdown)
+            <div className="space-y-2 p-4 rounded-xl bg-muted/10 border border-dashed border-border/60">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                Available Matches (Drag or Select from dropdown)
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {responses.map((resp) => (
+                  <DraggableMatchResponse
+                    key={resp.id}
+                    id={resp.id}
+                    text={resp.text}
+                    isUsed={Boolean(
+                      responseCountsByText[resp.text] &&
+                      usedResponseCounts[resp.text] >=
+                        responseCountsByText[resp.text],
+                    )}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {responses.map((resp) => (
-              <DraggableMatchResponse
-                key={resp.id}
-                id={resp.id}
-                text={resp.text}
-                isUsed={Boolean(
-                  responseCountsByText[resp.text] &&
-                  usedResponseCounts[resp.text] >=
-                    responseCountsByText[resp.text],
-                )}
-                disabled={disabled}
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-    </DndContext>
+        </DndContext>
+      )}
+    </div>
   );
 }

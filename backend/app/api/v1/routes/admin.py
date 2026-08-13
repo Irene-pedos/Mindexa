@@ -27,6 +27,7 @@ from app.schemas.admin import (
     AdminIntegrityOverview,
     SystemSettingsSchema,
     AdminInstitutionSummary,
+    AdminUserAccommodationsUpdate,
 )
 from app.db.schemas.academic import (
     CourseResponse,
@@ -217,6 +218,28 @@ async def update_user_status(
     from app.core.constants import UserStatus
     service = AdminService(db)
     return await service.update_user_status(user_id, UserStatus(body.status.upper()))
+
+
+@router.patch(
+    "/users/{user_id}/accommodations",
+    response_model=UserResponse,
+    summary="Update student accessibility accommodations (Admin only)",
+)
+async def update_user_accommodations(
+    user_id: uuid.UUID,
+    body: AdminUserAccommodationsUpdate,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """Updates student accessibility accommodations and logs an immutable audit trail entry."""
+    service = AdminService(db)
+    actor_role = current_user.role.value if hasattr(current_user.role, "value") else str(current_user.role)
+    return await service.update_user_accommodations(
+        user_id=user_id,
+        body=body,
+        actor_id=current_user.id,
+        actor_role=actor_role,
+    )
 
 @router.post(
     "/users/{user_id}/courses",

@@ -1,34 +1,34 @@
 // components/mindexa/dashboard/quick-actions.tsx
 import { Button } from "@/components/ui/button"
-import { Plus, Play, Calendar, Brain } from "lucide-react"
+import { Play, Calendar, Brain, Plus } from "lucide-react"
 import Link from "next/link"
 
 export function QuickActions() {
   return (
-    <div className="flex flex-wrap gap-3">
-      <Button asChild size="lg" className="font-medium">
+    <div className="flex flex-wrap gap-2">
+      <Button asChild size="sm" className="h-8 text-xs gap-1.5">
         <Link href="/student/assessments">
-          <Play className="mr-2 size-5" />
-          Join Active Assessment
+          <Play className="size-3.5" />
+          Join Assessment
         </Link>
       </Button>
 
-      <Button variant="outline" size="lg" asChild>
+      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-border/60" asChild>
         <Link href="/student/schedule">
-          <Calendar className="mr-2 size-5" />
-          View Full Schedule
+          <Calendar className="size-3.5" />
+          Full Schedule
         </Link>
       </Button>
 
-      <Button variant="outline" size="lg" asChild>
+      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-border/60" asChild>
         <Link href="/student/study">
-          <Brain className="mr-2 size-5" />
-          Open Study Support
+          <Brain className="size-3.5" />
+          Study Support
         </Link>
       </Button>
 
-      <Button variant="outline" size="lg">
-        <Plus className="mr-2 size-5" />
+      <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground">
+        <Plus className="size-3.5" />
         Submit Homework
       </Button>
     </div>

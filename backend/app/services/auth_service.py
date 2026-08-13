@@ -302,6 +302,8 @@ class AuthService:
                 self.db.add(enrollment)
 
         user.onboarding_completed = True
+        if hasattr(user.profile, "simple_mode_enabled"):
+            user.profile.simple_mode_enabled = True
         self.db.add(user.profile)
         self.db.add(user)
         await self.db.commit()
@@ -332,6 +334,31 @@ class AuthService:
 
         user.onboarding_completed = True
         self.db.add(user.profile)
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def update_tour_progress(
+        self,
+        user_id: uuid.UUID,
+        step: int,
+        variant: str | None = None,
+        completed: bool = False,
+    ) -> User:
+        """
+        Update guided tour step and completion state.
+        """
+        user = await self._users.get_by_id(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        user.onboarding_tour_step = max(0, step)
+        if variant is not None:
+            user.onboarding_tour_variant = variant
+        if completed:
+            user.onboarding_tour_completed = True
+
         self.db.add(user)
         await self.db.commit()
         await self.db.refresh(user)

@@ -407,13 +407,8 @@ export default function LecturerAIAssistant() {
 
   // 4. Feedback Generator Form
   const [feedbackPerformance, setFeedbackPerformance] = useState("");
-
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-
-  // Scroll chat messages to bottom
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [history, isGenerating]);
+  // NOTE: No manual scroll ref — MessageScrollerContent handles auto-scroll
+  // via isAtBottom state, preserving the user's scroll position when they scroll up.
 
   // Clean up polling interval
   useEffect(() => {
@@ -1168,7 +1163,7 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                   ) : (
                     <MessageScroller>
                       <MessageScrollerViewport>
-                        <MessageScrollerContent className="p-2 space-y-4 max-w-3xl mx-auto">
+                        <MessageScrollerContent aria-busy={isGenerating} className="p-2 space-y-4 max-w-3xl mx-auto">
                           {history.map((msg, index) => (
                             <div
                               key={index}

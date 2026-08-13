@@ -363,7 +363,7 @@ export default function StudentDashboard() {
   }
 
   return (
-    <div className="space-y-4">
+    <div data-tour="student-dashboard" className="space-y-4">
       {/* Welcome Header with Planner Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-2">

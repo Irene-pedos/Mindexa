@@ -33,13 +33,13 @@ import { NavUser } from "@/components/nav-user"
 import { useAuth } from "@/hooks/use-auth";
 
 const mainNav = [
-  { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard },
-  { title: "Users & Roles", url: "/admin/users", icon: Users },
+  { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard, tourId: "admin-dashboard" },
+  { title: "Users & Roles", url: "/admin/users", icon: Users, tourId: "admin-users" },
   { title: "Institutions", url: "/admin/institutions", icon: Building2 },
   { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
   { title: "Academic Periods", url: "/admin/academic/periods", icon: Calendar },
   { title: "Academic Assignments", url: "/admin/academic/assignments", icon: Users },
-  { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen },
+  { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen, tourId: "admin-courses" },
 ];
 
 const oversightNav = [
@@ -111,7 +111,7 @@ export function AdminSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                   >
-                    <Link href={item.url}>
+                    <Link href={item.url} data-tour={item.tourId}>
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
                     </Link>

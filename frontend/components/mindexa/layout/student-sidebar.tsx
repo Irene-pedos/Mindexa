@@ -39,15 +39,15 @@ import { studentApi } from "@/lib/api/student";
 import { assessmentApi } from "@/lib/api/assessment";
 
 const mainNav = [
-  { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard, tourId: "student-dashboard" },
   { title: "My Courses", url: "/student/courses", icon: BookOpen },
-  { title: "Assessments", url: "/student/assessments", icon: FileText },
+  { title: "Assessments", url: "/student/assessments", icon: FileText, tourId: "student-assessments" },
   { title: "Schedule", url: "/student/schedule", icon: Calendar },
 ];
 
 const toolsNav = [
-  { title: "Results & Feedback", url: "/student/results", icon: Trophy },
-  { title: "Study Support", url: "/student/study", icon: Brain },
+  { title: "Results & Feedback", url: "/student/results", icon: Trophy, tourId: "student-results" },
+  { title: "Study Support", url: "/student/study", icon: Brain, tourId: "student-study" },
   { title: "Upload Resources", url: "/student/resources", icon: Upload },
 ];
 
@@ -170,6 +170,7 @@ export function StudentSidebar({
                   >
                     <Link
                       href={item.url}
+                      data-tour={item.tourId}
                       className="relative flex items-center w-full"
                     >
                       <item.icon className="size-5" />
@@ -208,7 +209,7 @@ export function StudentSidebar({
                         "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
                     )}
                   >
-                    <Link href={item.url}>
+                    <Link href={item.url} data-tour={item.tourId}>
                       <item.icon className="size-5" />
                       <span>{item.title}</span>
                     </Link>

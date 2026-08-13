@@ -58,12 +58,18 @@ def _run(coro: Awaitable[T]) -> T:
 
     async def wrapper():
         # First, ensure we start with a clean slate in this loop
-        await engine.dispose()
+        try:
+            await engine.dispose()
+        except Exception:
+            pass
         try:
             return await coro
         finally:
             # Cleanly shut down connections *before* the loop closes
-            await engine.dispose()
+            try:
+                await engine.dispose()
+            except Exception:
+                pass
 
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)

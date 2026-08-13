@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String, Text
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, Index, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
@@ -88,6 +88,21 @@ class User(BaseModel, table=True):
         nullable=False,
         sa_column_kwargs={"server_default": "false"}
     )
+    onboarding_tour_completed: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
+    )
+    onboarding_tour_step: int = Field(
+        default=0,
+        nullable=False,
+        sa_column_kwargs={"server_default": "0"}
+    )
+    onboarding_tour_variant: Optional[str] = Field(
+        default=None,
+        max_length=50,
+        sa_column=Column(String(50), nullable=True)
+    )
     external_id: Optional[str] = Field(
         default=None, 
         max_length=100, 
@@ -124,6 +139,12 @@ class User(BaseModel, table=True):
 class UserProfile(BaseModel, table=True):
     """Extended user profile information."""
     __tablename__ = "user_profile"
+    __table_args__ = (
+        CheckConstraint(
+            "extra_time_percent >= 0 AND extra_time_percent <= 300",
+            name="ck_user_profile_extra_time_percent",
+        ),
+    )
 
     user_id: uuid.UUID = Field(
         sa_column=Column(
@@ -205,6 +226,35 @@ class UserProfile(BaseModel, table=True):
             nullable=True,
             index=True,
         )
+    )
+
+    # ── Accessibility & Accommodations ────────────────────────────────────────
+    simple_mode_enabled: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
+    )
+    extra_time_percent: int = Field(
+        default=0,
+        ge=0,
+        le=300,
+        nullable=False,
+        sa_column_kwargs={"server_default": "0"}
+    )
+    requires_screen_reader_mode: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
+    )
+    large_text_default: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
+    )
+    reduced_motion_default: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": "false"}
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────

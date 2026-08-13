@@ -1,18 +1,21 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
-import { BrainCircuit, Lightbulb, AlertTriangle, TrendingUp, Info } from "lucide-react";
+import {
+  BrainCircuit,
+  Lightbulb,
+  AlertTriangle,
+  TrendingUp,
+  Info,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import { analyticsApi, AIAssessmentInsightsResponse } from "@/lib/api/analytics";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { cn } from "@/lib/utils";
 
 interface AIAssessmentInsightsProps {
   assessmentId: string;
@@ -22,6 +25,9 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AIAssessmentInsightsResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [weakExpanded, setWeakExpanded] = useState(true);
+  const [suggestionsExpanded, setSuggestionsExpanded] = useState(true);
+  const [insightsExpanded, setInsightsExpanded] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -41,18 +47,13 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
 
   if (loading) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-8 w-48" />
-        <Card className="shadow-none border border-dashed border-primary/20">
-          <CardContent className="p-6 space-y-4">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-[90%]" />
-            <div className="grid grid-cols-2 gap-4 pt-4">
-               <Skeleton className="h-24 w-full" />
-               <Skeleton className="h-24 w-full" />
-            </div>
-          </CardContent>
-        </Card>
+      <div className="space-y-3">
+        <Skeleton className="h-6 w-40" />
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-[85%]" />
+          <Skeleton className="h-4 w-[70%]" />
+        </div>
       </div>
     );
   }
@@ -70,93 +71,129 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
   if (!data) return null;
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500">
+    <div className="space-y-3 animate-in fade-in duration-300">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <BrainCircuit className="size-5 text-primary" />
-          <h2 className="text-lg font-bold tracking-tight">AI Cohort Analysis</h2>
+          <BrainCircuit className="size-4 text-primary" />
+          <span className="text-xs font-semibold text-foreground">AI Cohort Analysis</span>
         </div>
-        <Badge variant="secondary" className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 bg-primary/5 text-muted-foreground border border-primary/10">
-          AI Suggestion Only
+        <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60">
+          AI suggestion only
         </Badge>
       </div>
 
-      <Card className="shadow-none border border-primary/10 bg-primary/5">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-            <TrendingUp className="size-4" /> Performance Narrative
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm leading-relaxed text-foreground/90 font-medium">
-            {data.summary}
-          </p>
-        </CardContent>
-      </Card>
+      {/* Performance Narrative */}
+      <div className="p-3 rounded-xl border border-border/50 bg-muted/20 text-xs text-foreground/80 leading-relaxed flex items-start gap-2">
+        <TrendingUp className="size-3.5 text-muted-foreground shrink-0 mt-0.5" />
+        <p>{data.summary}</p>
+      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Weak Topics */}
-        <Card className="shadow-none border border-amber-100 bg-amber-50/30">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-amber-800 flex items-center gap-2">
-              <AlertTriangle className="size-3.5" /> Weak Topics Identified
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {data.weak_topics.map((topic, i) => (
-                <li key={i} className="text-sm text-amber-900/80 flex items-start gap-2">
-                  <span className="mt-1.5 size-1.5 rounded-full bg-amber-500 shrink-0" />
+      {/* Weak Topics */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <button
+          onClick={() => setWeakExpanded(!weakExpanded)}
+          className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="size-3.5 text-amber-500" />
+            <span className="text-[11px] font-semibold text-foreground">
+              Weak Topics Identified
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+              {data.weak_topics.length}
+            </Badge>
+          </div>
+          {weakExpanded ? (
+            <ChevronUp className="size-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          )}
+        </button>
+        {weakExpanded && (
+          <div className="px-3 py-2.5 space-y-1.5">
+            {data.weak_topics.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground italic">No significant weak areas detected.</p>
+            ) : (
+              data.weak_topics.map((topic, i) => (
+                <div key={i} className="flex items-start gap-2 text-[11px] text-foreground/80">
+                  <span className="mt-1.5 size-1.5 rounded-full bg-amber-400 shrink-0" />
                   {topic}
-                </li>
-              ))}
-              {data.weak_topics.length === 0 && <li className="text-xs text-muted-foreground italic">No significant weak areas detected.</li>}
-            </ul>
-          </CardContent>
-        </Card>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
-        {/* Recommended Interventions */}
-        <Card className="shadow-none border border-emerald-100 bg-emerald-50/30">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-2">
-              <Lightbulb className="size-3.5" /> Suggested Interventions
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ul className="space-y-2">
-              {data.recommended_interventions.map((item, i) => (
-                <li key={i} className="text-sm text-emerald-900/80 flex items-start gap-2">
-                  <span className="mt-1.5 size-1.5 rounded-full bg-emerald-500 shrink-0" />
-                  {item}
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
+      {/* Suggested Interventions */}
+      <div className="rounded-xl border border-border/50 overflow-hidden">
+        <button
+          onClick={() => setSuggestionsExpanded(!suggestionsExpanded)}
+          className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <Lightbulb className="size-3.5 text-primary" />
+            <span className="text-[11px] font-semibold text-foreground">
+              Suggested Interventions
+            </span>
+            <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+              {data.recommended_interventions.length}
+            </Badge>
+          </div>
+          {suggestionsExpanded ? (
+            <ChevronUp className="size-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="size-3.5 text-muted-foreground" />
+          )}
+        </button>
+        {suggestionsExpanded && (
+          <div className="px-3 py-2.5 space-y-1.5">
+            {data.recommended_interventions.map((item, i) => (
+              <div key={i} className="flex items-start gap-2 text-[11px] text-foreground/80">
+                <span className="mt-1.5 size-1.5 rounded-full bg-primary/60 shrink-0" />
+                {item}
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Strategic Insights */}
       {data.insights.length > 0 && (
-        <div className="space-y-3 pt-2">
-          <h3 className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2 px-1">
-            <Info className="size-3" /> Strategic Insights
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {data.insights.map((insight, i) => (
-              <div key={i} className="p-3 rounded-lg border bg-background text-xs text-muted-foreground leading-relaxed shadow-sm">
-                {insight}
-              </div>
-            ))}
-          </div>
+        <div className="rounded-xl border border-border/50 overflow-hidden">
+          <button
+            onClick={() => setInsightsExpanded(!insightsExpanded)}
+            className="w-full flex items-center justify-between px-3 py-2.5 bg-muted/30 hover:bg-muted/50 transition-colors"
+          >
+            <div className="flex items-center gap-2">
+              <Info className="size-3.5 text-muted-foreground" />
+              <span className="text-[11px] font-semibold text-foreground">Strategic Insights</span>
+              <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
+                {data.insights.length}
+              </Badge>
+            </div>
+            {insightsExpanded ? (
+              <ChevronUp className="size-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronDown className="size-3.5 text-muted-foreground" />
+            )}
+          </button>
+          {insightsExpanded && (
+            <div className="px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {data.insights.map((insight, i) => (
+                <div key={i} className="p-2.5 rounded-lg border border-border/40 bg-muted/10 text-[11px] text-muted-foreground leading-relaxed">
+                  {insight}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
-      
-      <div className="pt-2 px-1">
-        <p className="text-[10px] text-muted-foreground leading-relaxed">
-          These insights are based on automated analysis of student score distributions and question-level difficulty aggregates. 
-          No individual student data was shared with the AI provider.
-        </p>
-      </div>
+
+      <p className="text-[10px] text-muted-foreground/60 leading-relaxed px-0.5">
+        Based on aggregated score distributions only. No individual student data was shared with the AI provider.
+      </p>
     </div>
   );
 }

@@ -241,29 +241,7 @@ export function ContextualAskAiPanel({
                   {msg.sender === "user" ? (
                     <p>{msg.text}</p>
                   ) : (
-                    <RichMessageRenderer content={msg.text} />
-                  )}
-
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="pt-2 border-t border-border/40 space-y-1">
-                      <span className="text-[10px] font-semibold text-muted-foreground flex items-center gap-1">
-                        <FileText className="size-3 text-primary" /> Sources
-                      </span>
-                      {msg.citations.map((c, i) => (
-                        <div
-                          key={i}
-                          className="text-[10px] text-muted-foreground bg-background/50 p-1.5 rounded border border-border/30"
-                        >
-                          <span className="font-medium">
-                            {c.resource_name || c.title || "Source"}
-                          </span>
-                          {c.page_number ? ` (p. ${c.page_number})` : ""}
-                          {c.excerpt || c.snippet
-                            ? `: ${c.excerpt || c.snippet}`
-                            : ""}
-                        </div>
-                      ))}
-                    </div>
+                    <RichMessageRenderer content={msg.text} citations={msg.citations as any} />
                   )}
 
                   <div

@@ -13,7 +13,7 @@ import {
   StudySession,
   StudyPlannerSummary,
 } from "@/lib/api/study-planner";
-import HeroUITabs from "@/components/ui/heroui-tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
@@ -34,13 +34,17 @@ import {
   Plus,
   BookOpen,
   Layers,
+  ListChecks,
   SlidersHorizontal,
   Play,
-  X,
   AlertTriangle,
   RotateCcw,
   Bot,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
+import { HelpPopover } from "@/components/mindexa/common/help-popover";
 import { format, parseISO, isBefore } from "date-fns";
 import { cn } from "@/lib/utils";
 
@@ -52,19 +56,19 @@ export default function StudentStudyPage() {
   const [plans, setPlans] = useState<StudyPlan[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Modals state
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [initialAssessmentForWizard, setInitialAssessmentForWizard] = useState<
-    string | undefined
-  >(undefined);
-  const [completeModalSession, setCompleteModalSession] =
-    useState<StudySession | null>(null);
-  const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(
-    null,
-  );
-  const [rescheduleSession, setRescheduleSession] =
-    useState<StudySession | null>(null);
+  const [initialAssessmentForWizard, setInitialAssessmentForWizard] = useState<string | undefined>(undefined);
+  const [completeModalSession, setCompleteModalSession] = useState<StudySession | null>(null);
+  const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(null);
+  const [rescheduleSession, setRescheduleSession] = useState<StudySession | null>(null);
   const [aiTutorModalOpen, setAiTutorModalOpen] = useState(false);
+
+  // Collapsible section state
+  const [nextExpanded, setNextExpanded] = useState(true);
+  const [upcomingExpanded, setUpcomingExpanded] = useState(true);
+  const [missedExpanded, setMissedExpanded] = useState(true);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [expandedPlanIds, setExpandedPlanIds] = useState<Set<string>>(new Set());
 
   async function loadData() {
     try {
@@ -81,9 +85,7 @@ export default function StudentStudyPage() {
     }
   }
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  useEffect(() => { loadData(); }, []);
 
   const handleSelectTabWithTopic = (tab: string, topic?: string) => {
     if (topic) setSelectedTopicContext(topic);
@@ -99,24 +101,23 @@ export default function StudentStudyPage() {
     setWizardOpen(true);
   };
 
-  // Process and categorize all sessions across active plans
+  const togglePlanExpanded = (planId: string) => {
+    setExpandedPlanIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(planId)) next.delete(planId);
+      else next.add(planId);
+      return next;
+    });
+  };
+
   const categorizedSessions = useMemo(() => {
     const allSessions: StudySession[] = [];
-    plans.forEach((p) => {
-      if (p.sessions) {
-        allSessions.push(...p.sessions);
-      }
-    });
-
-    // Sort by scheduled_start ascending
+    plans.forEach((p) => { if (p.sessions) allSessions.push(...p.sessions); });
     allSessions.sort(
-      (a, b) =>
-        new Date(a.scheduled_start).getTime() -
-        new Date(b.scheduled_start).getTime(),
+      (a, b) => new Date(a.scheduled_start).getTime() - new Date(b.scheduled_start).getTime(),
     );
 
     const now = new Date();
-
     const completed: StudySession[] = [];
     const missedOrRescheduled: StudySession[] = [];
     const pendingUpcoming: StudySession[] = [];
@@ -137,105 +138,77 @@ export default function StudentStudyPage() {
     });
 
     const nextSession = pendingUpcoming.length > 0 ? pendingUpcoming[0] : null;
-    const remainingUpcoming =
-      pendingUpcoming.length > 0 ? pendingUpcoming.slice(1) : [];
+    const remainingUpcoming = pendingUpcoming.length > 0 ? pendingUpcoming.slice(1) : [];
 
-    return {
-      nextSession,
-      upcoming: remainingUpcoming,
-      completed,
-      missedOrRescheduled,
-    };
+    return { nextSession, upcoming: remainingUpcoming, completed, missedOrRescheduled };
   }, [plans]);
 
   return (
-    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
-      {/* Header Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
-        <div className="space-y-0.5">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
-            <SparklesIcon size={20} className="text-primary shrink-0" /> Study Planner & Academic Coach
+    <div className="space-y-4 w-full mx-auto animate-in fade-in duration-300">
+
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/20 pb-3">
+        <div className="space-y-0.5 min-w-0">
+          <h1 className="text-base font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <SparklesIcon size={16} className="text-primary shrink-0" />
+            Study Planner
           </h1>
-          <p className="text-xs text-muted-foreground font-medium">
-            AI-powered study scheduling, assessment readiness scoring, and intelligent academic tutoring.
+          <p className="text-xs text-muted-foreground">
+            AI-powered scheduling, readiness scoring, and academic tutoring.
           </p>
         </div>
-
-        {/* Action Controls: AI Tutor & New Study Plan */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 shrink-0">
+          <HelpPopover topic="ai-study" variant="badge" label="Study Help" />
+          <ContextualExplainer topic="ai-study-support" variant="pill" label="Guide" />
           <Button
-            variant="outline"
+            variant="ghost"
             onClick={() => setAiTutorModalOpen(true)}
             size="sm"
-            className="h-8.5 px-3 rounded-lg text-xs font-semibold gap-1.5 border-primary/30 bg-primary/5 hover:bg-primary/10 text-primary shadow-xs transition-all"
+            className="h-8 px-3 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
           >
-            <SparklesIcon size={16} className="text-primary" />
-            <span>Study AI Tutor</span>
-            {selectedTopicContext && (
-              <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                Filtered
-              </Badge>
-            )}
+            <Sparkles className="size-3.5" />
+            AI Tutor
+            {selectedTopicContext && <span className="size-1.5 rounded-full bg-primary" />}
           </Button>
-
           <Button
             onClick={() => handleOpenWizardWithAssessment()}
             size="sm"
-            className="h-8.5 px-3.5 rounded-lg text-xs font-semibold uppercase tracking-wider gap-1.5 shadow-xs bg-primary hover:bg-primary/90 text-primary-foreground"
+            className="h-8 px-3 text-xs gap-1.5"
           >
-            <Plus className="size-3.5" /> New Study Plan
+            <Plus className="size-3.5" /> New Plan
           </Button>
         </div>
       </div>
 
-      {/* HeroUITabs */}
-      <HeroUITabs
-        value={activeTab}
-        onValueChange={setActiveTab}
-        className="w-full"
-      >
-        <HeroUITabs.ListContainer>
-          <HeroUITabs.List aria-label="Study views">
-            <HeroUITabs.Tab
-              id="overview"
-              className="text-xs font-medium px-2 pb-2.5 pt-1 transition-all"
-            >
-              <span className="flex items-center gap-1.5">
-                <Layers className="size-3.5" /> Planner Overview
-              </span>
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-            <HeroUITabs.Tab
-              id="plans"
-              className="text-xs font-medium px-2 pb-2.5 pt-1 transition-all"
-            >
-              <span className="flex items-center gap-1.5">
-                <BookOpen className="size-3.5" /> My Active Plans ({plans.length})
-              </span>
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-          </HeroUITabs.List>
-        </HeroUITabs.ListContainer>
+      {/* Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="h-auto p-1">
+          <TabsTrigger value="overview">
+            <Layers className="size-3.5" />
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="plans">
+            <ListChecks className="size-3.5" />
+            Plans
+            <span className="ml-1 opacity-60 font-normal">({plans.length})</span>
+          </TabsTrigger>
+        </TabsList>
 
-        {/* Tab 1: Planner Overview */}
+        {/* Overview Tab */}
         {activeTab === "overview" && (
           <div className="pt-3">
             {loading ? (
-              <div className="space-y-4">
-                <Skeleton className="h-40 w-full rounded-xl" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {[1, 2, 3, 4].map((i) => (
-                    <Skeleton key={i} className="h-20 w-full rounded-xl" />
-                  ))}
+              <div className="space-y-3">
+                <Skeleton className="h-32 w-full rounded-xl" />
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+                  {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-16 w-full rounded-lg" />)}
                 </div>
               </div>
             ) : (
               <StudyPlanDashboard
                 summary={summary}
                 onOpenWizard={handleOpenWizardWithAssessment}
-                onOpenCompleteModal={(session) =>
-                  setCompleteModalSession(session)
-                }
+                onOpenCompleteModal={(session) => setCompleteModalSession(session)}
                 onOpenAdjustModal={(plan) => setAdjustModalPlan(plan)}
                 onSelectTab={handleSelectTabWithTopic}
               />
@@ -243,351 +216,280 @@ export default function StudentStudyPage() {
           </div>
         )}
 
-        {/* Tab 2: Reorganized Active Plans & Grouped Sessions */}
+        {/* Plans Tab */}
         {activeTab === "plans" && (
-          <div className="pt-3 space-y-5">
+          <div className="pt-3 space-y-4">
             {plans.length === 0 ? (
-              <div className="py-14 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30 space-y-2.5">
-                <BookOpen className="mx-auto size-8 text-muted-foreground/30" />
-                <p className="text-xs font-semibold text-muted-foreground">
-                  You haven&apos;t created any study plans yet.
-                </p>
-                <Button
-                  onClick={() => handleOpenWizardWithAssessment()}
-                  size="sm"
-                  className="h-8 text-xs font-semibold uppercase tracking-wider rounded-lg"
-                >
-                  Create First Plan
+              <div className="py-12 text-center border border-dashed border-border/40 rounded-xl space-y-3">
+                <BookOpen className="mx-auto size-7 text-muted-foreground/20" />
+                <p className="text-xs text-muted-foreground">No study plans yet.</p>
+                <Button onClick={() => handleOpenWizardWithAssessment()} size="sm" variant="outline" className="h-7 text-xs">
+                  Create first plan
                 </Button>
               </div>
             ) : (
               <>
-                {/* 1. Next Session (Hero Highlight Card) */}
+                {/* Next Session */}
                 {categorizedSessions.nextSession && (
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                      <Sparkles className="size-3.5" /> Next Up Guided Session
-                    </h3>
-                    <Card className="rounded-xl border border-primary/30 bg-primary/5 p-4 md:p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <Badge
-                            variant="outline"
-                            className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/10"
-                          >
-                            Next Up
-                          </Badge>
-                          <Badge
-                            variant="secondary"
-                            className="text-[10px] font-medium"
-                          >
-                            <Clock className="size-3 mr-1" />
-                            {format(
-                              parseISO(
-                                categorizedSessions.nextSession.scheduled_start,
-                              ),
-                              "EEEE, MMM d 'at' HH:mm",
-                            )}
-                          </Badge>
+                  <CollapsibleSection
+                    icon={<Sparkles className="size-3.5 text-primary" />}
+                    label="Up next"
+                    count={1}
+                    expanded={nextExpanded}
+                    onToggle={() => setNextExpanded(!nextExpanded)}
+                    accent
+                  >
+                    <Card className="rounded-xl border border-border/50 bg-card shadow-none p-4">
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Badge variant="secondary" className="text-[10px] font-normal">
+                              <Clock className="size-2.5 mr-1 opacity-60" />
+                              {format(parseISO(categorizedSessions.nextSession.scheduled_start), "EEE, MMM d 'at' HH:mm")}
+                            </Badge>
+                            <span className="text-[10px] text-muted-foreground">
+                              {categorizedSessions.nextSession.duration_minutes}m
+                            </span>
+                          </div>
+                          <p className="text-sm font-medium text-foreground">
+                            {categorizedSessions.nextSession.topic || categorizedSessions.nextSession.title}
+                          </p>
                         </div>
-                        <h4 className="text-base font-semibold text-foreground">
-                          {categorizedSessions.nextSession.topic ||
-                            categorizedSessions.nextSession.title}
-                        </h4>
-                        <p className="text-xs text-muted-foreground font-medium">
-                          Duration:{" "}
-                          {categorizedSessions.nextSession.duration_minutes}{" "}
-                          minutes • Guided Lesson & Knowledge Check
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setRescheduleSession(
-                              categorizedSessions.nextSession,
-                            )
-                          }
-                          className="h-8 text-xs font-medium rounded-lg border-border/60"
-                        >
-                          <RotateCcw className="size-3.5 mr-1" /> Reschedule
-                        </Button>
-
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            router.push(
-                              `/student/study/session/${categorizedSessions.nextSession?.id}`,
-                            )
-                          }
-                          className="h-8 px-3.5 text-xs font-semibold rounded-lg bg-primary hover:bg-primary/90 text-primary-foreground shadow-xs gap-1.5"
-                        >
-                          <Play className="size-3.5 fill-white" /> Start Guided Session
-                        </Button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setRescheduleSession(categorizedSessions.nextSession)}
+                            className="h-7 text-xs text-muted-foreground hover:text-foreground px-2"
+                          >
+                            <RotateCcw className="size-3 mr-1" /> Reschedule
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => router.push(`/student/study/session/${categorizedSessions.nextSession?.id}`)}
+                            className="h-7 px-3 text-xs gap-1"
+                          >
+                            <Play className="size-3 fill-current" /> Start
+                          </Button>
+                        </div>
                       </div>
                     </Card>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* 2. Upcoming Sessions Section */}
+                {/* Upcoming */}
                 {categorizedSessions.upcoming.length > 0 && (
-                  <div className="space-y-2.5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground flex items-center gap-1.5">
-                      <Clock className="size-3.5 text-muted-foreground" />{" "}
-                      Upcoming Sessions ({categorizedSessions.upcoming.length})
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <CollapsibleSection
+                    icon={<Clock className="size-3.5 text-muted-foreground" />}
+                    label="Upcoming"
+                    count={categorizedSessions.upcoming.length}
+                    expanded={upcomingExpanded}
+                    onToggle={() => setUpcomingExpanded(!upcomingExpanded)}
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                       {categorizedSessions.upcoming.map((s) => (
                         <div
                           key={s.id}
-                          className="p-3.5 rounded-xl border border-border/50 bg-card/50 hover:bg-card transition-all flex items-center justify-between gap-3 shadow-xs"
+                          className="p-3 rounded-lg border border-border/40 bg-card flex items-center justify-between gap-3 hover:bg-muted/30 transition-colors"
                         >
                           <div className="space-y-0.5 min-w-0 flex-1">
-                            <div className="font-semibold text-xs text-foreground truncate">
-                              {s.title || s.topic}
-                            </div>
-                            <div className="text-[11px] text-muted-foreground font-medium flex items-center gap-2 flex-wrap">
-                              <span className="flex items-center gap-1">
-                                <CalendarIcon className="size-3" />
-                                {format(
-                                  parseISO(s.scheduled_start),
-                                  "MMM d, HH:mm",
-                                )}{" "}
-                                ({s.duration_minutes}m)
-                              </span>
-                              {s.source_material_ids && s.source_material_ids.length > 0 && (
-                                <Badge variant="secondary" className="text-[9px] font-semibold bg-muted text-muted-foreground gap-1 px-1.5 py-0">
-                                  📄 {s.source_material_ids.length} materials
-                                </Badge>
-                              )}
-                            </div>
+                            <p className="text-xs font-medium text-foreground truncate">{s.title || s.topic}</p>
+                            <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                              <CalendarIcon className="size-2.5 shrink-0" />
+                              {format(parseISO(s.scheduled_start), "MMM d, HH:mm")}
+                              <span className="opacity-60">· {s.duration_minutes}m</span>
+                            </p>
                           </div>
-
                           <div className="flex items-center gap-1 shrink-0">
                             <Button
-                              variant="ghost"
-                              size="sm"
+                              variant="ghost" size="sm"
                               onClick={() => setRescheduleSession(s)}
-                              className="h-7 text-[11px] font-medium text-muted-foreground hover:text-foreground px-2"
+                              className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground"
                             >
                               Reschedule
                             </Button>
-
                             <Button
                               size="sm"
-                              onClick={() =>
-                                router.push(`/student/study/session/${s.id}`)
-                              }
-                              className="h-7 text-[11px] font-semibold rounded-lg gap-1 px-2.5"
+                              onClick={() => router.push(`/student/study/session/${s.id}`)}
+                              className="h-6 text-[11px] px-2 gap-1"
                             >
-                              <Play className="size-3 fill-white" /> Start
+                              <Play className="size-2.5 fill-current" /> Start
                             </Button>
                           </div>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* 3. Missed or Rescheduled Sessions Section */}
+                {/* Missed */}
                 {categorizedSessions.missedOrRescheduled.length > 0 && (
-                  <div className="space-y-2.5">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                      <AlertTriangle className="size-3.5" /> Missed / Rescheduled
-                      ({categorizedSessions.missedOrRescheduled.length})
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <CollapsibleSection
+                    icon={<AlertTriangle className="size-3.5" />}
+                    label="Missed"
+                    count={categorizedSessions.missedOrRescheduled.length}
+                    expanded={missedExpanded}
+                    onToggle={() => setMissedExpanded(!missedExpanded)}
+                    variant="warning"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                       {categorizedSessions.missedOrRescheduled.map((s) => (
                         <div
                           key={s.id}
-                          className="p-3.5 rounded-xl border border-amber-500/20 bg-amber-500/5 flex items-center justify-between gap-3"
+                          className="p-3 rounded-lg border border-border/40 bg-muted/20 flex items-center justify-between gap-3"
                         >
                           <div className="space-y-0.5 min-w-0 flex-1">
-                            <div className="font-semibold text-xs text-foreground truncate">
-                              {s.topic || s.title}
-                            </div>
-                            <div className="text-[11px] text-amber-700 dark:text-amber-300 font-medium">
-                              Originally:{" "}
-                              {format(
-                                parseISO(s.scheduled_start),
-                                "MMM d, HH:mm",
-                              )}
-                            </div>
+                            <p className="text-xs font-medium text-foreground truncate">{s.topic || s.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {format(parseISO(s.scheduled_start), "MMM d, HH:mm")}
+                            </p>
                           </div>
-
                           <Button
-                            size="sm"
-                            variant="outline"
+                            size="sm" variant="outline"
                             onClick={() => setRescheduleSession(s)}
-                            className="h-7 text-[11px] font-semibold border-amber-500/30 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 px-2.5"
+                            className="h-6 text-[11px] px-2 shrink-0 border-border/60"
                           >
                             Reschedule
                           </Button>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* 4. Completed Sessions Section */}
+                {/* Completed */}
                 {categorizedSessions.completed.length > 0 && (
-                  <div className="space-y-2.5 pt-1">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                      <CheckCircle2 className="size-3.5" /> Completed Sessions (
-                      {categorizedSessions.completed.length})
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  <CollapsibleSection
+                    icon={<CheckCircle2 className="size-3.5" />}
+                    label="Completed"
+                    count={categorizedSessions.completed.length}
+                    expanded={completedExpanded}
+                    onToggle={() => setCompletedExpanded(!completedExpanded)}
+                    variant="success"
+                  >
+                    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2">
                       {categorizedSessions.completed.map((s) => (
                         <div
                           key={s.id}
-                          className="p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 flex items-center justify-between gap-3"
+                          className="p-3 rounded-lg border border-border/40 bg-muted/10 flex items-center justify-between gap-3"
                         >
                           <div className="space-y-0.5 min-w-0 flex-1">
-                            <div className="font-semibold text-xs text-foreground truncate">
-                              {s.topic || s.title}
-                            </div>
-                            <div className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                              Completed • Score:{" "}
+                            <p className="text-xs font-medium text-foreground truncate">{s.topic || s.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
                               {s.knowledge_check_score
-                                ? `${Math.round(s.knowledge_check_score)}%`
+                                ? `Score: ${Math.round(s.knowledge_check_score)}%`
                                 : "Completed"}
-                            </div>
+                            </p>
                           </div>
-
                           <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              router.push(`/student/study/session/${s.id}`)
-                            }
-                            className="h-7 text-[11px] font-semibold border-emerald-500/30 text-emerald-700 dark:text-emerald-300 px-2.5"
+                            size="sm" variant="ghost"
+                            onClick={() => router.push(`/student/study/session/${s.id}`)}
+                            className="h-6 text-[11px] px-2 shrink-0 text-muted-foreground hover:text-foreground"
                           >
                             Review
                           </Button>
                         </div>
                       ))}
                     </div>
-                  </div>
+                  </CollapsibleSection>
                 )}
 
-                {/* Active Plans List Overview */}
-                <div className="pt-4 border-t border-border/40 space-y-3">
-                  <h3 className="text-sm font-semibold text-foreground">
-                    Active Study Plans ({plans.length})
-                  </h3>
-                  {plans.map((plan) => (
-                    <Card
-                      key={plan.id}
-                      className="rounded-xl border border-border/50 bg-card p-4 space-y-3 shadow-xs"
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/30 pb-3">
-                        <div>
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] uppercase font-semibold px-2 py-0.5 bg-primary/10 text-primary border-primary/20"
-                            >
-                              {plan.study_type}
-                            </Badge>
-                            <Badge
-                              variant="secondary"
-                              className="text-[9px] uppercase font-semibold"
-                            >
-                              {plan.priority} Priority
-                            </Badge>
-                            <Badge
-                              variant="outline"
-                              className="text-[9px] uppercase font-semibold bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                            >
-                              Readiness: {plan.readiness_score ?? 0}%
-                            </Badge>
-                          </div>
-                          <h4 className="text-base font-semibold text-foreground tracking-tight mt-1">
-                            {plan.title}
-                          </h4>
-                          <p className="text-xs text-muted-foreground font-medium">
-                            Goal: {plan.daily_goal} • Duration:{" "}
-                            {plan.session_duration_minutes} mins/session
-                          </p>
-                        </div>
-
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAdjustModalPlan(plan)}
-                          className="h-8 text-xs font-medium rounded-lg border-border/60 gap-1.5 self-start sm:self-auto"
+                {/* Active Plans */}
+                <div className="pt-2 border-t border-border/20 space-y-2.5">
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    Active plans ({plans.length})
+                  </p>
+                  {plans.map((plan) => {
+                    const isExpanded = expandedPlanIds.has(plan.id);
+                    return (
+                      <Card key={plan.id} className="rounded-xl border border-border/40 bg-card shadow-none overflow-hidden">
+                        {/* Plan header */}
+                        <div
+                          onClick={() => togglePlanExpanded(plan.id)}
+                          className="w-full flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 text-left hover:bg-muted/20 transition-colors cursor-pointer"
                         >
-                          <SlidersHorizontal className="size-3.5" /> Adjust Plan
-                        </Button>
-                      </div>
-
-                      {plan.sessions && plan.sessions.length > 0 && (
-                        <div className="space-y-2 pt-0.5">
-                          <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                            Plan Sessions ({plan.sessions.length})
-                          </span>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-2 max-h-48 overflow-y-auto pr-1">
-                            {plan.sessions.map((s) => (
-                              <div
-                                key={s.id}
-                                className="p-2.5 rounded-lg border border-border/40 bg-muted/20 flex items-center justify-between text-xs gap-2"
-                              >
-                                <div className="min-w-0 flex-1">
-                                  <div className="font-semibold text-foreground truncate">
-                                    {s.topic || s.title}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground">
-                                    {s.scheduled_start
-                                      ? format(
-                                          parseISO(s.scheduled_start),
-                                          "MMM d, HH:mm",
-                                        )
-                                      : "Unscheduled"}{" "}
-                                    • {s.status}
-                                  </div>
-                                </div>
-                                {s.status !== "COMPLETED" && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => setRescheduleSession(s)}
-                                    className="h-6 text-[10px] px-1.5 font-medium text-primary hover:bg-primary/10 shrink-0"
-                                  >
-                                    Reschedule
-                                  </Button>
-                                )}
-                              </div>
-                            ))}
+                          <div className="space-y-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <Badge variant="secondary" className="text-[10px] font-normal">{plan.study_type}</Badge>
+                              <Badge variant="outline" className="text-[10px] font-normal border-border/60">{plan.priority} priority</Badge>
+                              <Badge variant="outline" className="text-[10px] font-normal border-border/60">{plan.readiness_score ?? 0}% ready</Badge>
+                            </div>
+                            <p className="text-sm font-medium text-foreground">{plan.title}</p>
+                            <p className="text-[11px] text-muted-foreground">
+                              {plan.daily_goal} · {plan.session_duration_minutes} min/session
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0 self-start sm:self-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={(e) => { e.stopPropagation(); setAdjustModalPlan(plan); }}
+                              className="h-7 text-xs text-muted-foreground hover:text-foreground px-2 gap-1"
+                            >
+                              <SlidersHorizontal className="size-3" /> Adjust
+                            </Button>
+                            <div className="p-1 text-muted-foreground">
+                              {isExpanded
+                                ? <ChevronUp className="size-4" />
+                                : <ChevronDown className="size-4" />}
+                            </div>
                           </div>
                         </div>
-                      )}
-                    </Card>
-                  ))}
+
+                        {/* Plan sessions */}
+                        {isExpanded && plan.sessions && plan.sessions.length > 0 && (
+                          <div className="border-t border-border/30 p-4 space-y-2">
+                            <p className="text-[11px] text-muted-foreground">
+                              {plan.sessions.length} sessions
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
+                              {plan.sessions.map((s) => (
+                                <div
+                                  key={s.id}
+                                  className="px-2.5 py-2 rounded-lg border border-border/30 bg-muted/10 flex items-center justify-between gap-2"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-[11px] font-medium text-foreground truncate">{s.topic || s.title}</p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      {s.scheduled_start
+                                        ? format(parseISO(s.scheduled_start), "MMM d, HH:mm")
+                                        : "Unscheduled"} · {s.status.toLowerCase()}
+                                    </p>
+                                  </div>
+                                  {s.status !== "COMPLETED" && (
+                                    <Button
+                                      variant="ghost" size="sm"
+                                      onClick={() => setRescheduleSession(s)}
+                                      className="h-5 text-[10px] px-1.5 text-muted-foreground hover:text-foreground shrink-0"
+                                    >
+                                      Reschedule
+                                    </Button>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </Card>
+                    );
+                  })}
                 </div>
               </>
             )}
           </div>
         )}
-      </HeroUITabs>
+      </Tabs>
 
-      {/* Full-Screen Distraction-Free AI Tutor Modal */}
+      {/* AI Tutor Modal */}
       <Dialog open={aiTutorModalOpen} onOpenChange={setAiTutorModalOpen}>
         <DialogContent className="fixed inset-2 sm:inset-4 md:inset-6 max-w-none max-h-none w-auto h-auto translate-x-0 translate-y-0 p-0 rounded-2xl border border-border bg-background shadow-2xl flex flex-col overflow-hidden sm:max-w-none">
-          <DialogHeader className="p-4 border-b border-border/60 bg-muted/30 flex flex-row items-center justify-between space-y-0 shrink-0">
-            <div className="flex items-center gap-3">
-              <div className="size-9 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-                <Bot className="size-5" />
-              </div>
-              <div>
-                <DialogTitle className="text-sm font-bold text-foreground flex items-center gap-2">
-                  Study AI Tutor & Academic Coach
-                </DialogTitle>
-                <p className="text-xs text-muted-foreground">
-                  Ask questions, request explanations, or practice concepts.
-                </p>
-              </div>
+          <DialogHeader className="px-4 py-3 border-b border-border/40 flex flex-row items-center gap-3 space-y-0 shrink-0">
+            <div className="size-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
+              <Bot className="size-4" />
+            </div>
+            <div>
+              <DialogTitle className="text-sm font-medium text-foreground">Study AI Tutor</DialogTitle>
+              <p className="text-xs text-muted-foreground">Ask questions, request explanations, or practice concepts.</p>
             </div>
           </DialogHeader>
           <div className="flex-1 overflow-hidden p-4">
@@ -603,31 +505,69 @@ export default function StudentStudyPage() {
         onSuccess={loadData}
         initialAssessmentId={initialAssessmentForWizard}
       />
-
       <SessionCompletionModal
         session={completeModalSession}
         open={!!completeModalSession}
-        onOpenChange={(open) => {
-          if (!open) setCompleteModalSession(null);
-        }}
+        onOpenChange={(open) => { if (!open) setCompleteModalSession(null); }}
         onCompleted={loadData}
       />
-
       <PlanAdjustmentModal
         plan={adjustModalPlan}
         open={!!adjustModalPlan}
-        onOpenChange={(open) => {
-          if (!open) setAdjustModalPlan(null);
-        }}
+        onOpenChange={(open) => { if (!open) setAdjustModalPlan(null); }}
         onAdjusted={loadData}
       />
-
       <RescheduleModal
         session={rescheduleSession}
         isOpen={!!rescheduleSession}
         onClose={() => setRescheduleSession(null)}
         onSessionUpdated={loadData}
       />
+    </div>
+  );
+}
+
+// ── CollapsibleSection ────────────────────────────────────────────────────────
+interface CollapsibleSectionProps {
+  icon: React.ReactNode;
+  label: string;
+  count?: number;
+  expanded: boolean;
+  onToggle: () => void;
+  accent?: boolean;
+  variant?: "default" | "warning" | "success";
+  children: React.ReactNode;
+}
+
+function CollapsibleSection({
+  icon, label, count, expanded, onToggle, accent, variant = "default", children,
+}: CollapsibleSectionProps) {
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={onToggle}
+        className="flex items-center gap-2 w-full group"
+      >
+        <div className={cn(
+          "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider flex-1",
+          variant === "warning" && "text-amber-500 dark:text-amber-400",
+          variant === "success" && "text-emerald-600 dark:text-emerald-400",
+          variant === "default" && !accent && "text-muted-foreground",
+          accent && "text-primary",
+        )}>
+          {icon}
+          {label}
+          {count !== undefined && (
+            <span className="text-muted-foreground font-normal normal-case tracking-normal">
+              ({count})
+            </span>
+          )}
+        </div>
+        <div className="text-muted-foreground group-hover:text-foreground transition-colors">
+          {expanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </div>
+      </button>
+      {expanded && children}
     </div>
   );
 }

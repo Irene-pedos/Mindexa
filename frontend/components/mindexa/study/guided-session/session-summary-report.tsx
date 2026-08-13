@@ -2,13 +2,14 @@
 
 import React from "react";
 import {
-  CheckCircle2,
   Trophy,
   Flame,
   TrendingUp,
   Sparkles,
   ArrowRight,
   BookOpen,
+  Clock,
+  CheckCircle2,
 } from "lucide-react";
 import {
   Card,
@@ -34,50 +35,52 @@ export function SessionSummaryReport({
   onReturnToPlanner,
 }: SessionSummaryReportProps) {
   return (
-    <Card className="border-border/70 bg-card shadow-2xl rounded-2xl overflow-hidden max-w-3xl mx-auto space-y-6 animate-in fade-in zoom-in-95 duration-400">
-      <CardHeader className="border-b border-border/50 bg-gradient-to-r from-primary/10 via-indigo-500/10 to-emerald-500/10 px-8 py-8 text-center">
-        <div className="mx-auto size-20 rounded-full bg-gradient-to-tr from-primary to-indigo-600 flex items-center justify-center text-primary-foreground shadow-lg mb-4">
-          <Trophy className="size-10" />
+    <Card className="w-full border border-border bg-card rounded-2xl overflow-hidden space-y-6 shadow-xs animate-in fade-in duration-300">
+      {/* Clean, Non-Gradient Header */}
+      <CardHeader className="border-b border-border/60 bg-background px-6 sm:px-8 py-6 text-center space-y-3">
+        <div className="mx-auto inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-xs font-semibold">
+          <Trophy className="size-4 text-emerald-600 dark:text-emerald-400" />
+          <span>Guided Session Completed</span>
         </div>
-        <Badge
-          variant="outline"
-          className="mx-auto text-xs font-bold border-primary/30 text-primary bg-primary/10 px-3 py-1 mb-2"
-        >
-          Guided Session Completed
-        </Badge>
-        <CardTitle className="text-2xl md:text-3xl font-black tracking-tight text-foreground">
-          {session.topic}
-        </CardTitle>
-        <p className="text-xs text-muted-foreground mt-1 font-medium">
-          {session.title}
-        </p>
+        
+        <div className="space-y-1">
+          <CardTitle className="text-xl sm:text-2xl md:text-3xl font-bold tracking-tight text-foreground">
+            {session.topic}
+          </CardTitle>
+          {session.title && (
+            <p className="text-xs sm:text-sm text-muted-foreground font-medium">
+              {session.title}
+            </p>
+          )}
+        </div>
       </CardHeader>
 
-      <CardContent className="px-8 space-y-6">
-        {/* Highlight Stats Row */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-center space-y-1">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1">
-              <Flame className="size-3.5 text-amber-500" /> Streak Active
+      <CardContent className="px-4 sm:px-6 md:px-8 space-y-6">
+        {/* Responsive Stats Row (1-col on mobile, 3-col on sm/md) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+          <div className="p-4 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/30 transition-colors text-center space-y-1 flex flex-col items-center justify-center">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1.5">
+              <Flame className="size-3.5 text-amber-500" /> Streak Status
             </span>
-            <p className="text-xl font-black text-foreground">Done</p>
+            <p className="text-lg sm:text-xl font-bold text-foreground flex items-center gap-1">
+              <CheckCircle2 className="size-4 text-emerald-500 inline" /> Active
+            </p>
           </div>
 
-          <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-center space-y-1">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1">
-              <TrendingUp className="size-3.5 text-emerald-500" /> Knowledge
-              Check
+          <div className="p-4 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/30 transition-colors text-center space-y-1 flex flex-col items-center justify-center">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1.5">
+              <TrendingUp className="size-3.5 text-emerald-500" /> Knowledge Check
             </span>
-            <p className="text-xl font-black text-foreground">
+            <p className="text-lg sm:text-xl font-bold text-foreground">
               {report ? `${Math.round(report.score_percentage)}%` : "Completed"}
             </p>
           </div>
 
-          <div className="p-4 rounded-xl border border-border/60 bg-muted/20 text-center space-y-1">
-            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1">
-              <BookOpen className="size-3.5 text-primary" /> Session Time
+          <div className="p-4 rounded-xl border border-border/70 bg-muted/20 hover:bg-muted/30 transition-colors text-center space-y-1 flex flex-col items-center justify-center">
+            <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center justify-center gap-1.5">
+              <Clock className="size-3.5 text-primary" /> Session Time
             </span>
-            <p className="text-xl font-black text-foreground">
+            <p className="text-lg sm:text-xl font-bold text-foreground">
               {session.duration_minutes}m
             </p>
           </div>
@@ -85,7 +88,7 @@ export function SessionSummaryReport({
 
         {/* AI Session Summary Report */}
         {session.session_summary_text && (
-          <div className="p-6 rounded-xl border border-primary/20 bg-primary/5 space-y-3">
+          <div className="p-4 sm:p-6 rounded-xl border border-primary/20 bg-primary/5 space-y-3">
             <h4 className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-primary">
               <Sparkles className="size-4" /> AI Session Takeaways & Summary
             </h4>
@@ -161,10 +164,10 @@ export function SessionSummaryReport({
         )}
       </CardContent>
 
-      <CardFooter className="px-8 py-6 border-t border-border/50 flex justify-center">
+      <CardFooter className="px-4 sm:px-6 md:px-8 py-5 border-t border-border/60 bg-muted/10 flex justify-center">
         <Button
           onClick={onReturnToPlanner}
-          className="w-full md:w-auto text-xs font-bold px-8 h-11 rounded-xl bg-gradient-to-r from-primary to-indigo-600 hover:from-primary/90 text-primary-foreground shadow-lg gap-2"
+          className="w-full sm:w-auto text-xs font-semibold px-8 h-10 rounded-xl gap-2 shadow-xs cursor-pointer"
         >
           Return to Learning Workspace <ArrowRight className="size-4" />
         </Button>

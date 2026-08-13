@@ -223,7 +223,7 @@ class Settings(BaseSettings):
 
     # ─── Google Gemini ────────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""
-    GEMINI_DEFAULT_MODEL: str = "gemini-2.0-flash"
+    GEMINI_DEFAULT_MODEL: str = "gemini-2.5-flash"
 
     # ─── Vector Store ─────────────────────────────────────────────────────────
     VECTOR_STORE: Literal["pgvector", "qdrant"] = "pgvector"

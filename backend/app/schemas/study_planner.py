@@ -156,6 +156,8 @@ class CreateStudyPlanRequest(BaseModel):
 
 class GeneratePlanFromAssessmentRequest(BaseModel):
     assessment_id: uuid.UUID
+    start_date: Optional[datetime] = None  # User-selected start; falls back to now() when omitted
+    end_date: Optional[datetime] = None    # User-selected end; falls back to assessment window when omitted
     target_mode: str = Field(default="full_assessment_coverage")
     target_learning_unit_id: Optional[uuid.UUID] = None
     available_days: List[str] = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -171,6 +173,8 @@ class GeneratePlanFromAssessmentRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_blackouts(self) -> Self:
+        if self.start_date and self.end_date and self.end_date <= self.start_date:
+            raise ValueError("end_date must be strictly after start_date")
         cleaned_blackouts = []
         for d in self.blackout_dates:
             d_str = str(d).strip()

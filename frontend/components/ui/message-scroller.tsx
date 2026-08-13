@@ -95,7 +95,41 @@ export function MessageScroller({ children, className }: { children: React.React
 }
 
 export function MessageScrollerViewport({ children, className }: { children: React.ReactNode; className?: string }) {
-  const { viewportRef } = useMessageScroller();
+  const { viewportRef, setIsAtBottom, setShowScrollButton } = useMessageScroller();
+
+  // Disengage auto-scroll on any deliberate user interaction so they
+  // aren't pulled back to the bottom while reading, selecting text, or
+  // using keyboard navigation. Auto-scroll re-engages automatically
+  // when the user scrolls back to the bottom (handleScroll in MessageScroller).
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el) return;
+
+    const disengage = () => {
+      const offset = 25;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight <= offset;
+      if (!atBottom) {
+        setIsAtBottom(false);
+        setShowScrollButton(el.scrollHeight > el.clientHeight);
+      }
+    };
+
+    const onSelectionChange = () => {
+      if (document.getSelection()?.toString()) disengage();
+    };
+
+    el.addEventListener("mousedown", disengage, { passive: true });
+    el.addEventListener("keydown", disengage, { passive: true });
+    el.addEventListener("selectstart", disengage, { passive: true });
+    document.addEventListener("selectionchange", onSelectionChange, { passive: true });
+
+    return () => {
+      el.removeEventListener("mousedown", disengage);
+      el.removeEventListener("keydown", disengage);
+      el.removeEventListener("selectstart", disengage);
+      document.removeEventListener("selectionchange", onSelectionChange);
+    };
+  }, [viewportRef, setIsAtBottom, setShowScrollButton]);
 
   return (
     <div

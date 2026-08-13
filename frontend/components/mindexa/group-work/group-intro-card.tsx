@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 
 interface GroupIntroCardProps {
   assessment: any;
@@ -61,7 +62,8 @@ export function GroupIntroCard({ assessment, groupName }: GroupIntroCardProps) {
             </div>
           </div>
           <div className="flex items-center gap-3 self-end md:self-auto">
-             <div className="flex flex-wrap gap-2">
+             <div className="flex flex-wrap items-center gap-2">
+                <ContextualExplainer topic="group-leadership" variant="pill" label="Leadership Rules" />
                 <Badge variant="secondary" className="h-7 px-3 bg-background border shadow-none text-[10px] font-bold uppercase tracking-wider">
                   Group: {groupName}
                 </Badge>

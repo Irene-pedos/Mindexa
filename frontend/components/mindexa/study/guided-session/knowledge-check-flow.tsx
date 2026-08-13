@@ -298,6 +298,14 @@ export function KnowledgeCheckFlow({
   const currentQ = questions[currentIdx];
   const qType = (currentQ.question_type || "MCQ").toUpperCase();
 
+  // Defensive: only render the DnD fill-in-the-blanks component when the
+  // question_text actually contains ___ markers. Malformed questions (plain
+  // prose tagged as FILL_BLANKS) fall through to the SHORT_ANSWER branch.
+  const HAS_BLANK_MARKER = /_{2,}/;
+  const rawFillBlank =
+    qType === "FILL_BLANKS" || qType === "FILL_BLANK" || qType === "FILL_IN_BLANK";
+  const isFillBlank = rawFillBlank && HAS_BLANK_MARKER.test(currentQ.question_text);
+
   return (
     <Card className="border-border/70 bg-card shadow-lg rounded-2xl overflow-hidden">
       <CardHeader className="border-b border-border/50 bg-muted/20 px-6 py-5 space-y-3">
@@ -350,9 +358,7 @@ export function KnowledgeCheckFlow({
         )}
 
         {/* 2. FILL_BLANKS Question Type */}
-        {(qType === "FILL_BLANKS" ||
-          qType === "FILL_BLANK" ||
-          qType === "FILL_IN_BLANK") && (
+        {isFillBlank && (
           <SharedFillInTheBlanksDnd
             questionText={currentQ.question_text}
             options={(currentQ.options || []).map((optStr, idx) => ({
@@ -390,8 +396,8 @@ export function KnowledgeCheckFlow({
           </div>
         )}
 
-        {/* 4. SHORT_ANSWER Question Type */}
-        {qType === "SHORT_ANSWER" && (
+        {/* 4. SHORT_ANSWER Question Type (also handles malformed FILL_BLANKS with no ___ markers) */}
+        {(qType === "SHORT_ANSWER" || (rawFillBlank && !isFillBlank)) && (
           <div className="space-y-2">
             <label className="text-xs font-semibold text-muted-foreground block">
               Provide your concise written response:

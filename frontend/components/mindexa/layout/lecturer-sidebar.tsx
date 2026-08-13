@@ -54,7 +54,7 @@ import { NotificationType } from "@/lib/api/notification/notificationTypes";
 import { User } from "@/lib/types/user";
 
 const mainNav = [
-  { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard },
+  { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard, tourId: "lecturer-dashboard" },
   {
     title: "My Assignments",
     url: "/lecturer/assignments",
@@ -62,7 +62,7 @@ const mainNav = [
     badge: true,
   },
   { title: "My Workspaces", url: "/lecturer/courses", icon: BookOpen },
-  { title: "Assessments", url: "/lecturer/assessments", icon: FileText },
+  { title: "Assessments", url: "/lecturer/assessments", icon: FileText, tourId: "lecturer-create-assessment" },
   {
     title: "Question Bank",
     url: "/lecturer/question-bank",
@@ -225,7 +225,7 @@ export function LecturerSidebar({
                         "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
                     )}
                   >
-                    <Link href={item.url} className="relative">
+                    <Link href={item.url} data-tour={item.tourId} className="relative">
                       <item.icon className="size-5" aria-hidden="true" />
                       <span>{item.title}</span>
                       {showBadge && (

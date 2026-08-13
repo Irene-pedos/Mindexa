@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import HeroUITabs from "@/components/ui/heroui-tabs";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useRouter } from "next/navigation";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -39,7 +39,10 @@ import {
   HelpCircle,
   FileText,
   AlertCircle,
+  Zap,
+  XCircle,
 } from "lucide-react";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 import { cn } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { notificationApi } from "@/lib/api/notification";
@@ -392,7 +395,7 @@ export default function StudentAssessmentsPage() {
 
 
   return (
-    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
+    <div data-tour="student-assessments" className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
       {/* Precision Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-border/25">
         <div className="space-y-0.5">
@@ -427,34 +430,37 @@ export default function StudentAssessmentsPage() {
         </div>
       </div>
 
-      <HeroUITabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
-        <HeroUITabs.ListContainer>
-          <HeroUITabs.List aria-label="Assessment categories">
-            <HeroUITabs.Tab id="active" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
-              Active <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("active")}</span>
-              {hasNewInCategory("active") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="upcoming" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
-              Upcoming <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("upcoming")}</span>
-              {hasNewInCategory("upcoming") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="submitted" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
-              Submitted <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("submitted")}</span>
-              {hasNewInCategory("submitted") && <span className="absolute top-0.5 right-[-4px] size-1.5 rounded-full bg-red-500 animate-pulse" />}
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="missed" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all">
-              Missed <span className="ml-1.5 bg-muted px-1.5 py-0.5 rounded text-[10px] text-muted-foreground font-semibold">{getCount("missed")}</span>
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-            <HeroUITabs.Tab id="violations" className="text-xs font-medium px-1 pb-2.5 pt-1 relative transition-all data-[selected=true]:text-destructive">
-              Violations <span className="ml-1.5 bg-destructive/10 px-1.5 py-0.5 rounded text-[10px] text-destructive font-semibold">{getCount("violations")}</span>
-              <HeroUITabs.Indicator />
-            </HeroUITabs.Tab>
-          </HeroUITabs.List>
-        </HeroUITabs.ListContainer>
+      <Tabs value={filterTab} onValueChange={(v) => { setFilterTab(v); if (!visitedTabs.includes(v)) setVisitedTabs([...visitedTabs, v]); }} className="w-full">
+        <TabsList className="h-auto p-1 flex-wrap">
+          <TabsTrigger value="active" className="relative">
+            <Zap className="size-3.5" />
+            Active
+            <span className="ml-1 opacity-70 font-normal text-[10px]">({getCount("active")})</span>
+            {hasNewInCategory("active") && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-red-400 animate-pulse" />}
+          </TabsTrigger>
+          <TabsTrigger value="upcoming" className="relative">
+            <Calendar className="size-3.5" />
+            Upcoming
+            <span className="ml-1 opacity-70 font-normal text-[10px]">({getCount("upcoming")})</span>
+            {hasNewInCategory("upcoming") && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-red-400 animate-pulse" />}
+          </TabsTrigger>
+          <TabsTrigger value="submitted" className="relative">
+            <CheckCircle2 className="size-3.5" />
+            Submitted
+            <span className="ml-1 opacity-70 font-normal text-[10px]">({getCount("submitted")})</span>
+            {hasNewInCategory("submitted") && <span className="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-red-400 animate-pulse" />}
+          </TabsTrigger>
+          <TabsTrigger value="missed">
+            <TimerOff className="size-3.5" />
+            Missed
+            <span className="ml-1 opacity-70 font-normal text-[10px]">({getCount("missed")})</span>
+          </TabsTrigger>
+          <TabsTrigger value="violations" className="data-[state=active]:bg-destructive">
+            <XCircle className="size-3.5" />
+            Violations
+            <span className="ml-1 opacity-70 font-normal text-[10px]">({getCount("violations")})</span>
+          </TabsTrigger>
+        </TabsList>
 
         <div className="space-y-3 pt-3">
           {loading ? (
@@ -469,7 +475,7 @@ export default function StudentAssessmentsPage() {
             </div>
           )}
         </div>
-      </HeroUITabs>
+      </Tabs>
 
       {/* Pagination Controls */}
       {total > pageSize && (
@@ -518,9 +524,12 @@ export default function StudentAssessmentsPage() {
       >
         <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
           <DialogHeader className="space-y-1">
-            <DialogTitle className="text-base font-semibold text-foreground">
-              Pre-flight Security Check-in
-            </DialogTitle>
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-base font-semibold text-foreground">
+                Pre-flight Security Check-in
+              </DialogTitle>
+              <ContextualExplainer topic="start-assessment" variant="pill" label="What to expect?" />
+            </div>
             <DialogDescription className="text-xs text-muted-foreground">
               Please review the following requirements before starting the assessment.
             </DialogDescription>
@@ -530,8 +539,11 @@ export default function StudentAssessmentsPage() {
             {/* Fullscreen Rules */}
             <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
               <ShieldAlert className="size-4 text-primary shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
+              <div className="space-y-0.5 flex-1">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
+                  <ContextualExplainer topic="fullscreen-integrity" variant="icon" />
+                </div>
                 <p className="text-[11px] text-muted-foreground leading-normal font-medium">
                   {selectedAssessmentForStart?.fullscreen_required 
                     ? "This exam enforces lock-down fullscreen. You must not exit fullscreen mode." 

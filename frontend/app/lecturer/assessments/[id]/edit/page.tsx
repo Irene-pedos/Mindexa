@@ -2784,6 +2784,22 @@ export default function EditAssessmentPage() {
       audience_type: m.audience_type,
       target_student_ids: m.target_student_ids,
     };
+
+    // Compute window_start / window_end from date + time parts
+    if (m.date && m.startTime) {
+      const [h, min] = m.startTime.split(":").map(Number);
+      const d = new Date(m.date);
+      d.setHours(h, min, 0, 0);
+      payload.window_start = d.toISOString();
+    }
+    if (m.date && m.endTime) {
+      const [h, min] = m.endTime.split(":").map(Number);
+      const d = new Date(m.date);
+      d.setHours(h, min, 0, 0);
+      if (m.startTime && m.endTime < m.startTime) d.setDate(d.getDate() + 1);
+      payload.window_end = d.toISOString();
+    }
+
     return payload;
   };
 
@@ -2970,9 +2986,11 @@ export default function EditAssessmentPage() {
           body: JSON.stringify(preparePayload()),
         });
       } else {
+        // For PUBLISHED/SCHEDULED assessments use the flat AssessmentGeneralUpdate
+        // schema expected by PUT /assessments/{id}, NOT the nested bulk payload.
         await apiClient(`/assessments/${id}`, {
           method: "PUT",
-          body: JSON.stringify(preparePayload()),
+          body: JSON.stringify(prepareWizardPayload(1)),
         });
       }
       setRules((prev) => ({ ...prev, accessPassword: "" }));

@@ -167,4 +167,11 @@ export const authApi = {
       body: formData,
     });
   },
+
+  updateTourProgress: async (data: { step: number; variant?: string; completed?: boolean }) => {
+    return apiClient("/auth/me/tour", {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
 };

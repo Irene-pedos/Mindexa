@@ -161,8 +161,13 @@ class StudyPlannerService:
             raise ValueError("Assessment not found")
 
         now = datetime.now(UTC)
-        start_date = _ensure_utc(now)
-        end_date = _ensure_utc(assessment.window_start or assessment.window_end or (now + timedelta(days=7)))
+        # Prefer user-supplied dates; fall back to assessment window / now only when omitted.
+        start_date = _ensure_utc(data.start_date) if data.start_date else _ensure_utc(now)
+        end_date = (
+            _ensure_utc(data.end_date)
+            if data.end_date
+            else _ensure_utc(assessment.window_start or assessment.window_end or (now + timedelta(days=7)))
+        )
         if end_date <= start_date:
             end_date = start_date + timedelta(days=7)
 
@@ -1004,25 +1009,52 @@ class StudyPlannerService:
         dur = new_duration or session.duration_minutes
         proposed_end = new_start_utc + timedelta(minutes=dur)
 
-        # Conflict validation against other active student sessions
         if not force:
-            try:
-                plans = await self.repo.list_plans_for_student(student_id)
-                if isinstance(plans, list):
-                    for p in plans:
-                        for s in (getattr(p, "sessions", []) or []):
-                            if getattr(s, "id", None) != session_id and getattr(s, "status", None) in ["SCHEDULED", "RESCHEDULED", "IN_PROGRESS"]:
-                                s_start = _ensure_utc(getattr(s, "scheduled_start", None))
-                                s_end = _ensure_utc(getattr(s, "scheduled_end", None))
-                                if s_start and s_end and s_start < proposed_end and s_end > new_start_utc:
-                                    conflict_title = getattr(s, "topic", None) or getattr(s, "title", "Existing Session")
-                                    raise ConflictError(
-                                        f"Schedule conflict detected: proposed time overlaps with existing session '{conflict_title}' ({s_start.strftime('%b %d, %H:%M')}). Set force=True to proceed anyway."
-                                    )
-            except ValueError:
-                raise
-            except Exception as exc:
-                logger.warning("Schedule conflict check skipped due to repo/mock error", error=str(exc))
+            # ── Issue B: Plan-boundary & blackout-date enforcement ──────────────
+            # Load the parent plan to validate date/blackout constraints.
+            plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
+            if plan:
+                plan_start = _ensure_utc(plan.start_date)
+                plan_end = _ensure_utc(plan.end_date)
+
+                if plan_start and new_start_utc < plan_start:
+                    raise ConflictError(
+                        f"Cannot reschedule before the plan's start date "
+                        f"({plan_start.strftime('%b %d, %Y')}). "
+                        f"Set force=True to override."
+                    )
+                if plan_end and proposed_end > plan_end:
+                    raise ConflictError(
+                        f"Cannot reschedule past the plan's end date "
+                        f"({plan_end.strftime('%b %d, %Y')}). "
+                        f"Set force=True to override."
+                    )
+                date_str = new_start_utc.strftime("%Y-%m-%d")
+                if date_str in set(plan.blackout_dates or []):
+                    raise ConflictError(
+                        f"{date_str} is a blackout date on this plan. "
+                        f"Set force=True to override."
+                    )
+
+            # ── Issue A: Conflict detection via the shared helper ────────────────
+            # Previously this was a duplicated inline loop inside try/except Exception,
+            # which silently swallowed ConflictError (not a ValueError subclass) and
+            # allowed the session to be moved into the conflicting slot.
+            conflict = await self._find_conflicts_for_slot(
+                student_id,
+                new_start_utc,
+                proposed_end,
+                exclude_session_id=session_id,
+            )
+            if conflict:
+                conflict_title = getattr(conflict, "topic", None) or getattr(conflict, "title", "Existing Session")
+                conflict_start = _ensure_utc(getattr(conflict, "scheduled_start", None))
+                conflict_time = conflict_start.strftime("%b %d, %H:%M") if conflict_start else "unknown time"
+                raise ConflictError(
+                    f"Schedule conflict detected: proposed time overlaps with existing session "
+                    f"'{conflict_title}' ({conflict_time}). "
+                    f"Set force=True to proceed anyway."
+                )
 
         session.scheduled_start = new_start_utc
         session.duration_minutes = dur
@@ -1032,6 +1064,7 @@ class StudyPlannerService:
         await self.repo.update_session(session)
         await self.db.commit()
         return self._format_session(session)
+
 
     async def adjust_plan(
         self, plan_id: uuid.UUID, student_id: uuid.UUID, action: str

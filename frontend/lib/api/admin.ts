@@ -43,6 +43,22 @@ export interface UserProfileResponse {
   level?: string;
   year?: string;
   assigned_courses?: string[];
+  simple_mode_enabled?: boolean;
+  extra_time_percent?: number;
+  requires_screen_reader_mode?: boolean;
+  large_text_default?: boolean;
+  reduced_motion_default?: boolean;
+  accommodations_note?: string;
+  updated_at?: string;
+}
+
+export interface AdminAccommodationsUpdate {
+  extra_time_percent?: number;
+  requires_screen_reader_mode?: boolean;
+  large_text_default?: boolean;
+  simple_mode_enabled?: boolean;
+  reduced_motion_default?: boolean;
+  reason: string;
 }
 
 export interface UserResponse {
@@ -251,6 +267,15 @@ export const adminApi = {
   },
   updateInstitution: async (id: string, data: any): Promise<any> => {
     return apiClient(`/admin/institutions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  updateAccommodations: async (
+    userId: string,
+    data: AdminAccommodationsUpdate
+  ): Promise<UserResponse> => {
+    return apiClient(`/admin/users/${userId}/accommodations`, {
       method: "PATCH",
       body: JSON.stringify(data),
     });

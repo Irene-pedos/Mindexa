@@ -29,12 +29,12 @@ def test_study_support_agent_build_system_prompt() -> None:
     agent = StudySupportAgent(FakeGateway("Hello"))
     
     prompt_with_context = agent._build_system_prompt(has_context=True)
-    assert "Mindexa Study Support Agent" in prompt_with_context
-    assert "using ONLY the provided course material context" in prompt_with_context
+    assert "Mindexa's AI Study Tutor" in prompt_with_context
+    assert "DIRECT ANSWER FIRST" in prompt_with_context
 
     prompt_without_context = agent._build_system_prompt(has_context=False)
-    assert "Mindexa Study Support Agent" in prompt_without_context
-    assert "Answer from general academic knowledge only" in prompt_without_context
+    assert "Mindexa's AI Study Tutor" in prompt_without_context
+    assert "MANDATORY GENERAL KNOWLEDGE DISCLAIMER" in prompt_without_context
 
 
 def test_study_support_agent_build_user_prompt() -> None:

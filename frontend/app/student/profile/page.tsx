@@ -16,7 +16,8 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
-import { User, Mail, Phone, Shield, Bell, BookOpen } from "lucide-react";
+import { User, Mail, Phone, Shield, Bell, BookOpen, Accessibility } from "lucide-react";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 import { useAuth } from "@/hooks/use-auth";
 import { authApi } from "@/lib/api/auth";
 import { toast } from "sonner";
@@ -31,6 +32,9 @@ export default function ProfileSettingsPage() {
     first_name: "",
     last_name: "",
     phone_number: "",
+    simple_mode_enabled: false,
+    large_text_default: false,
+    reduced_motion_default: false,
   });
 
   // BUG-16 fix: notification preferences with persistent state
@@ -53,6 +57,9 @@ export default function ProfileSettingsPage() {
         first_name: user.profile?.first_name || "",
         last_name: user.profile?.last_name || "",
         phone_number: user.profile?.phone_number || "",
+        simple_mode_enabled: !!user.profile?.simple_mode_enabled,
+        large_text_default: !!user.profile?.large_text_default,
+        reduced_motion_default: !!user.profile?.reduced_motion_default,
       });
       setInitialLoading(false);
     }
@@ -296,6 +303,93 @@ export default function ProfileSettingsPage() {
                 <p className="text-[9px] text-muted-foreground uppercase font-bold tracking-wider">
                   JPG or PNG. Max 2MB.
                 </p>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Accessibility & Accommodations */}
+          <Card className="bg-card/30 border border-border/45 rounded-xl shadow-sm overflow-hidden">
+            <CardHeader className="pb-2.5 pt-4.5 px-5">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+                  <Accessibility className="size-5 text-primary" /> Accessibility & Accommodations
+                </CardTitle>
+                <ContextualExplainer topic="accommodations" variant="pill" label="Policy Info" />
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4 px-5 pb-5">
+              <div className="space-y-3">
+                <div className="p-3 rounded-lg bg-primary/5 border border-primary/15 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-foreground">Extra Time Multiplier</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      Server-enforced accommodation
+                    </div>
+                  </div>
+                  <Badge variant={user?.profile?.extra_time_percent ? "default" : "outline"} className="text-xs font-bold">
+                    {user?.profile?.extra_time_percent ? `+${user.profile.extra_time_percent}% Extra Time` : "Standard (0%)"}
+                  </Badge>
+                </div>
+
+                <div className="p-3 rounded-lg bg-muted/40 border border-border/50 flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-foreground">Screen-Reader Mode</div>
+                    <div className="text-[10px] text-muted-foreground mt-0.5">
+                      Institutional accommodation preset
+                    </div>
+                  </div>
+                  <Badge variant={user?.profile?.requires_screen_reader_mode ? "default" : "outline"} className="text-xs font-bold">
+                    {user?.profile?.requires_screen_reader_mode ? "Active / Required" : "Standard UI"}
+                  </Badge>
+                </div>
+              </div>
+
+              <Separator className="bg-border/40" />
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-foreground">Simple Mode (Tier 1)</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    High-clarity interface with enlarged touch targets
+                  </div>
+                </div>
+                <Switch
+                  checked={formData.simple_mode_enabled}
+                  onCheckedChange={(val) => setFormData((prev) => ({ ...prev, simple_mode_enabled: val }))}
+                  id="pref-simple-mode"
+                />
+              </div>
+
+              <Separator className="bg-border/40" />
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-foreground">Large Text Default</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Enlarged default reading typography
+                  </div>
+                </div>
+                <Switch
+                  checked={formData.large_text_default}
+                  onCheckedChange={(val) => setFormData((prev) => ({ ...prev, large_text_default: val }))}
+                  id="pref-large-text"
+                />
+              </div>
+
+              <Separator className="bg-border/40" />
+
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-bold text-foreground">Reduced Motion</div>
+                  <div className="text-[10px] text-muted-foreground mt-0.5">
+                    Minimize UI transitions and animations
+                  </div>
+                </div>
+                <Switch
+                  checked={formData.reduced_motion_default}
+                  onCheckedChange={(val) => setFormData((prev) => ({ ...prev, reduced_motion_default: val }))}
+                  id="pref-reduced-motion"
+                />
               </div>
             </CardContent>
           </Card>

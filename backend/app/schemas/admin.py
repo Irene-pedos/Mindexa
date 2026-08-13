@@ -59,6 +59,15 @@ class AdminUserStatusUpdate(BaseModel):
     """Request to update a user's status."""
     status: str # Should match UserStatus enum values
 
+class AdminUserAccommodationsUpdate(BaseModel):
+    """Request to update a student's accessibility accommodations and digital literacy tier."""
+    extra_time_percent: Optional[int] = None
+    requires_screen_reader_mode: Optional[bool] = None
+    large_text_default: Optional[bool] = None
+    simple_mode_enabled: Optional[bool] = None
+    reduced_motion_default: Optional[bool] = None
+    reason: Optional[str] = None
+
 class AdminUserCreate(BaseModel):
     """Request to create a new user by an admin."""
     email: str
@@ -162,5 +171,6 @@ AdminAnalyticsResponse.model_rebuild()
 AdminIntegrityOverview.model_rebuild()
 AdminBulkUserApproveRequest.model_rebuild()
 AdminBulkUserStatusUpdateRequest.model_rebuild()
+AdminUserAccommodationsUpdate.model_rebuild()
 SystemSettingsSchema.model_rebuild()
 AdminInstitutionSummary.model_rebuild()

@@ -1,32 +1,30 @@
 // components/mindexa/dashboard/ai-study-entry.tsx
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { ArrowRight } from "lucide-react"
-import { SparklesIcon } from "@/components/ui/sparkles-icon"
+import { ArrowRight, Sparkles } from "lucide-react"
 import Link from "next/link"
 
 export function AiStudyEntry() {
   return (
-    <Card className="border-border/60 bg-card shadow-xs rounded-xl">
-      <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base font-semibold">
-          <SparklesIcon size={20} className="text-primary" />
-          Study Support AI
-        </CardTitle>
-        <CardDescription className="text-xs">
-          Get personalized revision guidance, concept explanations, and learning gap analysis.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="pt-2">
-        <Button asChild className="w-full h-8.5 text-xs font-semibold rounded-lg shadow-xs">
+    <Card className="border border-border/50 bg-card shadow-none rounded-xl">
+      <CardContent className="p-4 space-y-3">
+        <div className="flex items-start gap-3">
+          <div className="size-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <Sparkles className="size-4 text-primary" />
+          </div>
+          <div className="space-y-0.5 min-w-0">
+            <p className="text-xs font-semibold text-foreground">Study Support AI</p>
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              Personalized revision guidance, concept explanations, and learning gap analysis.
+            </p>
+          </div>
+        </div>
+        <Button asChild size="sm" variant="outline" className="w-full h-8 text-xs gap-1.5 border-border/60">
           <Link href="/student/study">
             Open AI Study Assistant
-            <ArrowRight className="ml-1.5 size-3.5" />
+            <ArrowRight className="size-3.5" />
           </Link>
         </Button>
-        <p className="text-[11px] text-center text-muted-foreground mt-2.5 font-medium">
-          Available for revision & homework support
-        </p>
       </CardContent>
     </Card>
   )

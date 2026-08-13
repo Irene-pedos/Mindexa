@@ -27,8 +27,29 @@ import {
   RefreshCw,
   Maximize2,
   Minimize2,
+  Plus,
+  History,
+  Clock,
+  MessageSquare,
+  PanelRightClose,
+  PanelRightOpen,
 } from "lucide-react";
-import { studentAiApi } from "@/lib/api/student-ai";
+import { studentAiApi, type StudentChatHistoryItem } from "@/lib/api/student-ai";
+
+function formatHistoryDate(dateStr?: string) {
+  if (!dateStr) return "";
+  try {
+    const d = new Date(dateStr);
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    if (isToday) {
+      return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+    return d.toLocaleDateString([], { month: "short", day: "numeric" });
+  } catch (e) {
+    return "";
+  }
+}
 import {
   studentApi,
   StudentResourceResponse,
@@ -163,12 +184,51 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
   const resourcesRef = useRef<HTMLDivElement>(null);
   const tipsRef = useRef<HTMLDivElement>(null);
   const integrityRef = useRef<HTMLDivElement>(null);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  // NOTE: No manual scroll ref — MessageScrollerContent handles auto-scroll
+  // via isAtBottom state, preserving the user's scroll position when they scroll up.
 
-  // Scroll chat messages to bottom
+  // Right-side History Panel State
+  const [isRightHistoryCollapsed, setIsRightHistoryCollapsed] = useState(false);
+  const [rawHistory, setRawHistory] = useState<StudentChatHistoryItem[]>([]);
+  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
+
+  // Esc key listener for fullscreen
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isThinking]);
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && isFullScreen) {
+        setIsFullScreen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isFullScreen]);
+
+  const handleStartNewChat = () => {
+    setMessages([]);
+    setActiveHistoryId(null);
+    setPrompt("");
+    setError(null);
+    toast.success("Started a new chat session");
+  };
+
+  const handleSelectHistoryItem = (item: StudentChatHistoryItem) => {
+    setActiveHistoryId(item.id);
+    setMessages([
+      {
+        id: item.id + "-q",
+        sender: "student",
+        text: item.question,
+        timestamp: new Date(item.created_at),
+      },
+      {
+        id: item.id + "-a",
+        sender: "ai",
+        text: item.answer,
+        citations: item.citations,
+        timestamp: new Date(item.created_at),
+      },
+    ]);
+  };
 
   useEffect(() => {
     async function loadData() {
@@ -205,6 +265,7 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
 
         // Restore chat conversation history from server
         if (historyData && historyData.length > 0) {
+          setRawHistory(historyData);
           const loadedMessages: Message[] = historyData.flatMap((item) => [
             {
               id: item.id + "-q",
@@ -434,6 +495,16 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
       };
 
       setMessages((prev) => [...prev, newAiMessage]);
+
+      const newHistItem: StudentChatHistoryItem = {
+        id: (Date.now() + 1).toString(),
+        question: userQuery,
+        answer: res.explanation,
+        citations: res.citations || [],
+        created_at: new Date().toISOString(),
+      };
+      setRawHistory((prev) => [...prev, newHistItem]);
+      setActiveHistoryId(newHistItem.id);
     } catch (err: any) {
       if (err?.status === 403 || err?.code === "AI_BLOCKED_DURING_ACTIVE_ASSESSMENT" || String(err?.message || "").includes("during an active")) {
         setIsBlockedByActiveExam(true);
@@ -763,15 +834,42 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
 
             <Button
               variant="outline"
-              size="icon"
-              className="h-8 w-8 hover:bg-zinc-100 border-zinc-200"
+              size="sm"
+              className={cn(
+                "h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-white lg:hidden",
+                !isRightHistoryCollapsed && "border-primary text-primary bg-primary/5"
+              )}
+              onClick={() => setIsRightHistoryCollapsed(!isRightHistoryCollapsed)}
+              title="Toggle Chat History"
+              type="button"
+            >
+              <History className="size-3.5 text-primary shrink-0" />
+              <span className="hidden sm:inline">History</span>
+            </Button>
+
+            <Button
+              variant={isFullScreen ? "default" : "outline"}
+              size="sm"
+              className={cn(
+                "h-8 gap-1.5 px-3 text-xs font-bold transition-all shadow-2xs",
+                isFullScreen
+                  ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 border-zinc-800"
+                  : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+              )}
               onClick={() => setIsFullScreen(!isFullScreen)}
-              title={isFullScreen ? "Exit Fullscreen" : "Enter Fullscreen"}
+              title={isFullScreen ? "Exit Fullscreen (Esc)" : "Enter Fullscreen"}
+              type="button"
             >
               {isFullScreen ? (
-                <Minimize2 className="size-4 text-zinc-600" />
+                <>
+                  <Minimize2 className="size-3.5 text-zinc-200 dark:text-zinc-800 shrink-0" />
+                  <span>Exit Fullscreen</span>
+                </>
               ) : (
-                <Maximize2 className="size-4 text-zinc-600" />
+                <>
+                  <Maximize2 className="size-3.5 text-zinc-600 shrink-0" />
+                  <span className="hidden sm:inline">Fullscreen</span>
+                </>
               )}
             </Button>
           </div>
@@ -1031,7 +1129,6 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                             </Marker>
                           </div>
                         )}
-                        <div ref={messagesEndRef} />
                       </MessageScrollerContent>
                     </MessageScrollerViewport>
                     <MessageScrollerButton />
@@ -1222,6 +1319,114 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                 </div>
               </div>
             </TabsContent>
+          </div>
+
+          {/* Right Side Panel: New Chat & Previous Chats History */}
+          <div
+            className={cn(
+              "hidden lg:flex flex-col border border-border/40 bg-card/40 backdrop-blur-sm rounded-xl transition-all duration-300 shrink-0 relative overflow-hidden shadow-xs",
+              isRightHistoryCollapsed ? "w-[48px]" : "w-[260px] xl:w-[280px]"
+            )}
+          >
+            {/* Header & Toggle */}
+            <div className="p-2.5 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
+              {!isRightHistoryCollapsed && (
+                <div className="flex items-center gap-2 text-xs font-bold text-foreground">
+                  <History className="size-4 text-primary" />
+                  <span>Chat History</span>
+                  {rawHistory.length > 0 && (
+                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono font-semibold">
+                      {rawHistory.length}
+                    </Badge>
+                  )}
+                </div>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsRightHistoryCollapsed(!isRightHistoryCollapsed)}
+                className="size-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors mx-auto"
+                title={isRightHistoryCollapsed ? "Expand Chat History" : "Collapse Chat History"}
+                type="button"
+              >
+                {isRightHistoryCollapsed ? (
+                  <PanelRightOpen className="size-4 text-primary" />
+                ) : (
+                  <PanelRightClose className="size-4" />
+                )}
+              </Button>
+            </div>
+
+            {/* New Chat Button */}
+            <div className="p-2.5 border-b border-border/30">
+              {!isRightHistoryCollapsed ? (
+                <Button
+                  onClick={handleStartNewChat}
+                  className="w-full h-8 gap-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs"
+                  type="button"
+                >
+                  <Plus className="size-3.5" />
+                  <span>New Chat</span>
+                </Button>
+              ) : (
+                <Button
+                  onClick={handleStartNewChat}
+                  size="icon"
+                  className="size-7 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs mx-auto flex"
+                  title="New Chat"
+                  type="button"
+                >
+                  <Plus className="size-3.5" />
+                </Button>
+              )}
+            </div>
+
+            {/* Previous Chats List */}
+            {!isRightHistoryCollapsed && (
+              <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
+                  <span>Previous Chats</span>
+                  <Clock className="size-3" />
+                </div>
+
+                {rawHistory.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground font-medium bg-muted/20 rounded-lg border border-dashed border-border/40 my-2">
+                    No previous chats yet.
+                  </div>
+                ) : (
+                  rawHistory.slice().reverse().map((item) => {
+                    const isActive = activeHistoryId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        onClick={() => handleSelectHistoryItem(item)}
+                        className={cn(
+                          "group p-2.5 rounded-xl border text-xs cursor-pointer transition-all space-y-1 text-left",
+                          isActive
+                            ? "border-primary/50 bg-primary/10 text-primary shadow-2xs font-semibold"
+                            : "border-border/30 bg-background/60 hover:bg-background hover:border-border/70 text-foreground/90"
+                        )}
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <MessageSquare className="size-3.5 shrink-0 text-primary" />
+                          <span className="truncate font-medium flex-1 text-[11px]">
+                            {item.question}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-muted-foreground flex items-center justify-between pt-0.5">
+                          <span>{formatHistoryDate(item.created_at)}</span>
+                          {item.citations && item.citations.length > 0 && (
+                            <span className="text-primary/80 font-mono">
+                              {item.citations.length} ref{item.citations.length > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         </Tabs>
       </Card>

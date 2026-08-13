@@ -184,6 +184,38 @@ class KnowledgeCheckQuestion(BaseModel):
         re.IGNORECASE,
     )
 
+    # Matches two or more consecutive underscores — the canonical blank marker for FILL_BLANKS.
+    _BLANK_MARKER_RE: re.Pattern[str] = re.compile(r"_{2,}")
+
+    @model_validator(mode="after")
+    def _validate_fill_blanks_structure(self) -> "KnowledgeCheckQuestion":
+        """Enforce structural integrity of FILL_BLANKS questions.
+
+        Raises ValueError (caught by the caller as a generation failure) when:
+        - question_text contains no '___' blank markers
+        - options (word bank) is empty
+        - there are fewer options than blank slots
+        """
+        if self.question_type != "FILL_BLANKS":
+            return self
+
+        blank_count = len(self._BLANK_MARKER_RE.findall(self.question_text))
+        if blank_count == 0:
+            raise ValueError(
+                "FILL_BLANKS question_text must contain at least one '___' blank marker. "
+                "The AI produced plain prose with no blanks — question dropped."
+            )
+        if not self.options:
+            raise ValueError(
+                "FILL_BLANKS question must provide a non-empty 'options' word bank."
+            )
+        if len(self.options) < blank_count:
+            raise ValueError(
+                f"FILL_BLANKS has {blank_count} blank(s) but only {len(self.options)} option(s). "
+                "options must contain at least one entry per blank."
+            )
+        return self
+
     @model_validator(mode="after")
     def _validate_matching_structure(self) -> "KnowledgeCheckQuestion":
         """Enforce structural integrity of MATCHING questions.

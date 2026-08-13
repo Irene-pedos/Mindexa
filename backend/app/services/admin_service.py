@@ -41,6 +41,7 @@ from app.schemas.admin import (
     AdminRecentActivity,
     SystemSettingsSchema,
     AdminCourseCreate,
+    AdminUserAccommodationsUpdate,
 )
 from app.db.schemas.academic import CourseResponse
 from app.services.auth_service import AuthService
@@ -772,3 +773,78 @@ class AdminService:
             response.profile.assigned_courses = list(result.scalars().all())
 
         return response
+
+    async def update_user_accommodations(
+        self,
+        user_id: uuid.UUID,
+        body: AdminUserAccommodationsUpdate,
+        actor_id: Optional[uuid.UUID] = None,
+        actor_role: Optional[str] = "admin",
+    ) -> UserResponse:
+        """
+        Update student accessibility accommodations and digital literacy tier,
+        recording an immutable AuditLog row with before/after state diff.
+        """
+        user = await self.user_repo.get_by_id(user_id)
+        if not user:
+            raise NotFoundError("User not found")
+
+        profile = user.profile
+        if not profile:
+            raise NotFoundError("User profile not found")
+
+        # Capture before_state
+        before_state = {
+            "extra_time_percent": getattr(profile, "extra_time_percent", 0),
+            "requires_screen_reader_mode": getattr(profile, "requires_screen_reader_mode", False),
+            "large_text_default": getattr(profile, "large_text_default", False),
+            "simple_mode_enabled": getattr(profile, "simple_mode_enabled", False),
+            "reduced_motion_default": getattr(profile, "reduced_motion_default", False),
+        }
+
+        # Apply updates
+        if body.extra_time_percent is not None:
+            profile.extra_time_percent = body.extra_time_percent
+        if body.requires_screen_reader_mode is not None:
+            profile.requires_screen_reader_mode = body.requires_screen_reader_mode
+        if body.large_text_default is not None:
+            profile.large_text_default = body.large_text_default
+        if body.simple_mode_enabled is not None:
+            profile.simple_mode_enabled = body.simple_mode_enabled
+        if body.reduced_motion_default is not None:
+            profile.reduced_motion_default = body.reduced_motion_default
+
+        # Capture after_state
+        after_state = {
+            "extra_time_percent": getattr(profile, "extra_time_percent", 0),
+            "requires_screen_reader_mode": getattr(profile, "requires_screen_reader_mode", False),
+            "large_text_default": getattr(profile, "large_text_default", False),
+            "simple_mode_enabled": getattr(profile, "simple_mode_enabled", False),
+            "reduced_motion_default": getattr(profile, "reduced_motion_default", False),
+        }
+        if body.reason:
+            after_state["reason"] = body.reason
+
+        self.db.add(profile)
+
+        # Write AuditLog
+        from app.db.models.audit import AuditLog
+
+        audit = AuditLog(
+            entity_type="user_profile",
+            entity_id=profile.id,
+            action="accommodations_updated",
+            description=f"Accommodations updated for user {user.email}. Reason: {body.reason or 'Administrative review'}",
+            before_state=before_state,
+            after_state=after_state,
+            actor_id=actor_id,
+            actor_role=actor_role,
+        )
+        self.db.add(audit)
+
+        await self.db.commit()
+        await self.db.refresh(profile)
+        await self.db.refresh(user)
+
+        return await self._build_user_response_with_courses(user)
+

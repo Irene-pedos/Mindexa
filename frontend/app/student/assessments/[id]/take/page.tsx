@@ -9,6 +9,7 @@ import React, {
   useRef,
 } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/use-auth";
 import Image from "next/image";
 import {
   Card,
@@ -58,6 +59,8 @@ import {
   SheetTrigger,
   SheetClose,
 } from "@/components/ui/sheet";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
+import { HelpPopover } from "@/components/mindexa/common/help-popover";
 import {
   Collapsible,
   CollapsibleContent,
@@ -340,6 +343,7 @@ function useIntegrityMonitor({
   isHighSecurity,
   handleIntegrityEvent,
   setIsFullscreen,
+  setIsScreenBlurred,
 }: {
   stage: Stage;
   assessment: AssessmentMeta | null;
@@ -391,9 +395,18 @@ function useIntegrityMonitor({
     if (stage !== "taking") return;
 
     const handleBlur = () => {
-      handleIntegrityEvent("SCREEN_BLURRING", {
+      setIsScreenBlurred(true);
+      // "WINDOW_BLUR" is the DB-valid enum value for focus-lost events.
+      // The backend also maps SCREEN_BLURRING → WINDOW_BLUR in its rule key
+      // lookup, but the DB INSERT itself must use the valid enum value.
+      handleIntegrityEvent("WINDOW_BLUR", {
         details: "Focus lost to external task or app",
       });
+    };
+
+    const handleFocus = () => {
+      setIsScreenBlurred(false);
+      handleIntegrityEvent("WINDOW_FOCUS");
     };
 
     const handleCopy = (e: ClipboardEvent) => {
@@ -413,7 +426,7 @@ function useIntegrityMonitor({
 
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
-      handleIntegrityEvent("RIGHT_CLICK_ATTEMPT");
+      handleIntegrityEvent("RIGHT_CLICK");
       toast.warning("Right-click menu is disabled.");
     };
 
@@ -429,7 +442,8 @@ function useIntegrityMonitor({
           window.outerHeight - window.innerHeight > threshold) &&
         (widthDiff > 50 || heightDiff > 50)
       ) {
-        handleIntegrityEvent("DEVTOOLS_DETECTED");
+        // DEVTOOLS_DETECTED is not a valid DB enum value yet — log locally.
+        console.warn("[Integrity] DevTools activity detected");
         toast.warning("Developer Tools activity is monitored.");
       }
       lastWidth = window.innerWidth;
@@ -437,6 +451,7 @@ function useIntegrityMonitor({
     };
 
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
     document.addEventListener("copy", handleCopy);
     document.addEventListener("paste", handlePaste);
     document.addEventListener("contextmenu", handleContextMenu);
@@ -444,12 +459,13 @@ function useIntegrityMonitor({
 
     return () => {
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
       document.removeEventListener("copy", handleCopy);
       document.removeEventListener("paste", handlePaste);
       document.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("resize", handleResize);
     };
-  }, [stage, handleIntegrityEvent]);
+  }, [stage, handleIntegrityEvent, setIsScreenBlurred]);
 
   // AI Assistance checking
   useEffect(() => {
@@ -483,10 +499,11 @@ function useIntegrityMonitor({
       );
 
       if (detectedKeyword || detectedProperty) {
-        handleIntegrityEvent("AI_EXTENSION_DETECTED", {
-          userAgent: navigator.userAgent,
-          detected_keyword: detectedKeyword || null,
-          detected_property: detectedProperty || null,
+        // AI_EXTENSION_DETECTED is not yet a valid DB enum value — log locally
+        // and show the toast, but don't send to the API to avoid a 500 error.
+        console.warn("[Integrity] AI extension detected", {
+          detected_keyword: detectedKeyword,
+          detected_property: detectedProperty,
         });
         toast.error(
           "Academic Integrity Alert: AI extensions or assistant tools detected. This event has been logged.",
@@ -622,11 +639,13 @@ function MatchingDnd({
   attemptId,
   currentVal,
   setAnswers,
+  interactionMode,
 }: {
   q: AssessmentQuestion;
   attemptId: string | null;
   currentVal: Record<string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+  interactionMode?: "drag" | "list" | "auto";
 }) {
   return (
     <SharedMatchingDnd
@@ -634,6 +653,7 @@ function MatchingDnd({
       questionId={q.id}
       attemptId={attemptId}
       currentVal={currentVal}
+      interactionMode={interactionMode}
       onAnswerChange={(newAnswers) => {
         setAnswers((prev) => ({
           ...prev,
@@ -649,11 +669,13 @@ function FillInTheBlanksDnd({
   attemptId,
   currentVal,
   setAnswers,
+  interactionMode,
 }: {
   q: AssessmentQuestion;
   attemptId: string | null;
   currentVal: Record<number | string, string> | undefined;
   setAnswers: React.Dispatch<React.SetStateAction<Answers>>;
+  interactionMode?: "drag" | "list" | "auto";
 }) {
   return (
     <SharedFillInTheBlanksDnd
@@ -662,6 +684,7 @@ function FillInTheBlanksDnd({
       questionId={q.id}
       attemptId={attemptId}
       currentVal={currentVal}
+      interactionMode={interactionMode}
       onAnswerChange={(newAnswers) => {
         setAnswers((prev) => ({
           ...prev,
@@ -918,6 +941,13 @@ export default function TakeAssessmentPage() {
   const params = useParams();
   const router = useRouter();
   const assessmentId = params.id as string;
+  const { user } = useAuth();
+
+  const isSimpleMode = Boolean(user?.profile?.simple_mode_enabled);
+  const extraTimePercent = user?.profile?.extra_time_percent || 0;
+  const isScreenReader = Boolean(user?.profile?.requires_screen_reader_mode);
+  const preferredInteractionMode: "drag" | "list" | "auto" =
+    isSimpleMode || isScreenReader ? "list" : "auto";
 
   const requiresLecturerReview = useCallback(
     (q: AssessmentQuestion): boolean => {
@@ -2267,6 +2297,7 @@ export default function TakeAssessmentPage() {
         <FillInTheBlanksDnd
           q={q}
           attemptId={attemptId}
+          interactionMode={preferredInteractionMode}
           currentVal={
             currentVal &&
             typeof currentVal === "object" &&
@@ -2285,6 +2316,7 @@ export default function TakeAssessmentPage() {
         <MatchingDnd
           q={q}
           attemptId={attemptId}
+          interactionMode={preferredInteractionMode}
           currentVal={
             currentVal &&
             typeof currentVal === "object" &&
@@ -2870,7 +2902,7 @@ export default function TakeAssessmentPage() {
   );
 
   return (
-    <div className="min-h-screen bg-background flex flex-col font-sans">
+    <div data-tour="student-taking" className="min-h-screen bg-background flex flex-col font-sans">
       {!isOnline && (
         <div className="bg-amber-500 text-white py-2 px-6 text-center text-xs font-semibold tracking-wider flex items-center justify-center gap-2 z-50">
           <WifiOff className="size-3.5 animate-pulse" />
@@ -2900,6 +2932,7 @@ export default function TakeAssessmentPage() {
             <div className="font-semibold text-sm truncate max-w-[240px] text-foreground/95">
               {assessment?.title}
             </div>
+            <HelpPopover topic="fullscreen" variant="icon" />
             {assessment?.is_open_book !== undefined && stage === "taking" && (
               <Badge
                 variant="outline"
@@ -2917,6 +2950,17 @@ export default function TakeAssessmentPage() {
         </div>
 
         <div className="flex items-center gap-3">
+          {extraTimePercent > 0 && (
+            <Badge
+              variant="outline"
+              className="hidden sm:flex items-center gap-1 px-2.5 py-1 rounded-lg border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 text-xs font-semibold"
+              title="Disability / Academic Time Accommodation Applied"
+            >
+              <Clock className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Extra time applied (+{extraTimePercent}%)</span>
+            </Badge>
+          )}
+
           <div
             className={cn(
               "flex items-center gap-1.5 px-3 py-1 rounded-lg border text-sm font-semibold tabular-nums",
@@ -2930,20 +2974,24 @@ export default function TakeAssessmentPage() {
             <Timer className="size-4" /> {formatTime(timeLeft)}
           </div>
           {warnings > 0 && (
-            <div
-              className={cn(
-                "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold",
-                warnings === 1 &&
-                  "border-amber-500/20 text-amber-600 bg-amber-500/10",
-                warnings >= 2 &&
-                  "border-destructive/20 text-destructive bg-destructive/10 animate-pulse",
-              )}
-            >
-              <AlertTriangle className="size-3.5" />
-              {warnings}/3 Warnings
+            <div className="flex items-center gap-1">
+              <div
+                className={cn(
+                  "flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold",
+                  warnings === 1 &&
+                    "border-amber-500/20 text-amber-600 bg-amber-500/10",
+                  warnings >= 2 &&
+                    "border-destructive/20 text-destructive bg-destructive/10 animate-pulse",
+                )}
+              >
+                <AlertTriangle className="size-3.5" />
+                {warnings}/3 Warnings
+              </div>
+              <HelpPopover topic="fullscreen" variant="icon" />
             </div>
           )}
           <Button
+            data-tour="student-submit"
             onClick={() => setShowSubmitConfirm(true)}
             variant="destructive"
             size="sm"
@@ -2956,7 +3004,7 @@ export default function TakeAssessmentPage() {
       </div>
 
       {stage === "intro" && assessment && (
-        <div className="flex-1 flex items-center justify-center p-4">
+        <div data-tour="student-taking" className="flex-1 flex items-center justify-center p-4">
           <Card className="max-w-xl w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
             <CardHeader className="text-center py-6 bg-muted/20 border-b border-border/40">
               <CardTitle className="text-2xl font-semibold tracking-tight">
@@ -3043,6 +3091,19 @@ export default function TakeAssessmentPage() {
                   </span>
                 </div>
               )}
+              {extraTimePercent > 0 && (
+                <div className="p-3.5 rounded-xl border border-emerald-500/25 bg-emerald-500/[0.04] flex items-start gap-3 text-left">
+                  <Clock className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5">
+                    <span className="font-bold text-xs text-emerald-900 dark:text-emerald-200 block">
+                      Academic Time Accommodation Active
+                    </span>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      You have an approved accommodation granting <strong className="text-emerald-700 dark:text-emerald-300">+{extraTimePercent}% extra time</strong>. This has been automatically added to your exam timer.
+                    </p>
+                  </div>
+                </div>
+              )}
               {assessment.instructions && (
                 <div className="p-4 rounded-xl border border-primary/10 bg-primary/[0.01] text-left space-y-2">
                   <h4 className="font-bold text-xs uppercase tracking-wider text-primary/80">
@@ -3104,11 +3165,12 @@ export default function TakeAssessmentPage() {
                   </Badge>
                   <Badge
                     variant="outline"
-                    className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground"
+                    className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground flex items-center gap-1"
                   >
-                    {assessment.fullscreen_required
+                    <span>{assessment.fullscreen_required
                       ? "Lockdown Mode"
-                      : "Open Environment"}
+                      : "Open Environment"}</span>
+                    <ContextualExplainer topic="fullscreen-integrity" variant="icon" className="size-4" />
                   </Badge>
                 </div>
               </div>
@@ -4045,28 +4107,32 @@ export default function TakeAssessmentPage() {
       </Dialog>
 
       <Dialog open={showSubmitConfirm} onOpenChange={setShowSubmitConfirm}>
-        <DialogContent className="sm:max-w-md p-6 border-none shadow-xl rounded-xl bg-background">
-          <DialogHeader className="text-center">
-            <DialogTitle className="text-lg font-semibold tracking-tight text-foreground">
-              Review & Submit Assessment
-            </DialogTitle>
-            <DialogDescription className="text-xs text-muted-foreground mt-1">
-              Please review your completion status before finalizing your
-              attempt.
+        <DialogContent className="sm:max-w-md p-6 border-none shadow-xl rounded-2xl bg-background">
+          <DialogHeader className="text-left">
+            <div className="flex items-center justify-between">
+              <DialogTitle className="text-lg font-bold tracking-tight text-foreground">
+                Ready to Submit Your Exam?
+              </DialogTitle>
+              <div className="flex items-center gap-1.5">
+                <HelpPopover topic="submit" variant="badge" label="Submit Rules" />
+              </div>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
+              You are about to hand in your assessment. Once you submit, your answers are permanently locked and submitted to your lecturer for grading.
             </DialogDescription>
           </DialogHeader>
 
           <div className="my-4 space-y-3 py-2 border-y border-border/40">
             <div className="grid grid-cols-2 gap-2 text-xs font-medium text-left">
-              <div className="p-3 bg-muted/20 border border-border/60 rounded-lg flex flex-col justify-between">
+              <div className="p-3 bg-muted/20 border border-border/60 rounded-xl flex flex-col justify-between">
                 <span className="text-muted-foreground">Total Questions</span>
-                <span className="text-base font-bold text-foreground mt-1">
+                <span className="text-lg font-bold text-foreground mt-1">
                   {questions.length}
                 </span>
               </div>
-              <div className="p-3 bg-emerald-50/20 border border-emerald-500/10 rounded-lg flex flex-col justify-between">
-                <span className="text-emerald-600">Answered</span>
-                <span className="text-base font-bold text-emerald-600 mt-1">
+              <div className="p-3 bg-emerald-50/30 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex flex-col justify-between">
+                <span className="text-emerald-700 dark:text-emerald-300">Answered</span>
+                <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-1">
                   {
                     questions.filter((q) =>
                       isQuestionAnswered(q, answers[q.id]),
@@ -4074,53 +4140,32 @@ export default function TakeAssessmentPage() {
                   }
                 </span>
               </div>
-              <div className="p-3 bg-amber-50/20 border border-amber-500/10 rounded-lg flex flex-col justify-between">
-                <span className="text-amber-600">Flagged for Review</span>
-                <span className="text-base font-bold text-amber-600 mt-1">
-                  {questions.filter((q) => flaggedQuestions[q.id]).length}
-                </span>
-              </div>
-              <div className="p-3 bg-red-50/20 border border-red-500/10 rounded-lg flex flex-col justify-between">
-                <span className="text-red-600">Skipped Explicitly</span>
-                <span className="text-base font-bold text-red-600 mt-1">
-                  {
-                    questions.filter(
-                      (q) =>
-                        skippedQuestions[q.id] &&
-                        !isQuestionAnswered(q, answers[q.id]),
-                    ).length
-                  }
-                </span>
-              </div>
             </div>
 
             {unansweredRequired.length > 0 && (
-              <div className="p-3 rounded-lg bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-left">
+              <div className="p-3 rounded-xl bg-red-500/10 border border-red-500/20 flex items-start gap-2.5 text-left">
                 <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
-                <div className="text-xs text-red-700 leading-relaxed">
-                  <span className="font-semibold block">
-                    Required Action Required
+                <div className="text-xs text-red-700 dark:text-red-300 leading-relaxed">
+                  <span className="font-bold block mb-0.5">
+                    Required Questions Incomplete
                   </span>
-                  You have {unansweredRequired.length} unanswered required{" "}
-                  {unansweredRequired.length === 1 ? "question" : "questions"}{" "}
-                  that must be answered before submission.
-                  <span className="block mt-1 font-bold">
-                    Questions: {unansweredRequiredNums.join(", ")}
+                  You have {unansweredRequired.length} required question{unansweredRequired.length === 1 ? "" : "s"} left to answer before submitting.
+                  <span className="block mt-1 font-semibold">
+                    Question numbers: {unansweredRequiredNums.join(", ")}
                   </span>
                 </div>
               </div>
             )}
 
-            {unansweredOptional.length > 0 && (
-              <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/15 flex items-start gap-2.5 text-left">
-                <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
-                <div className="text-xs text-destructive leading-relaxed">
-                  <span className="font-semibold block">
-                    Unanswered Optional Questions
+            {unansweredRequired.length === 0 && unansweredOptional.length > 0 && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-left">
+                <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  <span className="font-bold block mb-0.5">
+                    Unanswered Questions ({unansweredOptional.length})
                   </span>
-                  You have {unansweredOptional.length} unanswered optional{" "}
-                  {unansweredOptional.length === 1 ? "question" : "questions"}.
-                  <span className="block mt-1 font-bold text-destructive/80">
+                  You can still submit now, but any blank questions will receive 0 marks.
+                  <span className="block mt-1 font-medium text-muted-foreground">
                     Questions: {unansweredOptionalNums.join(", ")}
                   </span>
                 </div>
@@ -4128,51 +4173,49 @@ export default function TakeAssessmentPage() {
             )}
 
             {manualSubmitError && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-left flex items-start gap-2.5">
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-left flex items-start gap-2.5">
                 <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
-                <div className="text-xs text-red-700 leading-relaxed">
-                  <span className="font-semibold block mb-0.5">
-                    Submission Failed
-                  </span>
+                <div className="text-xs text-red-700 dark:text-red-300 leading-relaxed">
+                  <span className="font-bold block mb-0.5">Submission Error</span>
                   {manualSubmitError}
                 </div>
               </div>
             )}
-
-            <p className="text-xs text-muted-foreground/90 font-medium text-center pt-1 leading-relaxed">
-              Are you sure you want to submit? This action is final and cannot
-              be undone.
-            </p>
           </div>
 
           <div className="space-y-2">
             {firstUnansweredIndex !== -1 && (
               <Button
                 variant="outline"
-                className="w-full h-10 text-xs font-semibold border-primary/20 hover:bg-primary/5 text-primary rounded-lg flex items-center justify-center gap-1.5"
+                className="w-full h-10 text-xs font-semibold border-primary/30 hover:bg-primary/5 text-primary rounded-xl flex items-center justify-center gap-1.5"
                 onClick={() => {
                   navigateToQuestion(firstUnansweredIndex);
                   setShowSubmitConfirm(false);
                 }}
               >
-                <ArrowRight className="size-3.5" /> Jump to First Unanswered
-                (Question {firstUnansweredIndex + 1})
+                <ArrowRight className="size-3.5" /> Return to Question {firstUnansweredIndex + 1}
               </Button>
             )}
             <div className="flex gap-3">
               <Button
                 variant="outline"
-                className="flex-1 h-10 text-xs font-medium rounded-lg"
+                className="flex-1 h-11 text-xs font-medium rounded-xl"
                 onClick={() => setShowSubmitConfirm(false)}
               >
-                Cancel & Review
+                Keep Working
               </Button>
               <Button
-                className="flex-1 h-10 text-xs font-semibold rounded-lg shadow-none bg-primary hover:bg-primary/90 text-primary-foreground"
+                className="flex-1 h-11 text-xs font-bold rounded-xl shadow-none bg-primary hover:bg-primary/90 text-primary-foreground"
                 onClick={submitAssessment}
                 disabled={submitting || unansweredRequired.length > 0}
               >
-                Confirm Submission
+                {submitting ? (
+                  <>
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" /> Submitting...
+                  </>
+                ) : (
+                  "Yes, Submit Exam"
+                )}
               </Button>
             </div>
           </div>

@@ -220,3 +220,85 @@
   color: transparent !important;
   display: inline-block;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ACCESSIBILITY & DIGITAL LITERACY TIERS (STEP 10)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Simple Mode (Tier 1 Digital Literacy) */
+.simple-mode {
+  --radius: 0.75rem;
+}
+
+.simple-mode button,
+.simple-mode [role="button"],
+.simple-mode input[type="button"],
+.simple-mode input[type="submit"] {
+  min-height: 44px;
+  font-size: 0.9375rem;
+}
+
+.simple-mode input,
+.simple-mode select,
+.simple-mode textarea {
+  min-height: 44px;
+  font-size: 0.9375rem;
+}
+
+.simple-mode p,
+.simple-mode span,
+.simple-mode label {
+  line-height: 1.65;
+}
+
+.simple-mode .card,
+.simple-mode [data-slot="card"] {
+  box-shadow: none;
+  border-width: 1.5px;
+}
+
+/* Help affordances always prominent in simple mode */
+.simple-mode [data-help-trigger] {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+
+/* Large Text Default */
+.large-text {
+  font-size: 112.5%; /* Scales 16px to 18px base */
+}
+
+.large-text h1 {
+  font-size: 2rem !important;
+  line-height: 1.3 !important;
+}
+
+.large-text h2 {
+  font-size: 1.65rem !important;
+  line-height: 1.35 !important;
+}
+
+.large-text h3 {
+  font-size: 1.35rem !important;
+  line-height: 1.4 !important;
+}
+
+.large-text p,
+.large-text label,
+.large-text li,
+.large-text input,
+.large-text button,
+.large-text select {
+  font-size: 1.05rem !important;
+}
+
+/* Reduced Motion Mode */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+

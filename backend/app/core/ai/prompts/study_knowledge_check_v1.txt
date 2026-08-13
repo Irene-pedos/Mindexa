@@ -17,7 +17,7 @@ CRITICAL RULES FOR QUESTION TYPES & JSON SCHEMA:
    - premises and matches MUST be the same length and non-empty.
    - blank_answers MUST be a dict mapping each premise string to its correct match string.
    - options[] should mirror premises[] (same values, same order) for compatibility.
-4. FILL_BLANKS: Question text should include '[blank]' placeholder. Provide candidate options in 'options' array and a 'blank_answers' dictionary mapping blank index (e.g. "0") to target answer string.
+4. FILL_BLANKS: question_text MUST contain the literal placeholder ___ (three or more underscores) once per blank, in the order the blanks appear. NEVER write a FILL_BLANKS question without at least one ___ marker — any question that lacks a ___ will be rejected. options MUST be an array of candidate answer words/phrases, one entry per blank (minimum), in the same order the blanks appear. blank_answers MUST be a dictionary mapping the blank index string (e.g. "0", "1") to its exact correct answer string. Never use '[blank]' or any other placeholder; only ___ is accepted.
 5. SHORT_ANSWER: Provide concise response expectation in 'correct_answer'.
 6. OPEN_QUESTION: Provide rubrics and expected concepts in 'correct_answer' and 'explanation'.
 
@@ -48,5 +48,17 @@ Return ONLY a JSON array matching this schema (the example below uses HTML/CSS/J
     "correct_option_index": null,
     "correct_answer": "Matching pairs verified",
     "explanation": "HTML provides structure, CSS handles presentation, and JavaScript enables interactivity."
+  },
+  {
+    "id": "q3",
+    "question_text": "In the browser rendering pipeline, ___ parses HTML into a tree structure, while ___ handles the visual styling rules.",
+    "question_type": "FILL_BLANKS",
+    "options": ["the HTML parser", "the CSS engine"],
+    "premises": [],
+    "matches": [],
+    "blank_answers": {"0": "the HTML parser", "1": "the CSS engine"},
+    "correct_option_index": null,
+    "correct_answer": null,
+    "explanation": "The HTML parser builds the DOM tree; the CSS engine (style engine) processes stylesheets to produce the CSSOM."
   }
 ]

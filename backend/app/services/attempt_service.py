@@ -29,6 +29,7 @@ from app.db.enums import AssessmentStatus, AttemptStatus, StudentGroupStatus
 from app.db.models.attempt import AssessmentAttempt
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
+from app.db.repositories.auth import UserRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 
@@ -42,6 +43,7 @@ class AttemptService:
         self.db = db
         self.attempt_repo = AttemptRepository(db)
         self.assessment_repo = AssessmentRepository(db)
+        self.user_repo = UserRepository(db)
         self.group_repo = GroupRepository(db)
         self.submission_repo = SubmissionRepository(db)
 
@@ -86,7 +88,10 @@ class AttemptService:
         # Gate 1b — audience type targeting check
         if assessment.audience_type == "selected":
             target_ids = assessment.target_student_ids or []
-            if str(student_id) not in [str(tid) for tid in target_ids]:
+            # Only block if a non-empty target list is configured; an empty
+            # list indicates the assessment was not yet fully configured and
+            # should be treated as open to all enrolled students.
+            if target_ids and str(student_id) not in [str(tid) for tid in target_ids]:
                 raise AuthorizationError(
                     "You are not eligible for this assessment.",
                     code="STUDENT_NOT_TARGETED",
@@ -96,24 +101,38 @@ class AttemptService:
             from app.db.models.assessment import AssessmentTargetSection
             from app.db.enums import EnrollmentStatus
             from sqlalchemy import select
-            
-            stmt = (
-                select(StudentEnrollment.id)
-                .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
+
+            # First check that at least one target section is configured.
+            # If none exist (misconfigured assessment), treat as open to all.
+            section_count_stmt = (
+                select(AssessmentTargetSection.id)
                 .where(
-                    StudentEnrollment.student_id == student_id,
-                    StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
-                    StudentEnrollment.is_deleted == False,
                     AssessmentTargetSection.assessment_id == assessment_id,
-                    AssessmentTargetSection.is_deleted == False
+                    AssessmentTargetSection.is_deleted == False,
                 )
+                .limit(1)
             )
-            res = await self.db.execute(stmt)
-            if not res.scalars().first():
-                raise AuthorizationError(
-                    "You are not eligible for this assessment.",
-                    code="STUDENT_NOT_TARGETED",
+            section_count_res = await self.db.execute(section_count_stmt)
+            has_configured_sections = section_count_res.scalars().first() is not None
+
+            if has_configured_sections:
+                stmt = (
+                    select(StudentEnrollment.id)
+                    .join(AssessmentTargetSection, AssessmentTargetSection.class_section_id == StudentEnrollment.class_section_id)
+                    .where(
+                        StudentEnrollment.student_id == student_id,
+                        StudentEnrollment.enrollment_status.in_([EnrollmentStatus.ACTIVE, EnrollmentStatus.ACTIVE.value]),
+                        StudentEnrollment.is_deleted == False,
+                        AssessmentTargetSection.assessment_id == assessment_id,
+                        AssessmentTargetSection.is_deleted == False,
+                    )
                 )
+                res = await self.db.execute(stmt)
+                if not res.scalars().first():
+                    raise AuthorizationError(
+                        "You are not eligible for this assessment.",
+                        code="STUDENT_NOT_TARGETED",
+                    )
 
         # Gate 2 — within window
         if assessment.is_group_assessment:
@@ -184,8 +203,18 @@ class AttemptService:
                 )
             group_id = group.id
 
-        # Compute expires_at
-        expires_at = self._compute_expires_at(assessment, now)
+        # Load student profile to check for extra_time_percent accommodation
+        user = await self.user_repo.get_by_id(student_id)
+        extra_time_percent = 0
+        if user and user.profile and getattr(user.profile, "extra_time_percent", 0):
+            extra_time_percent = max(0, user.profile.extra_time_percent)
+
+        # Compute expires_at with student accommodations
+        expires_at = self._compute_expires_at(
+            assessment=assessment,
+            now=now,
+            extra_time_percent=extra_time_percent,
+        )
         access_token = uuid.uuid4()
 
         attempt = await self.attempt_repo.create(
@@ -431,16 +460,35 @@ class AttemptService:
     # HELPERS
     # -----------------------------------------------------------------------
 
-    def _compute_expires_at(self, assessment, now: datetime) -> datetime:
+    def _compute_expires_at(
+        self,
+        assessment,
+        now: datetime,
+        extra_time_percent: int = 0,
+    ) -> datetime:
         """
-        expires_at = min(window_end, now + duration_minutes).
+        Compute attempt expiration timestamp factoring in extra time accommodations.
+
+        adjusted_duration_minutes = duration_minutes * (1 + extra_time_percent / 100).
+        
+        expires_at = min(window_end, now + adjusted_duration_minutes).
+        If allow_accommodation_past_window_end is True on assessment, duration is not capped by window_end.
         If duration_minutes is None, expires_at = window_end.
-        If window_end is None, expires_at = now + duration_minutes.
+        If window_end is None, expires_at = now + adjusted_duration_minutes.
         If both are None, use a 24h fallback (homework/untimed mode).
         """
         candidates = []
         if assessment.duration_minutes:
-            candidates.append(now + timedelta(minutes=assessment.duration_minutes))
+            multiplier = 1.0 + (max(0, extra_time_percent) / 100.0)
+            adjusted_minutes = assessment.duration_minutes * multiplier
+            duration_expiry = now + timedelta(minutes=adjusted_minutes)
+
+            allow_past_window = getattr(assessment, "allow_accommodation_past_window_end", False)
+            if allow_past_window and extra_time_percent > 0:
+                return duration_expiry
+
+            candidates.append(duration_expiry)
+
         if assessment.window_end:
             candidates.append(assessment.window_end)
         if not candidates:

@@ -13,11 +13,14 @@ import { useRouter } from "next/navigation";
 import { setAccessToken } from "@/lib/api/client";
 import { toast } from "sonner";
 
-type AuthUser = {
+export type AuthUser = {
   id: string;
   email: string;
   role: string;
   onboarding_completed: boolean;
+  onboarding_tour_completed?: boolean;
+  onboarding_tour_step?: number;
+  onboarding_tour_variant?: string | null;
   profile?: {
     first_name?: string | null;
     last_name?: string | null;
@@ -35,6 +38,11 @@ type AuthUser = {
     option?: string | null;
     level?: string | null;
     year?: string | null;
+    simple_mode_enabled?: boolean;
+    extra_time_percent?: number;
+    requires_screen_reader_mode?: boolean;
+    large_text_default?: boolean;
+    reduced_motion_default?: boolean;
   } | null;
 };
 
@@ -55,6 +63,8 @@ interface AuthContextType {
   }>;
   logout: () => Promise<void>;
   checkAuth: () => Promise<void>;
+  updateTourProgress: (step: number, completed?: boolean, variant?: string) => Promise<void>;
+  setUser: React.Dispatch<React.SetStateAction<AuthUser | null>>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -210,6 +220,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const updateTourProgress = async (step: number, completed: boolean = false, variant?: string) => {
+    try {
+      const updatedUser = await authApi.updateTourProgress({
+        step,
+        completed,
+        variant: variant || user?.role?.toLowerCase(),
+      });
+      setUser((prev) => {
+        const next = { ...prev, ...updatedUser };
+        if (typeof window !== "undefined") {
+          localStorage.setItem("user", JSON.stringify(next));
+        }
+        return next;
+      });
+    } catch (err) {
+      console.error("[AuthProvider] Failed to update tour progress", err);
+    }
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -220,6 +249,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         checkAuth,
+        updateTourProgress,
+        setUser,
       }}
     >
       {children}

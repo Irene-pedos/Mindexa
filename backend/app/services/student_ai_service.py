@@ -112,7 +112,7 @@ class StudentAIService:
                 question=s.question,
                 answer=s.llm_response,
                 citations=s.source_citations or [],
-                created_at=s.created_at.isoformat(),
+                created_at=s.created_at.isoformat() if s.created_at else datetime.now(UTC).isoformat(),
             )
             for s in sessions
         ]

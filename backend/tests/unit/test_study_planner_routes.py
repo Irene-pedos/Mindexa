@@ -149,9 +149,19 @@ async def test_reschedule_contract_schema_and_route():
     mock_session.duration_minutes = 60
     mock_session.status = "SCHEDULED"
 
+    mock_plan = MagicMock()
+    mock_plan.id = mock_session.study_plan_id
+    mock_plan.start_date = datetime(2026, 7, 1, tzinfo=UTC)
+    mock_plan.end_date = datetime(2026, 8, 31, tzinfo=UTC)
+    mock_plan.blackout_dates = []
+
     with patch.object(service.repo, "get_session_by_id", new_callable=AsyncMock) as mock_get_session, \
+         patch.object(service.repo, "get_plan_by_id", new_callable=AsyncMock) as mock_get_plan, \
+         patch.object(service.repo, "list_plans_for_student", new_callable=AsyncMock) as mock_list_plans, \
          patch.object(service.repo, "update_session", new_callable=AsyncMock) as mock_update_session:
         mock_get_session.return_value = mock_session
+        mock_get_plan.return_value = mock_plan
+        mock_list_plans.return_value = []
 
         # Route reads body.new_duration_minutes
         resched = await service.reschedule_session(

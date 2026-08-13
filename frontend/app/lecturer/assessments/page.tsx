@@ -514,7 +514,7 @@ export default function ManageAssessmentsPage() {
   ).length;
 
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div data-tour="lecturer-create" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* ── Page header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div>
@@ -524,6 +524,7 @@ export default function ManageAssessmentsPage() {
           </p>
         </div>
         <Button
+          data-tour="lecturer-create-assessment"
           size="sm"
           asChild
           className="h-8 rounded-lg px-4 gap-1.5 shadow-none font-bold text-[10px] uppercase tracking-wider text-white"

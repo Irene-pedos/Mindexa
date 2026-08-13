@@ -6,7 +6,9 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ThemeProvider } from "@/components/providers/theme-provider";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { AccessibilityProvider } from "@/components/providers/accessibility-provider";
 import { RoleGuard } from "@/components/mindexa/layout/role-guard";
+import { GuidedTourModal } from "@/components/mindexa/onboarding/guided-tour-modal";
 import { Toaster } from "@/components/ui/sonner";
 
 const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
@@ -115,9 +117,12 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <AuthProvider>
-            <TooltipProvider>
-              <RoleGuard>{children}</RoleGuard>
-            </TooltipProvider>
+            <AccessibilityProvider>
+              <TooltipProvider>
+                <RoleGuard>{children}</RoleGuard>
+                <GuidedTourModal />
+              </TooltipProvider>
+            </AccessibilityProvider>
           </AuthProvider>
           <Toaster position="top-center" />
         </ThemeProvider>

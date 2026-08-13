@@ -1368,7 +1368,7 @@ class AssessmentService:
                 "peer_evaluation_weight_percent": data.metadata.peerEvaluationWeightPercent if is_group else None,
                 "individual_weighting_enabled": data.metadata.individualWeightingEnabled if is_group else False,
                 "appeal_window_days": data.metadata.appealWindowDays if is_group else None,
-                "audience_type": data.metadata.audience_type,
+                "audience_type": data.metadata.audience_type or "all",
                 "target_student_ids": data.metadata.target_student_ids,
             }
             if data.draft_step is not None:

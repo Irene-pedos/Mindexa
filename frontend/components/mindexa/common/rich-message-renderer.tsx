@@ -340,12 +340,84 @@ function ParsedContentBlock({ text }: { text: string }) {
   return <div className="space-y-1 font-sans">{elements}</div>;
 }
 
+function CitationsSection({
+  citations,
+}: {
+  citations: Array<{
+    resource_name?: string;
+    title?: string;
+    resource_id?: string;
+    page_number?: number | null;
+    excerpt?: string;
+    snippet?: string;
+  }>;
+}) {
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  if (!citations || citations.length === 0) return null;
+
+  const INITIAL_LIMIT = 2;
+  const visibleCitations = isExpanded ? citations : citations.slice(0, INITIAL_LIMIT);
+  const remainingCount = citations.length - INITIAL_LIMIT;
+
+  return (
+    <div className="mt-3.5 pt-2.5 border-t border-border/40 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+          <FileText className="size-3 text-primary" /> References ({citations.length})
+        </span>
+        {remainingCount > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="h-5 px-1.5 text-[10px] text-primary hover:bg-primary/5 font-medium flex items-center gap-1"
+          >
+            {isExpanded ? (
+              "Show less"
+            ) : (
+              <>
+                <span>+{remainingCount} more reference{remainingCount > 1 ? "s" : ""}</span>
+                <ChevronRight className="size-3 rotate-90" />
+              </>
+            )}
+          </Button>
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {visibleCitations.map((c, idx) => {
+          const titleText = c.resource_name || c.title || "Source";
+          const snippetText = c.excerpt || c.snippet;
+          return (
+            <Badge
+              key={idx}
+              variant="outline"
+              className="text-[10px] bg-background hover:bg-muted/40 font-normal px-2.5 py-1 border-border/60 flex items-center gap-1 max-w-full"
+              title={snippetText}
+            >
+              <span className="truncate max-w-[220px] font-medium text-foreground">{titleText}</span>
+              {c.page_number && <span className="text-muted-foreground font-mono">(p. {c.page_number})</span>}
+            </Badge>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export function RichMessageRenderer({ content, citations, className }: RichMessageRendererProps) {
   // Parse content into blocks: code, table, mermaid, chart, gk_marker, text
   const blocks = useMemo(() => {
     if (!content) return [];
 
     let processedContent = content.trim();
+
+    // Strip redundant inline source markers like [Source: ... Page ...] or [Source: ...] if present in text
+    processedContent = processedContent
+      .replace(/\[Source:\s*[^\]]+\]/gi, "")
+      .replace(/\[Page\s*\d+[^\]]*\]/gi, "")
+      .replace(/\n\s*\n\s*\n/g, "\n\n")
+      .trim();
 
     // 1. Unwrap markdown ```json ... ``` wrapper if it contains JSON
     if (processedContent.startsWith("```json")) {
@@ -515,26 +587,7 @@ export function RichMessageRenderer({ content, citations, className }: RichMessa
       })}
 
       {/* Citations section if provided */}
-      {citations && citations.length > 0 && (
-        <div className="mt-3.5 pt-2.5 border-t border-border/40 space-y-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
-            <FileText className="size-3 text-primary" /> Verified Citations ({citations.length})
-          </span>
-          <div className="flex flex-wrap gap-1.5">
-            {citations.map((c, idx) => (
-              <Badge
-                key={idx}
-                variant="outline"
-                className="text-[10px] bg-background hover:bg-muted/40 font-normal px-2 py-0.5 border-border/60 flex items-center gap-1"
-                title={c.excerpt}
-              >
-                <span>{c.resource_name}</span>
-                {c.page_number && <span className="text-muted-foreground">(p. {c.page_number})</span>}
-              </Badge>
-            ))}
-          </div>
-        </div>
-      )}
+      {citations && citations.length > 0 && <CitationsSection citations={citations} />}
     </div>
   );
 }

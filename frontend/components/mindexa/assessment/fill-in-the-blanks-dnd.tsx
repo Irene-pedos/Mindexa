@@ -13,7 +13,8 @@ import {
   DragEndEvent,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { X } from "lucide-react";
+import { X, ListFilter, Move } from "lucide-react";
+import { useAccessibility } from "@/components/providers/accessibility-provider";
 import { cn } from "@/lib/utils";
 
 export interface FillBlankOption {
@@ -30,6 +31,7 @@ export interface FillInTheBlanksDndProps {
   currentVal?: Record<number | string, string>;
   onAnswerChange: (val: Record<number | string, string>) => void;
   disabled?: boolean;
+  interactionMode?: "drag" | "list" | "auto";
 }
 
 function seededShuffle<T>(array: T[], seedStr: string): T[] {
@@ -174,11 +176,25 @@ export function SharedFillInTheBlanksDnd({
   currentVal,
   onAnswerChange,
   disabled,
+  interactionMode = "auto",
 }: FillInTheBlanksDndProps) {
+  const { isSimpleMode, isScreenReaderMode } = useAccessibility();
   const rawText = questionText || "";
-  const parts = rawText.split(/\[blank\]|_{3,4}/gi);
-  const blankAnswers = currentVal || {};
+  const parts = useMemo(() => rawText.split(/\[blank\]|_{3,4}/gi), [rawText]);
+  const blankAnswers = useMemo(() => currentVal || {}, [currentVal]);
   const [isDragging, setIsDragging] = useState(false);
+
+  const defaultMode = useMemo<"dnd" | "list">(() => {
+    if (interactionMode === "list") return "list";
+    if (interactionMode === "drag") return "dnd";
+    return isSimpleMode || isScreenReaderMode ? "list" : "dnd";
+  }, [interactionMode, isSimpleMode, isScreenReaderMode]);
+
+  const [viewMode, setViewMode] = useState<"dnd" | "list">(defaultMode);
+
+  React.useEffect(() => {
+    setViewMode(defaultMode);
+  }, [defaultMode]);
 
   const pool = useMemo(() => {
     const raw = (options || [])
@@ -238,64 +254,167 @@ export function SharedFillInTheBlanksDnd({
   const usedAnswers = Object.values(blankAnswers) as string[];
 
   return (
-    <DndContext
-      sensors={sensors}
-      collisionDetection={closestCenter}
-      onDragStart={() => setIsDragging(true)}
-      onDragEnd={(e) => {
-        setIsDragging(false);
-        handleDragEnd(e);
-      }}
-      onDragCancel={() => setIsDragging(false)}
-    >
-      <div className="space-y-6">
-        <div className="p-5 md:p-6 rounded-xl border border-border/70 bg-card leading-[2.6] text-xs md:text-sm font-medium text-foreground/90 shadow-xs">
-          {parts.map((part: string, i: number) => (
-            <React.Fragment key={i}>
-              <span className="whitespace-pre-wrap">{part}</span>
-              {i < parts.length - 1 && (
-                <DroppableBlank
-                  index={i}
-                  value={blankAnswers[i] || blankAnswers[str(i)]}
-                  onRemove={() => removeAnswer(i)}
-                  optionsPool={pool.map((p) => p.text)}
-                  isDragging={isDragging}
-                  disabled={disabled}
-                  onSelect={(val) => {
-                    onAnswerChange({
-                      ...blankAnswers,
-                      [i]: val,
-                    });
-                  }}
-                />
-              )}
-            </React.Fragment>
-          ))}
-        </div>
+    <div className="space-y-4">
+      {/* Accessible Mode Switcher */}
+      <div className="flex items-center justify-between p-2.5 rounded-lg bg-muted/20 border border-border/40">
+        <span className="text-xs font-semibold text-foreground/80 flex items-center gap-1.5">
+          {viewMode === "list" ? (
+            <>
+              <ListFilter className="size-3.5 text-primary" />
+              <span>List Mode Active (Accessible Dropdowns)</span>
+            </>
+          ) : (
+            <>
+              <Move className="size-3.5 text-primary" />
+              <span>Drag & Drop Mode Active</span>
+            </>
+          )}
+        </span>
+        <button
+          type="button"
+          onClick={() => setViewMode((prev) => (prev === "list" ? "dnd" : "list"))}
+          className="text-xs font-medium text-primary hover:underline px-2 py-0.5 rounded focus:outline-none"
+        >
+          {viewMode === "list" ? "Switch to Drag & Drop" : "Switch to List Mode"}
+        </button>
+      </div>
 
-        {pool.length > 0 && (
-          <div className="space-y-2 p-4 rounded-xl bg-muted/10 border border-dashed border-border/60">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
-              Word / Option Bank (Drag to blank or select in place)
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {pool.map((ans) => (
-                <DraggableFillBlankAnswer
-                  key={ans.id}
-                  id={ans.id}
-                  text={ans.text}
-                  isUsed={Boolean(
-                    poolCountsByText[ans.text] &&
-                    usedAnswerCounts[ans.text] >= poolCountsByText[ans.text],
+      {viewMode === "list" ? (
+        /* ACCESSIBLE LIST MODE */
+        <div className="space-y-4">
+          <div className="p-4 rounded-xl border border-border/70 bg-card text-xs md:text-sm font-medium leading-relaxed">
+            <span className="font-bold text-muted-foreground block mb-2 text-[11px] uppercase tracking-wider">
+              Question Text:
+            </span>
+            {parts.map((part, i) => (
+              <React.Fragment key={i}>
+                <span>{part}</span>
+                {i < parts.length - 1 && (
+                  <span className="inline-block mx-1 px-2 py-0.5 rounded font-bold bg-primary/10 text-primary border border-primary/20">
+                    [Blank {i + 1}: {blankAnswers[i] || blankAnswers[String(i)] || "Unanswered"}]
+                  </span>
+                )}
+              </React.Fragment>
+            ))}
+          </div>
+
+          <div className="space-y-3">
+            {parts.slice(0, -1).map((_, i) => {
+              const matchedVal = blankAnswers[i] || blankAnswers[String(i)];
+              return (
+                <div
+                  key={i}
+                  className="p-3.5 rounded-xl border border-border/70 bg-card flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs"
+                >
+                  <div className="text-xs md:text-sm font-semibold text-foreground">
+                    <span className="font-bold text-primary mr-2">Blank {i + 1}:</span>
+                    Select the word or phrase to fill this position
+                  </div>
+                  <div className="w-full sm:w-64">
+                    <select
+                      disabled={disabled}
+                      value={matchedVal || ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        if (val === "") {
+                          removeAnswer(i);
+                        } else {
+                          onAnswerChange({
+                            ...blankAnswers,
+                            [i]: val,
+                          });
+                        }
+                      }}
+                      className="w-full h-11 px-3 rounded-lg border border-border/80 bg-background text-xs font-semibold text-foreground focus:ring-2 focus:ring-primary/20"
+                      aria-label={`Select answer for Blank ${i + 1}`}
+                    >
+                      <option value="">-- Select blank option --</option>
+                      {pool
+                        .filter((opt, _, arr) => {
+                          // Deduplicate: render each unique text once only
+                          return arr.findIndex((x) => x.text === opt.text) === arr.indexOf(opt);
+                        })
+                        .map((opt, optIdx) => {
+                          const totalAvailable = poolCountsByText[opt.text] || 1;
+                          const timesUsed = usedAnswerCounts[opt.text] || 0;
+                          // Show option if: it's the current selection for this blank,
+                          // OR there are still unused copies left
+                          const isCurrentSelection = matchedVal === opt.text;
+                          const hasCapacityLeft = timesUsed < totalAvailable;
+                          if (!isCurrentSelection && !hasCapacityLeft) return null;
+                          return (
+                            <option key={optIdx} value={opt.text}>
+                              {opt.text}
+                            </option>
+                          );
+                        })}
+                    </select>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        /* INTERACTIVE DRAG & DROP MODE */
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={() => setIsDragging(true)}
+          onDragEnd={(e) => {
+            setIsDragging(false);
+            handleDragEnd(e);
+          }}
+          onDragCancel={() => setIsDragging(false)}
+        >
+          <div className="space-y-6">
+            <div className="p-5 md:p-6 rounded-xl border border-border/70 bg-card leading-[2.6] text-xs md:text-sm font-medium text-foreground/90 shadow-xs">
+              {parts.map((part: string, i: number) => (
+                <React.Fragment key={i}>
+                  <span className="whitespace-pre-wrap">{part}</span>
+                  {i < parts.length - 1 && (
+                    <DroppableBlank
+                      index={i}
+                      value={blankAnswers[i] || blankAnswers[String(i)]}
+                      onRemove={() => removeAnswer(i)}
+                      optionsPool={pool.map((p) => p.text)}
+                      isDragging={isDragging}
+                      disabled={disabled}
+                      onSelect={(val) => {
+                        onAnswerChange({
+                          ...blankAnswers,
+                          [i]: val,
+                        });
+                      }}
+                    />
                   )}
-                  disabled={disabled}
-                />
+                </React.Fragment>
               ))}
             </div>
+
+            <div className="space-y-2 p-4 rounded-xl bg-muted/10 border border-dashed border-border/60">
+              <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mb-2">
+                Available Word Bank (Drag or Select from dropdown)
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {pool.map((opt) => (
+                  <DraggableFillBlankAnswer
+                    key={opt.id}
+                    id={opt.id}
+                    text={opt.text}
+                    isUsed={Boolean(
+                      poolCountsByText[opt.text] &&
+                      usedAnswerCounts[opt.text] >= poolCountsByText[opt.text],
+                    )}
+                    disabled={disabled}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
-        )}
-      </div>
-    </DndContext>
+        </DndContext>
+      )}
+    </div>
   );
 }
 

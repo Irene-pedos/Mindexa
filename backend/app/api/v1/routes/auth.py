@@ -77,6 +77,7 @@ from app.db.schemas.auth import (
     VerifyEmailRequest,
     StudentOnboardingRequest,
     LecturerOnboardingRequest,
+    TourProgressUpdateRequest,
 )
 from app.db.session import get_db
 from app.dependencies.auth import (
@@ -172,6 +173,12 @@ def _build_user_response(user) -> UserResponse:
             department_id=getattr(user.profile, "department_id", None),
             option_id=getattr(user.profile, "option_id", None),
             class_section_id=getattr(user.profile, "class_section_id", None),
+            # Accessibility & Accommodations
+            simple_mode_enabled=getattr(user.profile, "simple_mode_enabled", False),
+            extra_time_percent=getattr(user.profile, "extra_time_percent", 0),
+            requires_screen_reader_mode=getattr(user.profile, "requires_screen_reader_mode", False),
+            large_text_default=getattr(user.profile, "large_text_default", False),
+            reduced_motion_default=getattr(user.profile, "reduced_motion_default", False),
         )
 
     return UserResponse(
@@ -183,6 +190,9 @@ def _build_user_response(user) -> UserResponse:
         status=user.status,
         email_verified=user.email_verified,
         onboarding_completed=getattr(user, "onboarding_completed", False),
+        onboarding_tour_completed=getattr(user, "onboarding_tour_completed", False),
+        onboarding_tour_step=getattr(user, "onboarding_tour_step", 0),
+        onboarding_tour_variant=getattr(user, "onboarding_tour_variant", None),
         email_verified_at=getattr(user, "email_verified_at", None),
         last_login_at=getattr(user, "last_login_at", None),
         profile=profile_response,
@@ -842,6 +852,31 @@ async def update_me(
     await db.refresh(profile)
 
     return _build_user_response(current_user)
+
+
+@router.patch(
+    "/me/tour",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update onboarding guided tour progress",
+    description="Update user's current step, variant, and completion status for the onboarding tour.",
+)
+async def update_tour_progress(
+    body: TourProgressUpdateRequest,
+    current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
+) -> UserResponse:
+    """
+    Update guided tour state for the authenticated user.
+    """
+    service = AuthService(db)
+    user = await service.update_tour_progress(
+        user_id=current_user.id,
+        step=body.resolved_step,
+        variant=body.resolved_variant,
+        completed=body.resolved_completed,
+    )
+    return _build_user_response(user)
 
 
 @router.post(

@@ -34,6 +34,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useDebounce } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import { Eye } from "lucide-react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   Search,
@@ -63,7 +64,10 @@ import {
   Lock,
   FileText,
   Send,
+  Focus,
+  AlignLeft,
 } from "lucide-react";
+import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 
 import { gradingApi } from "@/lib/api/grading";
 import { lecturerApi, WorkspaceListItem } from "@/lib/api/lecturer";
@@ -1932,35 +1936,19 @@ export default function LecturerGradingQueue() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Review Mode Toggle Switch */}
-            <div className="flex items-center bg-muted/30 border border-border/40 p-0.5 rounded-lg">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setReviewMode("focus")}
-                className={cn(
-                  "h-7 px-3 text-[10px] font-bold uppercase rounded-md transition-all duration-200",
-                  reviewMode === "focus"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted/50",
-                )}
-              >
-                Focus Mode
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setReviewMode("detailed")}
-                className={cn(
-                  "h-7 px-3 text-[10px] font-bold uppercase rounded-md transition-all duration-200",
-                  reviewMode === "detailed"
-                    ? "bg-primary text-primary-foreground shadow-sm"
-                    : "text-muted-foreground hover:bg-muted/50",
-                )}
-              >
-                Detailed Mode
-              </Button>
-            </div>
+            {/* Review Mode Toggle */}
+            <Tabs value={reviewMode} onValueChange={(v) => setReviewMode(v as "focus" | "detailed")}>
+              <TabsList className="h-auto p-0.5">
+                <TabsTrigger value="focus" className="h-7 px-3 text-[10px] font-bold uppercase">
+                  <Focus className="size-3.5" />
+                  Focus
+                </TabsTrigger>
+                <TabsTrigger value="detailed" className="h-7 px-3 text-[10px] font-bold uppercase">
+                  <AlignLeft className="size-3.5" />
+                  Detailed
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
 
             <Button
               variant="outline"
@@ -2901,7 +2889,7 @@ export default function LecturerGradingQueue() {
 
   // ─── RENDERING PATH 3: REVIEW QUEUE NAVIGATION HIERARCHY ──────────────────
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div data-tour="lecturer-grading" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Precision Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
         <div>
@@ -3382,10 +3370,13 @@ export default function LecturerGradingQueue() {
           <div className="border border-border/50 rounded-xl overflow-hidden bg-card/30 backdrop-blur-sm shadow-none">
             <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-border/40 bg-muted/10">
               <div className="space-y-1">
-                <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
-                  <Unlock className="size-4 text-primary" />
-                  Publish Results
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <Unlock className="size-4 text-primary" />
+                    Publish Results
+                  </h2>
+                  <ContextualExplainer topic="grading-release" variant="pill" label="Release Guidelines" />
+                </div>
                 <p className="text-[11px] text-muted-foreground font-medium">
                   {submittedResultCount} submitted of {releaseQueue.length || selectedClass.total_students} enrolled students.
                   {releaseQueue.length > submittedResultCount

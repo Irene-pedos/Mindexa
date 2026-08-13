@@ -14,6 +14,7 @@ import {
   UserPlus,
   AlertCircle,
   Loader2,
+  Compass,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -223,7 +224,22 @@ export function SiteHeader() {
 
       <div className="flex-1" />
 
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => {
+            if (typeof window !== "undefined") {
+              window.dispatchEvent(new CustomEvent("mindexa-open-tour", { detail: { step: 0 } }));
+            }
+          }}
+          className="hidden md:flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground h-8 px-2.5"
+          title="Take Guided Tour"
+        >
+          <Compass className="size-3.5 text-primary" />
+          <span>Take Tour</span>
+        </Button>
+
         <Badge variant="secondary" className="font-medium">
           {role}
         </Badge>
@@ -328,6 +344,17 @@ export function SiteHeader() {
                 <Link href="/student/academic-record">Academic Record</Link>
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem
+              className="cursor-pointer"
+              onClick={() => {
+                if (typeof window !== "undefined") {
+                  window.dispatchEvent(new CustomEvent("mindexa-open-tour", { detail: { step: 0 } }));
+                }
+              }}
+            >
+              <Compass className="mr-2 size-4 text-primary" />
+              Guided Tour
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               className="text-destructive cursor-pointer"

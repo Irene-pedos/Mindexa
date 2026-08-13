@@ -57,6 +57,11 @@ import {
   Users,
   Upload,
   BookOpen,
+  Sparkles,
+  Sliders,
+  Target,
+  Wand2,
+  Layers,
 } from "lucide-react";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -7901,7 +7906,7 @@ export default function NewAssessmentBuilder() {
   };
 
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div data-tour="lecturer-create" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex items-center justify-between border-b pb-2">
         <div>
@@ -8155,60 +8160,106 @@ export default function NewAssessmentBuilder() {
 
       {/* AI GENERATION CONFIG SHEET */}
       <Sheet open={aiDrawerOpen} onOpenChange={setAiDrawerOpen}>
-        <SheetContent side="right" className="w-full sm:max-w-162.5 md:max-w-175 p-6 flex flex-col h-full overflow-y-auto">
-          <SheetHeader className="border-b pb-4 shrink-0">
-            <SheetTitle className="flex items-center gap-2 text-lg font-bold">
-              <BrainCircuit className="size-5 text-primary animate-pulse" /> AI
-              Question Generator Settings
-            </SheetTitle>
-            <SheetDescription>
-              Configure generation constraints. AI will draft questions matching
-              these criteria.
-            </SheetDescription>
-          </SheetHeader>
-          <div className="-mx-4 no-scrollbar max-h-[60vh] overflow-y-auto px-4 py-2 space-y-4 flex-1">
-            {aiTargetSectionId === "all" ? (
-              <div className="space-y-4">
-                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg space-y-2 text-xs text-zinc-600">
-                  <div>
-                    <strong>Course Workspace:</strong>{" "}
-                    {selectedWorkspaceDetail?.title ||
-                      "No course workspace selected"}
-                  </div>
-                  <div>
-                    <strong>Assessment Title:</strong>{" "}
-                    {metadata.title || "Untitled Assessment"}
-                  </div>
-                  <div>
-                    <strong>Assessment Type:</strong> {(metadata.mode === "Groupwork" ? "Group Work" : metadata.mode) || "CAT"}
-                  </div>
+        <SheetContent side="right" className="w-full sm:max-w-xl md:max-w-2xl p-0 flex flex-col h-full bg-background border-l shadow-2xl overflow-hidden">
+          {/* Header */}
+          <SheetHeader className="p-6 border-b shrink-0 bg-gradient-to-r from-primary/5 via-primary/10 to-transparent">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/15 border border-primary/20 text-primary shadow-xs">
+                <BrainCircuit className="size-6 animate-pulse" />
+              </div>
+              <div className="space-y-1 text-left">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <SheetTitle className="text-xl font-bold tracking-tight">
+                    AI Question Generator Settings
+                  </SheetTitle>
+                  {aiTargetSectionId !== "all" ? (
+                    <Badge variant="secondary" className="text-[10px] font-semibold bg-primary/10 text-primary border border-primary/20">
+                      Single Section
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="text-[10px] font-semibold bg-indigo-50 text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                      Full Assessment
+                    </Badge>
+                  )}
                 </div>
+                <SheetDescription className="text-xs text-muted-foreground">
+                  Configure generation parameters and target content. AI will draft questions matching these criteria.
+                </SheetDescription>
+              </div>
+            </div>
+          </SheetHeader>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-zinc-700">
-                    Blueprint Distribution Summary
-                  </Label>
-                  <div className="space-y-2 border p-3 rounded-lg bg-zinc-50/50">
+          {/* Scrollable Content Body */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {aiTargetSectionId === "all" ? (
+              <div className="space-y-5">
+                {/* Context Card */}
+                <Card className="border-primary/15 bg-gradient-to-br from-primary/5 to-transparent shadow-none">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-center gap-2 text-xs font-semibold text-primary uppercase tracking-wider">
+                      <Sparkles className="size-3.5" /> Assessment Context
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      <div className="p-2.5 rounded-lg bg-background/80 border shadow-2xs">
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium block">Workspace</span>
+                        <span className="font-medium text-foreground truncate block mt-0.5" title={selectedWorkspaceDetail?.title || "No workspace"}>
+                          {selectedWorkspaceDetail?.title || "No workspace selected"}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-background/80 border shadow-2xs">
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium block">Assessment Title</span>
+                        <span className="font-medium text-foreground truncate block mt-0.5" title={metadata.title || "Untitled"}>
+                          {metadata.title || "Untitled Assessment"}
+                        </span>
+                      </div>
+                      <div className="p-2.5 rounded-lg bg-background/80 border shadow-2xs">
+                        <span className="text-[10px] text-muted-foreground uppercase font-medium block">Assessment Mode</span>
+                        <span className="font-medium text-foreground truncate block mt-0.5">
+                          {(metadata.mode === "Groupwork" ? "Group Work" : metadata.mode) || "CAT"}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Blueprint Distribution Summary */}
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                      <Layers className="size-3.5 text-primary" /> Blueprint Distribution Summary
+                    </Label>
+                    <Badge variant="outline" className="text-[10px]">
+                      {blueprint.length} {blueprint.length === 1 ? "Section" : "Sections"}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-2 border rounded-xl p-3 bg-muted/20">
                     {blueprint.map((sec, idx) => (
                       <div
                         key={sec.id}
-                        className="flex justify-between items-center text-xs pb-1.5 border-b last:border-0 last:pb-0 border-zinc-100"
+                        className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 rounded-lg bg-background border shadow-2xs transition-all hover:border-primary/30"
                       >
-                        <div>
-                          <span className="font-semibold text-zinc-800">
-                            Section {idx + 1}: {sec.section}
-                          </span>
-                          <div className="text-[10px] text-zinc-400 truncate max-w-50">
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-xs text-foreground">
+                              Section {idx + 1}: {sec.section}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground truncate max-w-xs">
                             {sec.topics || "General topics"}
-                          </div>
+                          </p>
                         </div>
-                        <div className="text-right text-[10px] font-medium text-zinc-500">
-                          <div>
-                            {sec.questions || 0} Questions · {sec.marks || 0}{" "}
-                            Marks
+                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1 text-[11px] font-medium border-t sm:border-t-0 pt-1.5 sm:pt-0">
+                          <div className="text-foreground">
+                            <strong>{sec.questions || 0}</strong> Qs · <strong>{sec.marks || 0}</strong> Marks
                           </div>
-                          <div className="uppercase text-[9px] text-zinc-400">
-                            {sec.difficulty} · {sec.bloomLevel || "understand"}
+                          <div className="flex items-center gap-1.5">
+                            <Badge variant="secondary" className="text-[9px] uppercase px-1.5 py-0 h-4">
+                              {sec.difficulty}
+                            </Badge>
+                            <Badge variant="outline" className="text-[9px] uppercase px-1.5 py-0 h-4">
+                              {sec.bloomLevel || "understand"}
+                            </Badge>
                           </div>
                         </div>
                       </div>
@@ -8216,19 +8267,48 @@ export default function NewAssessmentBuilder() {
                   </div>
                 </div>
 
-                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-[10px] text-amber-800 leading-normal">
-                  <strong>Assessment balancing:</strong> The AI Question
-                  Generation Agent will generate a balanced set of questions
-                  mapping to each blueprint section&apos;s topics, difficulty
-                  level, and Bloom&apos;s Taxonomy setting automatically.
+                {/* Info Card */}
+                <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-900 dark:text-amber-200 text-xs flex gap-3 items-start">
+                  <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed text-[11px]">
+                    <strong className="font-semibold text-amber-950 dark:text-amber-100">Automatic Assessment Balancing:</strong> The AI Question Generation Agent will distribute generation requests across each section according to your defined topics, difficulty levels, and Bloom&apos;s Taxonomy targets.
+                  </div>
                 </div>
               </div>
             ) : (
-              <>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">
-                    Subject / Topic Focus
-                  </Label>
+              <div className="space-y-5">
+                {/* Active Section Info Card */}
+                {(() => {
+                  const activeSec = blueprint.find((b) => b.id === aiTargetSectionId);
+                  return activeSec ? (
+                    <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/15 flex items-center justify-between text-xs">
+                      <div className="flex items-center gap-2.5">
+                        <Target className="size-4 text-primary" />
+                        <div>
+                          <span className="text-muted-foreground text-[10px] uppercase font-medium block">Targeting Section</span>
+                          <span className="font-bold text-foreground text-xs">{activeSec.section}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-[10px]">
+                          {activeSec.questions} Qs Required
+                        </Badge>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {activeSec.marks} Marks
+                        </Badge>
+                      </div>
+                    </div>
+                  ) : null;
+                })()}
+
+                {/* Subject / Topic Focus */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <BookOpen className="size-3.5 text-primary" /> Subject / Topic Focus <span className="text-destructive">*</span>
+                    </Label>
+                    <span className="text-[10px] text-muted-foreground">Required</span>
+                  </div>
                   <Input
                     value={aiGenerationConfig.topic}
                     onChange={(e) =>
@@ -8238,13 +8318,18 @@ export default function NewAssessmentBuilder() {
                       })
                     }
                     placeholder="e.g. Database indexes, B-Trees, Query Optimization"
+                    className="h-10 text-xs bg-background"
                   />
+                  <p className="text-[10px] text-muted-foreground">
+                    Specify main concepts or topics you want the AI to generate questions for.
+                  </p>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">
-                      Question Type
+                {/* Row 1: Question Type & Target Count */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
+                      <Sliders className="size-3.5 text-primary" /> Question Format
                     </Label>
                     <Select
                       value={aiGenerationConfig.question_type}
@@ -8255,7 +8340,7 @@ export default function NewAssessmentBuilder() {
                         })
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-10 text-xs bg-background">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -8291,13 +8376,13 @@ export default function NewAssessmentBuilder() {
                             visibleTypes = [
                               {
                                 value: "mixed",
-                                label: "Mixed (All Selected Formats)",
+                                label: "Mixed (All Allowed Formats)",
                               },
                               ...visibleTypes,
                             ];
                           }
                           return visibleTypes.map((t) => (
-                            <SelectItem key={t.value} value={t.value}>
+                            <SelectItem key={t.value} value={t.value} className="text-xs">
                               {t.label}
                             </SelectItem>
                           ));
@@ -8305,14 +8390,16 @@ export default function NewAssessmentBuilder() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold">
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold flex items-center gap-1.5">
                       Target Questions Count
                     </Label>
                     <Input
                       type="number"
                       min={1}
                       max={20}
+                      className="h-10 text-xs bg-background"
                       value={aiGenerationConfig.count}
                       onChange={(e) =>
                         setAiGenerationConfig({
@@ -8324,8 +8411,9 @@ export default function NewAssessmentBuilder() {
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
+                {/* Row 2: Difficulty & Bloom Level */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-2">
                     <Label className="text-xs font-semibold">
                       Difficulty Level
                     </Label>
@@ -8338,17 +8426,18 @@ export default function NewAssessmentBuilder() {
                         })
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-10 text-xs bg-background">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="easy">Easy</SelectItem>
-                        <SelectItem value="medium">Medium</SelectItem>
-                        <SelectItem value="hard">Hard</SelectItem>
+                        <SelectItem value="easy" className="text-xs">Easy</SelectItem>
+                        <SelectItem value="medium" className="text-xs">Medium</SelectItem>
+                        <SelectItem value="hard" className="text-xs">Hard</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1.5">
+
+                  <div className="space-y-2">
                     <Label className="text-xs font-semibold">
                       {"Bloom's Taxonomy Level"}
                     </Label>
@@ -8361,30 +8450,34 @@ export default function NewAssessmentBuilder() {
                         })
                       }
                     >
-                      <SelectTrigger>
+                      <SelectTrigger className="h-10 text-xs bg-background">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="remember">Remember</SelectItem>
-                        <SelectItem value="understand">Understand</SelectItem>
-                        <SelectItem value="apply">Apply</SelectItem>
-                        <SelectItem value="analyze">Analyze</SelectItem>
-                        <SelectItem value="evaluate">Evaluate</SelectItem>
-                        <SelectItem value="create">Create</SelectItem>
+                        <SelectItem value="remember" className="text-xs">Remember (Knowledge recall)</SelectItem>
+                        <SelectItem value="understand" className="text-xs">Understand (Comprehension)</SelectItem>
+                        <SelectItem value="apply" className="text-xs">Apply (Execution & practice)</SelectItem>
+                        <SelectItem value="analyze" className="text-xs">Analyze (Deconstruction & logic)</SelectItem>
+                        <SelectItem value="evaluate" className="text-xs">Evaluate (Critique & judgment)</SelectItem>
+                        <SelectItem value="create" className="text-xs">Create (Formulate & synthesize)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
-            <div className="space-y-1.5 pt-2">
-              <Label className="text-xs font-semibold">
-                Additional Context / Custom Prompt
-              </Label>
+            {/* Additional Context / Custom Prompt Section */}
+            <div className="space-y-3 pt-3 border-t">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold flex items-center gap-1.5">
+                  <Wand2 className="size-3.5 text-primary" /> Additional Guidance & Custom Prompt
+                </Label>
+                <span className="text-[10px] text-muted-foreground">Optional</span>
+              </div>
               <Textarea
-                placeholder="Include details about what concepts to cover, expected outcomes, or specific coding/math expressions to include..."
-                className="min-h-25"
+                placeholder="Specify extra details, style requirements, formulas, code snippets, or specific constraints (e.g. 'Use Python syntax', 'Include edge cases')..."
+                className="min-h-24 text-xs bg-background resize-y"
                 value={aiGenerationConfig.additional_context}
                 onChange={(e) =>
                   setAiGenerationConfig({
@@ -8393,36 +8486,83 @@ export default function NewAssessmentBuilder() {
                   })
                 }
               />
+
+              {/* Quick suggestion chips */}
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-muted-foreground font-medium">Quick Prompt Chips (click to add):</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {[
+                    "Include step-by-step solutions",
+                    "Focus on practical scenarios",
+                    "Include edge cases",
+                    "Use real-world datasets/examples",
+                    "Add formulas or code snippets",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => {
+                        const currentText = aiGenerationConfig.additional_context || "";
+                        if (!currentText.includes(chip)) {
+                          const newText = currentText
+                            ? `${currentText.trim()} ${chip}.`
+                            : `${chip}.`;
+                          setAiGenerationConfig({
+                            ...aiGenerationConfig,
+                            additional_context: newText,
+                          });
+                        }
+                      }}
+                      className="text-[10px] px-2 py-1 rounded-md bg-muted/50 border hover:bg-primary/10 hover:border-primary/30 transition-colors text-muted-foreground hover:text-primary cursor-pointer"
+                    >
+                      + {chip}
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
           </div>
-          <div className="border-t pt-4 flex justify-end gap-2 bg-background shrink-0 mt-4">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAiDrawerOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleAIGenerate}
-              disabled={
-                aiGenerating ||
-                (aiTargetSectionId !== "all" && !aiGenerationConfig.topic)
-              }
-              size="sm"
-              className="font-semibold"
-            >
-              {aiGenerating ? (
-                <>
-                  <LoaderCircleIcon className="mr-2 h-4 w-4 animate-spin" />{" "}
-                  Generating...
-                </>
+
+          {/* Footer */}
+          <div className="p-4 border-t bg-background shrink-0 flex items-center justify-between gap-3">
+            <div className="text-xs text-muted-foreground hidden sm:block">
+              {aiTargetSectionId === "all" ? (
+                <span>Target: <strong>All Sections</strong> ({blueprint.reduce((a, b) => a + (b.questions || 0), 0)} Questions)</span>
               ) : (
-                <>
-                  <BrainCircuit className="mr-2 h-4 w-4" /> Start AI Generation
-                </>
+                <span>Target: <strong>{aiGenerationConfig.count}</strong> Question(s)</span>
               )}
-            </Button>
+            </div>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAiDrawerOpen(false)}
+                className="text-xs h-9"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAIGenerate}
+                disabled={
+                  aiGenerating ||
+                  (aiTargetSectionId !== "all" && !aiGenerationConfig.topic)
+                }
+                size="sm"
+                className="text-xs h-9 font-semibold gap-2 shadow-xs"
+              >
+                {aiGenerating ? (
+                  <>
+                    <LoaderCircleIcon className="size-4 animate-spin" />
+                    Generating Questions...
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit className="size-4" />
+                    Start AI Generation
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </SheetContent>
       </Sheet>
@@ -8439,45 +8579,60 @@ export default function NewAssessmentBuilder() {
       >
         <SheetContent
           side="right"
-          className="w-full sm:max-w-2xl md:max-w-3xl p-6 flex flex-col h-full overflow-hidden"
+          className="w-full sm:max-w-3xl md:max-w-4xl lg:max-w-5xl xl:max-w-6xl p-0 flex flex-col h-full bg-background border-l shadow-2xl overflow-hidden"
         >
-          <SheetHeader className="border-b pb-4 shrink-0">
-            <SheetTitle className="flex items-center gap-2 text-lg font-bold">
-              <CheckCircle2 className="size-5 text-emerald-500" /> Review AI
-              Question Candidates
-            </SheetTitle>
-            <SheetDescription>
-              Accept, edit, or reject the AI generated candidate questions
-              below.
-            </SheetDescription>
+          {/* Header */}
+          <SheetHeader className="p-6 border-b shrink-0 bg-gradient-to-r from-emerald-500/10 via-primary/5 to-transparent">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-emerald-500/15 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 shadow-xs">
+                  <CheckCircle2 className="size-6" />
+                </div>
+                <div className="space-y-1 text-left">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <SheetTitle className="text-xl font-bold tracking-tight">
+                      Review AI Question Candidates
+                    </SheetTitle>
+                    <Badge variant="secondary" className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border border-emerald-500/20">
+                      {aiCandidates.length} Candidate{aiCandidates.length === 1 ? "" : "s"} Pending
+                    </Badge>
+                  </div>
+                  <SheetDescription className="text-xs text-muted-foreground">
+                    Accept, edit, or reject the AI generated candidate questions below.
+                  </SheetDescription>
+                </div>
+              </div>
+            </div>
+
             {/* Source legend */}
-            <div className="flex items-center gap-3 pt-1 flex-wrap">
-              <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
-                Source:
+            <div className="flex items-center gap-3 pt-3 flex-wrap border-t border-muted/30 mt-3">
+              <span className="text-[10px] text-muted-foreground font-semibold uppercase tracking-wider">
+                Grounded Source Legend:
               </span>
               <div className="flex items-center gap-1.5">
-                <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50 pointer-events-none">
-                  <BookOpen className="size-2.5" /> Lecture Material
+                <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-50 pointer-events-none">
+                  <BookOpen className="size-3" /> Lecture Material
                 </Badge>
                 <span className="text-[10px] text-muted-foreground">
-                  grounded in your uploaded course materials
+                  (grounded in course materials)
                 </span>
               </div>
               <div className="flex items-center gap-1.5">
-                <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50 pointer-events-none">
-                  <BrainCircuit className="size-2.5" /> AI Knowledge
+                <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800 hover:bg-amber-50 pointer-events-none">
+                  <BrainCircuit className="size-3" /> AI Knowledge
                 </Badge>
                 <span className="text-[10px] text-muted-foreground">
-                  no matching lecture material found — review carefully
+                  (review carefully)
                 </span>
               </div>
             </div>
           </SheetHeader>
 
+          {/* Failed Section Alert */}
           {aiFailedSectionIds.length > 0 && (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3 shrink-0 my-2">
-              <div className="flex gap-2.5 items-start text-xs text-amber-800">
-                <AlertTriangle className="size-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="mx-6 mt-4 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl space-y-3 shrink-0">
+              <div className="flex gap-2.5 items-start text-xs text-amber-900 dark:text-amber-200">
+                <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <div>
                   <strong className="font-semibold block mb-0.5">
                     Partial Generation Failure
@@ -8499,16 +8654,16 @@ export default function NewAssessmentBuilder() {
                 size="sm"
                 onClick={handleRetryFailedSections}
                 disabled={aiGenerating}
-                className="w-full bg-white hover:bg-amber-100 border-amber-300 text-amber-900 font-semibold h-8 text-xs"
+                className="w-full bg-background hover:bg-amber-500/10 border-amber-500/30 text-amber-900 dark:text-amber-100 font-semibold h-8 text-xs gap-2"
               >
                 {aiGenerating ? (
                   <>
-                    <LoaderCircleIcon className="mr-2 h-3.5 w-3.5 animate-spin" />{" "}
-                    Retrying...
+                    <LoaderCircleIcon className="size-3.5 animate-spin" />
+                    Retrying Failed Sections...
                   </>
                 ) : (
                   <>
-                    <BrainCircuit className="mr-2 h-3.5 w-3.5 text-primary" />{" "}
+                    <BrainCircuit className="size-3.5 text-primary" />
                     Retry Failed Sections
                   </>
                 )}
@@ -8516,352 +8671,385 @@ export default function NewAssessmentBuilder() {
             </div>
           )}
 
-          <div className="-mx-4 no-scrollbar max-h-[60vh] overflow-y-auto px-4 py-2 space-y-6 flex-1">
-            <div className="space-y-6">
-              {(() => {
-                const groups: { [key: string]: any[] } = {};
-                aiCandidates.forEach((c) => {
-                  const secId = c._sectionId || "unknown";
-                  if (!groups[secId]) groups[secId] = [];
-                  groups[secId].push(c);
-                });
+          {/* Scrollable Content */}
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {(() => {
+              const groups: { [key: string]: any[] } = {};
+              aiCandidates.forEach((c) => {
+                const secId = c._sectionId || "unknown";
+                if (!groups[secId]) groups[secId] = [];
+                groups[secId].push(c);
+              });
 
-                return Object.entries(groups).map(([secId, items]) => {
-                  const sectionObj = blueprint.find((s) => s.id === secId);
-                  const sectionTitle = sectionObj ? sectionObj.section : "General / First Section";
-                  return (
-                    <div key={secId} className="space-y-4">
-                      <div className="flex items-center gap-2 border-b pb-2 bg-muted/5 sticky top-0 z-10 backdrop-blur-sm pt-2">
-                        <div className="h-4 w-1 rounded bg-primary" />
-                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-                          {sectionTitle} ({items.length})
+              return Object.entries(groups).map(([secId, items]) => {
+                const sectionObj = blueprint.find((s) => s.id === secId);
+                const sectionTitle = sectionObj ? sectionObj.section : "General / Main Section";
+                return (
+                  <div key={secId} className="space-y-4">
+                    {/* Section Sticky Header */}
+                    <div className="flex items-center justify-between border-b pb-2 bg-background/90 sticky top-0 z-10 backdrop-blur-md pt-1">
+                      <div className="flex items-center gap-2">
+                        <div className="h-4 w-1.5 rounded-full bg-primary" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-foreground">
+                          {sectionTitle}
                         </h4>
                       </div>
-                      <div className="space-y-4">
-                        {items.map((cand) => (
-                          <Card
-                            key={cand.id}
-                            className="shadow-none border hover:border-primary/20 transition-all bg-white"
-                          >
-                            <CardContent className="p-4 space-y-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <Badge
-                                    variant="outline"
-                                    className="text-[10px] font-bold uppercase"
-                                  >
-                                    {cand.question_type}
+                      <Badge variant="outline" className="text-[10px] font-semibold">
+                        {items.length} Question{items.length === 1 ? "" : "s"}
+                      </Badge>
+                    </div>
+
+                    <div className="space-y-4">
+                      {items.map((cand) => (
+                        <Card
+                          key={cand.id}
+                          className="border rounded-xl shadow-2xs hover:border-primary/30 transition-all bg-card overflow-hidden"
+                        >
+                          <CardContent className="p-5 space-y-4">
+                            {/* Candidate Card Header Bar */}
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-3">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] font-bold uppercase tracking-wider bg-background"
+                                >
+                                  {cand.question_type}
+                                </Badge>
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px] font-medium uppercase"
+                                >
+                                  {cand.difficulty}
+                                </Badge>
+                                {cand.grounded_by_rag ? (
+                                  <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                                    <BookOpen className="size-3" />
+                                    Lecture Material
                                   </Badge>
-                                  <Badge
-                                    variant="secondary"
-                                    className="text-[10px] uppercase"
-                                  >
-                                    {cand.difficulty}
+                                ) : (
+                                  <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                    <BrainCircuit className="size-3" />
+                                    AI Knowledge
                                   </Badge>
-                                  {cand.grounded_by_rag ? (
-                                    <Badge className="text-[10px] font-semibold gap-1 bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-50">
-                                      <BookOpen className="size-2.5" />
-                                      Lecture Material
-                                    </Badge>
-                                  ) : (
-                                    <Badge className="text-[10px] font-semibold gap-1 bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-50">
-                                      <BrainCircuit className="size-2.5" />
-                                      AI Knowledge
-                                    </Badge>
-                                  )}
+                                )}
+                              </div>
+
+                              {/* Action Buttons Toolbar */}
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleAcceptCandidate(cand.id)}
+                                  disabled={isReviewApplying}
+                                  className="h-8 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/50 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 border-emerald-200 dark:border-emerald-800 gap-1.5 px-3"
+                                >
+                                  <Check className="size-3.5" /> Accept
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setEditingCandidateId(cand.id);
+                                    setEditingText(cand.parsed_question_text || "");
+                                    setEditingExplanation(
+                                      cand.parsed_explanation || "",
+                                    );
+                                    setEditingOptions(
+                                      (cand.options || cand._options || []).map(
+                                        (o: any) => ({
+                                          option_text: o.text || o.option_text || "",
+                                          option_text_right:
+                                            o.option_text_right || o.explanation || "",
+                                          is_correct: o.is_correct ?? false,
+                                          order_index: o.order_index ?? 0,
+                                          match_key: o.match_key,
+                                        }),
+                                      ),
+                                    );
+                                  }}
+                                  className="h-8 text-xs font-medium text-primary bg-primary/5 hover:bg-primary/10 border-primary/20 gap-1.5 px-3"
+                                >
+                                  <FileText className="size-3.5" /> Edit
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => handleRejectCandidate(cand.id)}
+                                  disabled={isReviewApplying}
+                                  className="h-8 text-xs font-medium text-destructive bg-destructive/5 hover:bg-destructive/10 border-destructive/20 gap-1.5 px-2.5"
+                                  title="Reject Candidate"
+                                >
+                                  <X className="size-3.5" />
+                                </Button>
+                              </div>
+                            </div>
+
+                            {/* Form or Preview Display */}
+                            {editingCandidateId === cand.id ? (
+                              <div className="space-y-4 pt-1 bg-muted/20 p-4 rounded-xl border">
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs font-semibold">
+                                    Edit Question Text
+                                  </Label>
+                                  <Textarea
+                                    value={editingText}
+                                    onChange={(e) => setEditingText(e.target.value)}
+                                    className="min-h-24 text-xs bg-background"
+                                  />
                                 </div>
-                                <div className="flex gap-1">
+                                <div className="space-y-1.5">
+                                  <Label className="text-xs font-semibold">
+                                    Edit Solution Explanation
+                                  </Label>
+                                  <Textarea
+                                    value={editingExplanation}
+                                    onChange={(e) =>
+                                      setEditingExplanation(e.target.value)
+                                    }
+                                    className="min-h-16 text-xs bg-background"
+                                  />
+                                </div>
+
+                                {editingOptions.length > 0 && (
+                                  <div className="space-y-2.5 pt-2 border-t">
+                                    <Label className="text-xs font-semibold">
+                                      Edit Options / Choices
+                                    </Label>
+                                    <div className="space-y-2">
+                                      {editingOptions.map((opt, oIdx) => {
+                                        const qType = mapBackendToFrontendType(
+                                          cand.question_type,
+                                        );
+                                        return (
+                                          <div
+                                            key={oIdx}
+                                            className="flex gap-2 items-center"
+                                          >
+                                            {qType === "matching" ? (
+                                              <>
+                                                <Input
+                                                  value={opt.option_text || ""}
+                                                  onChange={(e) => {
+                                                    const newOpts = [...editingOptions];
+                                                    newOpts[oIdx] = {
+                                                      ...newOpts[oIdx],
+                                                      option_text: e.target.value,
+                                                    };
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                  placeholder="Premise (Left)..."
+                                                  className="h-9 text-xs flex-1 bg-background"
+                                                />
+                                                <span className="text-xs text-muted-foreground font-bold">
+                                                  ➔
+                                                </span>
+                                                <Input
+                                                  value={opt.option_text_right || ""}
+                                                  onChange={(e) => {
+                                                    const newOpts = [...editingOptions];
+                                                    newOpts[oIdx] = {
+                                                      ...newOpts[oIdx],
+                                                      option_text_right: e.target.value,
+                                                    };
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                  placeholder="Response (Right)..."
+                                                  className="h-9 text-xs flex-1 bg-background"
+                                                />
+                                              </>
+                                            ) : qType === "casestudy" ? (
+                                              <>
+                                                <Input
+                                                  value={opt.option_text || ""}
+                                                  onChange={(e) => {
+                                                    const newOpts = [...editingOptions];
+                                                    newOpts[oIdx] = {
+                                                      ...newOpts[oIdx],
+                                                      option_text: e.target.value,
+                                                    };
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                  placeholder="Sub-question text..."
+                                                  className="h-9 text-xs flex-1 bg-background"
+                                                />
+                                                <Input
+                                                  type="number"
+                                                  value={
+                                                    opt.match_key !== undefined &&
+                                                    opt.match_key !== null
+                                                      ? opt.match_key
+                                                      : "5"
+                                                  }
+                                                  onChange={(e) => {
+                                                    const newOpts = [...editingOptions];
+                                                    newOpts[oIdx] = {
+                                                      ...newOpts[oIdx],
+                                                      match_key: e.target.value,
+                                                    };
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                  placeholder="Marks"
+                                                  className="h-9 text-xs w-18 text-center bg-background"
+                                                />
+                                              </>
+                                            ) : (
+                                              <>
+                                                <Checkbox
+                                                  checked={opt.is_correct}
+                                                  onCheckedChange={(checked) => {
+                                                    const newOpts = [...editingOptions];
+                                                    if (
+                                                      qType === "truefalse" ||
+                                                      qType === "mcq"
+                                                    ) {
+                                                      if (checked) {
+                                                        newOpts.forEach((o, idx) => {
+                                                          o.is_correct = idx === oIdx;
+                                                        });
+                                                      } else {
+                                                        newOpts[oIdx].is_correct =
+                                                          false;
+                                                      }
+                                                    } else {
+                                                      newOpts[oIdx].is_correct =
+                                                        !!checked;
+                                                    }
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                />
+                                                <Input
+                                                  value={opt.option_text || ""}
+                                                  onChange={(e) => {
+                                                    const newOpts = [...editingOptions];
+                                                    newOpts[oIdx] = {
+                                                      ...newOpts[oIdx],
+                                                      option_text: e.target.value,
+                                                    };
+                                                    setEditingOptions(newOpts);
+                                                  }}
+                                                  placeholder="Option text..."
+                                                  className="h-9 text-xs flex-1 bg-background"
+                                                />
+                                              </>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+
+                                <div className="flex justify-end gap-2 pt-2 border-t">
                                   <Button
                                     variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleAcceptCandidate(cand.id)}
-                                    disabled={isReviewApplying}
-                                    className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                                    size="sm"
+                                    onClick={() => setEditingCandidateId(null)}
+                                    className="text-xs h-8"
                                   >
-                                    <Check className="size-4" />
+                                    Cancel
                                   </Button>
                                   <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => {
-                                      setEditingCandidateId(cand.id);
-                                      setEditingText(cand.parsed_question_text || "");
-                                      setEditingExplanation(
-                                        cand.parsed_explanation || "",
-                                      );
-                                      setEditingOptions(
-                                        (cand.options || cand._options || []).map(
-                                          (o: any) => ({
-                                            option_text: o.text || o.option_text || "",
-                                            option_text_right:
-                                              o.option_text_right || o.explanation || "",
-                                            is_correct: o.is_correct ?? false,
-                                            order_index: o.order_index ?? 0,
-                                            match_key: o.match_key,
-                                          }),
-                                        ),
-                                      );
-                                    }}
-                                    className="h-8 w-8 text-primary hover:bg-primary/5"
-                                  >
-                                    <FileText className="size-4" />
-                                  </Button>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => handleRejectCandidate(cand.id)}
+                                    size="sm"
+                                    onClick={() => handleSaveEditedCandidate(cand.id)}
                                     disabled={isReviewApplying}
-                                    className="h-8 w-8 text-destructive hover:bg-destructive/5"
+                                    className="text-xs h-8 font-semibold bg-emerald-600 text-white hover:bg-emerald-700"
                                   >
-                                    <X className="size-4" />
+                                    Save & Accept
                                   </Button>
                                 </div>
                               </div>
+                            ) : (
+                              <div className="space-y-3">
+                                <p className="text-sm font-semibold leading-relaxed text-foreground">
+                                  {cand.parsed_question_text}
+                                </p>
 
-                              {editingCandidateId === cand.id ? (
-                                <div className="space-y-3 pt-2">
-                                  <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold">
-                                      Edit Question Content
-                                    </Label>
-                                    <Textarea
-                                      value={editingText}
-                                      onChange={(e) => setEditingText(e.target.value)}
-                                      className="min-h-20"
-                                    />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label className="text-xs font-semibold">
-                                      Edit Explanation
-                                    </Label>
-                                    <Textarea
-                                      value={editingExplanation}
-                                      onChange={(e) =>
-                                        setEditingExplanation(e.target.value)
-                                      }
-                                    />
-                                  </div>
-
-                                  {editingOptions.length > 0 && (
-                                    <div className="space-y-2.5 pt-2 border-t border-dashed">
-                                      <Label className="text-xs font-semibold">
-                                        Edit Options / Choices
-                                      </Label>
-                                      <div className="space-y-2">
-                                        {editingOptions.map((opt, oIdx) => {
-                                          const qType = mapBackendToFrontendType(
-                                            cand.question_type,
-                                          );
-                                          return (
-                                            <div
-                                              key={oIdx}
-                                              className="flex gap-2 items-center"
-                                            >
-                                              {qType === "matching" ? (
-                                                <>
-                                                  <Input
-                                                    value={opt.option_text || ""}
-                                                    onChange={(e) => {
-                                                      const newOpts = [...editingOptions];
-                                                      newOpts[oIdx] = {
-                                                        ...newOpts[oIdx],
-                                                        option_text: e.target.value,
-                                                      };
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                    placeholder="Left value..."
-                                                    className="h-8 text-xs flex-1"
-                                                  />
-                                                  <span className="text-xs text-muted-foreground">
-                                                    ➔
-                                                  </span>
-                                                  <Input
-                                                    value={opt.option_text_right || ""}
-                                                    onChange={(e) => {
-                                                      const newOpts = [...editingOptions];
-                                                      newOpts[oIdx] = {
-                                                        ...newOpts[oIdx],
-                                                        option_text_right: e.target.value,
-                                                      };
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                    placeholder="Right value..."
-                                                    className="h-8 text-xs flex-1"
-                                                  />
-                                                </>
-                                              ) : qType === "casestudy" ? (
-                                                <>
-                                                  <Input
-                                                    value={opt.option_text || ""}
-                                                    onChange={(e) => {
-                                                      const newOpts = [...editingOptions];
-                                                      newOpts[oIdx] = {
-                                                        ...newOpts[oIdx],
-                                                        option_text: e.target.value,
-                                                      };
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                    placeholder="Sub-question text..."
-                                                    className="h-8 text-xs flex-1"
-                                                  />
-                                                  <Input
-                                                    type="number"
-                                                    value={
-                                                      opt.match_key !== undefined &&
-                                                      opt.match_key !== null
-                                                        ? opt.match_key
-                                                        : "5"
-                                                    }
-                                                    onChange={(e) => {
-                                                      const newOpts = [...editingOptions];
-                                                      newOpts[oIdx] = {
-                                                        ...newOpts[oIdx],
-                                                        match_key: e.target.value,
-                                                      };
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                    placeholder="Marks"
-                                                    className="h-8 text-xs w-16 text-center"
-                                                  />
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <Checkbox
-                                                    checked={opt.is_correct}
-                                                    onCheckedChange={(checked) => {
-                                                      const newOpts = [...editingOptions];
-                                                      if (
-                                                        qType === "truefalse" ||
-                                                        qType === "mcq"
-                                                      ) {
-                                                        if (checked) {
-                                                          newOpts.forEach((o, idx) => {
-                                                            o.is_correct = idx === oIdx;
-                                                          });
-                                                        } else {
-                                                          newOpts[oIdx].is_correct =
-                                                            false;
-                                                        }
-                                                      } else {
-                                                        newOpts[oIdx].is_correct =
-                                                          !!checked;
-                                                      }
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                  />
-                                                  <Input
-                                                    value={opt.option_text || ""}
-                                                    onChange={(e) => {
-                                                      const newOpts = [...editingOptions];
-                                                      newOpts[oIdx] = {
-                                                        ...newOpts[oIdx],
-                                                        option_text: e.target.value,
-                                                      };
-                                                      setEditingOptions(newOpts);
-                                                    }}
-                                                    placeholder="Option text..."
-                                                    className="h-8 text-xs flex-1"
-                                                  />
-                                                </>
-                                              )}
-                                            </div>
-                                          );
-                                        })}
+                                {/* Options grid */}
+                                {(() => {
+                                  const opts = cand.options || cand._options || [];
+                                  return (
+                                    opts.length > 0 && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                        {opts.map((opt: any, oIdx: number) => (
+                                          <div
+                                            key={oIdx}
+                                            className={cn(
+                                              "flex items-center justify-between text-xs p-2.5 rounded-lg border transition-all",
+                                              opt.is_correct
+                                                ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-950 dark:text-emerald-200 font-medium"
+                                                : "bg-muted/30 border-muted text-muted-foreground",
+                                            )}
+                                          >
+                                            <span className="truncate pr-2">
+                                              {(() => {
+                                                const textVal =
+                                                  opt.option_text ||
+                                                  opt.text ||
+                                                  opt.content ||
+                                                  "";
+                                                if (opt.option_text_right) {
+                                                  return `${textVal} ➔ ${opt.option_text_right}`;
+                                                }
+                                                return textVal;
+                                              })()}
+                                            </span>
+                                            {opt.is_correct && (
+                                              <Badge className="bg-emerald-600 text-white hover:bg-emerald-600 size-5 p-0 flex items-center justify-center rounded-full shrink-0">
+                                                <Check className="size-3" />
+                                              </Badge>
+                                            )}
+                                          </div>
+                                        ))}
                                       </div>
-                                    </div>
-                                  )}
+                                    )
+                                  );
+                                })()}
 
-                                  <div className="flex justify-end gap-2">
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => setEditingCandidateId(null)}
-                                    >
-                                      Cancel
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      onClick={() => handleSaveEditedCandidate(cand.id)}
-                                      disabled={isReviewApplying}
-                                    >
-                                      Save & Accept
-                                    </Button>
+                                {/* Explanation */}
+                                {cand.parsed_explanation && (
+                                  <div className="text-[11px] text-muted-foreground bg-muted/20 p-3 rounded-lg border border-dashed mt-2 leading-relaxed">
+                                    <strong className="font-semibold text-foreground">Explanation:</strong>{" "}
+                                    {cand.parsed_explanation}
                                   </div>
-                                </div>
-                              ) : (
-                                <div className="space-y-2">
-                                  <p className="text-sm font-semibold">
-                                    {cand.parsed_question_text}
-                                  </p>
-                                  {(() => {
-                                    const opts = cand.options || cand._options || [];
-                                    return (
-                                      opts.length > 0 && (
-                                        <div className="grid grid-cols-2 gap-2 pt-2">
-                                          {opts.map((opt: any, oIdx: number) => (
-                                            <div
-                                              key={oIdx}
-                                              className={cn(
-                                                "flex items-center justify-between text-xs p-2 rounded border transition-all",
-                                                opt.is_correct
-                                                  ? "bg-emerald-50 border-emerald-200 text-emerald-900 font-medium"
-                                                  : "bg-zinc-50 border-zinc-200 text-zinc-700",
-                                              )}
-                                            >
-                                              <span className="truncate">
-                                                {(() => {
-                                                  const textVal =
-                                                    opt.option_text ||
-                                                    opt.text ||
-                                                    opt.content ||
-                                                    "";
-                                                  if (opt.option_text_right) {
-                                                    return `${textVal} ➔ ${opt.option_text_right}`;
-                                                  }
-                                                  return textVal;
-                                                })()}
-                                              </span>
-                                              {opt.is_correct && (
-                                                <Check className="size-3 text-emerald-600" />
-                                              )}
-                                            </div>
-                                          ))}
-                                        </div>
-                                      )
-                                    );
-                                  })()}
-                                  {cand.parsed_explanation && (
-                                    <div className="text-[11px] text-muted-foreground bg-muted/10 p-2 rounded border border-dashed mt-2">
-                                      <strong>Explanation:</strong>{" "}
-                                      {cand.parsed_explanation}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        ))}
-                      </div>
+                                )}
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+                      ))}
                     </div>
-                  );
-                });
-              })()}
+                  </div>
+                );
+              });
+            })()}
 
-              {aiCandidates.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
-                  <CheckCircle2 className="size-8 text-emerald-500" />
-                  <p className="text-sm font-semibold">
-                    All candidates reviewed
+            {aiCandidates.length === 0 && (
+              <div className="flex flex-col items-center justify-center py-24 text-center space-y-3">
+                <div className="p-4 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                  <CheckCircle2 className="size-10" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-base font-bold text-foreground">
+                    All candidate questions reviewed!
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    You can close this dialog now.
+                    Accepted questions have been added to your assessment blueprint.
                   </p>
                 </div>
-              )}
-            </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setAiReviewDrawerOpen(false)}
+                  className="mt-2 text-xs font-semibold"
+                >
+                  Close Review Drawer
+                </Button>
+              </div>
+            )}
           </div>
 
-          <div className="border-t pt-4 flex justify-between items-center bg-background shrink-0 mt-4">
+          {/* Footer */}
+          <div className="p-4 border-t bg-background shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Checkbox
                 id="global-save-to-bank"
@@ -8870,36 +9058,40 @@ export default function NewAssessmentBuilder() {
               />
               <Label
                 htmlFor="global-save-to-bank"
-                className="cursor-pointer font-medium text-foreground"
+                className="cursor-pointer font-medium text-foreground text-xs"
               >
-                Save to bank in addition to adding to this assessment
+                Save accepted questions to Question Bank
               </Label>
             </div>
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setAiReviewDrawerOpen(false)}
-                className="text-xs h-8 text-muted-foreground"
+                className="text-xs h-9 text-muted-foreground"
               >
                 Close
               </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRejectAllCandidates}
-                className="text-xs h-8 text-destructive hover:bg-destructive/5"
-              >
-                Reject All
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={() => setShowAcceptAllConfirm(true)}
-                className="text-xs h-8 bg-emerald-600 text-white hover:bg-emerald-700"
-              >
-                Accept All
-              </Button>
+              {aiCandidates.length > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleRejectAllCandidates}
+                    className="text-xs h-9 text-destructive hover:bg-destructive/10 border-destructive/20 font-medium"
+                  >
+                    Reject All ({aiCandidates.length})
+                  </Button>
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={() => setShowAcceptAllConfirm(true)}
+                    className="text-xs h-9 bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-xs gap-1.5"
+                  >
+                    <Check className="size-3.5" /> Accept All ({aiCandidates.length})
+                  </Button>
+                </>
+              )}
             </div>
           </div>
         </SheetContent>

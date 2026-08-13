@@ -211,6 +211,8 @@ export interface CreateStudyPlanPayload {
 
 export interface GeneratePlanFromAssessmentPayload {
   assessment_id: string;
+  start_date?: string;         // ISO string — user-selected plan start date
+  end_date?: string;           // ISO string — user-selected plan end date (falls back to assessment window)
   target_mode?: "full_assessment_coverage" | "up_to_learning_unit";
   target_learning_unit_id?: string;
   available_days?: string[];

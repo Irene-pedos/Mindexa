@@ -21,7 +21,7 @@ class GeminiProvider(BaseProvider):
     def __init__(
         self,
         api_key: str,
-        default_model: str = "gemini-2.0-flash",
+        default_model: str = "gemini-2.5-flash",
         base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai",
         timeout_seconds: float = 30.0,
     ) -> None:

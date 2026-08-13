@@ -32,12 +32,32 @@ import {
   Eye,
   Lock,
   UserCheck,
+  Clock,
+  Accessibility,
+  Sliders,
+  FileText,
+  CheckCircle2,
+  History,
+  Sparkles,
 } from "lucide-react";
-import { adminApi, UserResponse, AdminUserCreate } from "@/lib/api/admin";
+import {
+  adminApi,
+  UserResponse,
+  AdminUserCreate,
+  AdminAccommodationsUpdate,
+} from "@/lib/api/admin";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import Link from "next/link";
 import { Input } from "@/components/ui/input";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -89,6 +109,131 @@ export default function AdminUsersPage() {
   const [selectedUser, setSelectedUser] = useState<UserResponse | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isProcessingUser, setIsProcessingUser] = useState<string | null>(null);
+
+  // Accommodations State
+  const [activeTab, setActiveTab] = useState<"directory" | "accommodations">(
+    "directory"
+  );
+  const [accommodationSearch, setAccommodationSearch] = useState("");
+  const [
+    selectedAccommodationsUser,
+    setSelectedAccommodationsUser,
+  ] = useState<UserResponse | null>(null);
+  const [
+    isAccommodationsDialogOpen,
+    setIsAccommodationsDialogOpen,
+  ] = useState(false);
+  const [accommodationsForm, setAccommodationsForm] = useState<
+    AdminAccommodationsUpdate
+  >({
+    extra_time_percent: 0,
+    requires_screen_reader_mode: false,
+    simple_mode_enabled: false,
+    large_text_default: false,
+    reduced_motion_default: false,
+    reason: "",
+  });
+  const [isSavingAccommodations, setIsSavingAccommodations] = useState(false);
+
+  const openAccommodationsModal = (user: UserResponse) => {
+    setSelectedAccommodationsUser(user);
+    setAccommodationsForm({
+      extra_time_percent: user.profile?.extra_time_percent || 0,
+      requires_screen_reader_mode: !!user.profile?.requires_screen_reader_mode,
+      simple_mode_enabled: !!user.profile?.simple_mode_enabled,
+      large_text_default: !!user.profile?.large_text_default,
+      reduced_motion_default: !!user.profile?.reduced_motion_default,
+      reason: "",
+    });
+    setIsAccommodationsDialogOpen(true);
+  };
+
+  const handleSaveAccommodations = async () => {
+    if (!selectedAccommodationsUser) return;
+    if (!accommodationsForm.reason || accommodationsForm.reason.trim().length < 3) {
+      toast.error(
+        "An administrative justification reason is required for the audit trail."
+      );
+      return;
+    }
+    setIsSavingAccommodations(true);
+    try {
+      const updatedProfile = await adminApi.updateAccommodations(
+        selectedAccommodationsUser.id,
+        accommodationsForm
+      );
+      toast.success(
+        `Accommodations saved for ${
+          selectedAccommodationsUser.profile?.first_name || "student"
+        } with audit log recorded.`
+      );
+      setUsers((prev) =>
+        prev.map((u) =>
+          u.id === selectedAccommodationsUser.id
+            ? {
+                ...u,
+                profile: {
+                  ...u.profile,
+                  ...updatedProfile,
+                  extra_time_percent: accommodationsForm.extra_time_percent,
+                  requires_screen_reader_mode:
+                    accommodationsForm.requires_screen_reader_mode,
+                  simple_mode_enabled: accommodationsForm.simple_mode_enabled,
+                  large_text_default: accommodationsForm.large_text_default,
+                  reduced_motion_default:
+                    accommodationsForm.reduced_motion_default,
+                  accommodations_note: accommodationsForm.reason,
+                  updated_at: new Date().toISOString(),
+                } as any,
+              }
+            : u
+        )
+      );
+      setIsAccommodationsDialogOpen(false);
+      setSelectedAccommodationsUser(null);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update student accommodations");
+    } finally {
+      setIsSavingAccommodations(false);
+    }
+  };
+
+  const studentUsers = useMemo(() => {
+    return users.filter((u) => u.role === "STUDENT");
+  }, [users]);
+
+  const filteredStudentUsers = useMemo(() => {
+    if (!accommodationSearch.trim()) return studentUsers;
+    const q = accommodationSearch.toLowerCase();
+    return studentUsers.filter((u) => {
+      const fullName = `${u.profile?.first_name || ""} ${
+        u.profile?.last_name || ""
+      }`.toLowerCase();
+      const email = (u.email || "").toLowerCase();
+      const studentId = (u.profile?.student_id || "").toLowerCase();
+      const department = (u.profile?.department || "").toLowerCase();
+      return (
+        fullName.includes(q) ||
+        email.includes(q) ||
+        studentId.includes(q) ||
+        department.includes(q)
+      );
+    });
+  }, [studentUsers, accommodationSearch]);
+
+  const accommodationStats = useMemo(() => {
+    const total = studentUsers.length;
+    const withExtraTime = studentUsers.filter(
+      (u) => (u.profile?.extra_time_percent || 0) > 0
+    ).length;
+    const withScreenReader = studentUsers.filter(
+      (u) => !!u.profile?.requires_screen_reader_mode
+    ).length;
+    const withSimpleMode = studentUsers.filter(
+      (u) => !!u.profile?.simple_mode_enabled
+    ).length;
+    return { total, withExtraTime, withScreenReader, withSimpleMode };
+  }, [studentUsers]);
 
   // New User Form State
   const [newUser, setNewUser] = useState<AdminUserCreate>({
@@ -256,10 +401,10 @@ export default function AdminUsersPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
-            Users & Permissions
+            Users &amp; Permissions
           </h1>
           <p className="text-muted-foreground text-xs font-medium">
-            Platform-wide account governance and role assignment
+            Platform-wide account governance, accessibility, and accommodation management
           </p>
         </div>
         <Button
@@ -271,7 +416,33 @@ export default function AdminUsersPage() {
         </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      {/* Tabs Header */}
+      <Tabs
+        value={activeTab}
+        onValueChange={(val: any) => setActiveTab(val)}
+        className="w-full space-y-4"
+      >
+        <div className="flex items-center justify-between border-b border-border/40 pb-2">
+          <TabsList className="h-9 p-1">
+            <TabsTrigger value="directory" className="text-xs gap-1.5">
+              <Users className="size-3.5" /> User Directory
+            </TabsTrigger>
+            <TabsTrigger value="accommodations" className="text-xs gap-1.5">
+              <Accessibility className="size-3.5" /> Accommodations &amp; Timing
+              {accommodationStats.withExtraTime > 0 && (
+                <Badge
+                  variant="secondary"
+                  className="ml-1 px-1.5 py-0 text-[10px] h-4 font-semibold"
+                >
+                  {accommodationStats.withExtraTime}
+                </Badge>
+              )}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+
+        <TabsContent value="directory" className="space-y-4 m-0">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
         {[
           {
             label: "Total Accounts",
@@ -699,6 +870,213 @@ export default function AdminUsersPage() {
           </div>
         </div>
       </Card>
+    </TabsContent>
+
+        {/* Accommodations Tab Content */}
+        <TabsContent value="accommodations" className="space-y-4 m-0">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
+              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Enrolled Students
+                </p>
+                <h3 className="text-xl font-semibold leading-tight text-primary">
+                  {accommodationStats.total}
+                </h3>
+              </CardContent>
+            </Card>
+
+            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
+              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Extra Time Active
+                </p>
+                <h3 className="text-xl font-semibold leading-tight text-emerald-600">
+                  {accommodationStats.withExtraTime}
+                </h3>
+              </CardContent>
+            </Card>
+
+            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
+              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Screen Reader Profiles
+                </p>
+                <h3 className="text-xl font-semibold leading-tight text-indigo-600">
+                  {accommodationStats.withScreenReader}
+                </h3>
+              </CardContent>
+            </Card>
+
+            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
+              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
+                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                  Simple Mode Defaults
+                </p>
+                <h3 className="text-xl font-semibold leading-tight text-amber-600">
+                  {accommodationStats.withSimpleMode}
+                </h3>
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+              <Input
+                placeholder="Search students by name, email, student ID, or department..."
+                className="pl-9 h-9 text-xs rounded-xl border-muted/50 bg-background focus-visible:ring-1"
+                value={accommodationSearch}
+                onChange={(e) => setAccommodationSearch(e.target.value)}
+              />
+            </div>
+            <div className="text-xs text-muted-foreground font-medium">
+              Showing {filteredStudentUsers.length} student account{filteredStudentUsers.length !== 1 ? "s" : ""}
+            </div>
+          </div>
+
+          <Card className="border shadow-none overflow-hidden rounded-2xl">
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader className="bg-muted/10">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Student
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Academic Scope
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Time Accommodation
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Accessibility Settings
+                    </TableHead>
+                    <TableHead className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Last Updated / Reason
+                    </TableHead>
+                    <TableHead className="text-right text-[10px] font-bold uppercase tracking-wider text-muted-foreground py-3">
+                      Action
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredStudentUsers.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="h-32 text-center text-xs text-muted-foreground">
+                        No students match the search criteria.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    filteredStudentUsers.map((student) => {
+                      const profile = student.profile;
+                      const extraTime = profile?.extra_time_percent || 0;
+                      const hasAccommodations =
+                        extraTime > 0 ||
+                        profile?.requires_screen_reader_mode ||
+                        profile?.simple_mode_enabled ||
+                        profile?.large_text_default ||
+                        profile?.reduced_motion_default;
+
+                      return (
+                        <TableRow key={student.id} className="hover:bg-muted/5 transition-colors">
+                          <TableCell className="py-3">
+                            <div className="font-semibold text-xs text-foreground">
+                              {profile?.first_name || profile?.last_name
+                                ? `${profile?.first_name || ""} ${profile?.last_name || ""}`.trim()
+                                : "Unnamed Student"}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground flex items-center gap-1 mt-0.5">
+                              <Mail className="size-3 text-muted-foreground/60" /> {student.email}
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="py-3">
+                            <div className="text-xs font-medium text-foreground">
+                              {profile?.department || "General"}
+                            </div>
+                            <div className="text-[11px] text-muted-foreground font-mono">
+                              ID: {profile?.student_id || "N/A"}
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="py-3">
+                            {extraTime > 0 ? (
+                              <Badge
+                                variant="outline"
+                                className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 text-xs font-semibold gap-1"
+                              >
+                                <Clock className="size-3 text-emerald-600" />
+                                +{extraTime}% Extra Time
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">Standard (0%)</span>
+                            )}
+                          </TableCell>
+
+                          <TableCell className="py-3">
+                            <div className="flex flex-wrap gap-1.5">
+                              {profile?.requires_screen_reader_mode && (
+                                <Badge variant="outline" className="bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/20 text-[10px] font-semibold">
+                                  Screen Reader
+                                </Badge>
+                              )}
+                              {profile?.simple_mode_enabled && (
+                                <Badge variant="outline" className="bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/20 text-[10px] font-semibold">
+                                  Simple UI
+                                </Badge>
+                              )}
+                              {profile?.large_text_default && (
+                                <Badge variant="outline" className="bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20 text-[10px] font-semibold">
+                                  Large Text
+                                </Badge>
+                              )}
+                              {profile?.reduced_motion_default && (
+                                <Badge variant="outline" className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20 text-[10px] font-semibold">
+                                  Reduced Motion
+                                </Badge>
+                              )}
+                              {!hasAccommodations && (
+                                <span className="text-xs text-muted-foreground">Standard</span>
+                              )}
+                            </div>
+                          </TableCell>
+
+                          <TableCell className="py-3 max-w-xs">
+                            {profile?.accommodations_note ? (
+                              <div className="text-xs text-foreground/80 truncate font-medium" title={profile.accommodations_note}>
+                                {profile.accommodations_note}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground italic">No note on record</span>
+                            )}
+                            {profile?.updated_at && (
+                              <div className="text-[10px] text-muted-foreground mt-0.5">
+                                Updated: {new Date(profile.updated_at).toLocaleDateString()}
+                              </div>
+                            )}
+                          </TableCell>
+
+                          <TableCell className="py-3 text-right">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 text-xs font-semibold rounded-lg gap-1.5"
+                              onClick={() => openAccommodationsModal(student)}
+                            >
+                              <Sliders className="size-3.5 text-primary" /> Edit Accommodations
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
 
       {/* Add User Dialog */}
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -1072,6 +1450,243 @@ export default function AdminUsersPage() {
                 setIsViewDetailsOpen(false);
               }}>Reactivate Account</Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Student Accommodations Dialog */}
+      <Dialog
+        open={isAccommodationsDialogOpen}
+        onOpenChange={setIsAccommodationsDialogOpen}
+      >
+        <DialogContent className="sm:max-w-[560px] p-6 border shadow-2xl rounded-2xl bg-background max-h-[90vh] overflow-y-auto">
+          <DialogHeader className="text-left">
+            <div className="flex items-center gap-2.5">
+              <div className="size-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <Accessibility className="size-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-base font-bold tracking-tight">
+                  Student Accommodations &amp; Timing
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {selectedAccommodationsUser?.profile?.first_name}{" "}
+                  {selectedAccommodationsUser?.profile?.last_name} •{" "}
+                  {selectedAccommodationsUser?.email}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2 border-y border-border/40 my-2">
+            {/* Extra Time Section */}
+            <div className="space-y-2.5 bg-muted/20 p-3.5 rounded-xl border border-border/50">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                    <Clock className="size-3.5 text-emerald-600" /> Extended Time Percent
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Extra time automatically calculated into all server-enforced countdown timers.
+                  </p>
+                </div>
+                <div className="text-right">
+                  <span className="text-base font-bold text-emerald-600 tabular-nums">
+                    +{accommodationsForm.extra_time_percent || 0}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                {[0, 25, 50, 75, 100].map((percent) => (
+                  <Button
+                    key={percent}
+                    type="button"
+                    variant={accommodationsForm.extra_time_percent === percent ? "default" : "outline"}
+                    size="sm"
+                    className="flex-1 h-7 text-[11px] font-semibold rounded-lg"
+                    onClick={() =>
+                      setAccommodationsForm((prev) => ({
+                        ...prev,
+                        extra_time_percent: percent,
+                      }))
+                    }
+                  >
+                    {percent === 0 ? "0% (Standard)" : `+${percent}%`}
+                  </Button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2 pt-1">
+                <Label htmlFor="customExtraTime" className="text-xs text-muted-foreground shrink-0">
+                  Custom %:
+                </Label>
+                <Input
+                  id="customExtraTime"
+                  type="number"
+                  min={0}
+                  max={200}
+                  value={accommodationsForm.extra_time_percent || 0}
+                  onChange={(e) =>
+                    setAccommodationsForm((prev) => ({
+                      ...prev,
+                      extra_time_percent: Math.max(0, Math.min(200, parseInt(e.target.value) || 0)),
+                    }))
+                  }
+                  className="h-7 text-xs w-24 rounded-lg"
+                />
+              </div>
+            </div>
+
+            {/* Accessibility & Sensory Toggles */}
+            <div className="space-y-3 p-3.5 bg-muted/10 rounded-xl border border-border/50">
+              <h4 className="text-xs font-bold text-foreground">
+                Accessibility &amp; Sensory Preferences
+              </h4>
+
+              <div className="flex items-center justify-between py-1">
+                <div className="space-y-0.5 pr-4">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Screen Reader Mode Required
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Enforces screen-reader ARIA live regions and forces Accessible List Mode for all interactions.
+                  </p>
+                </div>
+                <Switch
+                  checked={accommodationsForm.requires_screen_reader_mode}
+                  onCheckedChange={(checked) =>
+                    setAccommodationsForm((prev) => ({
+                      ...prev,
+                      requires_screen_reader_mode: checked,
+                    }))
+                  }
+                />
+              </div>
+
+              <Separator className="bg-border/30" />
+
+              <div className="flex items-center justify-between py-1">
+                <div className="space-y-0.5 pr-4">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Simple UI Mode Default
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Larger tap targets (≥44px), reduced secondary controls, and list fallbacks for Drag-and-Drop.
+                  </p>
+                </div>
+                <Switch
+                  checked={accommodationsForm.simple_mode_enabled}
+                  onCheckedChange={(checked) =>
+                    setAccommodationsForm((prev) => ({
+                      ...prev,
+                      simple_mode_enabled: checked,
+                    }))
+                  }
+                />
+              </div>
+
+              <Separator className="bg-border/30" />
+
+              <div className="flex items-center justify-between py-1">
+                <div className="space-y-0.5 pr-4">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Large Text Default
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Increases root font scaling (+15%) and line height across all assessment screens.
+                  </p>
+                </div>
+                <Switch
+                  checked={accommodationsForm.large_text_default}
+                  onCheckedChange={(checked) =>
+                    setAccommodationsForm((prev) => ({
+                      ...prev,
+                      large_text_default: checked,
+                    }))
+                  }
+                />
+              </div>
+
+              <Separator className="bg-border/30" />
+
+              <div className="flex items-center justify-between py-1">
+                <div className="space-y-0.5 pr-4">
+                  <Label className="text-xs font-semibold text-foreground">
+                    Reduced Motion Default
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Disables interface animations and rapid transitions for vestibular sensitivity.
+                  </p>
+                </div>
+                <Switch
+                  checked={accommodationsForm.reduced_motion_default}
+                  onCheckedChange={(checked) =>
+                    setAccommodationsForm((prev) => ({
+                      ...prev,
+                      reduced_motion_default: checked,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            {/* Justification & Audit Trail */}
+            <div className="space-y-1.5">
+              <Label htmlFor="auditReason" className="text-xs font-bold text-foreground flex items-center justify-between">
+                <span>Administrative Justification / Reason *</span>
+                <span className="text-[10px] text-muted-foreground font-normal">Required for Audit Log</span>
+              </Label>
+              <Textarea
+                id="auditReason"
+                placeholder="e.g., Approved by Disability Services Office (Ref: DSO-2026-881). Extra time and screen reader granted."
+                value={accommodationsForm.reason}
+                onChange={(e) =>
+                  setAccommodationsForm((prev) => ({
+                    ...prev,
+                    reason: e.target.value,
+                  }))
+                }
+                className="text-xs min-h-[70px] rounded-xl"
+              />
+            </div>
+
+            {/* Last Updated Timestamp & Audit trail note */}
+            {selectedAccommodationsUser?.profile?.updated_at && (
+              <div className="text-[11px] text-muted-foreground bg-muted/20 p-2.5 rounded-lg flex items-center gap-2">
+                <History className="size-3.5 text-muted-foreground shrink-0" />
+                <span>
+                  Last modified: {new Date(selectedAccommodationsUser.profile.updated_at).toLocaleString()}
+                </span>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-9 text-xs rounded-xl"
+              onClick={() => setIsAccommodationsDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-9 text-xs font-bold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={handleSaveAccommodations}
+              disabled={isSavingAccommodations}
+            >
+              {isSavingAccommodations ? (
+                <>
+                  <Loader2 className="size-3.5 mr-1.5 animate-spin" /> Saving...
+                </>
+              ) : (
+                "Save Accommodations & Log Audit"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
