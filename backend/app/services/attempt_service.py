@@ -135,11 +135,6 @@ class AttemptService:
                     )
 
         # Gate 2 — within window
-        if assessment.is_group_assessment:
-            raise ValidationError(
-                "Group-work assessments must be finalized through the shared group workspace.",
-                code="GROUP_WORK_SHARED_SUBMISSION_REQUIRED",
-            )
         now = _utcnow()
         if assessment.window_start and now < assessment.window_start:
             raise ValidationError(

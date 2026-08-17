@@ -1,36 +1,174 @@
+/**
+ * Authoritative set of closed / auto-gradable question types matching backend QuestionType.is_auto_gradable.
+ * Includes canonical backend enums and common aliases normalized by stripping spaces, hyphens, and underscores.
+ */
 export const CLOSED_QUESTION_TYPES = new Set([
   "mcq",
-  "multiple_choice",
-  "multiple-choice",
+  "multiplechoice",
+  "singleoption",
+  "multioption",
+  "multiselect",
+  "checkbox",
   "truefalse",
-  "true_false",
-  "true/false",
   "matching",
+  "matchpairs",
   "fillblank",
-  "fill_blank",
-  "fill-in-the-blank",
+  "fillblanks",
   "ordering",
+  "orderedlist",
 ]);
 
+/**
+ * Authoritative set of open-ended question types matching backend QuestionType.is_open_ended.
+ */
 export const OPEN_QUESTION_TYPES = new Set([
   "shortanswer",
-  "short_answer",
   "essay",
   "casestudy",
-  "case_study",
   "computational",
+  "practical",
 ]);
 
-function normalizeQuestionType(value?: string | null): string {
-  return (value || "").trim().toLowerCase();
+export function normalizeQuestionType(value?: string | null): string {
+  return (value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 }
 
 export function isClosedQuestionType(value?: string | null): boolean {
-  return CLOSED_QUESTION_TYPES.has(normalizeQuestionType(value));
+  const normalized = normalizeQuestionType(value);
+  return CLOSED_QUESTION_TYPES.has(normalized);
 }
 
-export function isOpenQuestionType(value?: string | null): boolean {
-  return OPEN_QUESTION_TYPES.has(normalizeQuestionType(value));
+export function isTrueFalseType(value?: string | null): boolean {
+  const normalized = normalizeQuestionType(value);
+  return normalized === "truefalse" || normalized === "tf";
+}
+
+export function isMcqType(value?: string | null): boolean {
+  const normalized = normalizeQuestionType(value);
+  return (
+    normalized === "mcq" ||
+    normalized === "multiplechoice" ||
+    normalized === "singleoption" ||
+    normalized === "multioption" ||
+    normalized === "multiselect" ||
+    normalized === "checkbox"
+  );
+}
+
+export function isMatchingType(value?: string | null): boolean {
+  const normalized = normalizeQuestionType(value);
+  return normalized === "matching" || normalized === "matchpairs";
+}
+
+export function isFillBlankType(value?: string | null): boolean {
+  const normalized = normalizeQuestionType(value);
+  return normalized === "fillblank" || normalized === "fillblanks";
+}
+
+export function isOrderingType(value?: string | null): boolean {
+  const normalized = normalizeQuestionType(value);
+  return normalized === "ordering" || normalized === "orderedlist";
+}
+
+export function isClosedChoiceType(value?: string | null): boolean {
+  return isMcqType(value) || isTrueFalseType(value);
+}
+
+export function isOpenQuestionType(
+  value?:
+    | {
+        type?: string | null;
+        question_type?: string | null;
+        grading_mode?: string | null;
+      }
+    | string
+    | null,
+): boolean {
+  if (!value) return false;
+  if (typeof value === "object") {
+    if (value.grading_mode) {
+      const mode = value.grading_mode.trim().toUpperCase();
+      if (mode === "AUTO" || mode === "AUTOMATIC") return false;
+      if (
+        mode === "MANUAL" ||
+        mode === "SEMI" ||
+        mode === "AI_ASSISTED" ||
+        mode === "RUBRIC"
+      ) {
+        return true;
+      }
+    }
+    const typeStr = value.type ?? value.question_type;
+    return isOpenQuestionType(typeStr);
+  }
+  const normalized = normalizeQuestionType(value);
+  return OPEN_QUESTION_TYPES.has(normalized);
+}
+
+export const isOpenEnded = isOpenQuestionType;
+
+/**
+ * Single shared source of truth for whether a question is auto-graded.
+ * Checks explicit grading_mode first, then defers to the authoritative QuestionType list.
+ */
+export function isQuestionAutoGraded(
+  q?:
+    | {
+        type?: string | null;
+        question_type?: string | null;
+        grading_mode?: string | null;
+      }
+    | string
+    | null,
+): boolean {
+  if (!q) return false;
+  if (typeof q === "string") {
+    return isClosedQuestionType(q);
+  }
+  if (q.grading_mode) {
+    const mode = q.grading_mode.trim().toUpperCase();
+    if (mode === "AUTO" || mode === "AUTOMATIC") return true;
+    if (
+      mode === "MANUAL" ||
+      mode === "SEMI" ||
+      mode === "AI_ASSISTED" ||
+      mode === "RUBRIC"
+    ) {
+      return false;
+    }
+  }
+  const typeStr = q.type ?? q.question_type;
+  if (!typeStr) return false;
+  return isClosedQuestionType(typeStr);
+}
+
+/**
+ * User-friendly display label for any question type.
+ */
+export function getQuestionTypeLabel(value?: string | null): string {
+  const normalized = normalizeQuestionType(value);
+  if (
+    normalized === "mcq" ||
+    normalized === "multiplechoice" ||
+    normalized === "singleoption" ||
+    normalized === "multioption" ||
+    normalized === "multiselect"
+  ) {
+    return "Multiple Choice";
+  }
+  if (normalized === "truefalse") return "True / False";
+  if (normalized === "matching" || normalized === "matchpairs") return "Matching";
+  if (normalized === "fillblank" || normalized === "fillblanks")
+    return "Fill in the Blanks";
+  if (normalized === "ordering" || normalized === "orderedlist") return "Ordering";
+  if (normalized === "shortanswer") return "Short Answer";
+  if (normalized === "essay") return "Essay";
+  if (normalized === "computational") return "Computational";
+  if (normalized === "casestudy") return "Case Study";
+  return (value || "Question").replace(/_/g, " ");
 }
 
 export function summarizeQuestionMix(

@@ -11,6 +11,14 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { 
   AlertTriangle, 
   CheckCircle2, 
@@ -169,8 +177,34 @@ function ResultReleaseContent() {
     }
   };
 
+  // Confirmation Dialog state
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<{
+    type: "class" | "selected";
+    classId?: string;
+    className?: string;
+    count?: number;
+  } | null>(null);
+
+  const requestReleaseClass = (classId: string, className: string) => {
+    setConfirmAction({
+      type: "class",
+      classId,
+      className,
+    });
+    setConfirmDialogOpen(true);
+  };
+
+  const requestReleaseSelected = () => {
+    setConfirmAction({
+      type: "selected",
+      count: selectedResultIds.filter(Boolean).length,
+    });
+    setConfirmDialogOpen(true);
+  };
+
   // Perform class-level release (releases all graded submissions in class)
-  const handleReleaseClass = async (classId: string, className: string) => {
+  const executeReleaseClass = async (classId: string, className: string) => {
     if (selectedAssessmentId === "all") return;
     setIsReleasing(true);
     try {
@@ -181,15 +215,17 @@ function ResultReleaseContent() {
       setClassStats(res.classes || []);
       // Reset selected class
       setSelectedClass(null);
-    } catch (e) {
+    } catch {
       toast.error("Failed to release class results.");
     } finally {
       setIsReleasing(false);
+      setConfirmDialogOpen(false);
+      setConfirmAction(null);
     }
   };
 
   // Release selected student results
-  const handleReleaseSelected = async () => {
+  const executeReleaseSelected = async () => {
     if (selectedAssessmentId === "all" || selectedResultIds.length === 0) return;
     setIsReleasing(true);
     
@@ -210,10 +246,12 @@ function ResultReleaseContent() {
         setClassStats(classRes.classes || []);
       }
       setSelectedResultIds([]);
-    } catch (e) {
+    } catch {
       toast.error("Failed to release selected results.");
     } finally {
       setIsReleasing(false);
+      setConfirmDialogOpen(false);
+      setConfirmAction(null);
     }
   };
 
@@ -343,7 +381,7 @@ function ResultReleaseContent() {
                                   disabled={!isFullyGraded || isReleasing}
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    handleReleaseClass(c.class_id, c.class_name);
+                                    requestReleaseClass(c.class_id, c.class_name);
                                   }}
                                   className="h-7 text-[10px] font-bold rounded-lg border-indigo-500/20 text-indigo-600 hover:bg-indigo-500/5"
                                 >
@@ -562,7 +600,7 @@ function ResultReleaseContent() {
                             size="sm"
                             variant="outline"
                             disabled={selectedResultIds.length === 0 || isReleasing}
-                            onClick={handleReleaseSelected}
+                            onClick={requestReleaseSelected}
                             className="h-8 text-xs font-bold rounded-lg"
                           >
                             <Send className="size-3.5 mr-1.5" /> Release Selected
@@ -570,7 +608,7 @@ function ResultReleaseContent() {
                           <Button
                             size="sm"
                             disabled={studentResults.every(r => r.is_released) || isReleasing}
-                            onClick={() => handleReleaseClass(selectedClass.class_id, selectedClass.class_name)}
+                            onClick={() => requestReleaseClass(selectedClass.class_id, selectedClass.class_name)}
                             className="h-8 text-xs font-bold rounded-lg"
                           >
                             <Unlock className="size-3.5 mr-1.5" /> Release All Graded
@@ -586,6 +624,77 @@ function ResultReleaseContent() {
           )}
         </div>
       )}
+
+      {/* Confirmation Dialog before Marks Release */}
+      <Dialog open={confirmDialogOpen} onOpenChange={setConfirmDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Unlock className="size-5 text-emerald-600" />
+              Confirm Official Marks Release
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-1.5 leading-relaxed">
+              {confirmAction?.type === "class" ? (
+                <>
+                  You are about to release official assessment results for all fully graded students in{" "}
+                  <strong className="text-foreground">{confirmAction.className || "this class section"}</strong>.
+                  Released grades and diagnostic feedback will immediately become visible to students on their portal.
+                </>
+              ) : (
+                <>
+                  You are about to release official assessment results for{" "}
+                  <strong className="text-foreground">{confirmAction?.count || selectedResultIds.length} selected student(s)</strong>.
+                  Released grades and feedback will immediately become visible to these students.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-amber-600 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold">Institutional Assessment Guard</p>
+              <p className="text-[11px] leading-normal text-muted-foreground">
+                Submissions with active integrity holds will remain safeguarded and unreleased. Incomplete submissions will be safely skipped.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isReleasing}
+              onClick={() => {
+                setConfirmDialogOpen(false);
+                setConfirmAction(null);
+              }}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isReleasing}
+              onClick={() => {
+                if (confirmAction?.type === "class" && confirmAction.classId) {
+                  executeReleaseClass(confirmAction.classId, confirmAction.className || "Class");
+                } else {
+                  executeReleaseSelected();
+                }
+              }}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5"
+            >
+              {isReleasing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="size-3.5" />
+              )}
+              Confirm & Release Marks
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

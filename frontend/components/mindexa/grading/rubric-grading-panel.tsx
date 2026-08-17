@@ -44,7 +44,14 @@ export function RubricGradingPanel({
   readOnly = false 
 }: RubricGradingPanelProps) {
   const [selectedLevels, setSelectedScores] = useState<Record<string, number>>(
-    currentScores.reduce((acc, curr) => ({ ...acc, [curr.criterion_id]: curr.score }), {})
+    currentScores.reduce((acc, curr) => {
+      const id = curr?.criterion_id || curr?.criteria_id || curr?.id;
+      const val = curr?.score ?? curr?.marks_awarded ?? curr?.marks;
+      if (id && val !== undefined && val !== null) {
+        acc[id] = Number(val);
+      }
+      return acc;
+    }, {})
   );
 
   const handleLevelSelect = (criterionId: string, criterionTitle: string, marks: number, max: number) => {
@@ -53,15 +60,21 @@ export function RubricGradingPanel({
     const newSelected = { ...selectedLevels, [criterionId]: marks };
     setSelectedScores(newSelected);
     
-    // Convert to the array format the API expects
+    // Convert to normalized array format supporting all consumers
     const scoresArray = Object.entries(newSelected).map(([id, score]) => {
-      // Find the title for this criterion
       const criterion = rubric.criteria.find(c => c.id === id);
+      const title = criterion?.title || criterionTitle || "Criterion";
+      const maxMarks = criterion?.max_marks || max || 10;
       return {
         criterion_id: id,
-        criterion_title: criterion?.title || "Criterion",
+        criteria_id: id,
+        criterion_title: title,
+        criterion: title,
         score: score,
-        max: criterion?.max_marks || 10
+        marks_awarded: score,
+        max: maxMarks,
+        max_score: maxMarks,
+        notes: "",
       };
     });
     

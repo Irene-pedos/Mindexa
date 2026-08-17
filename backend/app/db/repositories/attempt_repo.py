@@ -111,6 +111,21 @@ class AttemptRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_student_and_assessment(
+        self, student_id: uuid.UUID, assessment_id: uuid.UUID
+    ) -> AssessmentAttempt | None:
+        """Return the latest attempt for a student on an assessment."""
+        result = await self.db.execute(
+            select(AssessmentAttempt)
+            .where(
+                AssessmentAttempt.student_id == student_id,
+                AssessmentAttempt.assessment_id == assessment_id,
+                AssessmentAttempt.is_deleted.is_(False),
+            )
+            .order_by(AssessmentAttempt.created_at.desc())
+        )
+        return result.scalars().first()
+
     async def get_active_attempt(
         self, student_id: uuid.UUID, assessment_id: uuid.UUID
     ) -> AssessmentAttempt | None:

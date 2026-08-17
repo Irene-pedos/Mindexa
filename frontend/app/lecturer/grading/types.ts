@@ -125,11 +125,24 @@ export interface GradingQueueItem extends AiSuggestion {
 export interface ReleaseQueueItem {
   student_id: string;
   student_name: string;
-  attempt_id: string;
+  attempt_id: string | null;
+  graded_question_count?: number;
+  total_question_count?: number;
+  integrity_hold?: boolean;
+  is_released?: boolean;
+  can_release?: boolean;
   total_score: number | null;
+  max_score?: number | null;
   percentage: number | null;
   letter_grade: string | null;
-  status: "PENDING_RELEASE" | "RELEASED" | string;
+  status:
+    | "PENDING_RELEASE"
+    | "RELEASED"
+    | "INTEGRITY_HOLD"
+    | "GRADING_IN_PROGRESS"
+    | "AWAITING_CLASS_COMPLETION"
+    | "NOT_SUBMITTED"
+    | string;
   is_passing?: boolean;
 }
 
@@ -225,8 +238,16 @@ export interface RubricCriteria {
 }
 
 export interface RubricScore {
-  criteria_id: string;
-  score: number;
+  criteria_id?: string;
+  criterion_id?: string;
+  criterion?: string;
+  criterion_title?: string;
+  score?: number;
+  marks_awarded?: number;
+  max?: number;
+  max_score?: number;
+  notes?: string;
+  description?: string;
 }
 
 export interface SubmissionRecord extends AiSuggestion {
@@ -377,9 +398,5 @@ export interface GradingHistoryItem {
 
 /** AI grading details fetched for the batch review modal. */
 export interface BatchReviewDetails extends AiSuggestion {
-  rubric_scores?: Array<{
-    criterion: string;
-    marks_awarded: number;
-    notes: string;
-  }> | null;
+  rubric_scores?: RubricScore[] | null;
 }

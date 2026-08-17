@@ -22,10 +22,13 @@ from app.db.enums import (
 )
 from app.db.models.auth import User, UserProfile
 from app.db.repositories.assessment_repo import AssessmentRepository
+from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.group_appeal_repo import GroupAppealRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.group_submission_repo import GroupSubmissionRepository
 from app.db.repositories.notification_repo import NotificationRepository
+from app.db.repositories.result_repo import ResultRepository
+from app.services.result_service import _compute_letter_grade
 from app.schemas.group_work import (
     AddGroupCommentRequest,
     ApproveGroupAppealRequest,
@@ -68,6 +71,8 @@ class GroupWorkService:
         self.submission_repo = GroupSubmissionRepository(db)
         self.appeal_repo = GroupAppealRepository(db)
         self.notification_repo = NotificationRepository(db)
+        self.result_repo = ResultRepository(db)
+        self.attempt_repo = AttemptRepository(db)
 
     def _assert_can_edit(self, assessment, current_user: User) -> None:
         if current_user.role == UserRole.ADMIN.value:
@@ -934,7 +939,8 @@ class GroupWorkService:
         if submission.status not in {GroupSubmissionStatus.SUBMITTED, GroupSubmissionStatus.APPEALED, GroupSubmissionStatus.GRADED}:
             raise ConflictError("Only submitted group work can be graded.", code="GROUP_SUBMISSION_NOT_GRADABLE")
         
-        status = GroupSubmissionStatus.GRADED if (data.is_final if data.is_final is not None else True) else GroupSubmissionStatus.SUBMITTED
+        is_final = data.is_final if data.is_final is not None else True
+        status = GroupSubmissionStatus.GRADED if is_final else GroupSubmissionStatus.SUBMITTED
         await self.submission_repo.set_grade(
             submission_id=submission_id,
             total_score=data.total_score,
@@ -944,6 +950,87 @@ class GroupWorkService:
             member_overrides=data.member_overrides,
             status=status,
         )
+
+        # ── Atomically reconcile derived AssessmentResult for all active members ──
+        members = await self.group_repo.list_members(submission.group_id)
+        active_members = [m for m in members if not m.is_deleted]
+        active_student_ids = {m.student_id for m in active_members}
+
+        # Clean up any orphaned derived results if team members were reassigned
+        await self.result_repo.delete_orphaned_group_results(
+            group_submission_id=submission_id,
+            active_student_ids=active_student_ids,
+        )
+
+        if assessment.question_distribution_mode == QuestionDistributionMode.PER_GROUP:
+            total_questions_count = await self.assessment_repo.count_questions_for_group(assessment.id, submission.group_id)
+        else:
+            total_questions_count = await self.assessment_repo.count_questions(assessment.id)
+        completed_answers_count = await self.submission_repo.count_completed_answers(submission.id)
+
+        # For group assessments without individual Question rows (e.g. project/file submissions), treat as single graded unit
+        if total_questions_count == 0:
+            total_questions_count = 1
+            completed_answers_count = 1 if is_final else 0
+        elif is_final and completed_answers_count < total_questions_count:
+            completed_answers_count = total_questions_count
+
+        from app.db.enums import ResultReleaseMode
+        release_mode = assessment.result_release_mode if assessment else None
+        if hasattr(release_mode, "value"):
+            release_mode = release_mode.value
+
+        for member in active_members:
+            member_id_str = str(member.student_id)
+            # 1. Calculate per-student score from overrides or default total_score
+            student_score = (
+                data.member_overrides.get(member_id_str, data.total_score)
+                if data.member_overrides and member_id_str in data.member_overrides
+                else data.total_score
+            )
+            percentage = round((student_score / data.max_score) * 100, 2) if (data.max_score and data.max_score > 0) else 0.0
+            passing_pct = (assessment.passing_marks / assessment.total_marks * 100) if (assessment.total_marks and assessment.passing_marks) else 50.0
+            is_passing = percentage >= passing_pct
+            letter_grade = _compute_letter_grade(percentage)
+
+            # 2. Check per-student integrity hold from individual attempt telemetry
+            member_attempt = await self.attempt_repo.get_by_student_and_assessment(member.student_id, assessment.id)
+            integrity_hold = False
+            if member_attempt:
+                integrity_hold = bool(
+                    member_attempt.is_flagged
+                    or (member_attempt.integrity_risk_score and member_attempt.integrity_risk_score >= 70.0)
+                )
+
+            # 3. Upsert the derived AssessmentResult row
+            await self.result_repo.create_or_update_derived_group_result(
+                student_id=member.student_id,
+                assessment_id=assessment.id,
+                group_submission_id=submission.id,
+                attempt_id=member_attempt.id if member_attempt else None,
+                total_score=student_score,
+                max_score=data.max_score,
+                percentage=percentage,
+                letter_grade=letter_grade,
+                is_passing=is_passing,
+                integrity_hold=integrity_hold,
+                is_released=False,
+                graded_question_count=completed_answers_count,
+                total_question_count=total_questions_count,
+            )
+
+        # Automatic Release for IMMEDIATE mode if fully graded
+        if (
+            release_mode == ResultReleaseMode.IMMEDIATE.value
+            and is_final
+            and total_questions_count > 0
+            and completed_answers_count >= total_questions_count
+        ):
+            await self.release_group_result(
+                assessment_id=assessment_id,
+                submission_id=submission_id,
+                current_user=current_user,
+            )
 
     async def release_group_result(
         self,
@@ -964,18 +1051,21 @@ class GroupWorkService:
             raise NotFoundError("Group not found.", code="GROUP_NOT_FOUND")
 
         await self.submission_repo.mark_result_released(submission_id)
-        for member in group.members:
-            if member.is_deleted:
-                continue
-            await self.notification_repo.create(
-                recipient_id=member.student_id,
-                notification_type=NotificationType.GROUP_RESULT_RELEASED,
-                title="Group work result released",
-                body=f"Results for '{assessment.title}' have been released to your group.",
-                reference_id=submission_id,
-                reference_type="group_submission",
-                action_url=f"/student/group-work/{assessment_id}",
-            )
+
+        # Release derived AssessmentResult rows for unheld members
+        derived_results = await self.result_repo.list_by_group_submission(submission_id)
+        for res in derived_results:
+            if not res.integrity_hold and not res.is_released:
+                await self.result_repo.release(res.id, released_by_id=current_user.id)
+                await self.notification_repo.create(
+                    recipient_id=res.student_id,
+                    notification_type=NotificationType.GROUP_RESULT_RELEASED,
+                    title="Group work result released",
+                    body=f"Results for '{assessment.title}' have been released to your group.",
+                    reference_id=submission_id,
+                    reference_type="group_submission",
+                    action_url=f"/student/group-work/{assessment_id}",
+                )
 
     async def _all_submission_approvals_approved(self, submission_id: uuid.UUID, group_id: uuid.UUID) -> bool:
         approvals = await self.submission_repo.list_submission_approvals(submission_id)

@@ -587,20 +587,22 @@ export function AIReviewPanel({
                   Rubric Alignment
                 </p>
                 <div className="space-y-2">
-                  {details.rubric_scores.map((note, idx) => (
+                  {details.rubric_scores.map((note: any, idx: number) => (
                     <div
                       key={idx}
                       className="bg-background rounded border p-3 text-sm"
                     >
                       <div className="flex justify-between font-medium mb-1">
-                        <span>{note.criterion}</span>
+                        <span>{note.criterion || note.criterion_title || "Criterion"}</span>
                         <span className="text-primary">
-                          {note.marks_awarded} pts
+                          {note.marks_awarded ?? note.score ?? note.points_awarded ?? 0} pts
                         </span>
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        {note.notes}
-                      </p>
+                      {(note.notes || note.description) && (
+                        <p className="text-xs text-muted-foreground">
+                          {note.notes || note.description}
+                        </p>
+                      )}
                     </div>
                   ))}
                 </div>

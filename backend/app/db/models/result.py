@@ -30,7 +30,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlmodel import Field, Relationship
 
@@ -39,17 +39,19 @@ from app.db.enums import ResultLetterGrade
 from app.db.mixins import composite_index
 
 if TYPE_CHECKING:
-    from app.db.models.attempt import AssessmentAttempt
+    from app.db.models.attempt import AssessmentAttempt, GroupSubmission
 
 
 class AssessmentResult(BaseModel, table=True):
     """
-    The final computed result for one student attempt.
+    The final computed result for one student attempt or group submission.
 
     LIFECYCLE:
-        1. All SubmissionGrade rows for the attempt become is_final=True.
-        2. result_service.calculate_result() sums scores, computes percentage,
-           assigns letter_grade, sets is_passing, creates this row.
+        1. All SubmissionGrade rows for the attempt become is_final=True (Individual)
+           OR GroupWorkService.grade_group_submission() grades the team (Group).
+        2. result_service.calculate_result() or GroupWorkService.grade_group_submission()
+           sums scores, computes percentage, assigns letter_grade, sets is_passing,
+           and creates/updates this row.
         3. Row sits with is_released=False until release is triggered.
         4. On release: is_released=True, released_at=now, and the student
            receives a notification.
@@ -68,18 +70,47 @@ class AssessmentResult(BaseModel, table=True):
     __tablename__ = "assessment_result"
 
     __table_args__ = (
-        UniqueConstraint("attempt_id", name="uq_assessment_result_attempt"),
+        Index(
+            "uq_assessment_result_attempt_partial",
+            "attempt_id",
+            unique=True,
+            postgresql_where=text("attempt_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_assessment_result_group_member_partial",
+            "assessment_id",
+            "student_id",
+            "group_submission_id",
+            unique=True,
+            postgresql_where=text("group_submission_id IS NOT NULL"),
+        ),
         composite_index("assessment_result", "attempt_id"),
+        composite_index("assessment_result", "group_submission_id"),
+        composite_index("assessment_result", "is_group_result"),
         composite_index("assessment_result", "is_released"),
         composite_index("assessment_result", "is_released", "integrity_hold"),
     )
 
-    attempt_id: uuid.UUID = Field(
+    attempt_id: Optional[uuid.UUID] = Field(
+        default=None,
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
-            nullable=False,
-        )
+            ForeignKey("assessment_attempt.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
+    group_submission_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("group_submission.id", ondelete="CASCADE"),
+            nullable=True,
+        ),
+    )
+    is_group_result: bool = Field(
+        default=False,
+        nullable=False,
+        description="True if this result was derived from a collaborative group submission",
     )
     # Denormalised — avoids joins on every student dashboard read
     student_id: uuid.UUID = Field(nullable=False)
@@ -157,6 +188,17 @@ class AssessmentResult(BaseModel, table=True):
         default=0,
         nullable=False,
         description="Total questions in the assessment at calc time",
+    )
+    is_post_release_corrected: bool = Field(
+        default=False,
+        nullable=False,
+        description="True if result marks were adjusted via faculty moderation after initial release",
+    )
+    post_release_corrected_at: datetime | None = Field(
+        default=None,
+        sa_type=DateTime(timezone=True),
+        nullable=True,
+        description="Timestamp when post-release moderation occurred",
     )
 
     # -- Relationships --------------------------------------------------------

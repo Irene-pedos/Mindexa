@@ -136,6 +136,22 @@ async def list_my_results(
             page_size=page_size,
         )
 
+    # ── When include_pending=True: Include all student results and submitted attempts ──
+    results_stmt = (
+        select(AssessmentResult)
+        .options(selectinload(AssessmentResult.attempt))
+        .where(
+            AssessmentResult.student_id == current_user.id,
+            AssessmentResult.is_deleted == False,  # noqa: E712
+        )
+        .order_by(AssessmentResult.calculated_at.desc())
+    )
+    res_exec = await db.execute(results_stmt)
+    all_results = list(res_exec.scalars().all())
+
+    handled_assessment_ids = {r.assessment_id for r in all_results}
+    handled_attempt_ids = {r.attempt_id for r in all_results if r.attempt_id}
+
     attempts_stmt = (
         select(AssessmentAttempt)
         .options(
@@ -153,24 +169,55 @@ async def list_my_results(
     attempts = list(attempts_result.scalars().all())
 
     summaries = []
-    for attempt in attempts:
-        ass = attempt.assessment
-        result = attempt.result
-        released = bool(result and result.is_released)
-        held = bool(result and result.integrity_hold)
-        max_score = (
-            result.max_score
-            if result and result.max_score
-            else float(ass.total_marks or 0) if ass else 0.0
-        )
+    # 1. Add all AssessmentResults
+    for r in all_results:
+        ass = await db.get(Assessment, r.assessment_id)
+        released = bool(r.is_released)
+        held = bool(r.integrity_hold)
+        max_score = r.max_score if r.max_score else float(ass.total_marks or 0) if ass else 0.0
 
-        status = "GRADED" if released else "AUTO_SUBMITTED" if attempt.status == AttemptStatus.AUTO_SUBMITTED else "SUBMITTED"
-        if held:
-            status = "AUTO_SUBMITTED" if attempt.status == AttemptStatus.AUTO_SUBMITTED else "INTEGRITY_HOLD"
+        status = "GRADED" if released else "INTEGRITY_HOLD" if held else "PENDING_RELEASE"
+        submitted_at = r.attempt.submitted_at if r.attempt else r.calculated_at
 
         summaries.append(ResultSummary(
-            id=result.id if result else attempt.id,
+            id=r.id,
+            attempt_id=r.attempt_id,
+            group_submission_id=r.group_submission_id,
+            is_group_result=r.is_group_result,
+            student_id=r.student_id,
+            assessment_id=r.assessment_id,
+            assessment_title=ass.title if ass else "Assessment",
+            assessment_type=ass.assessment_type.value if ass and hasattr(ass.assessment_type, "value") else str(ass.assessment_type) if ass else None,
+            academic_year=ass.academic_year if ass else None,
+            course_code=ass.course_code if ass else None,
+            course_name=ass.course_name if ass else None,
+            submitted_at=submitted_at,
+            released_at=r.released_at if released else None,
+            student_status=status,
+            total_score=r.total_score if released else 0.0,
+            max_score=max_score,
+            percentage=r.percentage if released else 0.0,
+            letter_grade=r.letter_grade if released else None,
+            is_passing=r.is_passing if released else False,
+            is_released=released,
+            integrity_hold=held,
+            graded_question_count=r.graded_question_count,
+            total_question_count=r.total_question_count,
+        ))
+
+    # 2. Add any submitted attempts that do not yet have an AssessmentResult row
+    for attempt in attempts:
+        if attempt.id in handled_attempt_ids or attempt.assessment_id in handled_assessment_ids:
+            continue
+        ass = attempt.assessment
+        held = bool(attempt.is_flagged or (attempt.integrity_risk_score and attempt.integrity_risk_score >= 70.0))
+        status = "AUTO_SUBMITTED" if attempt.status == AttemptStatus.AUTO_SUBMITTED else "INTEGRITY_HOLD" if held else "SUBMITTED"
+        max_score = float(ass.total_marks or 0) if ass else 0.0
+
+        summaries.append(ResultSummary(
+            id=attempt.id,
             attempt_id=attempt.id,
+            is_group_result=bool(attempt.group_id is not None),
             student_id=attempt.student_id,
             assessment_id=attempt.assessment_id,
             assessment_title=ass.title if ass else "Assessment",
@@ -179,17 +226,17 @@ async def list_my_results(
             course_code=ass.course_code if ass else None,
             course_name=ass.course_name if ass else None,
             submitted_at=attempt.submitted_at,
-            released_at=result.released_at if released and result else None,
+            released_at=None,
             student_status=status,
-            total_score=result.total_score if released and result else 0.0,
+            total_score=0.0,
             max_score=max_score,
-            percentage=result.percentage if released and result else 0.0,
-            letter_grade=result.letter_grade if released and result else None,
-            is_passing=result.is_passing if released and result else False,
-            is_released=released,
+            percentage=0.0,
+            letter_grade=None,
+            is_passing=False,
+            is_released=False,
             integrity_hold=held,
-            graded_question_count=result.graded_question_count if result else 0,
-            total_question_count=result.total_question_count if result else 0,
+            graded_question_count=0,
+            total_question_count=0,
         ))
 
     total = len(summaries)
@@ -269,6 +316,7 @@ async def list_results_for_assessment(
 )
 async def calculate_result(
     attempt_id: uuid.UUID,
+    allow_partial: bool = Query(default=False, description="Allow calculation on partially graded attempt"),
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AssessmentResultResponse:
@@ -276,12 +324,16 @@ async def calculate_result(
     (Re)calculate the result for a submitted attempt.
 
     Safe to call multiple times — idempotent.
-    Used after all grades are finalised.
+    Requires all questions to be finalized unless allow_partial=True is specified.
     Result is NOT released to the student until POST /results/release is called.
     """
     service = ResultService(db)
-    result, created = await service.calculate_result(attempt_id=attempt_id)
-    return AssessmentResultResponse.model_validate(result)
+    result, created = await service.calculate_result(
+        attempt_id=attempt_id,
+        allow_partial=allow_partial,
+    )
+    enriched = await service.get_result_for_lecturer(attempt_id=result.id)
+    return AssessmentResultResponse.model_validate(enriched)
 
 
 # ── RELEASE RESULTS ───────────────────────────────────────────────────────────
@@ -521,16 +573,25 @@ async def get_release_readiness_queue(
     final_counts_res = await db.execute(final_count_stmt)
     final_counts = dict(final_counts_res.all())
 
-    # Check if all attempts are fully graded
+    # Check if all attempts/results are fully graded
     class_fully_graded = True
     for s in students:
         student_id = s[0]
+        result = results.get(student_id)
         attempt = attempts.get(student_id)
-        if attempt:
+        if result:
+            if result.total_question_count > 0:
+                if result.graded_question_count < result.total_question_count:
+                    class_fully_graded = False
+            elif not result.is_group_result:
+                class_fully_graded = False
+        elif attempt:
             tot = resp_counts.get(attempt.id, 0)
             fin = final_counts.get(attempt.id, 0)
-            if fin < tot:
+            if fin < tot or tot == 0:
                 class_fully_graded = False
+        else:
+            class_fully_graded = False
 
     # Populate response items list
     items = []
@@ -547,9 +608,9 @@ async def get_release_readiness_queue(
         attempt = attempts.get(student_id)
         result = results.get(student_id)
 
-        attempt_id = attempt.id if attempt else None
-        tot = resp_counts.get(attempt_id, 0) if attempt_id else 0
-        fin = final_counts.get(attempt_id, 0) if attempt_id else 0
+        attempt_id = attempt.id if attempt else (result.attempt_id if result else None)
+        tot = result.total_question_count if (result and result.total_question_count > 0) else (resp_counts.get(attempt_id, 0) if attempt_id else 0)
+        fin = result.graded_question_count if (result and result.graded_question_count > 0) else (final_counts.get(attempt_id, 0) if attempt_id else 0)
 
         integrity_hold = result.integrity_hold if result else False
         is_released = result.is_released if result else False
@@ -559,14 +620,27 @@ async def get_release_readiness_queue(
         percentage = result.percentage if result else None
         letter_grade = result.letter_grade.value if (result and result.letter_grade) else None
 
-        # Can release only if class is fully graded, attempt exists, not released, and no hold
-        has_attempt = attempt_id is not None
+        has_submission = (attempt_id is not None) or (result is not None)
         can_release = (
             class_fully_graded and
-            has_attempt and
+            has_submission and
             not is_released and
-            not integrity_hold
+            not integrity_hold and
+            (fin >= tot and tot > 0)
         )
+
+        status = "NOT_SUBMITTED"
+        if has_submission:
+            if is_released:
+                status = "RELEASED"
+            elif integrity_hold:
+                status = "INTEGRITY_HOLD"
+            elif fin < tot or tot == 0:
+                status = "GRADING_IN_PROGRESS"
+            elif can_release:
+                status = "PENDING_RELEASE"
+            else:
+                status = "AWAITING_CLASS_COMPLETION"
 
         items.append({
             "student_id": student_id,
@@ -577,6 +651,7 @@ async def get_release_readiness_queue(
             "integrity_hold": integrity_hold,
             "is_released": is_released,
             "can_release": can_release,
+            "status": status,
             "total_score": total_score,
             "max_score": max_score,
             "percentage": percentage,

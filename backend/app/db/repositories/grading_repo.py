@@ -86,6 +86,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.response_id == response_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
             )
         )
@@ -127,6 +128,7 @@ class GradingRepository:
                     SubmissionGrade.id == response_id,
                     SubmissionGrade.response_id == response_id,
                 ),
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_deleted.is_(False)
             )
             .limit(1)
@@ -183,7 +185,7 @@ class GradingRepository:
             grading_mode=grading_mode,
             is_final=False,
         )
-        await self.db.commit()
+        await self.db.flush()
 
         # Re-fetch with all options selectinloaded to ensure full detail is returned
         result = await self.db.execute(
@@ -197,6 +199,7 @@ class GradingRepository:
             )
             .where(
                 SubmissionGrade.response_id == response_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_deleted.is_(False)
             )
         )
@@ -208,6 +211,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
             )
         )
@@ -219,6 +223,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(SubmissionGrade).where(
                 SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
             )
@@ -229,6 +234,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(func.count(SubmissionGrade.id)).where(
                 SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
             )
@@ -239,6 +245,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(func.coalesce(func.sum(SubmissionGrade.score), 0.0)).where(
                 SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
                 SubmissionGrade.score.is_not(None),
@@ -250,6 +257,7 @@ class GradingRepository:
         result = await self.db.execute(
             select(func.coalesce(func.sum(SubmissionGrade.max_score), 0.0)).where(
                 SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
             )
@@ -454,8 +462,12 @@ class GradingRepository:
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             .outerjoin(StudentResponse, GradingQueueItem.response_id == StudentResponse.id)
-            # Link to SubmissionGrade for AI info
-            .outerjoin(SubmissionGrade, GradingQueueItem.response_id == SubmissionGrade.response_id)
+            # Link to SubmissionGrade for current AI info
+            .outerjoin(SubmissionGrade, and_(
+                GradingQueueItem.response_id == SubmissionGrade.response_id,
+                SubmissionGrade.is_current == True,
+                SubmissionGrade.is_deleted == False,
+            ))
             # Resolve class section — filter by course to avoid row multiplication
             # when a student is enrolled in multiple sections across different courses.
             .outerjoin(StudentEnrollment, and_(

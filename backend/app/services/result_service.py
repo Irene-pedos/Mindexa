@@ -22,6 +22,8 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
 
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.db.enums import AttemptStatus, ResultLetterGrade
@@ -74,22 +76,33 @@ class ResultService:
         from app.db.repositories.notification_repo import NotificationRepository
         from app.workers.tasks import send_email_notification
 
-        action_url = f"/student/results/{result.attempt_id}"
+        target_id = result.attempt_id or result.id
+        action_url = f"/student/results/{target_id}"
         notification_repo = NotificationRepository(self.db)
         await notification_repo.create(
             recipient_id=result.student_id,
-            notification_type=NotificationType.RESULT_RELEASED,
+            notification_type=(
+                NotificationType.GROUP_RESULT_RELEASED
+                if result.is_group_result
+                else NotificationType.RESULT_RELEASED
+            ),
             title=f"Marks published: {assessment_title}",
             body=(
                 f"Your marks for {assessment_title} have been published. "
                 f"Score: {round(result.percentage, 1)}%."
             ),
-            reference_id=result.attempt_id,
-            reference_type="assessment_attempt",
+            reference_id=target_id,
+            reference_type="group_submission" if result.is_group_result else "assessment_attempt",
             action_url=action_url,
         )
 
-        student = await self.db.get(User, result.student_id)
+        user_stmt = (
+            select(User)
+            .options(selectinload(User.profile))
+            .where(User.id == result.student_id)
+        )
+        user_res = await self.db.execute(user_stmt)
+        student = user_res.scalar_one_or_none()
         if student and student.email:
             first_name = student.profile.first_name if student.profile else "Student"
             results_url = f"{settings.FRONTEND_URL}{action_url}"
@@ -109,7 +122,11 @@ class ResultService:
                         else str(result.letter_grade)
                     ),
                     "is_passing": result.is_passing,
-                    "notification_type": NotificationType.RESULT_RELEASED.value,
+                    "notification_type": (
+                        NotificationType.GROUP_RESULT_RELEASED.value
+                        if result.is_group_result
+                        else NotificationType.RESULT_RELEASED.value
+                    ),
                     "app_name": settings.APP_NAME,
                 },
             )
@@ -122,13 +139,15 @@ class ResultService:
         self,
         *,
         attempt_id: uuid.UUID,
+        allow_partial: bool = False,
+        is_post_release_correction: bool = False,
     ) -> tuple[AssessmentResult, bool]:
         """
         Compute the AssessmentResult for an attempt.
 
-        Uses only is_final=True grades. If not all questions are graded yet,
-        still creates/updates the result (partial) but marks it accordingly.
-        The result is NOT released until the lecturer triggers release.
+        Uses only is_final=True grades. By default requires all questions to be graded
+        unless allow_partial=True is explicitly passed.
+        The result is NOT released until the lecturer triggers release (or IMMEDIATE mode on full grading).
 
         Returns (result, created: bool).
         """
@@ -142,17 +161,33 @@ class ResultService:
                 code="ATTEMPT_NOT_SUBMITTED",
             )
 
+        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
+        aq_count = await self.assessment_repo.count_assessment_questions(attempt.assessment_id)
+        graded_count = await self.grading_repo.count_final_grades(attempt_id)
+
+        # Completeness guard (Item 13)
+        if not allow_partial and aq_count > 0 and graded_count < aq_count:
+            raise ConflictError(
+                f"Attempt is only partially graded ({graded_count}/{aq_count} questions finalized). Set allow_partial=True to compute intermediate draft.",
+                code="ATTEMPT_PARTIALLY_GRADED",
+            )
+
         # Sum scores from final grades
         total_score = await self.grading_repo.sum_final_scores(attempt_id)
-        max_score = await self.grading_repo.sum_max_scores(attempt_id)
-        graded_count = await self.grading_repo.count_final_grades(attempt_id)
-        aq_count = await self.assessment_repo.count_assessment_questions(attempt.assessment_id)
+        
+        # Authoritative max score (denominator)
+        max_score = (
+            float(assessment.total_marks)
+            if (assessment and assessment.total_marks and assessment.total_marks > 0)
+            else await self.grading_repo.sum_max_scores(attempt_id)
+        )
+        if max_score <= 0:
+            max_score = await self.grading_repo.sum_max_scores(attempt_id)
 
         # Percentage (guard against divide-by-zero)
         percentage = round((total_score / max_score) * 100, 2) if max_score > 0 else 0.0
 
         # Passing threshold from assessment
-        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
         passing_pct = 0.0
         if assessment and assessment.passing_marks and assessment.total_marks:
             passing_pct = (assessment.passing_marks / assessment.total_marks) * 100
@@ -171,6 +206,7 @@ class ResultService:
             is_passing=is_passing,
             graded_question_count=graded_count,
             total_question_count=aq_count,
+            is_post_release_correction=is_post_release_correction,
         )
 
         # Set integrity hold if attempt is flagged
@@ -186,14 +222,22 @@ class ResultService:
         # Gate: Automatic Release for IMMEDIATE mode
         from app.db.enums import ResultReleaseMode
 
-        release_mode = assessment.result_release_mode
+        release_mode = assessment.result_release_mode if assessment else None
         if hasattr(release_mode, "value"):
             release_mode = release_mode.value
+
+        is_fully_graded = (
+            aq_count > 0
+            and graded_count >= aq_count
+            and result.total_question_count > 0
+            and result.graded_question_count >= result.total_question_count
+        )
 
         if (
             release_mode == ResultReleaseMode.IMMEDIATE.value
             and not result.integrity_hold
             and not result.is_released
+            and is_fully_graded
         ):
             await self.result_repo.release(result.id, released_by_id=None)
             result.is_released = True
@@ -268,24 +312,43 @@ class ResultService:
         """
         Release results to students.
 
-        If attempt_ids is None → releases all releasable results for the assessment.
-        If attempt_ids is provided → releases only those specific results.
+        If attempt_ids is None → releases all fully-graded releasable results for the assessment.
+        If attempt_ids is provided → releases only those specific results that are fully graded.
 
-        Results with integrity_hold=True are skipped and returned in held_attempt_ids.
+        Server-side validation:
+        - Results with integrity_hold=True are held and returned in held_attempt_ids.
+        - Results that are not fully graded (graded_question_count < total_question_count or
+          total_question_count == 0) are strictly NOT released and returned in incomplete_attempt_ids.
+        - Partial results are NEVER released to students.
 
         Returns:
             {
                 released_count: int,
                 held_count: int,
                 held_attempt_ids: [uuid, ...],
+                incomplete_count: int,
+                incomplete_attempt_ids: [uuid, ...],
                 message: str,
             }
         """
         from sqlalchemy import select
-        
+
+        # Total question count for assessment
+        total_questions = await self.assessment_repo.count_assessment_questions(assessment_id)
+
         if attempt_ids:
             # Load specific results
             results = await self.result_repo.list_by_attempt_ids(attempt_ids)
+            existing_attempt_ids = {r.attempt_id for r in results}
+            missing_attempt_ids = [aid for aid in attempt_ids if aid not in existing_attempt_ids]
+
+            # For missing results, attempt calculation
+            for aid in missing_attempt_ids:
+                try:
+                    calc_res, _ = await self.calculate_result(attempt_id=aid)
+                    results.append(calc_res)
+                except Exception:
+                    pass
         elif class_section_id:
             from app.db.models.academic import StudentEnrollment
             from app.db.enums import EnrollmentStatus
@@ -296,19 +359,59 @@ class ResultService:
             )
             res = await self.db.execute(student_ids_stmt)
             section_student_ids = set(res.scalars().all())
-            
+
             all_results = await self.result_repo.list_unreleased_without_hold(assessment_id)
             results = [r for r in all_results if r.student_id in section_student_ids]
         else:
             results = await self.result_repo.list_unreleased_without_hold(assessment_id)
 
-        releasable = [r for r in results if not r.integrity_hold and not r.is_released]
-        held = [r for r in results if r.integrity_hold]
+        releasable = []
+        held = []
+        incomplete = []
+
+        for r in results:
+            if r.is_released:
+                continue
+            if r.integrity_hold:
+                held.append(r)
+                continue
+
+            # Live check of question counts for data integrity
+            if r.is_group_result or not r.attempt_id:
+                is_fully_graded = (
+                    r.total_question_count > 0
+                    and r.graded_question_count >= r.total_question_count
+                )
+            else:
+                actual_graded = await self.grading_repo.count_final_grades(r.attempt_id)
+                aq_count = total_questions if total_questions > 0 else await self.assessment_repo.count_assessment_questions(r.assessment_id)
+                is_fully_graded = (
+                    aq_count > 0
+                    and actual_graded == aq_count
+                    and r.total_question_count > 0
+                    and r.graded_question_count >= r.total_question_count
+                )
+
+            if is_fully_graded:
+                releasable.append(r)
+            else:
+                incomplete.append(r)
 
         released_ids = [r.id for r in releasable]
         released_count = await self.result_repo.bulk_release(
             released_ids, released_by_id=released_by_id
         )
+
+        # Synchronize GroupSubmission.result_released_at for any released group results
+        group_sub_ids = {r.group_submission_id for r in releasable if r.is_group_result and r.group_submission_id}
+        for g_sub_id in group_sub_ids:
+            from app.db.models.attempt import GroupSubmission
+            g_sub = await self.db.get(GroupSubmission, g_sub_id)
+            if g_sub and not g_sub.result_released_at:
+                g_sub.result_released_at = _utcnow()
+                self.db.add(g_sub)
+        if group_sub_ids:
+            await self.db.flush()
 
         # Dispatch notifications for released results
         if released_ids:
@@ -321,16 +424,22 @@ class ResultService:
                     assessment_title=assessment_title,
                 )
 
-        held_attempt_ids = [r.attempt_id for r in held]
+        held_attempt_ids = [r.attempt_id or r.id for r in held]
+        incomplete_attempt_ids = [r.attempt_id or r.id for r in incomplete]
+
+        parts = [f"{released_count} result(s) released."]
+        if held:
+            parts.append(f"{len(held)} held due to integrity flags.")
+        if incomplete:
+            parts.append(f"{len(incomplete)} skipped (partially graded / incomplete).")
 
         return {
             "released_count": released_count,
             "held_count": len(held),
             "held_attempt_ids": held_attempt_ids,
-            "message": (
-                f"{released_count} result(s) released. "
-                f"{len(held)} held due to integrity flags."
-            ),
+            "incomplete_count": len(incomplete),
+            "incomplete_attempt_ids": incomplete_attempt_ids,
+            "message": " ".join(parts),
         }
 
     # -----------------------------------------------------------------------
@@ -345,17 +454,17 @@ class ResultService:
     ) -> dict:
         """
         Return a result for a student — only if is_released=True.
+        Supports lookup by attempt_id OR direct result.id.
         Raises NotFoundError if not released yet.
         """
-        attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
-        if not attempt:
-            raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(attempt_id)
+        if not result:
+            raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
 
-        if attempt.student_id != student_id:
-            raise AuthorizationError("You do not own this attempt", code="ATTEMPT_OWNERSHIP_VIOLATION")
+        if result.student_id != student_id:
+            raise AuthorizationError("You do not own this result", code="RESULT_OWNERSHIP_VIOLATION")
 
-        result = await self.result_repo.get_by_attempt_with_breakdowns(attempt_id)
-        if not result or not result.is_released:
+        if not result.is_released:
             raise NotFoundError(
                 "Result is not yet available",
                 code="RESULT_NOT_RELEASED",
@@ -370,8 +479,9 @@ class ResultService:
     ) -> dict:
         """
         Return a result for a lecturer/admin — no release check.
+        Supports lookup by attempt_id OR direct result.id.
         """
-        result = await self.result_repo.get_by_attempt_with_breakdowns(attempt_id)
+        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(attempt_id)
         if not result:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
         
@@ -399,10 +509,11 @@ class ResultService:
         resp = AssessmentResultResponse.model_validate(result)
         
         # 1. Load attempt info
-        attempt = await self.attempt_repo.get_by_id_simple(result.attempt_id)
-        if attempt:
-            resp.submitted_at = attempt.submitted_at
-            resp.started_at = attempt.started_at
+        if result.attempt_id:
+            attempt = await self.attempt_repo.get_by_id_simple(result.attempt_id)
+            if attempt:
+                resp.submitted_at = attempt.submitted_at
+                resp.started_at = attempt.started_at
 
         # 2. Load assessment and academic hierarchy
         assessment = await self.db.get(Assessment, result.assessment_id)
@@ -555,8 +666,26 @@ class ResultService:
             if period:
                 resp.academic_year = period.name
 
+        # 6. Group Result Special Handling: No fake breakdown generation
+        if result.is_group_result:
+            from app.db.models.attempt import GroupSubmission, StudentGroup
+            resp.is_group_result = True
+            resp.group_submission_id = result.group_submission_id
+            resp.breakdowns = []
+            if result.group_submission_id:
+                group_sub = await self.db.get(GroupSubmission, result.group_submission_id)
+                if group_sub:
+                    resp.group_feedback = group_sub.feedback
+                    if not resp.submitted_at:
+                        resp.submitted_at = group_sub.submitted_at
+                    group = await self.db.get(StudentGroup, group_sub.group_id)
+                    if group:
+                        resp.group_id = group.id
+                        resp.group_name = group.name
+            return resp.model_dump()
+
         # Load all questions and responses for this attempt
-        responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id)
+        responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id) if result.attempt_id else []
         response_map = {r.question_id: r for r in responses}
         
         # Map for section titles

@@ -39,7 +39,7 @@ class AssessmentReleasePolicyRequest(BaseModel):
     Body for PATCH /results/assessment/{assessment_id}/release-policy.
     Update the assessment's result release configuration.
     """
-    policy: str # string from frontend: 'immediate', 'scheduled', 'hold'
+    policy: str  # string from frontend: 'immediate', 'scheduled', 'hold'
     release_date: datetime | None = None
 
 
@@ -103,7 +103,12 @@ class AssessmentResultResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     id: uuid.UUID
-    attempt_id: uuid.UUID
+    attempt_id: uuid.UUID | None = None
+    group_submission_id: uuid.UUID | None = None
+    is_group_result: bool = False
+    group_id: uuid.UUID | None = None
+    group_name: str | None = None
+    group_feedback: str | None = None
     student_id: uuid.UUID
     assessment_id: uuid.UUID
     assessment_title: str | None = None
@@ -136,13 +141,20 @@ class AssessmentResultResponse(BaseModel):
     calculated_at: datetime
     graded_question_count: int
     total_question_count: int
+    is_post_release_corrected: bool = False
+    post_release_corrected_at: datetime | None = None
     breakdowns: list[ResultBreakdownItem] = []
 
 
 class ResultSummary(BaseModel):
+    model_config = {"from_attributes": True}
 
     id: uuid.UUID
-    attempt_id: uuid.UUID
+    attempt_id: uuid.UUID | None = None
+    group_submission_id: uuid.UUID | None = None
+    is_group_result: bool = False
+    group_id: uuid.UUID | None = None
+    group_name: str | None = None
     student_id: uuid.UUID
     student_name: str | None = None
     assessment_id: uuid.UUID
@@ -161,6 +173,8 @@ class ResultSummary(BaseModel):
     is_passing: bool
     is_released: bool
     integrity_hold: bool
+    is_post_release_corrected: bool = False
+    post_release_corrected_at: datetime | None = None
     graded_question_count: int | None = None
     total_question_count: int | None = None
 
@@ -177,8 +191,11 @@ class ResultReleaseResponse(BaseModel):
     """Returned after POST /results/release."""
     released_count: int
     held_count: int
-    held_attempt_ids: list[uuid.UUID]
+    held_attempt_ids: list[uuid.UUID] = []
+    incomplete_count: int = 0
+    incomplete_attempt_ids: list[uuid.UUID] = []
     message: str
+
 
 class ReleaseQueueItem(BaseModel):
     student_id: uuid.UUID
@@ -189,14 +206,17 @@ class ReleaseQueueItem(BaseModel):
     integrity_hold: bool
     is_released: bool
     can_release: bool
+    status: str = "PENDING_RELEASE"
     total_score: float | None = None
     max_score: float | None = None
     percentage: float | None = None
     letter_grade: str | None = None
 
+
 class ReleaseQueueResponse(BaseModel):
     items: list[ReleaseQueueItem]
     class_fully_graded: bool
+
 
 # Rebuild models
 ReleaseResultsRequest.model_rebuild()
@@ -206,3 +226,5 @@ AssessmentResultResponse.model_rebuild()
 ResultSummary.model_rebuild()
 ResultListResponse.model_rebuild()
 ResultReleaseResponse.model_rebuild()
+ReleaseQueueItem.model_rebuild()
+ReleaseQueueResponse.model_rebuild()

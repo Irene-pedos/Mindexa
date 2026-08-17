@@ -17,11 +17,13 @@ import {
   Clock,
   Cpu,
   Download,
+  ExternalLink,
   FileText,
   GraduationCap,
   Info,
   Layers,
   MessageCircle,
+  MessageSquare,
   Printer,
   RefreshCw,
   School,
@@ -42,6 +44,18 @@ import { assessmentApi } from "@/lib/api/assessment";
 import { attemptApi } from "@/lib/api/attempt";
 import { resultApi } from "@/lib/api/result";
 import { submissionApi } from "@/lib/api/submission";
+import {
+  isOpenEnded,
+  getQuestionTypeLabel,
+  isQuestionAutoGraded,
+  normalizeQuestionType,
+  isTrueFalseType,
+  isMcqType,
+  isMatchingType,
+  isFillBlankType,
+  isOrderingType,
+  isClosedChoiceType,
+} from "@/lib/grading-utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
@@ -63,55 +77,78 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 import { TableContextViewer, StructuredTableData } from "@/components/mindexa/common/table-context-viewer";
 import { cn } from "@/lib/utils";
 
-interface ResultOption {
+interface BlankItem {
+  blank_index?: number;
+  accepted_answers?: string[];
+  case_sensitive?: boolean;
+  points?: number;
+}
+
+interface OptionBreakdown {
   id: string;
-  text: string;
-  is_correct?: boolean | null;
-  match_key?: string | null;
+  content?: string;
+  text?: string;
+  marks?: number | null;
   match_value?: string | null;
   order_index?: number;
-  marks?: number;
+  is_correct: boolean;
+  explanation?: string | null;
 }
 
 interface QuestionBreakdown {
   id: string;
   question_id: string;
-  score: number | null;
-  max_score: number;
-  is_correct: boolean | null;
-  feedback: string | null;
-  feedback_author_basis?: string | null;
-  grading_mode: string | null;
-  was_skipped: boolean;
-  question_text: string | null;
-  question_type: string | null;
-  section_title: string | null;
+  question_type: string;
+  question_text: string;
+  image_url?: string | null;
   imageUrl?: string | null;
   case_study_context?: string | null;
-  question_table_context?: StructuredTableData | null;
-  questionTableContext?: StructuredTableData | null;
+  question_table_context?: any;
+  questionTableContext?: any;
   requires_table_answer?: boolean;
   requiresTableAnswer?: boolean;
-  answer_table_template?: StructuredTableData | null;
-  answerTableTemplate?: StructuredTableData | null;
-  student_answer: string | null;
-  student_answer_json?: Record<string, unknown> | unknown[] | null;
-  correct_answer: string | null;
-  options: ResultOption[] | null;
-  blanks?: Array<{
-    blank_index: number;
-    accepted_answers: string[];
-    case_sensitive?: boolean;
-  }> | null;
+  answer_table_template?: any;
+  answerTableTemplate?: any;
+  section_title?: string | null;
+  max_score: number;
+  awarded_score: number;
+  score?: number | null;
+  was_skipped?: boolean;
+  is_correct: boolean | null;
+  student_answer: string;
+  student_answer_json?: any;
+  correct_answer?: string | null;
+  correct_answer_json?: any;
+  model_answer?: string | null;
+  feedback: string | null;
+  feedback_author_basis?: string | null;
+  grading_mode?: string | null;
+  ai_confidence: number | null;
+  ai_rationale?: string | null;
+  ai_adjustments?: string | null;
+  ai_rubric_scores?: Record<string, any> | null;
+  options: OptionBreakdown[];
+  blanks?: BlankItem[] | null;
 }
 
 interface AssessmentResultResponse {
   id: string;
-  attempt_id: string;
+  attempt_id?: string | null;
+  group_submission_id?: string | null;
+  is_group_result?: boolean;
+  group_id?: string | null;
+  group_name?: string | null;
+  group_feedback?: string | null;
   student_id: string;
   assessment_id: string;
   assessment_title: string | null;
@@ -144,40 +181,9 @@ interface AssessmentResultResponse {
   calculated_at: string | null;
   graded_question_count: number;
   total_question_count: number;
+  is_post_release_corrected?: boolean;
+  post_release_corrected_at?: string | null;
   breakdowns: QuestionBreakdown[];
-}
-
-const OPEN_TYPES = new Set([
-  "shortanswer",
-  "short_answer",
-  "essay",
-  "casestudy",
-  "case_study",
-  "computational",
-  "practical",
-]);
-const MCQ_TYPES = new Set(["mcq", "multiplechoice", "multiple_choice"]);
-const TRUE_FALSE_TYPES = new Set(["truefalse", "true_false"]);
-
-function normalizeType(value?: string | null) {
-  return (value || "").toLowerCase().replace(/[^a-z0-9_]/g, "");
-}
-
-function labelForType(value?: string | null) {
-  const normalized = normalizeType(value);
-  if (MCQ_TYPES.has(normalized)) return "Multiple choice";
-  if (TRUE_FALSE_TYPES.has(normalized)) return "True / False";
-  if (normalized === "casestudy" || normalized === "case_study") return "Case study";
-  if (normalized === "fillblank" || normalized === "fill_blank") return "Fill in the blanks";
-  if (normalized === "matching") return "Matching";
-  if (normalized === "ordering") return "Ordering";
-  if (normalized === "essay") return "Essay";
-  if (normalized === "computational") return "Computational";
-  return (value || "Question").replace(/_/g, " ");
-}
-
-function isOpenEnded(type?: string | null) {
-  return OPEN_TYPES.has(normalizeType(type));
 }
 
 const BLANK_SPLIT_REGEX = /(?:_{3,}|\[blank\]|\{\{blank\}\})/gi;
@@ -288,7 +294,8 @@ function ScoreRing({ pct, isPassing }: { pct: number; isPassing: boolean }) {
 }
 
 function ScoreBadge({ item }: { item: QuestionBreakdown }) {
-  const pending = item.score === null || item.score === undefined;
+  const currentScore = item.awarded_score ?? item.score;
+  const pending = currentScore === null || currentScore === undefined;
   if (item.was_skipped) {
     return (
       <span className="rounded-full bg-muted/60 px-2.5 py-0.5 text-[11px] font-bold text-muted-foreground border border-border/50">
@@ -304,8 +311,8 @@ function ScoreBadge({ item }: { item: QuestionBreakdown }) {
     );
   }
 
-  const isFull = item.score !== null && item.score >= item.max_score;
-  const isPartial = item.score !== null && item.score > 0 && item.score < item.max_score;
+  const isFull = currentScore !== null && currentScore >= item.max_score;
+  const isPartial = currentScore !== null && currentScore > 0 && currentScore < item.max_score;
 
   let tone = "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
   if (!isFull) {
@@ -328,16 +335,17 @@ function ScoreBadge({ item }: { item: QuestionBreakdown }) {
       ) : (
         <XCircle className="size-3.5" />
       )}
-      {item.score}/{item.max_score} Marks
+      {currentScore}/{item.max_score} Marks
     </span>
   );
 }
 
 function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
+  const currentScore = item.awarded_score ?? item.score;
   const isDeducted =
-    item.score === null
+    currentScore === null || currentScore === undefined
       ? false
-      : item.score < item.max_score || item.is_correct === false || item.was_skipped;
+      : currentScore < item.max_score || item.is_correct === false || Boolean(item.was_skipped);
 
   if (!item.feedback && !isDeducted) return null;
 
@@ -380,7 +388,7 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
       ) : isDeducted ? (
         <div className="text-xs space-y-1 text-muted-foreground font-medium">
           <p>
-            Marks deducted ({item.score ?? 0} out of {item.max_score} marks awarded).
+            Marks deducted ({currentScore ?? 0} out of {item.max_score} marks awarded).
           </p>
           {item.correct_answer && (
             <div className="text-emerald-700 dark:text-emerald-400 font-semibold flex items-start gap-1">
@@ -397,17 +405,19 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
 function ClosedChoiceReview({ item }: { item: QuestionBreakdown }) {
   const selected = answerValues(item);
   const options = item.options || [];
-  const type = normalizeType(item.question_type);
+  const isTf = isTrueFalseType(item.question_type);
   const renderedOptions =
-    TRUE_FALSE_TYPES.has(type) && options.length === 0
+    isTf && options.length === 0
       ? [
           {
             id: "true",
+            content: "True",
             text: "True",
             is_correct: item.correct_answer?.toLowerCase() === "true",
           },
           {
             id: "false",
+            content: "False",
             text: "False",
             is_correct: item.correct_answer?.toLowerCase() === "false",
           },
@@ -418,9 +428,10 @@ function ClosedChoiceReview({ item }: { item: QuestionBreakdown }) {
     <div className="space-y-2.5">
       <div className="grid gap-2 sm:grid-cols-2">
         {renderedOptions.map((option) => {
+          const optionText = option.content || option.text || "";
           const wasChosen = selected.some(
             (v) =>
-              v === option.id || v.toLowerCase() === option.text.toLowerCase()
+              v === option.id || (optionText && v.toLowerCase() === optionText.toLowerCase())
           );
           const correct = !!option.is_correct;
           return (
@@ -436,7 +447,7 @@ function ClosedChoiceReview({ item }: { item: QuestionBreakdown }) {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="font-medium text-foreground/90">
-                  {renderRichMathText(option.text)}
+                  {renderRichMathText(optionText)}
                 </div>
                 <div className="flex shrink-0 gap-1">
                   {wasChosen && (
@@ -480,8 +491,10 @@ function MatchingReview({ item }: { item: QuestionBreakdown }) {
   return (
     <div className="space-y-2">
       {options.map((option) => {
+        const optionKey = option.id;
+        const textKey = option.content || option.text;
         const chosen =
-          studentMap[option.id] ?? studentMap[option.text] ?? "No match submitted";
+          studentMap[optionKey] ?? (textKey ? studentMap[textKey] : undefined) ?? "No match submitted";
         const isMatchCorrect =
           option.match_value &&
           String(chosen).trim().toLowerCase() === option.match_value.trim().toLowerCase();
@@ -501,7 +514,7 @@ function MatchingReview({ item }: { item: QuestionBreakdown }) {
                 Item Prompt
               </span>
               <div className="font-semibold text-foreground mt-0.5">
-                {renderRichMathText(option.text)}
+                {renderRichMathText(option.content || option.text || "")}
               </div>
             </div>
             <div>
@@ -561,10 +574,10 @@ function OrderingReview({ item }: { item: QuestionBreakdown }) {
         .map((s) => s.trim())
         .filter(Boolean);
       return parts.map((strVal) => {
-        const opt = optionMap.get(strVal) || opts.find((o) => o.text === strVal);
+        const opt = optionMap.get(strVal) || opts.find((o) => (o.text || o.content) === strVal);
         return {
           id: opt?.id || strVal,
-          text: opt?.text || strVal,
+          text: opt?.text || opt?.content || strVal,
         };
       });
     }
@@ -589,10 +602,11 @@ function OrderingReview({ item }: { item: QuestionBreakdown }) {
         </p>
         {orderedItems.map((opt, idx) => {
           const expected = expectedOptions[idx];
+          const expectedText = expected?.text || expected?.content || "";
           const isCorrectPosition =
             expected &&
             (opt.id === expected.id ||
-              opt.text.trim().toLowerCase() === expected.text.trim().toLowerCase());
+              opt.text.trim().toLowerCase() === expectedText.trim().toLowerCase());
 
           return (
             <div
@@ -618,7 +632,7 @@ function OrderingReview({ item }: { item: QuestionBreakdown }) {
                     </span>
                   ) : (
                     <span className="text-amber-800 dark:text-amber-300">
-                      Expected: {renderRichMathText(expected.text)}
+                      Expected: {renderRichMathText(expectedText)}
                     </span>
                   )}
                 </span>
@@ -1028,9 +1042,13 @@ function CaseStudyReview({ item }: { item: QuestionBreakdown }) {
       ? (parsed as Record<string, unknown>)
       : {};
 
-  const prompts =
+  const prompts: Array<{ id: string; text: string; marks?: number | null }> =
     item.options && item.options.length > 0
-      ? item.options
+      ? item.options.map((opt, index) => ({
+          id: opt.id,
+          text: opt.content || opt.text || `Sub-question ${index + 1}`,
+          marks: opt.marks,
+        }))
       : Object.keys(answerMap).map((id, index) => ({
           id,
           text: `Sub-question ${index + 1}`,
@@ -1057,10 +1075,10 @@ function CaseStudyReview({ item }: { item: QuestionBreakdown }) {
       <div className="space-y-3">
         {prompts.map((prompt, index) => {
           const subMark =
-            prompt.marks !== undefined && prompt.marks > 0
+            prompt.marks !== undefined && prompt.marks !== null && prompt.marks > 0
               ? prompt.marks
               : totalSubMarks > 0
-              ? prompt.marks
+              ? (prompt.marks ?? 0)
               : Math.round((item.max_score / promptCount) * 10) / 10;
 
           return (
@@ -1122,7 +1140,7 @@ function OpenResponseReview({ item }: { item: QuestionBreakdown }) {
         </div>
       )}
 
-      {item.score === null && (
+      {(item.awarded_score === null || item.awarded_score === undefined) && item.score === null && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 font-medium">
           Awaiting lecturer evaluation and score publication.
         </div>
@@ -1138,13 +1156,12 @@ function QuestionCard({
   item: QuestionBreakdown;
   index: number;
 }) {
-  const type = normalizeType(item.question_type);
-  const isCaseStudy = type === "casestudy" || type === "case_study";
-  const isMatching = type === "matching";
-  const isOrdering =
-    type === "ordering" || type === "ordered_list" || type === "orderedlist";
-  const isFillBlank = type === "fillblank" || type === "fill_blank";
-  const isClosedChoice = MCQ_TYPES.has(type) || TRUE_FALSE_TYPES.has(type);
+  const type = normalizeQuestionType(item.question_type);
+  const isCaseStudy = type === "casestudy";
+  const isMatching = isMatchingType(item.question_type);
+  const isOrdering = isOrderingType(item.question_type);
+  const isFillBlank = isFillBlankType(item.question_type);
+  const isClosedChoice = isClosedChoiceType(item.question_type);
   const hasReferenceTable =
     !!(item.question_table_context || item.questionTableContext);
   const requiresTable =
@@ -1176,7 +1193,7 @@ function QuestionCard({
             )}
           </div>
           <p className="text-[11px] font-medium text-muted-foreground mt-0.5">
-            {labelForType(item.question_type)} • Total: {item.max_score}{" "}
+            {getQuestionTypeLabel(item.question_type)} • Total: {item.max_score}{" "}
             {item.max_score === 1 ? "mark" : "marks"}
           </p>
         </div>
@@ -1243,11 +1260,11 @@ function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] })
   const groups = useMemo(() => {
     const map = new Map<string, QuestionBreakdown[]>();
     for (const item of breakdowns) {
-      const key = item.section_title || labelForType(item.question_type);
+      const key = item.section_title || getQuestionTypeLabel(item.question_type);
       map.set(key, [...(map.get(key) || []), item]);
     }
     return Array.from(map.entries()).map(([name, items]) => {
-      const score = items.reduce((sum, item) => sum + (item.score ?? 0), 0);
+      const score = items.reduce((sum, item) => sum + (item.awarded_score ?? item.score ?? 0), 0);
       const total = items.reduce((sum, item) => sum + (item.max_score ?? 0), 0);
       return {
         name,
@@ -1300,17 +1317,13 @@ function SubmittedQuestionCard({
   sub: any;
   index: number;
 }) {
-  const type = normalizeType(q.type || q.question_type);
+  const qType = q.type || q.question_type;
+  const type = normalizeQuestionType(qType);
   const selected = sub?.selected_option_ids || [];
-  const isCaseStudy = type === "casestudy" || type === "case_study";
-  const isOrdering =
-    type === "ordering" || type === "ordered_list" || type === "orderedlist";
-  const isFillBlank =
-    type === "fillblank" ||
-    type === "fill_blank" ||
-    type === "fillblanks" ||
-    type === "fillintheblank" ||
-    type === "fillintheblanks";
+  const isCaseStudy = type === "casestudy";
+  const isOrdering = isOrderingType(qType);
+  const isFillBlank = isFillBlankType(qType);
+  const isClosedChoice = isClosedChoiceType(qType);
   const answer = safeJson(sub?.answer_text);
   const answerMap =
     answer && typeof answer === "object" && !Array.isArray(answer)
@@ -1340,7 +1353,7 @@ function SubmittedQuestionCard({
             )}
           </div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">
-            {labelForType(q.type)} • {q.marks} {q.marks === 1 ? "mark" : "marks"}
+            {getQuestionTypeLabel(q.type)} • {q.marks} {q.marks === 1 ? "mark" : "marks"}
           </p>
         </div>
         <span className="rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-bold uppercase text-muted-foreground border">
@@ -1371,7 +1384,7 @@ function SubmittedQuestionCard({
         </div>
       )}
 
-      {MCQ_TYPES.has(type) || TRUE_FALSE_TYPES.has(type) ? (
+      {isClosedChoice ? (
         <div className="grid gap-2 sm:grid-cols-2">
           {(q.options || []).map((option: any) => (
             <div
@@ -1767,7 +1780,14 @@ export default function ResultDetailPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setReviewDialogOpen(true)}
+            onClick={() => {
+              if (result.is_group_result) {
+                toast.info("Group work appeals must be initiated collaboratively via the Group Workspace.");
+                router.push(`/student/group-work/${result.assessment_id}`);
+                return;
+              }
+              setReviewDialogOpen(true);
+            }}
             className="h-8.5 gap-1.5 text-xs rounded-xl border-border/60 font-semibold"
           >
             <MessageCircle className="size-3.5 text-primary" />
@@ -1994,7 +2014,7 @@ export default function ResultDetailPage() {
             )}
           </p>
 
-          <div className="pt-2 flex justify-center sm:justify-start">
+          <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2">
             {result.is_passing ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
                 <CheckCircle2 className="size-3.5" /> Satisfactory Assessment Pass
@@ -2002,6 +2022,11 @@ export default function ResultDetailPage() {
             ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-0.5 text-xs font-bold text-rose-700 dark:text-rose-300">
                 <XCircle className="size-3.5" /> Did Not Meet Passing Standard
+              </span>
+            )}
+            {result.is_post_release_corrected && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
+                <ShieldCheck className="size-3.5" /> Official Faculty Moderation Adjustment
               </span>
             )}
           </div>
@@ -2017,6 +2042,58 @@ export default function ResultDetailPage() {
           </p>
         </div>
       </section>
+
+      {/* ── Collaborative Group Work Summary Card ── */}
+      {result.is_group_result && (
+        <section className="rounded-2xl border border-primary/25 bg-primary/[0.03] p-5 md:p-6 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-primary/15 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="size-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary font-bold">
+                <Users className="size-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-bold text-foreground">Collaborative Group Assessment</h2>
+                  <Badge variant="outline" className="text-[10px] font-bold border-primary/30 text-primary bg-primary/5">
+                    Team Result
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Team Name: <span className="font-semibold text-foreground">{result.group_name || "Assigned Group"}</span>
+                </p>
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant="default"
+              onClick={() => router.push(`/student/group-work/${result.assessment_id}`)}
+              className="h-8 gap-1.5 text-xs rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground font-semibold"
+            >
+              <ExternalLink className="size-3.5" />
+              Open Group Workspace
+            </Button>
+          </div>
+
+          {result.group_feedback && (
+            <div className="rounded-xl border border-border/70 bg-card p-4 space-y-1.5">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                <MessageSquare className="size-3.5 text-primary" />
+                Faculty Evaluation & Team Feedback
+              </div>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                {result.group_feedback}
+              </p>
+            </div>
+          )}
+
+          <div className="flex items-start gap-2.5 text-xs text-muted-foreground bg-muted/40 rounded-xl p-3.5 border border-border/50">
+            <Info className="size-4 text-primary shrink-0 mt-0.5" />
+            <p className="leading-relaxed">
+              Individual student grades for group assessments are derived directly from the team submission. Detailed collaborative answers, member contributions, peer reviews, and group-wide grade appeals are accessed within the <span className="font-semibold text-foreground">Group Workspace</span>.
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* Sectional Breakdown */}
       {result.breakdowns?.length > 0 && (

@@ -855,14 +855,16 @@ export default function BatchGradingPage() {
                               className="bg-background rounded-lg border border-border/40 p-2.5 text-xs"
                             >
                               <div className="flex justify-between font-bold mb-1">
-                                <span>{note.criterion}</span>
+                                <span>{note.criterion || note.criterion_title || "Criterion"}</span>
                                 <span className="text-primary">
-                                  {note.marks_awarded} pts
+                                  {note.marks_awarded ?? note.score ?? note.points_awarded ?? 0} pts
                                 </span>
                               </div>
-                              <p className="text-[11px] text-muted-foreground leading-normal">
-                                {note.notes}
-                              </p>
+                              {(note.notes || note.description) && (
+                                <p className="text-[11px] text-muted-foreground leading-normal">
+                                  {note.notes || note.description}
+                                </p>
+                              )}
                             </div>
                           ),
                         )}

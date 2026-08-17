@@ -42,6 +42,7 @@ class ResultRepository:
         is_passing: bool,
         graded_question_count: int,
         total_question_count: int,
+        is_post_release_correction: bool = False,
     ) -> tuple[AssessmentResult, bool]:
         """
         Upsert a result row. Returns (result, created).
@@ -50,6 +51,7 @@ class ResultRepository:
         existing = await self.get_by_attempt(attempt_id)
 
         if existing:
+            was_released = existing.is_released
             existing.total_score = total_score
             existing.max_score = max_score
             existing.percentage = percentage
@@ -58,6 +60,15 @@ class ResultRepository:
             existing.calculated_at = _utcnow()
             existing.graded_question_count = graded_question_count
             existing.total_question_count = total_question_count
+            if was_released or is_post_release_correction:
+                existing.is_post_release_corrected = True
+                existing.post_release_corrected_at = _utcnow()
+                if total_question_count > 0 and graded_question_count >= total_question_count:
+                    existing.is_released = True
+            elif total_question_count <= 0 or graded_question_count < total_question_count:
+                existing.is_released = False
+                existing.released_at = None
+                existing.released_by_id = None
             await self.db.flush()
             return existing, False
 
@@ -72,6 +83,73 @@ class ResultRepository:
             is_passing=is_passing,
             is_released=False,
             integrity_hold=False,
+            calculated_at=_utcnow(),
+            graded_question_count=graded_question_count,
+            total_question_count=total_question_count,
+        )
+        self.db.add(result)
+        await self.db.flush()
+        return result, True
+
+    async def create_or_update_derived_group_result(
+        self,
+        *,
+        student_id: uuid.UUID,
+        assessment_id: uuid.UUID,
+        group_submission_id: uuid.UUID,
+        attempt_id: uuid.UUID | None = None,
+        total_score: float,
+        max_score: float,
+        percentage: float,
+        letter_grade: str | None,
+        is_passing: bool,
+        integrity_hold: bool = False,
+        is_released: bool = False,
+        graded_question_count: int = 0,
+        total_question_count: int = 0,
+    ) -> tuple[AssessmentResult, bool]:
+        """
+        Upsert a derived group AssessmentResult row for a group member.
+        Returns (result, created).
+        """
+        existing = await self.get_by_group_member(
+            assessment_id=assessment_id,
+            student_id=student_id,
+            group_submission_id=group_submission_id,
+        )
+
+        if existing:
+            existing.attempt_id = attempt_id
+            existing.total_score = total_score
+            existing.max_score = max_score
+            existing.percentage = percentage
+            existing.letter_grade = letter_grade
+            existing.is_passing = is_passing
+            existing.integrity_hold = integrity_hold
+            existing.is_group_result = True
+            existing.calculated_at = _utcnow()
+            existing.graded_question_count = graded_question_count
+            existing.total_question_count = total_question_count
+            if not is_released and not existing.is_released:
+                existing.is_released = False
+                existing.released_at = None
+                existing.released_by_id = None
+            await self.db.flush()
+            return existing, False
+
+        result = AssessmentResult(
+            attempt_id=attempt_id,
+            group_submission_id=group_submission_id,
+            student_id=student_id,
+            assessment_id=assessment_id,
+            is_group_result=True,
+            total_score=total_score,
+            max_score=max_score,
+            percentage=percentage,
+            letter_grade=letter_grade,
+            is_passing=is_passing,
+            is_released=is_released,
+            integrity_hold=integrity_hold,
             calculated_at=_utcnow(),
             graded_question_count=graded_question_count,
             total_question_count=total_question_count,
@@ -104,6 +182,46 @@ class ResultRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_by_group_member(
+        self,
+        *,
+        assessment_id: uuid.UUID,
+        student_id: uuid.UUID,
+        group_submission_id: uuid.UUID,
+    ) -> AssessmentResult | None:
+        result = await self.db.execute(
+            select(AssessmentResult).where(
+                AssessmentResult.assessment_id == assessment_id,
+                AssessmentResult.student_id == student_id,
+                AssessmentResult.group_submission_id == group_submission_id,
+                AssessmentResult.is_deleted == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_by_group_submission(
+        self, group_submission_id: uuid.UUID
+    ) -> list[AssessmentResult]:
+        result = await self.db.execute(
+            select(AssessmentResult).where(
+                AssessmentResult.group_submission_id == group_submission_id,
+                AssessmentResult.is_deleted == False,  # noqa: E712
+            )
+        )
+        return list(result.scalars().all())
+
+    async def delete_orphaned_group_results(
+        self,
+        group_submission_id: uuid.UUID,
+        active_student_ids: set[uuid.UUID],
+    ) -> None:
+        """Removes derived result rows for members who were removed from the group."""
+        all_results = await self.list_by_group_submission(group_submission_id)
+        for r in all_results:
+            if r.student_id not in active_student_ids:
+                await self.db.delete(r)
+        await self.db.flush()
+
     async def get_by_attempt_with_breakdowns(
         self, attempt_id: uuid.UUID
     ) -> AssessmentResult | None:
@@ -112,6 +230,22 @@ class ResultRepository:
             .options(selectinload(AssessmentResult.breakdowns))
             .where(
                 AssessmentResult.attempt_id == attempt_id,
+                AssessmentResult.is_deleted == False,  # noqa: E712
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_by_attempt_or_id_with_breakdowns(
+        self, identifier: uuid.UUID
+    ) -> AssessmentResult | None:
+        result = await self.db.execute(
+            select(AssessmentResult)
+            .options(selectinload(AssessmentResult.breakdowns))
+            .where(
+                or_(
+                    AssessmentResult.attempt_id == identifier,
+                    AssessmentResult.id == identifier,
+                ),
                 AssessmentResult.is_deleted == False,  # noqa: E712
             )
         )

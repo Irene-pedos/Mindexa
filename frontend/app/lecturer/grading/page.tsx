@@ -135,6 +135,12 @@ import {
   getAiSuggestion,
   isAssessmentAiAllowed,
 } from "./types";
+import {
+  isQuestionAutoGraded,
+  normalizeQuestionType,
+  getQuestionTypeLabel,
+  isOpenEnded,
+} from "@/lib/grading-utils";
 
 function safeJson(value: unknown) {
   if (!value || typeof value !== "string") return value;
@@ -357,37 +363,6 @@ function ManualOnlyLanguageBanner({
 const DEFAULT_QUESTION_MAX_MARKS = 10;
 const DEFAULT_ASSESSMENT_TOTAL_MARKS = 100;
 
-function isQuestionAutoGraded(q: any): boolean {
-  if (!q) return false;
-  const rawType = (q.type || q.question_type || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
-  const autoTypes = [
-    "mcq",
-    "multiple_choice",
-    "multiplechoice",
-    "single_option",
-    "singleoption",
-    "multi_option",
-    "multioption",
-    "multiselect",
-    "multi_select",
-    "checkbox",
-    "true_false",
-    "truefalse",
-    "matching",
-    "match_pairs",
-    "ordering",
-    "ordered_list",
-    "orderedlist",
-    "fill_blanks",
-    "fill_blank",
-    "fillblank",
-    "fillblanks",
-  ];
-  return autoTypes.includes(rawType);
-}
-
 function DrawerIconButton({
   icon: Icon,
   label,
@@ -478,13 +453,9 @@ function SpeedGraderStudentAnswerCanvas({
   }
 
   const subType = (currentSubmission.answer_type || "").toUpperCase();
-  const qType = (
-    currentQuestion?.type ||
-    currentQuestion?.question_type ||
-    ""
-  )
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "");
+  const qType = normalizeQuestionType(
+    currentQuestion?.type || currentQuestion?.question_type || "",
+  );
 
   // Check structured table response
   const tableData = (() => {
@@ -857,6 +828,14 @@ function LecturerGradingQueueContent() {
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [isAiAccepted, setIsAiAccepted] = useState(false);
   const [showIntegrityLiftDialog, setShowIntegrityLiftDialog] = useState(false);
+  const [filterUngradedOnly, setFilterUngradedOnly] = useState(false);
+  const [bulkReleaseDialogOpen, setBulkReleaseDialogOpen] = useState(false);
+  const [bulkReleaseAction, setBulkReleaseAction] = useState<{
+    type: "selected" | "class_ready";
+    count: number;
+    className?: string;
+    attemptIds: string[];
+  } | null>(null);
   const [isReleasing, setIsReleasing] = useState(false);
   const [releaseQueue, setReleaseQueue] = useState<ReleaseQueueItem[]>([]);
   const [releaseQueueLoading, setReleaseQueueLoading] = useState(false);
@@ -1019,13 +998,13 @@ function LecturerGradingQueueContent() {
   );
 
   const fetchQueue = useCallback(
-    async (assessmentId: string, classId?: string) => {
+    async (assessmentId: string, classId?: string, page: number = 1) => {
       try {
         setLoading(true);
         const params: any = {
           assessment_id: assessmentId,
-          page: 1,
-          page_size: 100,
+          page: page,
+          page_size: PAGE_SIZE,
         };
         if (classId) params.class_id = classId;
         const res = await gradingApi.getGradingQueue(params);
@@ -1048,12 +1027,10 @@ function LecturerGradingQueueContent() {
           duration_minutes: item.duration_minutes,
         }));
         setData(mappedItems);
-        setTotal(res?.total !== undefined ? res.total : mappedItems.length);
-        setHasMore(
-          res?.total !== undefined
-            ? 1 * 100 < res.total
-            : mappedItems.length === 100,
-        );
+        setCurrentPage(page);
+        const totalCount = res?.total !== undefined ? res.total : mappedItems.length;
+        setTotal(totalCount);
+        setHasMore(page * PAGE_SIZE < totalCount);
       } catch {
         toast.error("Failed to load submissions queue");
         setData([]);
@@ -1304,6 +1281,38 @@ function LecturerGradingQueueContent() {
     setActiveQuestionIndex(idx);
     setIsEditing(false);
     setIsAiAccepted(false);
+  };
+
+  const handleJumpToNextUngraded = () => {
+    if (!activeAttempt || !activeAttempt.questions || activeAttempt.questions.length === 0) return;
+    const questions = activeAttempt.questions;
+    const totalQ = questions.length;
+
+    const isUngraded = (q: AttemptQuestion) => {
+      if (isQuestionAutoGraded(q)) return false;
+      const sub = activeSubmissions.find((s) => s.question_id === q.id);
+      return !sub || !sub.is_final;
+    };
+
+    // Look forward from activeQuestionIndex + 1 to totalQ - 1
+    for (let i = activeQuestionIndex + 1; i < totalQ; i++) {
+      if (isUngraded(questions[i])) {
+        handleSelectQuestion(i);
+        toast.info(`Jumped to ungraded Question ${i + 1}`);
+        return;
+      }
+    }
+
+    // Wrap around from 0 to activeQuestionIndex - 1
+    for (let i = 0; i < activeQuestionIndex; i++) {
+      if (isUngraded(questions[i])) {
+        handleSelectQuestion(i);
+        toast.info(`Jumped to ungraded Question ${i + 1}`);
+        return;
+      }
+    }
+
+    toast.success("All manual questions for this attempt are graded!");
   };
 
   const handleGroupQuestionSelect = (idx: number) => {
@@ -1619,6 +1628,15 @@ function LecturerGradingQueueContent() {
         return;
       }
 
+      // 5b. Jump to Next Ungraded Question: Alt+U
+      if (isAlt && e.key.toLowerCase() === "u") {
+        e.preventDefault();
+        if (isIndividualOpen) {
+          handleJumpToNextUngraded();
+        }
+        return;
+      }
+
       // 6. Accept AI Review: Alt+A
       if (
         (isAlt && e.key.toLowerCase() === "a") ||
@@ -1887,24 +1905,58 @@ function LecturerGradingQueueContent() {
     }
   };
 
-  const handleBulkReleaseSelected = async () => {
+  const requestBulkReleaseSelected = () => {
     if (!selectedAssessment || selectedAttemptIds.length === 0) return;
+    setBulkReleaseAction({
+      type: "selected",
+      count: selectedAttemptIds.length,
+      attemptIds: [...selectedAttemptIds],
+    });
+    setBulkReleaseDialogOpen(true);
+  };
+
+  const requestReleaseClassReady = () => {
+    if (!selectedAssessment || !selectedClass) return;
+    const attemptIds = releasableResults
+      .map((r) => r.attempt_id)
+      .filter((id): id is string => Boolean(id));
+    if (attemptIds.length === 0) return;
+    setBulkReleaseAction({
+      type: "class_ready",
+      count: attemptIds.length,
+      className: selectedClass.class_name,
+      attemptIds,
+    });
+    setBulkReleaseDialogOpen(true);
+  };
+
+  const executeBulkRelease = async () => {
+    if (!selectedAssessment || !bulkReleaseAction || !bulkReleaseAction.attemptIds || bulkReleaseAction.attemptIds.length === 0) return;
     try {
       setIsReleasing(true);
       const res = await resultApi.releaseResults(
         selectedAssessment.id,
-        selectedAttemptIds,
+        bulkReleaseAction.attemptIds,
         selectedClass?.class_id,
       );
-      toast.success(
-        `Successfully published results for ${res.published_count} student(s)`,
-      );
+      const count =
+        res?.released_count ?? res?.published_count ?? bulkReleaseAction.attemptIds.length;
+      let msg = `Successfully published results for ${count} student(s)`;
+      if (res?.held_count > 0) {
+        msg += ` (${res.held_count} held due to integrity flags)`;
+      }
+      if (res?.incomplete_count > 0) {
+        msg += ` (${res.incomplete_count} skipped - incomplete grading)`;
+      }
+      toast.success(msg);
       setSelectedAttemptIds([]);
       refreshClassContext();
     } catch {
-      toast.error("Failed to publish selected results");
+      toast.error("Failed to publish results");
     } finally {
       setIsReleasing(false);
+      setBulkReleaseDialogOpen(false);
+      setBulkReleaseAction(null);
     }
   };
 
@@ -1986,7 +2038,9 @@ function LecturerGradingQueueContent() {
   }, [selectedClass, data, releaseQueue]);
 
   const releasableResults = useMemo(() => {
-    return releaseQueue.filter((r) => r.status === "PENDING_RELEASE");
+    return releaseQueue.filter(
+      (r) => r.can_release || r.status === "PENDING_RELEASE",
+    );
   }, [releaseQueue]);
 
   return (
@@ -2137,23 +2191,101 @@ function LecturerGradingQueueContent() {
             {/* Left Sidebar - Question Navigation */}
             {isLeftSidebarOpen ? (
               <div className="w-64 border-r border-border/50 bg-muted/5 flex flex-col shrink-0 animate-in slide-in-from-left duration-200">
-                <div className="p-3.5 border-b border-border/40 flex items-center justify-between">
-                  <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Questions List
-                  </span>
+                <div className="p-3 border-b border-border/40 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      Questions ({activeAttempt.questions?.length || 0})
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-6 rounded-lg text-muted-foreground hover:text-foreground"
+                      onClick={() => setIsLeftSidebarOpen(false)}
+                      title="Collapse list (Alt+[)"
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                  </div>
+
+                  {/* Jump to Next Ungraded Shortcut Button */}
                   <Button
-                    variant="ghost"
-                    size="icon"
-                    className="size-6 rounded-lg text-muted-foreground hover:text-foreground"
-                    onClick={() => setIsLeftSidebarOpen(false)}
-                    title="Collapse list (Alt+[)"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleJumpToNextUngraded}
+                    className="w-full h-7 px-2 text-[11px] font-medium rounded-lg border-amber-500/30 bg-amber-500/5 text-amber-700 dark:text-amber-300 hover:bg-amber-500/10 flex items-center justify-between"
+                    title="Jump to Next Ungraded Question (Alt+U)"
                   >
-                    <ChevronLeft className="size-4" />
+                    <span className="flex items-center gap-1">
+                      <Sparkles className="size-3 text-amber-600" /> Next Ungraded
+                    </span>
+                    <kbd className="px-1 text-[9px] font-mono bg-background border rounded text-muted-foreground">
+                      Alt+U
+                    </kbd>
                   </Button>
+
+                  {/* Filter Pill: All vs Ungraded */}
+                  {(() => {
+                    const totalQ = activeAttempt.questions?.length || 0;
+                    const ungradedCount =
+                      activeAttempt.questions?.filter((q) => {
+                        if (isQuestionAutoGraded(q)) return false;
+                        const sub = activeSubmissions.find(
+                          (s: SubmissionRecord) => s.question_id === q.id,
+                        );
+                        return !sub || !sub.is_final;
+                      }).length || 0;
+
+                    return (
+                      <div className="flex items-center p-0.5 bg-muted/50 rounded-lg border border-border/40 text-[10px]">
+                        <button
+                          onClick={() => setFilterUngradedOnly(false)}
+                          className={cn(
+                            "flex-1 py-1 text-center font-medium rounded-md transition-colors",
+                            !filterUngradedOnly
+                              ? "bg-background text-foreground shadow-2xs font-semibold"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          All ({totalQ})
+                        </button>
+                        <button
+                          onClick={() => setFilterUngradedOnly(true)}
+                          className={cn(
+                            "flex-1 py-1 text-center font-medium rounded-md transition-colors",
+                            filterUngradedOnly
+                              ? "bg-background text-foreground shadow-2xs font-semibold"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          Ungraded ({ungradedCount})
+                        </button>
+                      </div>
+                    );
+                  })()}
                 </div>
+
                 <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
-                  {activeAttempt.questions?.map(
-                    (q: AttemptQuestion, idx: number) => {
+                  {(() => {
+                    const items = (activeAttempt.questions || [])
+                      .map((q: AttemptQuestion, idx: number) => ({ q, idx }))
+                      .filter(({ q }) => {
+                        if (!filterUngradedOnly) return true;
+                        if (isQuestionAutoGraded(q)) return false;
+                        const sub = activeSubmissions.find(
+                          (s: SubmissionRecord) => s.question_id === q.id,
+                        );
+                        return !sub || !sub.is_final;
+                      });
+
+                    if (items.length === 0) {
+                      return (
+                        <div className="p-4 text-center text-xs text-muted-foreground italic">
+                          No questions matching filter.
+                        </div>
+                      );
+                    }
+
+                    return items.map(({ q, idx }) => {
                       const sub = activeSubmissions.find(
                         (s: SubmissionRecord) => s.question_id === q.id,
                       );
@@ -2202,8 +2334,8 @@ function LecturerGradingQueueContent() {
                           </div>
                         </button>
                       );
-                    },
-                  )}
+                    });
+                  })()}
                 </div>
               </div>
             ) : (
@@ -3992,7 +4124,7 @@ function LecturerGradingQueueContent() {
                         <Button
                           size="sm"
                           disabled={isReleasing}
-                          onClick={handleBulkReleaseSelected}
+                          onClick={requestBulkReleaseSelected}
                           className="h-7 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
                         >
                           <Send className="size-3" /> Release Selected
@@ -4165,6 +4297,64 @@ function LecturerGradingQueueContent() {
                         )}
                       </TableBody>
                     </Table>
+
+                    {/* Pagination Controls */}
+                    {total > 0 && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-t border-border/40 text-xs text-muted-foreground bg-muted/5">
+                        <div className="font-medium">
+                          Showing{" "}
+                          <span className="font-mono text-foreground font-semibold">
+                            {groupedSubmissions.length > 0
+                              ? (currentPage - 1) * PAGE_SIZE + 1
+                              : 0}
+                          </span>{" "}
+                          to{" "}
+                          <span className="font-mono text-foreground font-semibold">
+                            {Math.min(currentPage * PAGE_SIZE, total)}
+                          </span>{" "}
+                          of <span className="font-mono text-foreground font-semibold">{total}</span> total submissions
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={currentPage <= 1 || loading}
+                            onClick={() => {
+                              if (selectedAssessment) {
+                                fetchQueue(
+                                  selectedAssessment.id,
+                                  selectedClass?.class_id,
+                                  currentPage - 1,
+                                );
+                              }
+                            }}
+                            className="h-7 px-2.5 rounded-lg border-border/60 text-xs font-medium gap-1"
+                          >
+                            <ChevronLeft className="size-3.5" /> Prev
+                          </Button>
+                          <span className="px-1.5 font-mono text-xs font-medium text-foreground">
+                            Page {currentPage} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+                          </span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={!hasMore || currentPage >= Math.ceil(total / PAGE_SIZE) || loading}
+                            onClick={() => {
+                              if (selectedAssessment) {
+                                fetchQueue(
+                                  selectedAssessment.id,
+                                  selectedClass?.class_id,
+                                  currentPage + 1,
+                                );
+                              }
+                            }}
+                            className="h-7 px-2.5 rounded-lg border-border/60 text-xs font-medium gap-1"
+                          >
+                            Next <ChevronRight className="size-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -4172,6 +4362,33 @@ function LecturerGradingQueueContent() {
               {/* VIEW TAB 2: UNIFIED RELEASE QUEUE */}
               {activeStepDView === "release" && (
                 <div className="space-y-4 animate-in fade-in duration-200">
+                  {/* Release Actions Bar */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 border border-border/50 bg-card/30 rounded-2xl backdrop-blur-xs">
+                    <div className="flex items-center gap-2">
+                      <Unlock className="size-4 text-emerald-500" />
+                      <span className="text-xs font-medium text-foreground">
+                        {releaseQueueClassFullyGraded
+                          ? "All submissions in this section are fully graded and ready for release."
+                          : "Grading is currently in progress for some students in this section."}
+                      </span>
+                    </div>
+                    {releasableResults.length > 0 && (
+                      <Button
+                        size="sm"
+                        disabled={isReleasing}
+                        onClick={requestReleaseClassReady}
+                        className="h-8 text-xs font-medium rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs gap-1.5"
+                      >
+                        {isReleasing ? (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        ) : (
+                          <CheckCheck className="size-3.5" />
+                        )}
+                        Publish All Ready ({releasableResults.length})
+                      </Button>
+                    )}
+                  </div>
+
                   <div className="border border-border/50 rounded-2xl overflow-hidden bg-card/40 backdrop-blur-xs shadow-2xs">
                     <Table>
                       <TableHeader className="bg-muted/15 border-b border-border/40">
@@ -4197,68 +4414,108 @@ function LecturerGradingQueueContent() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {releaseQueue.map((item) => (
-                          <TableRow
-                            key={item.student_id}
-                            className="h-13 border-border/20"
-                          >
-                            <TableCell className="px-6 py-2.5 font-medium text-xs text-foreground">
-                              {item.student_name}
-                            </TableCell>
-                            <TableCell className="py-2.5 text-center font-mono text-xs">
-                              {item.total_score !== null &&
-                              item.total_score !== undefined
-                                ? `${item.total_score} / ${selectedAssessment.total_marks}`
-                                : "—"}
-                            </TableCell>
-                            <TableCell className="py-2.5 text-center font-mono text-xs">
-                              {item.percentage !== null &&
-                              item.percentage !== undefined
-                                ? `${item.percentage}%`
-                                : "—"}
-                            </TableCell>
-                            <TableCell className="py-2.5 text-center font-mono text-xs font-semibold">
-                              {item.letter_grade || "—"}
-                            </TableCell>
-                            <TableCell className="py-2.5 text-center">
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "text-[9px] font-medium",
-                                  item.status === "RELEASED"
-                                    ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                                    : "bg-amber-500/10 text-amber-600 border-amber-500/20",
-                                )}
-                              >
-                                {item.status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="text-right pr-6 py-2.5">
-                              {item.status === "PENDING_RELEASE" && (
-                                <Button
-                                  size="sm"
-                                  onClick={async () => {
-                                    if (!item.attempt_id) return;
-                                    try {
-                                      await resultApi.releaseResults(
-                                        selectedAssessment.id,
-                                        [item.attempt_id],
-                                        selectedClass.class_id,
-                                      );
-                                      toast.success("Result published successfully");
-                                      refreshClassContext();
-                                    } catch {
-                                      toast.error("Failed to publish result");
-                                    }
-                                  }}
-                                  className="h-7 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+                        {releaseQueue.map((item) => {
+                          const isReleased =
+                            item.is_released || item.status === "RELEASED";
+                          const isHold =
+                            item.integrity_hold || item.status === "INTEGRITY_HOLD";
+                          const isReady =
+                            (item.can_release || item.status === "PENDING_RELEASE") &&
+                            !isReleased &&
+                            !isHold;
+
+                          return (
+                            <TableRow
+                              key={item.student_id}
+                              className="h-13 border-border/20"
+                            >
+                              <TableCell className="px-6 py-2.5 font-medium text-xs text-foreground">
+                                {item.student_name}
+                              </TableCell>
+                              <TableCell className="py-2.5 text-center font-mono text-xs">
+                                {item.total_score !== null &&
+                                item.total_score !== undefined
+                                  ? `${item.total_score} / ${selectedAssessment.total_marks}`
+                                  : "—"}
+                              </TableCell>
+                              <TableCell className="py-2.5 text-center font-mono text-xs">
+                                {item.percentage !== null &&
+                                item.percentage !== undefined
+                                  ? `${item.percentage}%`
+                                  : "—"}
+                              </TableCell>
+                              <TableCell className="py-2.5 text-center font-mono text-xs font-semibold">
+                                {item.letter_grade || "—"}
+                              </TableCell>
+                              <TableCell className="py-2.5 text-center">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "text-[9px] font-medium",
+                                    isReleased
+                                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                                      : isHold
+                                      ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                                      : isReady
+                                      ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                      : "bg-muted/50 text-muted-foreground border-border/40",
+                                  )}
                                 >
-                                  Publish
-                                </Button>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                                  {isReleased
+                                    ? "RELEASED"
+                                    : isHold
+                                    ? "INTEGRITY HOLD"
+                                    : isReady
+                                    ? "PENDING RELEASE"
+                                    : item.status?.replace(/_/g, " ") || "INCOMPLETE"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-right pr-6 py-2.5">
+                                {isReady && (
+                                  <Button
+                                    size="sm"
+                                    disabled={isReleasing}
+                                    onClick={async () => {
+                                      if (!item.attempt_id) return;
+                                      try {
+                                        await resultApi.releaseResults(
+                                          selectedAssessment.id,
+                                          [item.attempt_id],
+                                          selectedClass.class_id,
+                                        );
+                                        toast.success("Result published successfully");
+                                        refreshClassContext();
+                                      } catch {
+                                        toast.error("Failed to publish result");
+                                      }
+                                    }}
+                                    className="h-7 text-xs font-medium rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white"
+                                  >
+                                    Publish
+                                  </Button>
+                                )}
+                                {isReleased && (
+                                  <span className="text-xs text-emerald-600 font-medium inline-flex items-center gap-1">
+                                    <CheckCircle2 className="size-3 text-emerald-500" /> Published
+                                  </span>
+                                )}
+                                {isHold && (
+                                  <span className="text-xs text-rose-500 font-medium inline-flex items-center gap-1">
+                                    <ShieldAlert className="size-3 text-rose-500" /> Hold Active
+                                  </span>
+                                )}
+                                {!isReady && !isReleased && !isHold && (
+                                  <span className="text-xs text-muted-foreground font-mono">
+                                    {item.graded_question_count !== undefined &&
+                                    item.total_question_count !== undefined
+                                      ? `${item.graded_question_count}/${item.total_question_count} Graded`
+                                      : "—"}
+                                  </span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                         {releaseQueue.length === 0 && (
                           <TableRow>
                             <TableCell
@@ -4399,6 +4656,14 @@ function LecturerGradingQueueContent() {
                       Alt + P
                     </kbd>
                   </div>
+                </div>
+                <div className="flex items-center justify-between p-2.5 px-3">
+                  <span className="font-medium text-foreground">
+                    Jump to Next Ungraded Question
+                  </span>
+                  <kbd className="px-1.5 py-0.5 rounded bg-muted border font-mono text-[10px] font-medium">
+                    Alt + U
+                  </kbd>
                 </div>
                 <div className="flex items-center justify-between p-2.5 px-3">
                   <span className="font-medium text-foreground">
@@ -4595,6 +4860,72 @@ function LecturerGradingQueueContent() {
               className="text-xs rounded-xl h-8 font-medium bg-primary text-primary-foreground"
             >
               Confirm Lift
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Confirmation Dialog before Bulk Release */}
+      <Dialog open={bulkReleaseDialogOpen} onOpenChange={setBulkReleaseDialogOpen}>
+        <DialogContent className="sm:max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+              <Unlock className="size-5 text-emerald-600" />
+              Confirm Official Marks Release
+            </DialogTitle>
+            <DialogDescription className="text-xs text-muted-foreground pt-1.5 leading-relaxed">
+              {bulkReleaseAction?.type === "class_ready" ? (
+                <>
+                  You are about to release official assessment marks for{" "}
+                  <strong className="text-foreground">{bulkReleaseAction.count} ready student(s)</strong> in{" "}
+                  <strong className="text-foreground">{bulkReleaseAction.className || "this class section"}</strong>.
+                  Students will immediately be able to view their final scores, breakdowns, and diagnostic feedback.
+                </>
+              ) : (
+                <>
+                  You are about to release official assessment marks for{" "}
+                  <strong className="text-foreground">{bulkReleaseAction?.count || selectedAttemptIds.length} selected student(s)</strong>.
+                  Students will immediately be able to view their final scores, breakdowns, and diagnostic feedback.
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="rounded-xl border border-amber-500/20 bg-amber-50/50 dark:bg-amber-950/20 p-3 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
+            <AlertTriangle className="size-4 shrink-0 text-amber-600 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold">Institutional Assessment Guard</p>
+              <p className="text-[11px] leading-normal text-muted-foreground">
+                Submissions with active integrity holds will remain safeguarded and unreleased. Incomplete submissions will be safely skipped.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isReleasing}
+              onClick={() => {
+                setBulkReleaseDialogOpen(false);
+                setBulkReleaseAction(null);
+              }}
+              className="rounded-xl"
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              disabled={isReleasing}
+              onClick={executeBulkRelease}
+              className="rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-semibold gap-1.5"
+            >
+              {isReleasing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <CheckCircle2 className="size-3.5" />
+              )}
+              Confirm & Release Marks
             </Button>
           </DialogFooter>
         </DialogContent>

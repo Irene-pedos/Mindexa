@@ -58,23 +58,6 @@ class GradeReleaseRequest(MindexaSchema):
     )
 
 
-class SubmissionGradeResponse(BaseAuditedResponse):
-    attempt_id: uuid.UUID
-    assessment_id: uuid.UUID
-    student_id: uuid.UUID
-    submission_status: str
-    grading_mode: str
-    raw_score: float | None
-    final_marks: float | None
-    percentage: float | None
-    grade_letter: str | None
-    is_passing: bool | None
-    feedback: str | None
-    released_at: datetime | None
-    is_current: bool
-    score_breakdown: Any | None
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # RUBRIC GRADING
 # ─────────────────────────────────────────────────────────────────────────────

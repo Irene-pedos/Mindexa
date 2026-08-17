@@ -115,7 +115,6 @@ from app.db.schemas.grading import (
                                      RubricGradeEntry,
                                      RubricGradeResponse,
                                      RubricGradingRequest,
-                                     SubmissionGradeResponse,
 )
 
 # ── Group work ───────────────────────────────────────────────────────────────
@@ -281,7 +280,6 @@ __all__: list[str] = [
     "GradeConfirmRequest",
     "ResponseGradeOverride",
     "GradeReleaseRequest",
-    "SubmissionGradeResponse",
     "RubricGradeEntry",
     "RubricGradingRequest",
     "RubricGradeResponse",

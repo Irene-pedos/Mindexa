@@ -43,6 +43,7 @@ from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.question_repo import QuestionRepository
+from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -62,6 +63,7 @@ class GradingService:
         self.submission_repo = SubmissionRepository(db)
         self.assessment_repo = AssessmentRepository(db)
         self.question_repo = QuestionRepository(db)
+        self.result_repo = ResultRepository(db)
 
     # -----------------------------------------------------------------------
     # AUTO-GRADE MCQ / CLOSED QUESTIONS
@@ -295,11 +297,28 @@ class GradingService:
         from app.core.ai.language_policy import is_ai_allowed
         assessment_lang = getattr(assessment, "language", None) if assessment else None
         if not is_ai_allowed(assessment_lang):
-            item.status = GradingQueueStatus.PENDING_MANUAL
-            item.error_message = "AI grading disabled for Kinyarwanda language content. Routed to manual review."
-            await self.grading_repo.update_queue_item(item)
-            await self.db.commit()
-            return
+            logger.info(
+                "ai_grading_skipped_language_policy",
+                item_id=str(item.id),
+                language=assessment_lang,
+                reason="AI grading disabled for Kinyarwanda language content. Routed to manual review.",
+            )
+            await self.grading_repo.update_queue_item(
+                item.id,
+                status=GradingQueueStatus.PENDING,
+                ai_pre_graded=False,
+                grading_mode=(
+                    GradingMode.MANUAL.value
+                    if hasattr(GradingMode.MANUAL, "value")
+                    else str(GradingMode.MANUAL)
+                ),
+            )
+            return {
+                "status": "manual_review_required",
+                "item_id": str(item_id),
+                "response_id": str(response.id),
+                "reason": "AI grading disabled for Kinyarwanda language content. Routed to manual review.",
+            }
 
         # 4. Call AI Review Agent
         from app.agents.review_agent import ReviewAgent
@@ -979,58 +998,16 @@ class GradingService:
             if queue_item:
                 await self.grading_repo.complete_queue_item(queue_item.id)
 
-            # If all responses for this attempt are now graded, calculate the result
+            # If all questions for this attempt are now graded, calculate the result
             attempt_id = existing.attempt_id
             graded_count = await self.grading_repo.count_final_grades(attempt_id)
-            response_count = await self.submission_repo.count_responses(attempt_id)
+            aq_count = await self.assessment_repo.count_assessment_questions(existing.assessment_id)
 
-            if graded_count == response_count and response_count > 0:
-                from app.db.enums import NotificationType, ResultReleaseMode
-                from app.db.models.auth import User
-                from app.db.repositories.assessment_repo import \
-                    AssessmentRepository
-                from app.db.repositories.result_repo import ResultRepository
+            if graded_count == aq_count and aq_count > 0:
                 from app.services.result_service import ResultService
-                from app.workers.tasks import send_email_notification
 
                 result_service = ResultService(self.db)
-                result, _ = await result_service.calculate_result(attempt_id=attempt_id)
-
-                # Check result_release_mode — if it is IMMEDIATE, release and notify
-                assessment_repo = AssessmentRepository(self.db)
-                assessment = await assessment_repo.get_by_id_simple(result.assessment_id)
-
-                release_mode = assessment.result_release_mode
-                if hasattr(release_mode, "value"):
-                    release_mode = release_mode.value
-
-                if release_mode == ResultReleaseMode.IMMEDIATE.value and not result.integrity_hold:
-                    result_repo = ResultRepository(self.db)
-                    await result_repo.release(result.id, released_by_id=None)
-
-                    # Dispatch notification for the student
-                    student = await self.db.get(User, result.student_id)
-                    if student and student.email:
-                        first_name = student.profile.first_name if student.profile else "Student"
-                        from app.core.config import settings
-                        results_url = f"{settings.FRONTEND_URL}/student/results/{result.id}"
-
-                        send_email_notification.delay(
-                            to_email=student.email,
-                            subject=f"Results Released: {assessment.title}",
-                            template_name="result_released",
-                            context={
-                                "first_name": first_name,
-                                "assessment_title": assessment.title,
-                                "result_id": str(result.id),
-                                "results_url": results_url,
-                                "percentage": round(result.percentage, 1),
-                                "letter_grade": result.letter_grade.value if hasattr(result.letter_grade, "value") else str(result.letter_grade),
-                                "is_passing": result.is_passing,
-                                "notification_type": NotificationType.RESULT_RELEASED.value,
-                                "app_name": settings.APP_NAME
-                            }
-                        )
+                await result_service.calculate_result(attempt_id=attempt_id)
 
         existing.score = final_score
         existing.is_final = is_final
@@ -1723,7 +1700,11 @@ class GradingService:
         if not existing.is_final:
             raise ConflictError("Only finalised grades can be moderated. Use manual grading for pending items.")
 
-        # 2. Implements the pattern: mark current False, insert new
+        # 2. Check if the result was already released (post-release correction)
+        existing_result = await self.result_repo.get_by_attempt(existing.attempt_id)
+        was_released = bool(existing_result and existing_result.is_released)
+
+        # 3. Supersede grade with audit trail
         new_grade = await self.grading_repo.supersede_grade(
             old_grade_id=existing.id,
             new_score=new_score,
@@ -1733,32 +1714,47 @@ class GradingService:
             internal_notes=internal_notes
         )
 
-        # 3. Trigger result recalculation for the attempt
+        # 4. Trigger result recalculation for the attempt
         from app.services.result_service import ResultService
         result_service = ResultService(self.db)
-        result, _ = await result_service.calculate_result(attempt_id=existing.attempt_id)
+        result, _ = await result_service.calculate_result(
+            attempt_id=existing.attempt_id,
+            allow_partial=True,
+            is_post_release_correction=was_released,
+        )
 
-        # 4. Notify student
-        from app.core.config import settings
-        from app.db.enums import NotificationType
-        from app.db.models.auth import User
-        from app.workers.tasks import send_email_notification
-
-        student = await self.db.get(User, existing.student_id)
-        if student and student.email:
-            send_email_notification.delay(
-                to_email=student.email,
-                subject="Grade Updated (Moderation Review)",
-                template_name="grade_updated",
-                context={
-                    "first_name": student.profile.first_name if student.profile else "Student",
-                    "reason": revision_reason,
-                    "new_score": new_score,
-                    "max_score": existing.max_score,
-                    "results_url": f"{settings.FRONTEND_URL}/student/results/{result.id}",
-                    "notification_type": NotificationType.RESULT_RELEASED.value
-                }
+        if was_released:
+            logger.info(
+                "post_release_grade_moderated",
+                attempt_id=str(existing.attempt_id),
+                response_id=str(response_id),
+                moderator_id=str(moderator_id),
+                old_score=existing.score,
+                new_score=new_score,
+                revision_reason=revision_reason,
             )
+
+            # 5. Notify student only for post-release corrections
+            from app.core.config import settings
+            from app.db.enums import NotificationType
+            from app.db.models.auth import User
+            from app.workers.tasks import send_email_notification
+
+            student = await self.db.get(User, existing.student_id)
+            if student and student.email:
+                send_email_notification.delay(
+                    to_email=student.email,
+                    subject="Grade Updated (Moderation Review)",
+                    template_name="grade_updated",
+                    context={
+                        "first_name": student.profile.first_name if student.profile else "Student",
+                        "reason": revision_reason,
+                        "new_score": new_score,
+                        "max_score": existing.max_score,
+                        "results_url": f"{settings.FRONTEND_URL}/student/results/{result.id}",
+                        "notification_type": NotificationType.RESULT_RELEASED.value
+                    }
+                )
 
         return new_grade
 
