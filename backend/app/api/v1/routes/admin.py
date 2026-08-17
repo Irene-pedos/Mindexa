@@ -304,6 +304,20 @@ async def update_course(
     return await service.update_course(course_id, body)
 
 
+@router.post(
+    "/courses/{course_id}/sync-workspace-language",
+    summary="Sync Course language to linked workspaces and draft assessments (Admin)",
+)
+async def sync_course_workspace_language(
+    course_id: uuid.UUID,
+    current_user=Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cascades the course language policy to all active workspaces and draft assessments."""
+    service = AdminService(db)
+    return await service.sync_course_workspace_language(course_id)
+
+
 @router.get(
     "/lecturers",
     response_model=list[UserResponse],

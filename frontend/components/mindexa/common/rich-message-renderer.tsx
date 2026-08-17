@@ -42,7 +42,9 @@ interface RichMessageRendererProps {
   className?: string;
 }
 
-/** Formatted inline text component for bold **text** and `code` */
+import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
+
+/** Formatted inline text component for bold **text**, `code`, and KaTeX math formulas */
 function FormattedText({ text }: { text: string }) {
   if (!text) return null;
 
@@ -55,7 +57,7 @@ function FormattedText({ text }: { text: string }) {
         if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
           return (
             <strong key={i} className="font-semibold text-foreground">
-              {part.slice(2, -2)}
+              {renderRichMathText(part.slice(2, -2))}
             </strong>
           );
         }
@@ -69,7 +71,7 @@ function FormattedText({ text }: { text: string }) {
             </code>
           );
         }
-        return <span key={i}>{part}</span>;
+        return <React.Fragment key={i}>{renderRichMathText(part)}</React.Fragment>;
       })}
     </>
   );

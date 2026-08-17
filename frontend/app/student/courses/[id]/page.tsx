@@ -16,7 +16,7 @@ import {
   Eye,
   Download,
   ArrowRight,
-  BrainCircuit,
+  Sparkles,
   ChevronLeft,
   Clock,
   LayoutDashboard,
@@ -287,7 +287,7 @@ export default function StudentWorkspaceDetailPage() {
               </Button>
               <Button asChild variant="outline" className="w-full h-9 text-xs font-semibold rounded-lg border-border/60" size="sm">
                 <Link href="/student/study" className="flex items-center gap-2 justify-center">
-                  <BrainCircuit className="size-4" /> Study Agent
+                  <Sparkles className="size-4" /> Study Agent
                 </Link>
               </Button>
             </CardContent>

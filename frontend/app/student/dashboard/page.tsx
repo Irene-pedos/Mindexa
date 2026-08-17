@@ -404,7 +404,7 @@ export default function StudentDashboard() {
       )}
 
       {/* Metrics Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div data-tour="student-dashboard-metrics" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {metrics.map((stat, index) => (
           <Card key={index} className="rounded-xl shadow-none border">
             <CardHeader className="border-0 pb-0.5 pt-2.5 px-3">

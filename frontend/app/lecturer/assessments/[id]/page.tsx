@@ -43,7 +43,6 @@ import {
   Shield,
   Users,
   Layout,
-  BrainCircuit,
   Cpu,
   Play,
   StopCircle,
@@ -1002,7 +1001,7 @@ export default function AssessmentDetailsPage() {
                       variant="outline"
                       className="h-8 text-[11px] font-semibold border-primary/30 text-primary hover:bg-primary/5"
                     >
-                      <BrainCircuit className="size-3.5 mr-1" />
+                      <Sparkles className="size-3.5 mr-1" />
                       Generate questions for this section
                     </Button>
                   )}
@@ -1139,7 +1138,7 @@ export default function AssessmentDetailsPage() {
         <SheetContent side="right" className="w-[450px] sm:w-[540px] space-y-6">
           <SheetHeader>
             <SheetTitle className="flex items-center gap-2">
-              <BrainCircuit className="size-5 text-primary animate-pulse" /> AI Question Generator Settings
+              <Sparkles className="size-5 text-primary animate-pulse" /> AI Question Generator Settings
             </SheetTitle>
             <SheetDescription>
               Configure AI generation constraints. Questions will be appended to the selected section.
@@ -1257,7 +1256,7 @@ export default function AssessmentDetailsPage() {
           <SheetFooter className="pt-6 border-t">
             <Button variant="ghost" onClick={() => setAiDrawerOpen(false)}>Cancel</Button>
             <Button onClick={handleAIGenerate} className="font-semibold">
-              <BrainCircuit className="mr-2 h-4 w-4" /> Start AI Generation
+              <Sparkles className="mr-2 h-4 w-4" /> Start AI Generation
             </Button>
           </SheetFooter>
         </SheetContent>
@@ -1450,7 +1449,7 @@ export default function AssessmentDetailsPage() {
                         setAiDrawerOpen(true);
                       }}
                     >
-                      <BrainCircuit className="size-3.5 mr-1.5" />
+                      <Sparkles className="size-3.5 mr-1.5" />
                       Generate More
                     </Button>
                   </div>

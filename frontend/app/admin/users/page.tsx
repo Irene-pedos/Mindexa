@@ -397,7 +397,7 @@ export default function AdminUsersPage() {
   };
 
   return (
-    <div className="space-y-4 relative pb-20">
+    <div data-tour="admin-users" className="space-y-4 relative pb-20">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">
@@ -427,7 +427,7 @@ export default function AdminUsersPage() {
             <TabsTrigger value="directory" className="text-xs gap-1.5">
               <Users className="size-3.5" /> User Directory
             </TabsTrigger>
-            <TabsTrigger value="accommodations" className="text-xs gap-1.5">
+            <TabsTrigger value="accommodations" data-tour="admin-accommodations" className="text-xs gap-1.5">
               <Accessibility className="size-3.5" /> Accommodations &amp; Timing
               {accommodationStats.withExtraTime > 0 && (
                 <Badge

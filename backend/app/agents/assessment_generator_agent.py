@@ -395,7 +395,9 @@ class AssessmentGeneratorAgent(BaseAgent):
                 "For each option (sub-question): "
                 "- 'text' is the sub-question text. "
                 "- 'explanation' is the answer guidance / grading criteria for this sub-question. "
-                "- 'is_correct' should be true."
+                "- 'is_correct' should be true. "
+                "- 'match_key' should be the point allocation for this sub-question (e.g. 5). "
+                "Set the top-level 'explanation' field to null or empty string — do not summarize an answer at the top level."
             ),
             "computational": (
                 "Set options to []. "

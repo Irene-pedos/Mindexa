@@ -64,6 +64,19 @@ class StudentAIService:
                 )
             await self._assert_contexts_are_safe(body.contexts)
 
+        # Language policy check for student AI support
+        target_ws_id = getattr(body, "teaching_workspace_id", None)
+        if target_ws_id:
+            from app.db.models.academic import TeachingWorkspace
+            ws = await self.db.get(TeachingWorkspace, target_ws_id)
+            if ws:
+                from app.core.ai.language_policy import assert_ai_allowed
+                assert_ai_allowed(
+                    getattr(ws, "language", None),
+                    action="student_tutor",
+                    context={"workspace_id": str(target_ws_id)},
+                )
+
         # 1. Build Gateway
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()

@@ -327,8 +327,8 @@ async def draft_feedback(
             
         ans_dict = group_answer.answer_content or {}
         student_answer = ans_dict.get("text") or ans_dict.get("selected_option_id") or "No answer provided"
-        ai_score = ans_dict.get("ai_suggested_score") or 0.0
-        ai_rationale = ans_dict.get("ai_rationale") or "No rationale provided"
+        ai_score = ans_dict.get("ai_grade_score") or ans_dict.get("ai_suggested_score") or 0.0
+        ai_rationale = ans_dict.get("ai_grade_rationale") or ans_dict.get("ai_rationale") or "No rationale provided"
         
         from app.agents.feedback_agent import FeedbackAgent
         from app.core.ai.gateway import AIGateway
@@ -506,9 +506,13 @@ async def get_grade_for_response(
             score=None,
             max_score=float(q.marks) if q else 10.0,
             grading_mode="MANUAL",
-            ai_suggested_score=ans_dict.get("ai_suggested_score"),
-            ai_rationale=ans_dict.get("ai_rationale"),
-            ai_confidence=ans_dict.get("ai_confidence"),
+            ai_grade_score=ans_dict.get("ai_grade_score") or ans_dict.get("ai_suggested_score"),
+            ai_grade_rationale=ans_dict.get("ai_grade_rationale") or ans_dict.get("ai_rationale") or ans_dict.get("ai_feedback_draft"),
+            ai_grade_confidence=ans_dict.get("ai_grade_confidence") or ans_dict.get("ai_confidence"),
+            ai_grade_decision=ans_dict.get("ai_grade_decision") or "SUGGESTED",
+            ai_suggested_score=ans_dict.get("ai_grade_score") or ans_dict.get("ai_suggested_score"),
+            ai_rationale=ans_dict.get("ai_grade_rationale") or ans_dict.get("ai_rationale"),
+            ai_confidence=ans_dict.get("ai_grade_confidence") or ans_dict.get("ai_confidence"),
             ai_feedback_draft=ans_dict.get("ai_feedback_draft"),
             ai_feedback_strengths=ans_dict.get("ai_feedback_strengths"),
             ai_feedback_improvements=ans_dict.get("ai_feedback_improvements"),

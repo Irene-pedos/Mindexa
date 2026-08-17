@@ -10,6 +10,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -48,14 +49,13 @@ class SubmissionRepository:
 
         LOCKING NOTE:
             The unique constraint on (attempt_id, question_id) prevents
-            duplicate rows. The service layer must NOT call this after
-            is_final=True — the constraint check is at service layer.
+            duplicate rows. Handles concurrent race conditions gracefully.
         """
         # We check for ANY row including deleted ones to avoid unique constraint collisions
         existing = await self.get_response(attempt_id, question_id, include_deleted=True)
 
         if existing:
-            was_deleted = existing.is_deleted
+            was_deleted = bool(existing.is_deleted)
             existing.answer_type = answer_type
             existing.answer_text = answer_text
             existing.selected_option_ids = selected_option_ids
@@ -74,29 +74,53 @@ class SubmissionRepository:
             existing.deleted_at = None
             
             await self.db.flush()
-            return existing, not was_deleted # Mark as created if it was effectively gone
+            return existing, was_deleted # Mark as created only if it was effectively gone/deleted
 
-        now = _utcnow()
-        response = StudentResponse(
-            attempt_id=attempt_id,
-            question_id=question_id,
-            answer_type=answer_type,
-            answer_text=answer_text,
-            selected_option_ids=selected_option_ids,
-            ordered_option_ids=ordered_option_ids,
-            match_pairs_json=match_pairs_json,
-            fill_blank_answers=fill_blank_answers,
-            file_url=file_url,
-            time_spent_seconds=time_spent_seconds,
-            is_skipped=is_skipped,
-            saved_at=now,
-            created_at=now, # Manually set
-            updated_at=now, # Manually set
-            is_final=False,
-        )
-        self.db.add(response)
-        await self.db.flush()
-        return response, True
+        # If not existing, try to insert in a savepoint to catch race conditions
+        try:
+            async with self.db.begin_nested():
+                now = _utcnow()
+                response = StudentResponse(
+                    attempt_id=attempt_id,
+                    question_id=question_id,
+                    answer_type=answer_type,
+                    answer_text=answer_text,
+                    selected_option_ids=selected_option_ids,
+                    ordered_option_ids=ordered_option_ids,
+                    match_pairs_json=match_pairs_json,
+                    fill_blank_answers=fill_blank_answers,
+                    file_url=file_url,
+                    time_spent_seconds=time_spent_seconds,
+                    is_skipped=is_skipped,
+                    saved_at=now,
+                    created_at=now, # Manually set
+                    updated_at=now, # Manually set
+                    is_final=False,
+                )
+                self.db.add(response)
+                await self.db.flush()
+                return response, True
+        except Exception:
+            # Race condition: Another concurrent save inserted the record in between
+            existing = await self.get_response(attempt_id, question_id, include_deleted=True)
+            if existing:
+                existing.answer_type = answer_type
+                existing.answer_text = answer_text
+                existing.selected_option_ids = selected_option_ids
+                existing.ordered_option_ids = ordered_option_ids
+                existing.match_pairs_json = match_pairs_json
+                existing.fill_blank_answers = fill_blank_answers
+                existing.file_url = file_url
+                existing.saved_at = _utcnow()
+                existing.updated_at = _utcnow()
+                if time_spent_seconds is not None:
+                    existing.time_spent_seconds = time_spent_seconds
+                existing.is_skipped = is_skipped
+                existing.is_deleted = False
+                existing.deleted_at = None
+                await self.db.flush()
+                return existing, False
+            raise
 
     # -----------------------------------------------------------------------
     # StudentResponse — READS

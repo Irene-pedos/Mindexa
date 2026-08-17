@@ -10,18 +10,62 @@ import { Textarea } from "@/components/ui/textarea";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { BrainCircuit, Loader2, Save, Sparkles, Layers, Eye } from "lucide-react";
+import { Loader2, Save, Sparkles, Layers, Eye } from "lucide-react";
 import { assessmentApi } from "@/lib/api/assessment";
 import { gradingApi } from "@/lib/api/grading";
 import { aiGradingApi } from "@/lib/api/ai-grading";
 import { lecturerApi } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { AssessmentSummary, GradingQueueItem, BatchGradeItemState, BatchReviewDetails } from "../types";
+import {
+  AssessmentSummary,
+  GradingQueueItem,
+  BatchGradeItemState,
+  BatchReviewDetails,
+  getAiSuggestion,
+} from "../types";
+
+function parseCaseStudyAnswer(answer: string): string[] | null {
+  if (!answer || typeof answer !== "string" || !answer.trim().startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(answer);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      const entries = Object.values(parsed).filter(Boolean);
+      if (entries.length > 0) {
+        return entries.map((v) => String(v));
+      }
+    }
+  } catch {}
+  return null;
+}
 
 function ExpandableAnswer({ answer }: { answer: string }) {
   const [expanded, setExpanded] = useState(false);
-  const isLong = answer.length > 100;
+  const subAnswers = parseCaseStudyAnswer(answer);
+  const isLong = answer.length > 100 || (subAnswers && subAnswers.length > 1);
+
+  if (subAnswers) {
+    return (
+      <div className="text-xs space-y-1.5 font-sans">
+        {(expanded ? subAnswers : subAnswers.slice(0, 1)).map((sa, i) => (
+          <p key={i} className="text-foreground/90 leading-relaxed font-medium">
+            <span className="font-bold text-primary mr-1">Part {i + 1}:</span> {sa}
+          </p>
+        ))}
+        {subAnswers.length > 1 && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(!expanded);
+            }}
+            className="text-[10px] text-primary font-bold uppercase tracking-widest mt-1 hover:underline block"
+          >
+            {expanded ? "Show Less" : `View All ${subAnswers.length} Sub-Answers`}
+          </button>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="text-xs">
@@ -148,7 +192,7 @@ export default function BatchGradingPage() {
   // Load AI details helper for batch review modal and inline view
   const loadAiDetailsForQuestion = useCallback(async (items: GradingQueueItem[]) => {
     const pendingIds = items
-      .filter(item => !aiDetailsCache[item.response_id] && item.ai_suggested_score !== null)
+      .filter(item => !aiDetailsCache[item.response_id] && getAiSuggestion(item).hasSuggestion)
       .map(item => item.response_id);
 
     if (pendingIds.length === 0) return;
@@ -252,11 +296,13 @@ export default function BatchGradingPage() {
     let appliedCount = 0;
 
     items.forEach(item => {
-      if (item.ai_suggested_score !== null) {
+      const ai = getAiSuggestion(item);
+      if (ai.hasSuggestion) {
         const details = aiDetailsCache[item.response_id];
+        const detailAi = getAiSuggestion(details);
         nextState[item.response_id] = {
-          score: item.ai_suggested_score.toString(),
-          feedback: details?.ai_feedback_draft || details?.ai_rationale || ""
+          score: ai.score!.toString(),
+          feedback: detailAi.feedbackDraft || detailAi.rationale || ""
         };
         appliedCount++;
       }
@@ -572,44 +618,61 @@ export default function BatchGradingPage() {
                           </TableCell>
                           
                           <TableCell className="py-2">
-                            {item.ai_suggested_score !== null ? (
-                              <div className="space-y-1 text-xs">
-                                <div className="flex items-center gap-1.5">
-                                  <Badge variant="secondary" className="font-mono font-bold bg-primary/10 text-primary border-primary/20 text-[10px]">
-                                    {item.ai_suggested_score} pts
-                                  </Badge>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    className="size-6 text-primary hover:bg-primary/5 rounded-full"
-                                    onClick={() => {
-                                      setBatchReviewItem(item);
-                                      setShowBatchReviewModal(true);
-                                    }}
-                                    title="View full AI rationale modal"
-                                  >
-                                    <Eye className="size-3.5" />
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    className="h-6 text-[9px] font-bold border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-md px-1.5 flex items-center gap-1"
-                                    onClick={() => handleBatchApplyAi(item.response_id, item.ai_suggested_score!)}
-                                  >
-                                    <Sparkles className="size-2.5" /> Apply
-                                  </Button>
+                            {(() => {
+                              const itemAi = getAiSuggestion(item);
+                              const detailAi = getAiSuggestion(aiDetails);
+                              const fbPreview =
+                                detailAi.feedbackDraft || detailAi.rationale;
+                              return itemAi.hasSuggestion ? (
+                                <div className="space-y-1 text-xs">
+                                  <div className="flex items-center gap-1.5">
+                                    <Badge
+                                      variant="secondary"
+                                      className="font-mono font-bold bg-primary/10 text-primary border-primary/20 text-[10px]"
+                                    >
+                                      {itemAi.score} pts
+                                    </Badge>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="size-6 text-primary hover:bg-primary/5 rounded-full"
+                                      onClick={() => {
+                                        setBatchReviewItem(item);
+                                        setShowBatchReviewModal(true);
+                                      }}
+                                      title="View full AI rationale modal"
+                                    >
+                                      <Eye className="size-3.5" />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-6 text-[9px] font-bold border-primary/20 bg-primary/5 text-primary hover:bg-primary/10 rounded-md px-1.5 flex items-center gap-1"
+                                      onClick={() =>
+                                        handleBatchApplyAi(
+                                          item.response_id,
+                                          itemAi.score!,
+                                        )
+                                      }
+                                    >
+                                      <Sparkles className="size-2.5" /> Apply
+                                    </Button>
+                                  </div>
+                                  {fbPreview && (
+                                    <p
+                                      className="text-[10px] text-muted-foreground font-medium italic line-clamp-2 max-w-[220px]"
+                                      title={fbPreview}
+                                    >
+                                      {fbPreview}
+                                    </p>
+                                  )}
                                 </div>
-                                {aiDetails?.ai_feedback_draft && (
-                                  <p className="text-[10px] text-muted-foreground font-medium italic line-clamp-2 max-w-[220px]" title={aiDetails.ai_feedback_draft}>
-                                    {aiDetails.ai_feedback_draft}
-                                  </p>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground/40 text-[10px] italic">
-                                N/A (No AI suggestion)
-                              </span>
-                            )}
+                              ) : (
+                                <span className="text-muted-foreground/40 text-[10px] italic">
+                                  N/A (No AI suggestion)
+                                </span>
+                              );
+                            })()}
                           </TableCell>
                           
                           <TableCell className="text-center py-2">
@@ -671,7 +734,7 @@ export default function BatchGradingPage() {
         <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-6 rounded-xl border border-border shadow-2xl bg-background">
           <DialogHeader className="pb-2 border-b border-border/40">
             <div className="flex items-center gap-2 text-primary">
-              <BrainCircuit className="size-5" />
+              <Sparkles className="size-5" />
               <DialogTitle className="text-lg font-bold">
                 Review AI Suggestion
               </DialogTitle>
@@ -705,7 +768,7 @@ export default function BatchGradingPage() {
                     Suggested Score
                   </span>
                   <span className="font-bold text-primary">
-                    {batchReviewItem.ai_suggested_score} pts
+                    {getAiSuggestion(batchReviewItem).score} pts
                   </span>
                 </div>
               </div>
@@ -715,12 +778,27 @@ export default function BatchGradingPage() {
                 <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider">
                   Student Response
                 </span>
-                <div className="text-xs p-3 bg-muted/10 border border-border/60 rounded-xl whitespace-pre-wrap leading-relaxed max-h-[150px] overflow-y-auto font-mono">
-                  {batchReviewItem.student_answer || (
-                    <span className="italic text-muted-foreground">
-                      No response.
-                    </span>
-                  )}
+                <div className="text-xs p-3 bg-muted/10 border border-border/60 rounded-xl whitespace-pre-wrap leading-relaxed max-h-[180px] overflow-y-auto font-sans">
+                  {(() => {
+                    const raw = batchReviewItem.student_answer;
+                    if (!raw) return <span className="italic text-muted-foreground">No response.</span>;
+                    const parsedSub = parseCaseStudyAnswer(raw);
+                    if (parsedSub) {
+                      return (
+                        <div className="space-y-2">
+                          {parsedSub.map((sa, i) => (
+                            <div key={i} className="p-2 rounded-lg bg-background/70 border border-border/40">
+                              <span className="font-bold text-primary text-[10px] uppercase tracking-wider block mb-0.5">
+                                Sub-Question {i + 1}
+                              </span>
+                              <p className="text-foreground/90 font-medium leading-relaxed">{sa}</p>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }
+                    return <span className="font-mono">{raw}</span>;
+                  })()}
                 </div>
               </div>
 
@@ -752,9 +830,14 @@ export default function BatchGradingPage() {
                     AI Grading Rationale & Feedback Draft
                   </span>
                   <div className="text-xs p-3 bg-primary/[0.02] border border-primary/10 rounded-xl leading-relaxed">
-                    {batchReviewDetails?.ai_feedback_draft ||
-                      batchReviewDetails?.ai_rationale ||
-                      "No rationale or feedback draft available."}
+                    {(() => {
+                      const modalAi = getAiSuggestion(batchReviewDetails);
+                      return (
+                        modalAi.feedbackDraft ||
+                        modalAi.rationale ||
+                        "No rationale or feedback draft available."
+                      );
+                    })()}
                   </div>
                 </div>
 
@@ -810,10 +893,12 @@ export default function BatchGradingPage() {
               onClick={async () => {
                 if (batchReviewItem) {
                   const details = aiDetailsCache[batchReviewItem.response_id];
-                  const feedbackVal = details?.ai_feedback_draft || details?.ai_rationale || "";
+                  const detailAi = getAiSuggestion(details);
+                  const itemAi = getAiSuggestion(batchReviewItem);
+                  const feedbackVal = detailAi.feedbackDraft || detailAi.rationale || "";
                   await handleSaveBatchGrade(
                     batchReviewItem.response_id,
-                    batchReviewItem.ai_suggested_score!.toString(),
+                    (itemAi.score ?? "").toString(),
                     feedbackVal
                   );
                   setShowBatchReviewModal(false);

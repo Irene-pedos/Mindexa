@@ -97,8 +97,26 @@ class SubmissionResponse(BaseModel):
     submitted_at: datetime | None
     time_spent_seconds: int | None
     is_skipped: bool
+    auto_grade_score: float | None = None
+    auto_grade_is_correct: bool | None = None
+    ai_grade_score: float | None = None
+    ai_grade_confidence: float | None = None
+    ai_grade_rationale: str | None = None
+    ai_grade_decision: str | None = None
+    ai_suggested_score: float | None = None
+    ai_feedback_draft: str | None = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+    @model_validator(mode="after")
+    def populate_ai_aliases(self) -> "SubmissionResponse":
+        if self.ai_suggested_score is None and self.ai_grade_score is not None:
+            self.ai_suggested_score = self.ai_grade_score
+        if self.ai_grade_score is None and self.ai_suggested_score is not None:
+            self.ai_grade_score = self.ai_suggested_score
+        if self.ai_feedback_draft is None and self.ai_grade_rationale is not None:
+            self.ai_feedback_draft = self.ai_grade_rationale
+        return self
 
 
 class SubmissionSummary(BaseModel):

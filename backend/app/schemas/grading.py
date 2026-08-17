@@ -10,7 +10,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.db.enums import GradingMode, GradingQueuePriority, GradingQueueStatus
 
@@ -153,9 +153,13 @@ class SubmissionGradeResponse(BaseModel):
     score: float | None
     max_score: float
     grading_mode: GradingMode
-    ai_suggested_score: float | None
-    ai_rationale: str | None
-    ai_confidence: float | None
+    ai_grade_score: float | None = None
+    ai_grade_confidence: float | None = None
+    ai_grade_rationale: str | None = None
+    ai_grade_decision: str | None = None
+    ai_suggested_score: float | None = None
+    ai_rationale: str | None = None
+    ai_confidence: float | None = None
     ai_feedback_draft: str | None = None
     ai_feedback_strengths: list[str] | None = None
     ai_feedback_improvements: list[str] | None = None
@@ -196,6 +200,22 @@ class SubmissionGradeResponse(BaseModel):
     detected_issues: list[str] | None = None
     question_grading_mode: str | None = None  # AUTO | AI_ASSISTED | MANUAL
 
+    @model_validator(mode="after")
+    def populate_ai_canonical_fields(self) -> "SubmissionGradeResponse":
+        if self.ai_grade_score is None and self.ai_suggested_score is not None:
+            self.ai_grade_score = self.ai_suggested_score
+        if self.ai_suggested_score is None and self.ai_grade_score is not None:
+            self.ai_suggested_score = self.ai_grade_score
+        if self.ai_grade_confidence is None and self.ai_confidence is not None:
+            self.ai_grade_confidence = self.ai_confidence
+        if self.ai_confidence is None and self.ai_grade_confidence is not None:
+            self.ai_confidence = self.ai_grade_confidence
+        if self.ai_grade_rationale is None:
+            self.ai_grade_rationale = self.ai_rationale or self.ai_feedback_draft
+        if self.ai_rationale is None and self.ai_grade_rationale is not None:
+            self.ai_rationale = self.ai_grade_rationale
+        return self
+
 
 
 class GradingQueueItemResponse(BaseModel):
@@ -222,6 +242,10 @@ class GradingQueueItemResponse(BaseModel):
     priority: GradingQueuePriority
     grading_mode: GradingMode
     ai_pre_graded: bool
+    ai_grade_score: float | None = None
+    ai_grade_confidence: float | None = None
+    ai_grade_rationale: str | None = None
+    ai_grade_decision: str | None = None
     ai_suggested_score: float | None = None
     ai_confidence: float | None = None
     ai_grading_basis: str | None = None
@@ -240,6 +264,18 @@ class GradingQueueItemResponse(BaseModel):
     assigned_at: datetime | None = None
     completed_at: datetime | None = None
     created_at: datetime
+
+    @model_validator(mode="after")
+    def populate_ai_canonical_fields(self) -> "GradingQueueItemResponse":
+        if self.ai_grade_score is None and self.ai_suggested_score is not None:
+            self.ai_grade_score = self.ai_suggested_score
+        if self.ai_suggested_score is None and self.ai_grade_score is not None:
+            self.ai_suggested_score = self.ai_grade_score
+        if self.ai_grade_confidence is None and self.ai_confidence is not None:
+            self.ai_grade_confidence = self.ai_confidence
+        if self.ai_confidence is None and self.ai_grade_confidence is not None:
+            self.ai_confidence = self.ai_grade_confidence
+        return self
 
 
 class GradingQueueListResponse(BaseModel):

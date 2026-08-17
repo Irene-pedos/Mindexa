@@ -41,6 +41,8 @@ class AdminUserListResponse(BaseModel):
     items: List[UserResponse]
     total: int
 
+from app.db.enums import LanguageEnum
+
 class AdminCourseListItem(BaseModel):
     id: uuid.UUID
     code: str
@@ -48,6 +50,7 @@ class AdminCourseListItem(BaseModel):
     lecturer_name: str
     student_count: int
     status: str
+    language: LanguageEnum = LanguageEnum.EN
     performance_avg: float = 0.0
     academic_year: str | None = None
 
@@ -97,6 +100,7 @@ class AdminCourseUpdate(BaseModel):
     code: Optional[str] = None
     credit_hours: Optional[int] = None
     description: Optional[str] = None
+    language: Optional[LanguageEnum] = None
     is_active: Optional[bool] = None
     institution_id: Optional[uuid.UUID] = None
     academic_period_id: Optional[uuid.UUID] = None

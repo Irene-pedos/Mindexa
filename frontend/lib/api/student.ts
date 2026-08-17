@@ -78,6 +78,7 @@ export interface StudentCourseListItem {
   status: string;
   progress: number;
   academic_year: string;
+  language?: "EN" | "RW" | "FR" | "SW";
   workspace_id?: string | null;
 }
 
@@ -103,6 +104,7 @@ export interface StudentCourseDetail {
   materials: number;
   assessments: number;
   academic_year: string;
+  language?: "EN" | "RW" | "FR" | "SW" | string;
 }
 
 export interface StudentScheduleEvent {

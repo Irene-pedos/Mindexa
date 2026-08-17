@@ -192,6 +192,21 @@ class RoleRequiredError(AuthorizationError):
 InsufficientRoleError = RoleRequiredError
 
 
+class AILanguageBlockedError(AuthorizationError):
+    """
+    Raised when an AI operation is attempted on academic content in a language
+    where AI assistance is disabled by institutional governance policy (e.g. Kinyarwanda).
+    Maps to HTTP 403.
+    """
+
+    status_code = 403
+    default_message = (
+        "AI assistance is disabled for Kinyarwanda-language academic content. "
+        "This action must be performed manually."
+    )
+    default_code = "AI_BLOCKED_LANGUAGE_POLICY"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ACCOUNT STATE  (403)
 # ─────────────────────────────────────────────────────────────────────────────

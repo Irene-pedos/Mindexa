@@ -805,6 +805,7 @@ class GroupWorkService:
             teaching_workspace_id=assessment.teaching_workspace_id,
             academic_year=assessment.academic_year,
             created_by_id=current_user.id,
+            language=assessment.language,
             reassessment_of_id=assessment.id,
             is_group_assessment=True,
             max_group_size=assessment.max_group_size,

@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,6 +19,7 @@ import {
   Unlock, 
   Users, 
   ChevronRight, 
+  ChevronLeft,
   FileText, 
   FolderOpen, 
   ShieldAlert, 
@@ -53,11 +56,15 @@ interface StudentResultSummary {
   integrity_hold: boolean;
 }
 
-export default function ResultReleasePage() {
+function ResultReleaseContent() {
+  const searchParams = useSearchParams();
+  const initialAsmtId = searchParams.get("assessmentId") || "all";
+  const initialClassId = searchParams.get("classId");
+
   const [assessments, setAssessments] = useState<AssessmentSummary[]>([]);
   const [loading, setLoading] = useState(true);
   
-  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>("all");
+  const [selectedAssessmentId, setSelectedAssessmentId] = useState<string>(initialAsmtId);
   const [classStats, setClassStats] = useState<ClassStatRecord[]>([]);
   const [classStatsLoading, setClassStatsLoading] = useState(false);
   
@@ -73,7 +80,12 @@ export default function ResultReleasePage() {
     async function loadAssessments() {
       try {
         const res = await assessmentApi.getAssessments({ status: "PUBLISHED" });
-        setAssessments(res.items || []);
+        const items = res.items || [];
+        setAssessments(items);
+        if (initialAsmtId !== "all" && !items.some((a: AssessmentSummary) => a.id === initialAsmtId)) {
+          // If query param assessment is loaded, keep it
+          setSelectedAssessmentId(initialAsmtId);
+        }
       } catch (err: any) {
         toast.error("Failed to load assessments");
       } finally {
@@ -81,7 +93,7 @@ export default function ResultReleasePage() {
       }
     }
     loadAssessments();
-  }, []);
+  }, [initialAsmtId]);
 
   // Fetch Class stats when selected assessment changes
   useEffect(() => {
@@ -97,7 +109,14 @@ export default function ResultReleasePage() {
       setStudentResults([]);
       try {
         const res = await gradingApi.getAssessmentClassStats(selectedAssessmentId);
-        setClassStats(res.classes || []);
+        const classes = res.classes || [];
+        setClassStats(classes);
+        if (initialClassId) {
+          const match = classes.find((c: ClassStatRecord) => c.class_id === initialClassId);
+          if (match) {
+            setSelectedClass(match);
+          }
+        }
       } catch (err: any) {
         toast.error("Failed to fetch class sections stats");
       } finally {
@@ -105,7 +124,7 @@ export default function ResultReleasePage() {
       }
     }
     fetchClasses();
-  }, [selectedAssessmentId]);
+  }, [selectedAssessmentId, initialClassId]);
 
   // Load student results when class selection changes
   useEffect(() => {
@@ -202,11 +221,21 @@ export default function ResultReleasePage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-xl font-bold tracking-tight text-foreground">Result Review & Release Queue</h1>
-        <p className="text-xs text-muted-foreground">
-          Audit grading completion by class section, run release validations, and publish results to students.
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <Link
+              href="/lecturer/grading"
+              className="text-xs font-semibold text-muted-foreground hover:text-foreground inline-flex items-center gap-1 transition-colors"
+            >
+              <ChevronLeft className="size-3.5" /> Back to Grading
+            </Link>
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-foreground">Result Review & Release Queue</h1>
+          <p className="text-xs text-muted-foreground">
+            Audit grading completion by class section, run release validations, and publish results to students.
+          </p>
+        </div>
       </div>
 
       {loading ? (
@@ -356,6 +385,79 @@ export default function ResultReleasePage() {
                       )}
                     </CardHeader>
                     <CardContent className="p-0">
+                      {/* Live Class Dashboard Performance Card */}
+                      {selectedClass && studentResults.length > 0 && (() => {
+                        const submitted = selectedClass.submitted_count || studentResults.length;
+                        const pending = selectedClass.pending_review_count;
+                        const graded = selectedClass.reviewed_count;
+                        const flagged = studentResults.filter((r) => r.integrity_hold).length;
+                        const scored = studentResults.filter(
+                          (r) => r.total_score !== null && r.total_score !== undefined,
+                        );
+                        const avgPct =
+                          scored.length > 0
+                            ? Math.round(
+                                scored.reduce((acc, curr) => acc + (curr.percentage || 0), 0) /
+                                  scored.length,
+                              )
+                            : null;
+                        const completionPct =
+                          submitted > 0 ? Math.round((graded / submitted) * 100) : 0;
+
+                        return (
+                          <div className="p-4 bg-muted/5 border-b border-border/30 space-y-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-xs font-semibold text-muted-foreground">
+                                <strong className="text-foreground">
+                                  {graded}/{submitted} graded
+                                </strong>
+                                {" · "}
+                                <strong
+                                  className={
+                                    pending > 0
+                                      ? "text-amber-600 dark:text-amber-400"
+                                      : "text-muted-foreground"
+                                  }
+                                >
+                                  {pending} pending
+                                </strong>
+                                {" · "}
+                                <strong
+                                  className={
+                                    flagged > 0
+                                      ? "text-rose-600 dark:text-rose-400"
+                                      : "text-muted-foreground"
+                                  }
+                                >
+                                  {flagged} flagged / hold
+                                </strong>
+                                {avgPct !== null && (
+                                  <>
+                                    {" · "}
+                                    <strong className="text-primary">avg {avgPct}%</strong>
+                                  </>
+                                )}
+                              </p>
+                              <span className="text-[10px] font-mono text-muted-foreground font-semibold">
+                                {completionPct}% class completion
+                              </span>
+                            </div>
+                            <div className="w-full h-1.5 bg-muted/60 rounded-full overflow-hidden flex">
+                              <div
+                                className="h-full bg-emerald-500 transition-all duration-300"
+                                style={{ width: `${completionPct}%` }}
+                              />
+                              <div
+                                className="h-full bg-amber-500 transition-all duration-300"
+                                style={{
+                                  width: `${submitted > 0 ? (pending / submitted) * 100 : 0}%`,
+                                }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+
                       {resultsLoading ? (
                         <div className="py-24 text-center">
                           <Loader2 className="size-7 text-primary animate-spin mx-auto" />
@@ -485,5 +587,20 @@ export default function ResultReleasePage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function ResultReleasePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="py-24 text-center space-y-3">
+          <Loader2 className="size-8 text-primary animate-spin mx-auto" />
+          <p className="text-xs text-muted-foreground font-medium">Loading release queue...</p>
+        </div>
+      }
+    >
+      <ResultReleaseContent />
+    </Suspense>
   );
 }

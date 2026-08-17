@@ -1451,6 +1451,22 @@ class StudyPlannerService:
                 "topic_confidence": profile.topic_confidence or {},
             }
 
+            # Check language policy before AI lesson generation
+            from app.core.ai.language_policy import is_ai_allowed
+            ws_lang = None
+            if plan and plan.teaching_workspace_id:
+                from app.db.models.academic import TeachingWorkspace
+                ws = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+                if ws:
+                    ws_lang = getattr(ws, "language", None)
+
+            if not is_ai_allowed(ws_lang):
+                lesson_output = self._generate_fallback_lesson(session, plan, duration=session.duration_minutes or 60)
+                session.lesson_plan_json = lesson_output.model_dump()
+                session.lesson_status = "GENERATED"
+                await self.repo.update_session(session)
+                return StudySessionResponse.model_validate(session)
+
             # Retrieve RAG context grounded in vector embeddings
             rag_context = ""
             rag_citations = []

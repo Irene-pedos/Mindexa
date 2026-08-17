@@ -86,6 +86,7 @@ export interface AdminCourseListItem {
   lecturer_name: string;
   student_count: number;
   status: string;
+  language?: "EN" | "RW" | "FR" | "SW";
   academic_year?: string;
 }
 
@@ -278,6 +279,13 @@ export const adminApi = {
     return apiClient(`/admin/users/${userId}/accommodations`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  },
+  syncCourseWorkspaceLanguage: async (
+    courseId: string
+  ): Promise<{ course_id: string; course_code: string; language: string; updated_workspaces: number; updated_draft_assessments: number }> => {
+    return apiClient(`/admin/courses/${courseId}/sync-workspace-language`, {
+      method: "POST",
     });
   },
 };

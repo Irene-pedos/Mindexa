@@ -35,6 +35,9 @@ import {
   Library,
   Eye,
   Settings,
+  Globe,
+  AlertTriangle,
+  RefreshCw,
 } from "lucide-react";
 import { adminApi, AdminCourseListItem } from "@/lib/api/admin";
 import {
@@ -100,6 +103,7 @@ export default function AdminCoursesPage() {
     code: "",
     credit_hours: 3,
     description: "",
+    language: "EN",
     institution_id: "",
     academic_period_id: "",
     academic_year: "",
@@ -220,6 +224,7 @@ export default function AdminCoursesPage() {
       code: "",
       credit_hours: 3,
       description: "",
+      language: "EN",
       institution_id: "",
       academic_period_id: "",
       academic_year: "",
@@ -238,6 +243,7 @@ export default function AdminCoursesPage() {
         code: fullCourse.code,
         credit_hours: fullCourse.credit_hours,
         description: fullCourse.description || "",
+        language: fullCourse.language || course.language || "EN",
         institution_id: fullCourse.institution_id,
         academic_period_id: fullCourse.academic_period_id,
         academic_year: fullCourse.academic_year,
@@ -246,6 +252,20 @@ export default function AdminCoursesPage() {
       setIsEditDialogOpen(true);
     } catch (err) {
       toast.error("Failed to load course details");
+    } finally {
+      setIsProcessingRow(null);
+    }
+  };
+
+  const handleSyncLanguage = async (courseId: string) => {
+    setIsProcessingRow(courseId);
+    try {
+      const res = await adminApi.syncCourseWorkspaceLanguage(courseId);
+      toast.success(
+        `Synchronized language '${res.language}' across ${res.updated_workspaces} workspaces and ${res.updated_draft_assessments} draft assessments.`
+      );
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to synchronize workspace language");
     } finally {
       setIsProcessingRow(null);
     }
@@ -474,6 +494,46 @@ export default function AdminCoursesPage() {
               </div>
 
               <div className="grid gap-1.5">
+                <Label
+                  htmlFor="language"
+                  className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+                >
+                  <Globe className="size-3 text-primary" />
+                  Primary Instruction Language
+                </Label>
+                <Select
+                  value={formData.language || "EN"}
+                  onValueChange={(val) => setFormData({ ...formData, language: val })}
+                >
+                  <SelectTrigger className="text-xs h-10 rounded-xl">
+                    <SelectValue placeholder="Select Language" />
+                  </SelectTrigger>
+                  <SelectContent className="rounded-xl">
+                    <SelectItem value="EN" className="text-xs font-semibold">
+                      English (EN) - Full AI Support Enabled
+                    </SelectItem>
+                    <SelectItem value="RW" className="text-xs font-semibold text-amber-600">
+                      Kinyarwanda (RW) - Strict AI Restrictions Enforced
+                    </SelectItem>
+                    <SelectItem value="FR" className="text-xs font-semibold">
+                      French (FR) - Full AI Support Enabled
+                    </SelectItem>
+                    <SelectItem value="SW" className="text-xs font-semibold">
+                      Swahili (SW) - Full AI Support Enabled
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {formData.language === "RW" && (
+                  <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-[11px] mt-1">
+                    <AlertTriangle className="size-4 shrink-0 mt-0.5 text-amber-600" />
+                    <span>
+                      <strong>Institutional Policy:</strong> AI Question Generation, AI-Assisted Grading, Integrity Explanation LLM, and Student AI Tutors are strictly disabled for Kinyarwanda modules.
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid gap-1.5">
                 <Label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
                   Department Ownership
                 </Label>
@@ -641,6 +701,9 @@ export default function AdminCoursesPage() {
                   Course Title
                 </TableHead>
                 <TableHead className="text-[10px] uppercase font-bold tracking-wider h-10">
+                  Language
+                </TableHead>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider h-10">
                   Lecturer
                 </TableHead>
                 <TableHead className="text-[10px] uppercase font-bold tracking-wider h-10 text-center">
@@ -658,7 +721,7 @@ export default function AdminCoursesPage() {
               {loading ? (
                 [1, 2, 3, 4, 5].map((i) => (
                   <TableRow key={i} className="h-14 border-muted/10">
-                    <TableCell colSpan={7}>
+                    <TableCell colSpan={8}>
                       <Skeleton className="h-6 w-full rounded-lg" />
                     </TableCell>
                   </TableRow>
@@ -666,7 +729,7 @@ export default function AdminCoursesPage() {
               ) : filteredCourses.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={7}
+                    colSpan={8}
                     className="h-32 text-center text-muted-foreground text-xs italic"
                   >
                     No modules found matching your search.
@@ -697,6 +760,24 @@ export default function AdminCoursesPage() {
                           Academic Core
                         </span>
                       </div>
+                    </TableCell>
+                    <TableCell>
+                      {course.language === "RW" ? (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full px-2 py-0.5 text-[9px] font-bold border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400 gap-1"
+                        >
+                          RW
+                          <span className="text-[8px] opacity-75 font-normal">(No AI)</span>
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="rounded-full px-2 py-0.5 text-[9px] font-semibold text-muted-foreground border-border/80"
+                        >
+                          {course.language || "EN"}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-2">
@@ -745,7 +826,7 @@ export default function AdminCoursesPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent
                           align="end"
-                          className="w-48 rounded-xl shadow-xl border-muted/20 p-1"
+                          className="w-56 rounded-xl shadow-xl border-muted/20 p-1"
                         >
                           <DropdownMenuLabel className="text-[9px] font-semibold uppercase text-muted-foreground px-2 py-1.5 tracking-tighter">
                             Module Operations
@@ -764,6 +845,13 @@ export default function AdminCoursesPage() {
                           >
                             <UserCheck className="mr-2 size-3.5 text-muted-foreground" />{" "}
                             Student Roster
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-[11px] font-medium py-2 rounded-lg cursor-pointer text-primary focus:text-primary"
+                            onClick={() => handleSyncLanguage(course.id)}
+                          >
+                            <RefreshCw className="mr-2 size-3.5 text-primary" />{" "}
+                            Sync Language to Workspaces
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -926,6 +1014,46 @@ export default function AdminCoursesPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label
+                htmlFor="edit-language"
+                className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"
+              >
+                <Globe className="size-3 text-primary" />
+                Instruction Language
+              </Label>
+              <Select
+                value={formData.language || "EN"}
+                onValueChange={(val) => setFormData({ ...formData, language: val })}
+              >
+                <SelectTrigger className="text-xs h-10 rounded-xl">
+                  <SelectValue placeholder="Select Language" />
+                </SelectTrigger>
+                <SelectContent className="rounded-xl">
+                  <SelectItem value="EN" className="text-xs font-semibold">
+                    English (EN) - Full AI Support
+                  </SelectItem>
+                  <SelectItem value="RW" className="text-xs font-semibold text-amber-600">
+                    Kinyarwanda (RW) - AI Strictly Blocked
+                  </SelectItem>
+                  <SelectItem value="FR" className="text-xs font-semibold">
+                    French (FR) - Full AI Support
+                  </SelectItem>
+                  <SelectItem value="SW" className="text-xs font-semibold">
+                    Swahili (SW) - Full AI Support
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              {formData.language === "RW" && (
+                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 dark:text-amber-300 text-[11px]">
+                  <AlertTriangle className="size-3.5 shrink-0 mt-0.5 text-amber-600" />
+                  <span>
+                    Setting language to Kinyarwanda restricts all AI generation, AI grading, and student tutor features. Use &apos;Sync Language to Workspaces&apos; after saving to cascade this policy to active workspaces.
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="grid gap-1.5">

@@ -506,6 +506,13 @@ export default function LecturerAIAssistant() {
     return workspaces.find((w) => w.id === selectedWorkspaceId) || null;
   }, [selectedWorkspaceId, workspaces]);
 
+  const isRwandaBlocked = useMemo(() => {
+    return (
+      activeWorkspaceDetail?.language === "RW" ||
+      activeWorkspace?.language === "RW"
+    );
+  }, [activeWorkspaceDetail, activeWorkspace]);
+
   const getWorkspaceContextPrompt = () => {
     const ws = activeWorkspaceDetail || activeWorkspace;
     if (!ws) return "";
@@ -685,6 +692,11 @@ export default function LecturerAIAssistant() {
     displayContent?: string,
     displayAttachments?: Attachment[]
   ) => {
+    if (isRwandaBlocked) {
+      toast.error("AI features are disabled for Kinyarwanda-medium workspaces according to institutional policy.");
+      return;
+    }
+
     setIsGenerating(true);
     setIsConfigExpanded(false); // Automatically collapse settings when generating
     try {
@@ -1232,6 +1244,18 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                 </div>
               </MessageScrollerProvider>
 
+              {isRwandaBlocked && (
+                <div className="p-3.5 my-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-3">
+                  <AlertTriangle className="size-4.5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-semibold">AI Assistant Disabled for Kinyarwanda</strong>
+                    <span className="opacity-90">
+                      The active workspace has Kinyarwanda set as its instruction language. Per institutional academic integrity policies, automated AI support is disabled for this workspace.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="pt-2">
                 <AIChatInput
                   value={prompt}
@@ -1241,6 +1265,8 @@ Identify topics requiring reinforcement, suggest practical practice activities, 
                   onStop={() => setIsGenerating(false)}
                   attachments={attachments}
                   setAttachments={setAttachments}
+                  disabled={isRwandaBlocked}
+                  placeholder={isRwandaBlocked ? "AI Assistant is disabled for Kinyarwanda workspaces" : undefined}
                 />
               </div>
             </div>

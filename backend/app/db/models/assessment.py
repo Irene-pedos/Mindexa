@@ -45,7 +45,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint, Enum as SA_Enum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -57,6 +57,7 @@ from app.db.enums import (
     DifficultyLevel,
     GroupAssignmentMode,
     GradingMode,
+    LanguageEnum,
     QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
@@ -174,6 +175,10 @@ class Assessment(AuditedBaseModel, table=True):
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None, nullable=True)
     instructions: Optional[str] = Field(default=None, nullable=True)
+    language: LanguageEnum = Field(
+        default=LanguageEnum.EN,
+        sa_column=Column(SA_Enum(LanguageEnum), nullable=False, server_default="EN", index=True),
+    )
     assessment_type: AssessmentType = Field(nullable=False, index=True)
     status: AssessmentStatus = Field(
         default=AssessmentStatus.DRAFT,

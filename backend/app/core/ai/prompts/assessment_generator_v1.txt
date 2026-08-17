@@ -36,6 +36,12 @@ Do NOT invent facts. If the course material does not cover a sub-topic sufficien
 - For Case Study: provide a realistic scenario grounded in the course material.
 - For Practical: describe the procedure, expected output, and marking guide.
 
+### Mathematical & Scientific Formulas:
+- When mathematical formulas, equations, matrices, or scientific symbols are included, format them using standard LaTeX syntax.
+- Inline math MUST be enclosed in single dollar signs with NO space immediately after the opening $ or before the closing $ (e.g. `$E = mc^2$`, `$\\frac{a}{b}$`, `$\\sqrt{x^2 + y^2}$`).
+- Display / Block math MUST be enclosed in double dollar signs (e.g. `$$\\int_{0}^{1} x^2 \\, dx = \\frac{1}{3}$$`).
+- Currency amounts MUST NOT use unescaped single dollar signs with adjacent math syntax; use USD or escape as `\\$`.
+
 ### AI Safety Rules (ENFORCED):
 ❌ Do NOT publish, schedule, or release this assessment.
 ❌ Do NOT add questions directly to any official exam.

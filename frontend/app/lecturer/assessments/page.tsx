@@ -37,6 +37,7 @@ import {
   Sparkles,
   CheckCircle,
   UserCheck,
+  X,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
@@ -555,15 +556,21 @@ export default function ManageAssessmentsPage() {
       )}
 
       {/* ── Card ── */}
-      <div className="rounded-xl border border-border/50 bg-background overflow-hidden">
+      <div className="rounded-2xl border border-border/70 bg-card text-card-foreground shadow-sm overflow-hidden">
         {/* Toolbar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 border-b border-border/30 bg-muted/10">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 border-b border-border/40 bg-muted/20">
           <div className="flex flex-wrap items-center gap-2">
-            {/* Sort */}
-            <Select value={sortBy} onValueChange={setSortBy}>
-              <SelectTrigger className="w-36 h-7 text-[11px] rounded-lg bg-background border-muted/60 shadow-none font-medium">
-                <ArrowUpDown className="mr-1.5 size-3 text-muted-foreground/60" />
-                <SelectValue placeholder="Sort" />
+            {/* Sort Dropdown */}
+            <Select
+              value={sortBy}
+              onValueChange={(val) => {
+                setSortBy(val);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-44 h-8 text-xs rounded-xl bg-background border-border/60 shadow-none font-medium">
+                <ArrowUpDown className="mr-1.5 size-3.5 text-muted-foreground" />
+                <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent className="rounded-xl text-xs">
                 <SelectItem value="newest" className="text-xs">
@@ -573,7 +580,22 @@ export default function ManageAssessmentsPage() {
                   Oldest first
                 </SelectItem>
                 <SelectItem value="title" className="text-xs">
-                  Alphabetical
+                  Title (A → Z)
+                </SelectItem>
+                <SelectItem value="title_desc" className="text-xs">
+                  Title (Z → A)
+                </SelectItem>
+                <SelectItem value="due_date" className="text-xs">
+                  Due Date (Earliest)
+                </SelectItem>
+                <SelectItem value="due_date_desc" className="text-xs">
+                  Due Date (Latest)
+                </SelectItem>
+                <SelectItem value="marks" className="text-xs">
+                  Marks (Highest)
+                </SelectItem>
+                <SelectItem value="marks_asc" className="text-xs">
+                  Marks (Lowest)
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -586,8 +608,8 @@ export default function ManageAssessmentsPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="w-36 h-7 text-[11px] rounded-lg bg-background border-muted/60 shadow-none font-medium">
-                <Filter className="mr-1.5 size-3 text-muted-foreground/60" />
+              <SelectTrigger className="w-36 h-8 text-xs rounded-xl bg-background border-border/60 shadow-none font-medium">
+                <Filter className="mr-1.5 size-3.5 text-muted-foreground" />
                 <SelectValue placeholder="Type" />
               </SelectTrigger>
               <SelectContent className="rounded-xl text-xs">
@@ -602,48 +624,92 @@ export default function ManageAssessmentsPage() {
               </SelectContent>
             </Select>
 
+            {/* Grading Mode Filter */}
+            <Select
+              value={gradingFilter}
+              onValueChange={(v) => {
+                setGradingFilter(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="w-36 h-8 text-xs rounded-xl bg-background border-border/60 shadow-none font-medium">
+                <Cpu className="mr-1.5 size-3.5 text-muted-foreground" />
+                <SelectValue placeholder="Grading" />
+              </SelectTrigger>
+              <SelectContent className="rounded-xl text-xs">
+                <SelectItem value="all" className="text-xs">
+                  All grading
+                </SelectItem>
+                {GRADING_MODES.map((m) => (
+                  <SelectItem key={m} value={m} className="text-xs">
+                    {m.replace("_", " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
             {/* Clear filters */}
             {(typeFilter !== "all" ||
-              searchTerm) && (
+              gradingFilter !== "all" ||
+              searchTerm.trim().length > 0 ||
+              sortBy !== "newest") && (
               <Button
                 variant="ghost"
                 size="sm"
-                className="h-7 px-2 text-[10px] text-muted-foreground hover:text-foreground rounded-lg"
+                className="h-8 px-2.5 text-xs text-muted-foreground hover:text-foreground rounded-xl"
                 onClick={() => {
                   setTypeFilter("all");
                   setGradingFilter("all");
                   setSearchTerm("");
+                  setSortBy("newest");
+                  setPage(1);
                 }}
               >
-                <RefreshCw className="size-3 mr-1" /> Clear
+                <RefreshCw className="size-3 mr-1" /> Reset
               </Button>
             )}
           </div>
 
-          {/* Search */}
-          <div className="relative w-full sm:w-56">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3 text-muted-foreground/60" />
+          {/* Search with interactive Clear button */}
+          <div className="relative w-full md:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/70 pointer-events-none" />
             <Input
-              placeholder="Search assessments…"
-              className="pl-7 h-7 text-[11px] rounded-lg bg-background border-muted/60 focus-visible:ring-1 shadow-none"
+              placeholder="Search title, course code…"
+              className="pl-8.5 pr-8 h-8 text-xs rounded-xl bg-background border-border/60 focus-visible:ring-1 shadow-none"
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value);
+                setPage(1);
+              }}
             />
+            {searchTerm && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSearchTerm("");
+                  setPage(1);
+                }}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted/80 transition-colors"
+                title="Clear search"
+              >
+                <X className="size-3.5" />
+              </button>
+            )}
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-3">
+        <div className="p-3.5">
           {loading ? (
             <div className="space-y-3">
               <div className="flex gap-2">
                 {[1, 2, 3, 4, 5].map((i) => (
-                  <Skeleton key={i} className="w-20 h-7 rounded-lg" />
+                  <Skeleton key={i} className="w-24 h-8 rounded-xl" />
                 ))}
               </div>
-              <div className="space-y-1.5">
+              <div className="space-y-2 pt-2">
                 {[1, 2, 3, 4, 5, 6].map((i) => (
-                  <Skeleton key={i} className="w-full h-12 rounded-lg" />
+                  <Skeleton key={i} className="w-full h-12 rounded-xl" />
                 ))}
               </div>
             </div>
@@ -656,33 +722,58 @@ export default function ManageAssessmentsPage() {
                 setSelectedIds([]);
               }}
             >
-              {/* Tabs */}
-              <TabsList className="bg-muted/30 p-0.5 rounded-xl w-full flex-wrap h-auto gap-0.5 mb-3">
-                {STATUS_TABS.map((tab) => {
-                  const count =
-                    tab.value === "all" ? totalCount : tabCounts[tab.value];
-                  return (
-                    <TabsTrigger
-                      key={tab.value}
-                      value={tab.value}
-                      className="text-[10px] font-semibold uppercase tracking-tight px-3 h-7 rounded-lg data-[state=active]:bg-background data-[state=active]:shadow-sm"
-                    >
-                      {tab.label}
-                      {count !== undefined && count > 0 && (
-                        <span className="ml-1.5 px-1.5 py-0 rounded-full bg-muted text-muted-foreground text-[9px] font-bold">
-                          {count}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+              {/* Upgraded Tabs List */}
+              <div className="flex items-center justify-between gap-2 overflow-x-auto pb-1 mb-3">
+                <TabsList className="bg-muted/40 p-1 rounded-xl border border-border/50 h-auto gap-1 inline-flex shrink-0">
+                  {STATUS_TABS.map((tab) => {
+                    const count =
+                      tab.value === "all" ? totalCount : tabCounts[tab.value];
+                    const isActive = statusTab === tab.value;
+
+                    return (
+                      <TabsTrigger
+                        key={tab.value}
+                        value={tab.value}
+                        className={cn(
+                          "text-xs font-semibold px-3 py-1.5 rounded-lg transition-all duration-200 gap-2",
+                          "data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm data-[state=active]:border data-[state=active]:border-border/60",
+                          "text-muted-foreground hover:text-foreground hover:bg-background/50"
+                        )}
+                      >
+                        <span>{tab.label}</span>
+                        {count !== undefined && count > 0 && (
+                          <span
+                            className={cn(
+                              "px-1.5 py-0.2 rounded-full text-[10px] font-bold tabular-nums transition-colors",
+                              isActive
+                                ? "bg-primary/10 text-primary"
+                                : "bg-muted text-muted-foreground"
+                            )}
+                          >
+                            {count}
+                          </span>
+                        )}
+                      </TabsTrigger>
+                    );
+                  })}
+                </TabsList>
+
+                {debouncedSearch && (
+                  <div className="text-xs text-muted-foreground hidden sm:flex items-center gap-1.5 font-medium pr-1">
+                    <span>Results for</span>
+                    <span className="font-semibold text-foreground">
+                      &ldquo;{debouncedSearch}&rdquo;
+                    </span>
+                    <span className="text-muted-foreground/60">({totalCount})</span>
+                  </div>
+                )}
+              </div>
 
               <TabsContent value={statusTab} className="mt-0 outline-none">
                 {/* Bulk action bar */}
                 {selectedIds.length > 0 && (
-                  <div className="flex items-center justify-between bg-primary/5 px-3 py-1.5 rounded-lg border border-primary/10 mb-2">
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">
+                  <div className="flex items-center justify-between bg-primary/5 px-3.5 py-2 rounded-xl border border-primary/15 mb-3">
+                    <span className="text-xs font-semibold text-primary">
                       {selectedIds.length} draft
                       {selectedIds.length !== 1 ? "s" : ""} selected
                     </span>
@@ -690,18 +781,18 @@ export default function ManageAssessmentsPage() {
                       variant="destructive"
                       size="sm"
                       onClick={() => setBulkDeleteOpen(true)}
-                      className="h-6 px-3 rounded-lg text-[9px] font-bold uppercase shadow-none"
+                      className="h-7 px-3 rounded-lg text-xs font-semibold shadow-none"
                     >
-                      <Trash2 className="mr-1 size-3" /> Delete Selected
+                      <Trash2 className="mr-1.5 size-3.5" /> Delete Selected
                     </Button>
                   </div>
                 )}
 
                 {/* Table */}
-                <div className="rounded-xl border border-muted/30 overflow-hidden">
+                <div className="rounded-xl border border-border/60 overflow-hidden bg-background">
                   <Table>
-                    <TableHeader className="bg-muted/20">
-                      <TableRow className="hover:bg-transparent border-none">
+                    <TableHeader className="bg-muted/30">
+                      <TableRow className="hover:bg-transparent border-b border-border/40">
                         <TableHead className="w-[36px] px-3">
                           <Checkbox
                             checked={
@@ -711,37 +802,53 @@ export default function ManageAssessmentsPage() {
                             onCheckedChange={toggleSelectAll}
                           />
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9 min-w-[180px]">
+                        <TableHead
+                          onClick={() => {
+                            setSortBy(sortBy === "title" ? "title_desc" : "title");
+                            setPage(1);
+                          }}
+                          className="text-[11px] font-semibold uppercase tracking-wider h-10 min-w-[180px] cursor-pointer select-none hover:text-foreground"
+                        >
                           <span className="flex items-center gap-1.5">
                             <FileText className="size-3 text-muted-foreground/60" /> Assessment
+                            {sortBy === "title" && <ArrowUpDown className="size-3 text-primary" />}
+                            {sortBy === "title_desc" && <ArrowUpDown className="size-3 text-primary rotate-180" />}
                           </span>
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9">
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider h-10">
                           <span className="flex items-center gap-1.5">
                             <BookOpen className="size-3 text-muted-foreground/60" /> Course
                           </span>
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center h-10">
                           <span className="flex items-center justify-center gap-1.5">
                             <Filter className="size-3 text-muted-foreground/60" /> Type
                           </span>
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center h-10">
                           <span className="flex items-center justify-center gap-1.5">
                             <Zap className="size-3 text-muted-foreground/60" /> Release
                           </span>
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider h-9">
+                        <TableHead
+                          onClick={() => {
+                            setSortBy(sortBy === "marks" ? "marks_asc" : "marks");
+                            setPage(1);
+                          }}
+                          className="text-[11px] font-semibold uppercase tracking-wider h-10 cursor-pointer select-none hover:text-foreground"
+                        >
                           <span className="flex items-center gap-1.5">
                             <BarChart2 className="size-3 text-muted-foreground/60" /> Metrics
+                            {sortBy === "marks" && <ArrowUpDown className="size-3 text-primary" />}
+                            {sortBy === "marks_asc" && <ArrowUpDown className="size-3 text-primary rotate-180" />}
                           </span>
                         </TableHead>
-                        <TableHead className="text-[9px] font-semibold uppercase tracking-wider text-center h-9">
+                        <TableHead className="text-[11px] font-semibold uppercase tracking-wider text-center h-10">
                           <span className="flex items-center justify-center gap-1.5">
                             <CheckSquare className="size-3 text-muted-foreground/60" /> Status
                           </span>
                         </TableHead>
-                        <TableHead className="text-right text-[9px] font-semibold uppercase tracking-wider pr-3 h-9">
+                        <TableHead className="text-right text-[11px] font-semibold uppercase tracking-wider pr-3.5 h-10">
                           Actions
                         </TableHead>
                       </TableRow>
@@ -751,23 +858,51 @@ export default function ManageAssessmentsPage() {
                         <TableRow>
                           <TableCell
                             colSpan={8}
-                            className="text-center py-20 text-muted-foreground"
+                            className="text-center py-16 text-muted-foreground"
                           >
-                            <div className="flex flex-col items-center gap-3">
-                              <BookOpen className="size-8 opacity-10" />
-                              <p className="text-xs font-medium text-muted-foreground/60">
-                                No assessments found
-                              </p>
-                              <Button
-                                size="sm"
-                                asChild
-                                className="h-7 rounded-full px-4 text-xs"
-                              >
-                                <Link href="/lecturer/assessments/new">
-                                  <Plus className="size-3.5 mr-1" /> Create your
-                                  first assessment
-                                </Link>
-                              </Button>
+                            <div className="flex flex-col items-center gap-3 max-w-sm mx-auto">
+                              <div className="p-3 rounded-2xl bg-muted/40 border border-border/50 text-muted-foreground">
+                                <Search className="size-6 opacity-60" />
+                              </div>
+                              <div className="space-y-1">
+                                <p className="text-sm font-semibold text-foreground">
+                                  {searchTerm
+                                    ? `No assessments match "${searchTerm}"`
+                                    : statusTab !== "all"
+                                    ? `No ${statusTab.toLowerCase()} assessments found`
+                                    : "No assessments registered yet"}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {searchTerm
+                                    ? "Try refining your search query or reset your filters."
+                                    : "Get started by creating your first academic assessment."}
+                                </p>
+                              </div>
+                              {searchTerm || typeFilter !== "all" || gradingFilter !== "all" ? (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    setSearchTerm("");
+                                    setTypeFilter("all");
+                                    setGradingFilter("all");
+                                    setPage(1);
+                                  }}
+                                  className="h-8 rounded-xl text-xs mt-1"
+                                >
+                                  <RefreshCw className="size-3 mr-1.5" /> Clear Filters
+                                </Button>
+                              ) : (
+                                <Button
+                                  size="sm"
+                                  asChild
+                                  className="h-8 rounded-xl px-4 text-xs font-semibold mt-1"
+                                >
+                                  <Link href="/lecturer/assessments/new">
+                                    <Plus className="size-3.5 mr-1" /> Create Assessment
+                                  </Link>
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>

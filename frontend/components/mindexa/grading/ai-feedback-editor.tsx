@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Loader2, BrainCircuit, CheckCircle2, ChevronRight } from "lucide-react";
+import { Loader2, Sparkles, CheckCircle2, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { aiGradingApi } from "@/lib/api/ai-grading";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -83,7 +83,7 @@ export function AIFeedbackEditor({
     <Card className="shadow-none border border-primary/20">
       <CardHeader className="pb-3 border-b bg-muted/5 flex flex-row items-center justify-between">
         <div className="flex items-center gap-2">
-          <BrainCircuit className="size-4 text-primary" />
+          <Sparkles className="size-4 text-primary" />
           <CardTitle className="text-sm font-semibold">AI Feedback Editor</CardTitle>
         </div>
         <Badge variant="secondary" className="text-[10px] font-medium uppercase text-muted-foreground">
@@ -104,7 +104,7 @@ export function AIFeedbackEditor({
               </>
             ) : (
               <>
-                <BrainCircuit className="size-8 text-muted-foreground/40 mb-1" />
+                <Sparkles className="size-8 text-muted-foreground/40 mb-1" />
                 <p className="text-sm font-medium text-foreground">No AI Feedback Drafted Yet</p>
                 <p className="text-xs text-muted-foreground max-w-sm">
                   Generate professional, constructive feedback based on the student&apos;s submission and grading evaluation.

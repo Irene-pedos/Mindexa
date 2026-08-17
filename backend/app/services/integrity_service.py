@@ -37,11 +37,13 @@ RULES:
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.exceptions import AuthorizationError, NotFoundError
+from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
 from app.db.enums import (
+    AssessmentStatus,
     IntegrityEventType,
     IntegrityFlagRaisedBy,
     IntegrityFlagStatus,
@@ -49,6 +51,7 @@ from app.db.enums import (
     WarningLevel,
 )
 from app.db.models.integrity import IntegrityEvent, IntegrityFlag, IntegrityWarning
+from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.repositories.result_repo import ResultRepository
@@ -126,6 +129,7 @@ class IntegrityService:
         self.integrity_repo = IntegrityRepository(db)
         self.attempt_repo = AttemptRepository(db)
         self.result_repo = ResultRepository(db)
+        self.assessment_repo = AssessmentRepository(db)
 
     # -----------------------------------------------------------------------
     # RECORD EVENT
@@ -566,6 +570,25 @@ class IntegrityService:
         assessment = await self.db.get(Assessment, flag.assessment_id)
         assessment_title = assessment.title if assessment else "Unknown Assessment"
 
+        # Check language policy before AI explanation
+        from app.core.ai.language_policy import is_ai_allowed
+        if assessment and not is_ai_allowed(getattr(assessment, "language", None)):
+            import structlog
+            structlog.get_logger(__name__).warning(
+                "ai_action_blocked_by_language_policy",
+                action="explain_anomaly",
+                language=str(assessment.language),
+                flag_id=str(flag_id),
+            )
+            from app.agents.integrity_explainer_agent import IntegrityExplainerOutput
+            return IntegrityExplainerOutput(
+                summary=f"Automated narrative explanation disabled for Kinyarwanda assessment '{assessment_title}'. Please inspect the raw telemetry timeline below.",
+                risk_level="MEDIUM",
+                key_factors=[f"Total telemetry warnings observed: {report['total_warnings']}"],
+                recommended_action="Review proctoring logs manually in the telemetry timeline tab.",
+                confidence_score=1.0,
+            )
+
         # 2. Call AI Explainer Agent
         from app.agents.integrity_explainer_agent import IntegrityExplainerAgent, IntegrityExplainerOutput
         from app.core.ai.gateway import AIGateway
@@ -606,6 +629,14 @@ class IntegrityService:
         supervisor_id: uuid.UUID,
     ) -> None:
         """Open a supervision session for a lecturer joining the live panel."""
+        assessment = await self.assessment_repo.get_by_id(assessment_id)
+        if not assessment:
+            raise NotFoundError(f"Assessment '{assessment_id}' not found")
+        if assessment.status in (AssessmentStatus.CLOSED, AssessmentStatus.ARCHIVED):
+            raise ValidationError("Cannot deploy a supervision session on an assessment that has ended or is closed.")
+        if assessment.window_end and assessment.window_end < datetime.now(UTC):
+            raise ValidationError("Cannot deploy a supervision session on an assessment whose submission window has ended.")
+
         # End any existing active session first (reconnect handling)
         existing = await self.integrity_repo.get_active_session(assessment_id, supervisor_id)
         if existing:

@@ -84,6 +84,7 @@ from app.db.enums import (
     AssessmentType,
     GradingMode,
     GroupAssignmentMode,
+    LanguageEnum,
     QuestionDistributionMode,
     ResultReleaseMode,
 )
@@ -139,6 +140,7 @@ class AssessmentRepository:
         grading_mode: GradingMode,
         result_release_mode: ResultReleaseMode,
         total_marks: int,
+        language: LanguageEnum = LanguageEnum.EN,
         subject_id: uuid.UUID | None = None,
         description: str | None = None,
         reassessment_of_id: uuid.UUID | None = None,
@@ -187,6 +189,7 @@ class AssessmentRepository:
             course_id=course_id,
             academic_year=academic_year,
             subject_id=subject_id,
+            language=language,
             reassessment_of_id=reassessment_of_id,
             created_by_id=created_by_id,
             updated_by_id=created_by_id,
@@ -300,6 +303,7 @@ class AssessmentRepository:
         status: AssessmentStatus | None = None,
         assessment_type: AssessmentType | None = None,
         workspace_id: uuid.UUID | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -318,17 +322,38 @@ class AssessmentRepository:
             filters.append(col(Assessment.assessment_type) == assessment_type)
         if workspace_id:
             filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            filters.append(
+                or_(
+                    col(Assessment.title).ilike(term),
+                    col(Assessment.instructions).ilike(term),
+                    col(Assessment.course_name).ilike(term),
+                    col(Assessment.course_code).ilike(term),
+                )
+            )
 
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
-        order_by = col(Assessment.created_at).desc()
         if sort == "oldest":
             order_by = col(Assessment.created_at).asc()
-        elif sort == "title":
+        elif sort in ("title", "title_asc"):
             order_by = col(Assessment.title).asc()
+        elif sort == "title_desc":
+            order_by = col(Assessment.title).desc()
+        elif sort in ("marks", "marks_desc"):
+            order_by = col(Assessment.total_marks).desc()
+        elif sort == "marks_asc":
+            order_by = col(Assessment.total_marks).asc()
+        elif sort in ("due_date", "due_date_asc"):
+            order_by = col(Assessment.window_end).asc().nulls_last()
+        elif sort == "due_date_desc":
+            order_by = col(Assessment.window_end).desc().nulls_last()
+        else:
+            order_by = col(Assessment.created_at).desc()
 
         result = await self.db.execute(
             select(Assessment)
@@ -350,6 +375,7 @@ class AssessmentRepository:
         assessment_type: AssessmentType | None = None,
         course_id: uuid.UUID | None = None,
         workspace_id: uuid.UUID | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -367,17 +393,38 @@ class AssessmentRepository:
             filters.append(col(Assessment.course_id) == course_id)
         if workspace_id:
             filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
+        if search and search.strip():
+            term = f"%{search.strip()}%"
+            filters.append(
+                or_(
+                    col(Assessment.title).ilike(term),
+                    col(Assessment.instructions).ilike(term),
+                    col(Assessment.course_name).ilike(term),
+                    col(Assessment.course_code).ilike(term),
+                )
+            )
 
         count_result = await self.db.execute(
             select(func.count(col(Assessment.id))).where(*filters)
         )
         total = count_result.scalar_one()
 
-        order_by = col(Assessment.created_at).desc()
         if sort == "oldest":
             order_by = col(Assessment.created_at).asc()
-        elif sort == "title":
+        elif sort in ("title", "title_asc"):
             order_by = col(Assessment.title).asc()
+        elif sort == "title_desc":
+            order_by = col(Assessment.title).desc()
+        elif sort in ("marks", "marks_desc"):
+            order_by = col(Assessment.total_marks).desc()
+        elif sort == "marks_asc":
+            order_by = col(Assessment.total_marks).asc()
+        elif sort in ("due_date", "due_date_asc"):
+            order_by = col(Assessment.window_end).asc().nulls_last()
+        elif sort == "due_date_desc":
+            order_by = col(Assessment.window_end).desc().nulls_last()
+        else:
+            order_by = col(Assessment.created_at).desc()
 
         result = await self.db.execute(
             select(Assessment)

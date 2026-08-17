@@ -12,7 +12,8 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.constants import GradingMode, QuestionType, UserRole
+from app.core.constants import GradingMode, UserRole
+from app.db.enums import QuestionType
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.db.models.auth import User
 from app.db.models.question import Question
@@ -26,18 +27,25 @@ from app.schemas.question import (
 )
 
 
-def infer_grading_mode(question_type: str, override: str | None = None) -> str:
+def infer_grading_mode(
+    question_type: str,
+    override: str | None = None,
+    requires_table_answer: bool = False,
+) -> str:
     """Determine grading mode from question type unless explicitly overridden."""
     if override:
         return override
 
+    if requires_table_answer:
+        return GradingMode.SEMI.value
+
     try:
-        qt = QuestionType(question_type)
+        qt = QuestionType(str(question_type).upper())
         if qt.is_auto_gradable:
             return GradingMode.AUTO.value
         if qt.is_open_ended:
             return GradingMode.SEMI.value
-    except ValueError:
+    except (ValueError, AttributeError):
         pass
     return GradingMode.MANUAL.value
 
@@ -69,6 +77,7 @@ class QuestionService:
             topic=getattr(question, "topic_tag", None),
             bloom_level=None,
             suggested_marks=getattr(question, "marks", None),
+            requires_table_answer=getattr(question, "requires_table_answer", False),
             is_active=getattr(question, "is_active", True),
             source_type=str(self._enum_value(question.source_type)),
             version_number=getattr(question, "version", 1),
@@ -78,7 +87,12 @@ class QuestionService:
         )
 
     async def create_question(self, data: QuestionCreateRequest, created_by: User) -> Question:
-        grading_mode = infer_grading_mode(data.question_type, data.grading_mode)
+        req_table = getattr(data, "requires_table_answer", False) or False
+        grading_mode = infer_grading_mode(
+            data.question_type,
+            data.grading_mode,
+            requires_table_answer=req_table,
+        )
 
         if data.question_type in {QuestionType.MCQ.value, QuestionType.TRUE_FALSE.value}:
             if not data.options:
@@ -107,6 +121,9 @@ class QuestionService:
             created_by_id=created_by.id,
             source_type="manual",
             explanation=data.explanation,
+            question_table_context=data.question_table_context,
+            requires_table_answer=req_table,
+            answer_table_template=data.answer_table_template,
             course_id=data.course_id,
             topic_tag=data.topic,
             is_in_question_bank=True,
@@ -161,7 +178,16 @@ class QuestionService:
                 if hasattr(existing.question_type, "value")
                 else str(existing.question_type)
             )
-            new_grading_mode = infer_grading_mode(existing_qtype, data.grading_mode)
+            req_table = (
+                data.requires_table_answer
+                if data.requires_table_answer is not None
+                else getattr(existing, "requires_table_answer", False)
+            )
+            new_grading_mode = infer_grading_mode(
+                existing_qtype,
+                data.grading_mode,
+                requires_table_answer=req_table,
+            )
 
             new_question = await self._repo.create(
                 content=new_content,
@@ -181,6 +207,17 @@ class QuestionService:
                 ),
                 explanation=(
                     data.explanation if data.explanation is not None else existing.explanation
+                ),
+                question_table_context=(
+                    data.question_table_context
+                    if data.question_table_context is not None
+                    else getattr(existing, "question_table_context", None)
+                ),
+                requires_table_answer=req_table,
+                answer_table_template=(
+                    data.answer_table_template
+                    if data.answer_table_template is not None
+                    else getattr(existing, "answer_table_template", None)
                 ),
                 subject_id=existing.subject_id,
                 course_id=data.course_id if data.course_id is not None else existing.course_id,
@@ -243,6 +280,12 @@ class QuestionService:
             update_fields["image_url"] = data.image_url
         if data.explanation is not None:
             update_fields["explanation"] = data.explanation
+        if data.question_table_context is not None:
+            update_fields["question_table_context"] = data.question_table_context
+        if data.requires_table_answer is not None:
+            update_fields["requires_table_answer"] = data.requires_table_answer
+        if data.answer_table_template is not None:
+            update_fields["answer_table_template"] = data.answer_table_template
         if data.difficulty is not None:
             update_fields["difficulty"] = data.difficulty
         if data.grading_mode is not None:

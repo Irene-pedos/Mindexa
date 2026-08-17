@@ -13,7 +13,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Loader2,
-  BrainCircuit,
   AlertCircle,
   CheckCircle2,
   ShieldAlert,
@@ -22,6 +21,8 @@ import {
   HelpCircle,
   Sparkles,
   RefreshCcw,
+  BookOpen,
+  FileText,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
@@ -45,7 +46,7 @@ interface AIReviewPanelProps {
     draft: string,
     strengths: string[],
     improvements: string[],
-    suggestions: string[]
+    suggestions: string[],
   ) => void;
 }
 
@@ -63,9 +64,7 @@ export function AIReviewPanel({
   const [explainOpen, setExplainOpen] = useState(false);
   const [feedbackStatus, setFeedbackStatus] = useState<
     "thumbs_up" | "thumbs_down" | null
-  >(
-    null
-  );
+  >(null);
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [pollCount, setPollCount] = useState(0);
   const [pollTimeoutReached, setPollTimeoutReached] = useState(false);
@@ -86,7 +85,7 @@ export function AIReviewPanel({
           data.ai_feedback_draft || "",
           data.ai_feedback_strengths || [],
           data.ai_feedback_improvements || [],
-          data.ai_feedback_suggestions || []
+          data.ai_feedback_suggestions || [],
         );
       }
     } catch (err: any) {
@@ -105,8 +104,6 @@ export function AIReviewPanel({
   }, [loadDetails]);
 
   useEffect(() => {
-    // Exponential backoff polling: 5s → 7.5s → 11.3s → 17s → 25s → 30s max
-    // Max 6 polls (≈ 95 seconds total). Much less aggressive than the old setInterval.
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const isPending =
       details?.ai_review_status === "PENDING" ||
@@ -127,15 +124,25 @@ export function AIReviewPanel({
     };
   }, [details?.ai_review_status, pollCount, pollTimeoutReached, loadDetails]);
 
+  const hasSuggestion =
+    details?.ai_suggested_score !== null &&
+    details?.ai_suggested_score !== undefined;
+
   const handleRequestSuggestion = async () => {
     const triggerId = queueItemId || responseId;
     if (!triggerId) {
-      toast.error("Cannot request AI suggestion without a queue item ID or response ID.");
+      toast.error(
+        "Cannot request AI suggestion without a queue item ID or response ID.",
+      );
       return;
     }
 
     if (hasSuggestion) {
-      if (!confirm("This will discard your current edits and generate a new AI review. Do you want to continue?")) {
+      if (
+        !confirm(
+          "This will discard your current edits and generate a new AI review. Do you want to continue?",
+        )
+      ) {
         return;
       }
     }
@@ -177,12 +184,16 @@ export function AIReviewPanel({
   };
 
   const durationSec = getReviewDuration();
-  
-  const confidenceLevel = details?.ai_confidence_level || (
-    details?.ai_confidence !== null && details?.ai_confidence !== undefined
-      ? (details.ai_confidence >= 0.8 ? "HIGH" : (details.ai_confidence >= 0.5 ? "MEDIUM" : "LOW"))
-      : null
-  );
+
+  const confidenceLevel =
+    details?.ai_confidence_level ||
+    (details?.ai_confidence !== null && details?.ai_confidence !== undefined
+      ? details.ai_confidence >= 0.8
+        ? "HIGH"
+        : details.ai_confidence >= 0.5
+          ? "MEDIUM"
+          : "LOW"
+      : null);
 
   if (loading) {
     return (
@@ -195,16 +206,12 @@ export function AIReviewPanel({
     );
   }
 
-  const hasSuggestion =
-    details?.ai_suggested_score !== null &&
-    details?.ai_suggested_score !== undefined;
-
   return (
     <Card className="shadow-none border border-primary/20 bg-primary/5">
       <CardHeader className="pb-3 border-b border-primary/10">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <BrainCircuit className="size-4 text-primary" />
+            <Sparkles className="size-4 text-primary" />
             <CardTitle className="text-sm font-semibold">
               AI Grading Assistant
             </CardTitle>
@@ -257,7 +264,8 @@ export function AIReviewPanel({
               AI Review taking longer than expected
             </p>
             <p className="text-xs text-amber-600/80 max-w-[280px] leading-relaxed font-medium">
-              The AI evaluation is still running on the server. You can check status again or restart.
+              The AI evaluation is still running on the server. You can check
+              status again or restart.
             </p>
             <div className="flex items-center gap-3 mt-2">
               <Button
@@ -285,14 +293,17 @@ export function AIReviewPanel({
               </Button>
             </div>
           </div>
-        ) : requesting || details?.ai_review_status === "PENDING" || details?.ai_review_status === "PROCESSING" ? (
+        ) : requesting ||
+          details?.ai_review_status === "PENDING" ||
+          details?.ai_review_status === "PROCESSING" ? (
           <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-muted/5 rounded-xl border border-dashed border-primary/20">
             <Loader2 className="size-8 text-primary animate-spin" />
             <p className="text-sm font-semibold text-foreground animate-pulse">
               AI Review in Progress...
             </p>
             <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed font-medium">
-              The AI grading assistant is currently evaluating this response and mapping it to the rubric.
+              The AI grading assistant is currently evaluating this response and
+              mapping it to the rubric.
             </p>
             <Button
               size="sm"
@@ -300,7 +311,8 @@ export function AIReviewPanel({
               onClick={loadDetails}
               className="mt-2 rounded-lg font-semibold flex items-center gap-1.5 h-8 text-xs border-primary/20 hover:bg-primary/5 text-primary"
             >
-              <RefreshCcw className="size-3 animate-spin-reverse" /> Check Status
+              <RefreshCcw className="size-3 animate-spin-reverse" /> Check
+              Status
             </Button>
           </div>
         ) : details?.ai_review_status === "FAILED" ? (
@@ -322,12 +334,13 @@ export function AIReviewPanel({
           </div>
         ) : !hasSuggestion ? (
           <div className="flex flex-col items-center justify-center py-8 text-center space-y-3 bg-muted/5 rounded-xl border border-dashed">
-            <BrainCircuit className="size-8 text-muted-foreground/45" />
+            <Sparkles className="size-8 text-muted-foreground/45" />
             <p className="text-sm font-semibold text-foreground">
               No AI Suggestion Generated Yet
             </p>
             <p className="text-xs text-muted-foreground max-w-[280px] leading-relaxed font-medium">
-              Generate an AI-suggested score and feedback rationale for this student response.
+              Generate an AI-suggested score and feedback rationale for this
+              student response.
             </p>
             <Button
               size="sm"
@@ -347,13 +360,16 @@ export function AIReviewPanel({
                 </AlertDescription>
               </Alert>
             )}
- 
+
             <div className="py-2 px-3 rounded-xl bg-emerald-500/5 border border-emerald-500/15 text-[11px] text-emerald-700 font-semibold flex items-center justify-between">
               <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="size-3.5 text-emerald-600" /> AI Review Completed • Generated automatically
+                <CheckCircle2 className="size-3.5 text-emerald-600" /> AI Review
+                Completed • Generated automatically
               </span>
               {durationSec !== null && (
-                <span className="text-[10px] opacity-80 font-mono">Review completed in {durationSec}s</span>
+                <span className="text-[10px] opacity-80 font-mono">
+                  Review completed in {durationSec}s
+                </span>
               )}
             </div>
 
@@ -385,14 +401,19 @@ export function AIReviewPanel({
                             ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                             : confidenceLevel === "MEDIUM"
                               ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
-                              : "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                              : "bg-rose-500/10 text-rose-600 border-rose-500/20",
                         )}
                       >
                         {confidenceLevel}
                       </Badge>
                       {details.ai_confidence !== null && (
                         <span className="text-[11px] font-mono text-muted-foreground/80">
-                          ({(details.ai_confidence * (details.ai_confidence <= 1.0 ? 100 : 1)).toFixed(0)}%)
+                          (
+                          {(
+                            details.ai_confidence *
+                            (details.ai_confidence <= 1.0 ? 100 : 1)
+                          ).toFixed(0)}
+                          %)
                         </span>
                       )}
                     </div>
@@ -522,11 +543,12 @@ export function AIReviewPanel({
               </p>
             </div>
 
-            {/* Structured Rubric Alignment Checklist (B2 & A2 read-only report) */}
+            {/* Structured Rubric Alignment Checklist */}
             {details.rubric_alignment && details.rubric_alignment.length > 0 ? (
               <div className="space-y-2 pt-2 border-t border-border/40">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1">
-                  <CheckCircle2 className="size-3.5 text-primary" /> AI Rubric Alignment Report
+                  <CheckCircle2 className="size-3.5 text-primary" /> AI Rubric
+                  Alignment Report
                 </p>
                 <div className="space-y-2">
                   {details.rubric_alignment.map((item, idx) => (
@@ -543,12 +565,17 @@ export function AIReviewPanel({
                           )}
                           {item.criterion}
                         </span>
-                        <Badge variant="outline" className="font-mono text-[10px] bg-primary/5 text-primary">
+                        <Badge
+                          variant="outline"
+                          className="font-mono text-[10px] bg-primary/5 text-primary"
+                        >
                           {item.points_awarded} / {item.max_points} pts
                         </Badge>
                       </div>
                       {item.description && (
-                        <p className="text-muted-foreground font-medium pl-5">{item.description}</p>
+                        <p className="text-muted-foreground font-medium pl-5">
+                          {item.description}
+                        </p>
                       )}
                     </div>
                   ))}
@@ -580,11 +607,43 @@ export function AIReviewPanel({
               </div>
             ) : null}
 
+            {/* Source Citations & Course Material Evidence Grounding */}
+            {((details.source_citations &&
+              details.source_citations.length > 0) ||
+              (details.citations && details.citations.length > 0)) && (
+              <div className="space-y-2 pt-2 border-t border-border/40">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                  <BookOpen className="size-3.5 text-primary" /> Source
+                  Citations & Material Evidence
+                </p>
+                <div className="rounded-xl border border-border/60 bg-muted/10 p-3 space-y-2 text-xs">
+                  <p className="text-[11px] text-muted-foreground font-medium">
+                    This AI evaluation is grounded in the following course
+                    source materials:
+                  </p>
+                  <ul className="space-y-1.5">
+                    {(details.source_citations || details.citations || []).map(
+                      (citation, idx) => (
+                        <li
+                          key={idx}
+                          className="flex items-start gap-2 text-[11px] text-foreground/90 font-medium bg-background p-2 rounded-lg border border-border/40"
+                        >
+                          <FileText className="size-3.5 text-primary shrink-0 mt-0.5" />
+                          <span className="leading-snug">{citation}</span>
+                        </li>
+                      ),
+                    )}
+                  </ul>
+                </div>
+              </div>
+            )}
+
             {/* Flagged Analysis Issues */}
             {details.detected_issues && details.detected_issues.length > 0 && (
               <div className="space-y-2 pt-2 border-t border-border/40">
                 <p className="text-xs font-semibold uppercase tracking-wider text-rose-600 flex items-center gap-1">
-                  <ShieldAlert className="size-3.5 text-rose-500" /> Flagged Analysis Issues
+                  <ShieldAlert className="size-3.5 text-rose-500" /> Flagged
+                  Analysis Issues
                 </p>
                 <div className="space-y-1.5">
                   {details.detected_issues.map((issue, idx) => (
@@ -650,10 +709,13 @@ export function AIReviewPanel({
             size="sm"
             variant="secondary"
             onClick={() =>
-              onSuggestionApplied(details.ai_suggested_score as number, details.ai_feedback_draft || "")
+              onSuggestionApplied(
+                details.ai_suggested_score as number,
+                details.ai_feedback_draft || "",
+              )
             }
             disabled={details.is_final}
-            className="font-medium"
+            className="font-medium cursor-pointer"
           >
             Use Suggested Score
           </Button>

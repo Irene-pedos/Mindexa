@@ -68,6 +68,7 @@ class AttemptQuestionOption(BaseModel):
     id: uuid.UUID
     text: str = Field(validation_alias="content")
     option_text_right: Optional[str] = Field(None, validation_alias="match_value")
+    match_key: Optional[str] = Field(None, validation_alias="match_key")
     image_url: Optional[str] = Field(None, alias="imageUrl")
     order_index: int
 
@@ -86,6 +87,12 @@ class AttemptQuestionResponse(BaseModel):
     section_title: Optional[str] = None
     options: Optional[List[AttemptQuestionOption]] = None
     grading_mode: Optional[str] = None
+    question_table_context: Optional[Any] = Field(None, validation_alias="question_table_context")
+    questionTableContext: Optional[Any] = Field(None, validation_alias="questionTableContext")
+    requires_table_answer: bool = Field(False, validation_alias="requires_table_answer")
+    requiresTableAnswer: bool = Field(False, validation_alias="requiresTableAnswer")
+    answer_table_template: Optional[Any] = Field(None, validation_alias="answer_table_template")
+    answerTableTemplate: Optional[Any] = Field(None, validation_alias="answerTableTemplate")
 
     model_config = {
         "from_attributes": True,

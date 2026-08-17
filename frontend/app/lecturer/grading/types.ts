@@ -2,7 +2,90 @@
 // All domain types for the grading page and its sub-components.
 // Previously these were defined inline in page.tsx.
 
-export interface GradingQueueItem {
+/**
+ * Canonical AI suggestion shape matching backend schemas and domain models.
+ * Includes canonical names (ai_grade_score, ai_grade_confidence, ai_grade_rationale, ai_grade_decision)
+ * and backward-compatible aliases (ai_suggested_score, ai_confidence, ai_rationale, ai_feedback_draft).
+ */
+export interface AiSuggestion {
+  ai_grade_score?: number | null;
+  ai_grade_confidence?: number | null;
+  ai_grade_rationale?: string | null;
+  ai_grade_decision?:
+    | "PENDING"
+    | "SUGGESTED"
+    | "ACCEPTED"
+    | "MODIFIED"
+    | "REJECTED"
+    | "NOT_APPLICABLE"
+    | string
+    | null;
+  ai_suggested_score?: number | null;
+  ai_confidence?: number | null;
+  ai_rationale?: string | null;
+  ai_feedback_draft?: string | null;
+  ai_grading_basis?: string | null;
+  ai_feedback_strengths?: string[] | null;
+  ai_feedback_improvements?: string[] | null;
+  ai_feedback_suggestions?: string[] | null;
+}
+
+/**
+ * Normalizes an item containing AI fields into a single canonical shape.
+ */
+export function getAiSuggestion(item?: Partial<AiSuggestion> | Record<string, any> | null): {
+  score: number | null;
+  rationale: string | null;
+  confidence: number | null;
+  decision: string | null;
+  feedbackDraft: string | null;
+  hasSuggestion: boolean;
+} {
+  if (!item) {
+    return {
+      score: null,
+      rationale: null,
+      confidence: null,
+      decision: null,
+      feedbackDraft: null,
+      hasSuggestion: false,
+    };
+  }
+
+  const rawScore = item.ai_grade_score ?? item.ai_suggested_score;
+  const score = rawScore !== undefined && rawScore !== null ? Number(rawScore) : null;
+
+  const rationale =
+    item.ai_grade_rationale ??
+    item.ai_rationale ??
+    item.ai_feedback_draft ??
+    null;
+
+  const rawConfidence = item.ai_grade_confidence ?? item.ai_confidence;
+  const confidence =
+    rawConfidence !== undefined && rawConfidence !== null ? Number(rawConfidence) : null;
+
+  const decision = item.ai_grade_decision ?? null;
+
+  const feedbackDraft =
+    item.ai_feedback_draft ??
+    item.ai_grade_rationale ??
+    item.ai_rationale ??
+    null;
+
+  const hasSuggestion = score !== null && !isNaN(score);
+
+  return {
+    score,
+    rationale,
+    confidence,
+    decision,
+    feedbackDraft,
+    hasSuggestion,
+  };
+}
+
+export interface GradingQueueItem extends AiSuggestion {
   id: string;
   student_id: string;
   student_name: string;
@@ -22,12 +105,13 @@ export interface GradingQueueItem {
     | "RELEASED";
   submitted_at: string | null;
   student_answer: string | null;
-  ai_suggested_score: number | null;
-  ai_confidence: number | null;
-  ai_grading_basis?: string | null;
   max_score?: number;
-  ai_feedback_draft: string | null;
   score: number | null;
+  override_score?: number | null;
+  is_final?: boolean;
+  time_taken_seconds?: number | null;
+  started_at?: string | null;
+  duration_minutes?: number | null;
   feedback: string | null;
   is_flagged: boolean;
   integrity_risk_score: number;
@@ -36,6 +120,17 @@ export interface GradingQueueItem {
   workspace_title?: string;
   /** Name of the lecturer the attempt is currently assigned to, if any. */
   assigned_to_name?: string | null;
+}
+
+export interface ReleaseQueueItem {
+  student_id: string;
+  student_name: string;
+  attempt_id: string;
+  total_score: number | null;
+  percentage: number | null;
+  letter_grade: string | null;
+  status: "PENDING_RELEASE" | "RELEASED" | string;
+  is_passing?: boolean;
 }
 
 export interface AttemptDetail {
@@ -101,6 +196,23 @@ export interface AttemptQuestion {
   marks: number;
   grading_mode?: string;
   caseStudyContext?: string;
+  case_study_context?: string;
+  question_table_context?: any;
+  questionTableContext?: any;
+  imageUrl?: string;
+  image_url?: string;
+  image_alt_text?: string;
+  options?: Array<{
+    id: string;
+    text?: string;
+    content?: string;
+    option_text?: string;
+    marks?: number;
+    match_key?: any;
+    match_value?: any;
+    order_index?: number;
+    is_correct?: boolean;
+  }>;
   rubric?: Rubric;
   sub_questions?: SubQuestion[];
 }
@@ -117,7 +229,7 @@ export interface RubricScore {
   score: number;
 }
 
-export interface SubmissionRecord {
+export interface SubmissionRecord extends AiSuggestion {
   id: string;
   question_id: string;
   answer_text: string | null;
@@ -125,14 +237,6 @@ export interface SubmissionRecord {
   file_url: string | null;
   score: number | null;
   override_score: number | null;
-  ai_suggested_score: number | null;
-  ai_grading_basis?: string | null;
-  ai_feedback_draft: string | null;
-  ai_rationale?: string | null;
-  ai_confidence?: number | null;
-  ai_feedback_strengths?: string[] | null;
-  ai_feedback_improvements?: string[] | null;
-  ai_feedback_suggestions?: string[] | null;
   feedback: string | null;
   is_final: boolean;
 }
@@ -188,12 +292,26 @@ export interface AssessmentSummary {
   total_marks: number;
   grading_mode: string;
   window_end: string | null;
+  language?: string;
+  language_code?: string;
   passing_marks?: number;
   max_attempts?: number;
   is_group_assessment?: boolean;
   individual_member_scoring?: boolean;
   individual_weighting_enabled?: boolean;
   teaching_workspace_id?: string;
+}
+
+/**
+ * Checks if institutional AI features (suggestions, automatic reviews) are permitted
+ * for this assessment based on language governance policy (Kinyarwanda is strictly manual-only).
+ */
+export function isAssessmentAiAllowed(
+  assessment?: Partial<AssessmentSummary> | { language?: string; language_code?: string } | null,
+): boolean {
+  if (!assessment) return true;
+  const lang = (assessment.language || assessment.language_code || "").trim().toUpperCase();
+  return lang !== "RW" && lang !== "KINYARWANDA";
 }
 
 export interface QuestionSummary {
@@ -258,10 +376,7 @@ export interface GradingHistoryItem {
 }
 
 /** AI grading details fetched for the batch review modal. */
-export interface BatchReviewDetails {
-  ai_grading_basis?: string | null;
-  ai_feedback_draft?: string | null;
-  ai_rationale?: string | null;
+export interface BatchReviewDetails extends AiSuggestion {
   rubric_scores?: Array<{
     criterion: string;
     marks_awarded: number;

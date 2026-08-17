@@ -33,6 +33,13 @@ class TokenType(str, Enum):
     PASSWORD_RESET = "PASSWORD_RESET"
 
 
+class LanguageEnum(str, Enum):
+    EN = "EN"
+    RW = "RW"
+    FR = "FR"
+    SW = "SW"
+
+
 class AcademicPeriodType(str, Enum):
     SEMESTER = "SEMESTER"
     TRIMESTER = "TRIMESTER"

@@ -85,10 +85,14 @@ class ResultBreakdownItem(BaseModel):
     section_title: str | None = None
     image_url: str | None = Field(None, alias="imageUrl")
     case_study_context: str | None = None
+    question_table_context: dict | None = Field(None, alias="questionTableContext")
+    requires_table_answer: bool | None = Field(False, alias="requiresTableAnswer")
+    answer_table_template: dict | None = Field(None, alias="answerTableTemplate")
     student_answer: str | None = None
     student_answer_json: dict | list | None = None
     correct_answer: str | None = None
     options: list[dict] | None = None
+    blanks: list[dict] | None = None
 
 
 class AssessmentResultResponse(BaseModel):
@@ -107,8 +111,20 @@ class AssessmentResultResponse(BaseModel):
     course_code: str | None = None
     course_name: str | None = None
     institution_name: str | None = None
+    institution_logo_url: str | None = None
+    campus_name: str | None = None
     college_name: str | None = None
+    school_name: str | None = None
     department_name: str | None = None
+    option_name: str | None = None
+    assessment_type: str | None = None
+    duration_minutes: int | None = None
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    class_name: str | None = None
+    academic_level: str | None = None
+    submitted_at: datetime | None = None
+    started_at: datetime | None = None
     total_score: float
     max_score: float
     percentage: float
@@ -124,8 +140,6 @@ class AssessmentResultResponse(BaseModel):
 
 
 class ResultSummary(BaseModel):
-    """Lightweight result — used in lists."""
-    model_config = {"from_attributes": True}
 
     id: uuid.UUID
     attempt_id: uuid.UUID

@@ -33,6 +33,7 @@ import {
   MessageSquare,
   PanelRightClose,
   PanelRightOpen,
+  AlertTriangle,
 } from "lucide-react";
 import { studentAiApi, type StudentChatHistoryItem } from "@/lib/api/student-ai";
 
@@ -159,6 +160,12 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
   const [lecturerMaterials, setLecturerMaterials] = useState<any[]>([]);
   const [selectedResource, setSelectedResource] = useState<string | null>(null);
   const [loadingResources, setLoadingResources] = useState(true);
+
+  const isSelectedRwanda = useMemo(() => {
+    if (!selectedResource) return false;
+    const selectedWs = workspaces.find((w) => w.id === selectedResource);
+    return selectedWs?.language === "RW";
+  }, [workspaces, selectedResource]);
 
   // Dropdowns
   const [resourcesDropdownOpen, setResourcesDropdownOpen] = useState(false);
@@ -418,6 +425,11 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     const attachmentList = typeof params === "string" ? [] : params?.attachments || [];
     const isThinkingMode = typeof params === "object" ? params?.isThinking : false;
     const isDeepSearchMode = typeof params === "object" ? params?.isDeepSearch : false;
+
+    if (isSelectedRwanda) {
+      toast.error("AI Study Tutor is disabled for Kinyarwanda courses according to institutional academic policy.");
+      return;
+    }
 
     const userQuery = rawInput.trim();
     let promptWithContext = userQuery;
@@ -1136,6 +1148,18 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                 )}
               </div>
 
+              {isSelectedRwanda && (
+                <div className="p-3 my-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                  <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-semibold">AI Study Tutor Disabled</strong>
+                    <span className="opacity-90">
+                      The selected course has Kinyarwanda set as its instruction language. AI assistance is deactivated for Kinyarwanda modules according to institutional policies.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               {/* Input Bar with Attachment & Thinking support */}
               <div className="pt-2">
                 <AIChatInput
@@ -1146,6 +1170,8 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                   onStop={() => setIsThinking(false)}
                   attachments={attachments}
                   setAttachments={setAttachments}
+                  disabled={isSelectedRwanda}
+                  placeholder={isSelectedRwanda ? "AI Study Tutor is disabled for Kinyarwanda courses" : undefined}
                   onUploadFile={async (file: File) => {
                     const formData = new FormData();
                     formData.append("file", file);

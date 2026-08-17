@@ -320,7 +320,7 @@ export default function AcademicStructurePage() {
   }
 
   return (
-    <div className="flex flex-col h-[calc(100vh-120px)] overflow-hidden">
+    <div data-tour="admin-academic" className="flex flex-col h-[calc(100vh-120px)] overflow-hidden">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 border-b border-muted/20 pb-4">
         <div>

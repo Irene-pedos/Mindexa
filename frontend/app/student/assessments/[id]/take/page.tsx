@@ -47,9 +47,14 @@ import {
   BookOpen,
   Info,
   Menu,
+  Table as TableIcon,
 } from "lucide-react";
 import { SharedMatchingDnd } from "@/components/mindexa/assessment/matching-dnd";
 import { SharedFillInTheBlanksDnd } from "@/components/mindexa/assessment/fill-in-the-blanks-dnd";
+import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
+import { TableContextViewer } from "@/components/mindexa/common/table-context-viewer";
+import { TableAnswerInput } from "@/components/mindexa/assessment/table-answer-input";
+import { StudentMathResponseInput } from "@/components/mindexa/assessment/student-math-response-input";
 import {
   Sheet,
   SheetContent,
@@ -173,6 +178,12 @@ export interface AssessmentQuestion {
   allowed_file_types?: string[];
   max_file_size?: number;
   image_alt_text?: string;
+  question_table_context?: any;
+  questionTableContext?: any;
+  requires_table_answer?: boolean;
+  requiresTableAnswer?: boolean;
+  answer_table_template?: any;
+  answerTableTemplate?: any;
 }
 
 export interface AssessmentMeta {
@@ -193,6 +204,7 @@ export interface AssessmentMeta {
   result_release_mode?: string;
   sections?: any[];
   instructions?: string;
+  language?: "EN" | "RW" | "FR" | "SW" | string;
 }
 
 export interface SavedSubmission {
@@ -1169,6 +1181,7 @@ export default function TakeAssessmentPage() {
         if (typeof val === "object" && val !== null) {
           return !!(
             val.file_url ||
+            val.table_json ||
             (typeof val.answer_text === "string" &&
               val.answer_text.trim() !== "")
           );
@@ -2180,7 +2193,7 @@ export default function TakeAssessmentPage() {
                   htmlFor={opt.id}
                   className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
                 >
-                  {opt.text || opt.option_text || "Option"}
+                  {renderRichMathText(opt.text || opt.option_text || "Option")}
                 </Label>
               </div>
             );
@@ -2233,7 +2246,7 @@ export default function TakeAssessmentPage() {
                   htmlFor={opt.id}
                   className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
                 >
-                  {opt.text || opt.option_text || "Option"}
+                  {renderRichMathText(opt.text || opt.option_text || "Option")}
                 </Label>
               </div>
             );
@@ -2277,7 +2290,7 @@ export default function TakeAssessmentPage() {
                 htmlFor={opt.id}
                 className="flex-1 cursor-pointer font-medium text-sm text-foreground/80"
               >
-                {opt.text || opt.option_text || "Option"}
+                {renderRichMathText(opt.text || opt.option_text || "Option")}
               </Label>
             </div>
           ))}
@@ -2331,26 +2344,28 @@ export default function TakeAssessmentPage() {
 
     // ─── E. SHORT ANSWER ───
     if (type === "shortanswer" || type === "short_answer") {
+      const isTableReq = !!(q.requires_table_answer || q.requiresTableAnswer);
       const textVal = typeof currentVal === "string" ? currentVal : "";
+
       return (
         <div className="space-y-4">
-          <textarea
-            className="w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
-            placeholder="Type your response here..."
+          <StudentMathResponseInput
+            questionId={q.id}
             value={textVal}
-            onChange={(e) =>
-              setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+            onChange={(val) =>
+              setAnswers((prev) => ({ ...prev, [q.id]: val }))
             }
+            placeholder="Type your response, formula, or calculations here..."
+            requiresTableAnswer={isTableReq}
+            tableTemplate={q.answer_table_template || q.answerTableTemplate}
           />
-          {requiresLecturerReview(q) ? (
+          {requiresLecturerReview(q) || isTableReq ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No
-              auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
-              Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
             </div>
           )}
         </div>
@@ -2359,71 +2374,34 @@ export default function TakeAssessmentPage() {
 
     // ─── F. ESSAY ───
     if (type === "essay") {
+      const isTableReq = !!(q.requires_table_answer || q.requiresTableAnswer);
       const textVal = typeof currentVal === "string" ? currentVal : "";
-      const wordCount = textVal.trim().split(/\s+/).filter(Boolean).length;
-
-      const minWords = q.min_words;
-      const maxWords = q.max_words;
-
-      const isTooShort =
-        minWords !== undefined &&
-        minWords !== null &&
-        minWords > 0 &&
-        wordCount > 0 &&
-        wordCount < minWords;
-      const isTooLong =
-        maxWords !== undefined &&
-        maxWords !== null &&
-        maxWords > 0 &&
-        wordCount > maxWords;
-      const isOutRange = isTooShort || isTooLong;
-
-      let wordLabel = `${wordCount} words`;
-      if (maxWords && minWords) {
-        wordLabel = `${wordCount} / ${maxWords} words (min: ${minWords})`;
-      } else if (maxWords) {
-        wordLabel = `${wordCount} / ${maxWords} words`;
-      } else if (minWords) {
-        wordLabel = `${wordCount} words (min: ${minWords})`;
-      }
 
       return (
         <div className="space-y-4">
-          <textarea
-            className={cn(
-              "w-full min-h-[250px] p-4 rounded-xl border bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
-              isOutRange
-                ? "border-red-500/50 focus:border-red-500"
-                : "border-muted/70",
-            )}
-            placeholder="Write your detailed essay here..."
+          <StudentMathResponseInput
+            questionId={q.id}
             value={textVal}
-            onChange={(e) =>
-              setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+            onChange={(val) =>
+              setAnswers((prev) => ({ ...prev, [q.id]: val }))
             }
+            placeholder="Write your detailed essay, analysis, and calculations here..."
+            minHeight="min-h-[240px]"
+            minWords={q.min_words}
+            maxWords={q.max_words}
+            requiresTableAnswer={isTableReq}
+            tableTemplate={q.answer_table_template || q.answerTableTemplate}
           />
           <div className="flex items-center justify-between">
-            {requiresLecturerReview(q) ? (
+            {requiresLecturerReview(q) || isTableReq ? (
               <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-                <Clock className="size-3.5" /> Essay Review Required (No
-                auto-grading)
+                <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-                <CheckCircle className="size-3.5" /> Auto-Graded (Instant
-                Feedback)
+                <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
               </div>
             )}
-            <span
-              className={cn(
-                "text-xs font-semibold tabular-nums",
-                isOutRange
-                  ? "text-red-500 font-bold"
-                  : "text-muted-foreground/75",
-              )}
-            >
-              {wordLabel}
-            </span>
           </div>
         </div>
       );
@@ -2441,7 +2419,7 @@ export default function TakeAssessmentPage() {
               <span className="block font-bold text-xs uppercase text-amber-600 mb-1.5 tracking-wider">
                 Case Study Context Reference
               </span>
-              {q.caseStudyContext}
+              {renderRichMathText(q.caseStudyContext)}
             </div>
           )}
           {q.options && q.options.length > 0 ? (
@@ -2457,12 +2435,12 @@ export default function TakeAssessmentPage() {
                 return (
                   <div
                     key={opt.id}
-                    className="space-y-2 p-4 rounded-xl border border-muted/50 bg-background/50"
+                    className="space-y-3 p-4 rounded-xl border border-muted/50 bg-background/50"
                   >
                     <div className="flex items-start justify-between gap-4">
                       <h4 className="text-sm font-semibold text-foreground/90 leading-relaxed">
                         {idx + 1}.{" "}
-                        {opt.text || opt.option_text || "Sub-question"}
+                        {renderRichMathText(opt.text || opt.option_text || "Sub-question")}
                       </h4>
                       <Badge
                         variant="secondary"
@@ -2471,17 +2449,18 @@ export default function TakeAssessmentPage() {
                         {marksVal} Marks
                       </Badge>
                     </div>
-                    <textarea
-                      className="w-full min-h-[100px] p-3 rounded-lg border border-muted bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
-                      placeholder="Write your response to this sub-question..."
+                    <StudentMathResponseInput
+                      questionId={`${q.id}_${opt.id}`}
                       value={subAnswer}
-                      onChange={(e) => {
+                      onChange={(val) => {
                         const newVal = {
                           ...answersObj,
-                          [opt.id]: e.target.value,
+                          [opt.id]: val,
                         };
                         setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
                       }}
+                      placeholder="Write your response, formula, or analysis for this sub-question..."
+                      minHeight="min-h-[110px]"
                     />
                   </div>
                 );
@@ -2490,25 +2469,26 @@ export default function TakeAssessmentPage() {
           ) : (
             // Fallback to monolithic textarea if no sub-questions options exist
             <div className="space-y-4">
-              <textarea
-                className="w-full min-h-[180px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y"
-                placeholder="Write your analysis and response here..."
+              <StudentMathResponseInput
+                questionId={q.id}
                 value={typeof currentVal === "string" ? currentVal : ""}
-                onChange={(e) =>
-                  setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                onChange={(val) =>
+                  setAnswers((prev) => ({ ...prev, [q.id]: val }))
                 }
+                placeholder="Write your analysis, equations, and response here..."
+                minHeight="min-h-[180px]"
+                requiresTableAnswer={!!(q.requires_table_answer || q.requiresTableAnswer)}
+                tableTemplate={q.answer_table_template || q.answerTableTemplate}
               />
             </div>
           )}
           {requiresLecturerReview(q) ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Case Study Review Required (No
-              auto-grading)
+              <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
-              Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
             </div>
           )}
         </div>
@@ -2542,6 +2522,7 @@ export default function TakeAssessmentPage() {
         "png",
       ];
       const maxFileSize = q.max_file_size || 10;
+      const isTableReq = !!(q.requires_table_answer || q.requiresTableAnswer);
 
       return (
         <div className="space-y-4">
@@ -2554,15 +2535,63 @@ export default function TakeAssessmentPage() {
             <p className="text-sm text-foreground/80 leading-relaxed font-medium">
               {isPractical
                 ? "Please upload the required deliverable files and add your response comments below."
-                : "Show your step-by-step calculations and formulas in the editor below. You can optionally upload supporting files (scans, spreadsheets) if needed."}
+                : "Show your step-by-step calculations and formulas in the editor below. You can type mathematical equations, answer in structured tables, and optionally upload supporting files."}
             </p>
           </div>
 
+          {/* Table Answer Template if required or present */}
+          {isTableReq && (
+            <div className="space-y-2">
+              <TableAnswerInput
+                template={q.answer_table_template || q.answerTableTemplate}
+                value={
+                  typeof currentVal === "string"
+                    ? currentVal
+                    : (currentVal as any)?.table_json || undefined
+                }
+                onChange={(tableJson) => {
+                  if (typeof currentVal === "object" && currentVal !== null) {
+                    setAnswers((prev) => ({
+                      ...prev,
+                      [q.id]: { ...fileVal, table_json: tableJson, answer_text: answerText || tableJson },
+                    }));
+                  } else {
+                    setAnswers((prev) => ({ ...prev, [q.id]: tableJson }));
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {/* Reasoning / Calculations / Math formulas */}
+          <div className="space-y-2">
+            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
+              {isPractical
+                ? "Comments & Supporting Notes"
+                : "Your Calculations, Formulas & Reasoning"}
+            </Label>
+            <StudentMathResponseInput
+              questionId={q.id}
+              value={answerText}
+              onChange={(val) => {
+                const newVal = { ...fileVal, answer_text: val };
+                setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
+              }}
+              placeholder={
+                isPractical
+                  ? "Write your explanation or notes here..."
+                  : "Show your step-by-step formulas, mathematical equations, and calculations here..."
+              }
+              minHeight="min-h-[140px]"
+            />
+          </div>
+
+          {/* Supporting File / Deliverable */}
           <div className="space-y-2">
             <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
               {isPractical
                 ? "Deliverable File"
-                : "Supporting File / Scan (Optional)"}
+                : "Supporting File / Scan / Spreadsheet (Optional)"}
             </Label>
             {fileUrl ? (
               <div className="flex items-center justify-between p-3.5 rounded-xl border border-emerald-500/20 bg-emerald-500/[0.02] shadow-sm">
@@ -2681,39 +2710,13 @@ export default function TakeAssessmentPage() {
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground/80">
-              {isPractical
-                ? "Comments & Supporting Notes"
-                : "Your Reasoning / Calculations"}
-            </Label>
-            <textarea
-              className={cn(
-                "w-full min-h-[140px] p-4 rounded-xl border border-muted/70 bg-background focus:border-primary/40 outline-none text-sm leading-relaxed resize-y",
-                !isPractical && "font-mono",
-              )}
-              placeholder={
-                isPractical
-                  ? "Write your explanation or notes here..."
-                  : "Show your formulas and calculations here..."
-              }
-              value={answerText}
-              onChange={(e) => {
-                const newVal = { ...fileVal, answer_text: e.target.value };
-                setAnswers((prev) => ({ ...prev, [q.id]: newVal }));
-              }}
-            />
-          </div>
-
-          {requiresLecturerReview(q) ? (
+          {requiresLecturerReview(q) || isTableReq ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No
-              auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
-              Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
             </div>
           )}
         </div>
@@ -3745,12 +3748,31 @@ export default function TakeAssessmentPage() {
                               >
                                 {currentQ?.marks || 0} Marks
                               </Badge>
+                              {(currentQ?.requires_table_answer ||
+                                currentQ?.requiresTableAnswer) && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] h-4.5 py-0 px-1.5 font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20 gap-1"
+                                >
+                                  <TableIcon className="size-2.5" /> Table Response Required
+                                </Badge>
+                              )}
                             </div>
                             <h2 className="text-lg font-medium leading-relaxed text-foreground/90">
-                              {currentQ?.text || currentQ?.content}
+                              {renderRichMathText(currentQ?.text || currentQ?.content || "")}
                             </h2>
                           </div>
                         </div>
+                        {(currentQ?.question_table_context || currentQ?.questionTableContext) && (
+                          <div className="ml-10.5 space-y-1.5">
+                            <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                              <TableIcon className="size-3.5 text-primary" /> Reference Table
+                            </div>
+                            <TableContextViewer
+                              data={currentQ.question_table_context || currentQ.questionTableContext}
+                            />
+                          </div>
+                        )}
                         {currentQ?.imageUrl && (
                           <div className="ml-10.5 p-1 border border-border/40 rounded-xl bg-muted/5 inline-block relative max-w-full overflow-hidden">
                             <Image

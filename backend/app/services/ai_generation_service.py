@@ -89,12 +89,14 @@ class AIGenerationService:
                 "Students cannot access the AI generation service."
             )
 
-        effective_teaching_workspace_id = data.teaching_workspace_id
+        target_language = None
+        effective_assessment_id = data.assessment_id or data.target_assessment_id
+        effective_teaching_workspace_id = data.teaching_workspace_id or data.workspace_id
 
         # Validate assessment if linked
-        if data.assessment_id:
+        if effective_assessment_id:
             assessment = await self._assessment_repo.get_by_id_simple(
-                data.assessment_id
+                effective_assessment_id
             )
             if not assessment:
                 raise NotFoundError("Assessment not found.")
@@ -103,8 +105,19 @@ class AIGenerationService:
                     "Cannot generate questions for a finalized assessment.",
                     code="ASSESSMENT_FINALIZED",
                 )
+            target_language = getattr(assessment, "language", None)
             if not effective_teaching_workspace_id:
                 effective_teaching_workspace_id = assessment.teaching_workspace_id
+
+        if not target_language and effective_teaching_workspace_id:
+            from app.db.models.academic import TeachingWorkspace
+            ws = await self.db.get(TeachingWorkspace, effective_teaching_workspace_id)
+            if ws:
+                target_language = ws.language
+
+        # Central AI Language Policy Guard
+        from app.core.ai.language_policy import assert_ai_allowed
+        assert_ai_allowed(target_language, action="generate_questions", context={"assessment_id": str(effective_assessment_id) if effective_assessment_id else None})
 
         sections_dict = None
         if data.sections:
@@ -116,7 +129,7 @@ class AIGenerationService:
         # Create batch
         batch = await self._repo.create_batch(
             created_by_id=current_user.id,
-            assessment_id=data.assessment_id,
+            assessment_id=effective_assessment_id,
             target_section_id=data.target_section_id,
             sections_json=sections_dict,
             question_type=data.question_type,
@@ -405,22 +418,33 @@ class AIGenerationService:
             else ai_question.parsed_options_json
         )
 
+        q_type_upper = str(ai_question.question_type).upper()
+        is_case_study = q_type_upper == "CASE_STUDY"
+
+        content_to_save = (
+            "Analyze the following case scenario and answer the sub-questions below."
+            if is_case_study
+            else (question_text or "AI generated question")
+        )
+        case_study_context_to_save = question_text if is_case_study else None
+        explanation_to_save = None if is_case_study else explanation
+
         question = await self._question_repo.create(
-            content=question_text or "AI generated question",
+            content=content_to_save,
+            case_study_context=case_study_context_to_save,
             question_type=ai_question.question_type,
             difficulty=ai_question.difficulty,
             created_by_id=created_by.id,
             source_type="ai_generated",
-            explanation=explanation,
+            explanation=explanation_to_save,
+            source_ai_batch_id=getattr(ai_question, "batch_id", None),
         )
 
         # Create options if available
         if options_json:
             try:
                 options = json.loads(options_json)
-                q_type_upper = str(ai_question.question_type).upper()
                 is_matching = q_type_upper == "MATCHING"
-                is_case_study = q_type_upper == "CASE_STUDY"
                 for i, opt in enumerate(options):
                     m_key = None
                     m_val = None

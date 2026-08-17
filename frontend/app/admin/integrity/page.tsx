@@ -32,7 +32,7 @@ export default function AdminIntegrityPage() {
   }, []);
 
   return (
-    <div className="space-y-5">
+    <div data-tour="admin-integrity" className="space-y-5">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight flex items-center gap-2">

@@ -2,11 +2,14 @@
 
 export interface TourStep {
   id: string;
+  targetSelector: string;
+  fallbackSelector?: string;
+  path: string;
+  placement?: "bottom" | "top" | "left" | "right" | "bottom-start" | "bottom-end" | "top-start" | "top-end";
   title: string;
   subtitle: string;
   description: string;
   tip?: string;
-  path?: string;
   iconName: string;
   badge: string;
   actionLabel?: string;
@@ -27,14 +30,17 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
     roleName: "Student",
     welcomeTitle: "Welcome to Mindexa Student Portal",
     welcomeDescription:
-      "A quick walkthrough of your learning dashboard, test taking environment, results breakdown, and AI study companion.",
+      "A quick walkthrough of your learning dashboard, assessments environment, AI study companion, and feedback reports.",
     steps: [
       {
         id: "student-dashboard",
-        title: "Your Academic Dashboard",
-        subtitle: "Real-time overview of your learning journey",
+        targetSelector: "[data-tour='student-dashboard-metrics']",
+        fallbackSelector: "[data-tour='student-dashboard']",
+        placement: "bottom",
+        title: "Academic Metrics & Overview",
+        subtitle: "Real-time overview of your learning metrics",
         description:
-          "Your central hub for tracking upcoming assessments, recent course announcements, current GPA, and quick shortcuts to active study sessions.",
+          "Your central hub for tracking GPA trends, active enrolled courses, attendance rates, and upcoming exam deadlines.",
         tip: "Check the top banner for urgent notifications and upcoming scheduled exam windows.",
         path: "/student/dashboard",
         iconName: "LayoutDashboard",
@@ -48,6 +54,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "student-assessments",
+        targetSelector: "[data-tour='student-assessments']",
+        fallbackSelector: "[data-tour='student-assessments-list']",
+        placement: "bottom",
         title: "Assessments & Quizzes",
         subtitle: "View scheduled, active, and completed tests",
         description:
@@ -59,62 +68,15 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
         actionLabel: "Open Assessments",
         highlights: [
           "Clear countdown timers before test availability begins",
-          "Question type previews (MCQ, Essays, Matching, Fill-in-blanks)",
+          "Question type previews (MCQ, Essays, Case Studies, Matching)",
           "Submission deadline and maximum attempt counters",
         ],
       },
       {
-        id: "student-taking",
-        title: "Starting a Test & Integrity Rules",
-        subtitle: "Distraction-free, secure exam environment",
-        description:
-          "When starting a timed assessment, Mindexa opens an integrity-monitored workspace. Fullscreen enforcement and focus monitoring ensure fairness for every student.",
-        tip: "Avoid switching browser tabs or minimizing the window during an active assessment.",
-        path: "/student/assessments",
-        iconName: "ShieldCheck",
-        badge: "Exam Security",
-        actionLabel: "Learn Test Rules",
-        highlights: [
-          "Automated server-side timing with extended time accommodation",
-          "Continuous auto-saving so no answers are ever lost",
-          "Accessible list-mode fallback for keyboard and screen-reader users",
-        ],
-      },
-      {
-        id: "student-submit",
-        title: "Answering & Confident Submission",
-        subtitle: "Review matrix and instant confirmation",
-        description:
-          "Use the question matrix to jump between answered and flagged questions. When finished, a confirmation screen verifies all questions before recording your submission timestamp.",
-        tip: "You can flag tricky questions and return to them before submitting your exam.",
-        path: "/student/assessments",
-        iconName: "CheckCircle2",
-        badge: "Submissions",
-        highlights: [
-          "Visual indicator for unanswered and reviewed questions",
-          "Explicit confirmation prompt to prevent accidental submission",
-          "Cryptographically verifiable submission receipt timestamp",
-        ],
-      },
-      {
-        id: "student-results",
-        title: "Transparent Results & Feedback",
-        subtitle: "Explainable marks and rubric breakdowns",
-        description:
-          "After grading is published, inspect your question-by-question breakdown, model answers, and detailed constructive notes provided by your lecturers and AI grading.",
-        tip: "Click on any question to view the exact marking criteria and lecturer feedback basis.",
-        path: "/student/results",
-        iconName: "Trophy",
-        badge: "Grades & Rubrics",
-        actionLabel: "Explore Results",
-        highlights: [
-          "Clear distinction between human and AI-assisted evaluations",
-          "Actionable suggestions to improve in future assignments",
-          "Downloadable PDF assessment performance report",
-        ],
-      },
-      {
         id: "student-study",
+        targetSelector: "[data-tour='student-study']",
+        fallbackSelector: "[data-tour='student-study-planner']",
+        placement: "bottom",
         title: "AI Study Support & Tutoring",
         subtitle: "24/7 personalized course guidance",
         description:
@@ -130,6 +92,26 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
           "Personalized study streak and topic confidence tracking",
         ],
       },
+      {
+        id: "student-results",
+        targetSelector: "[data-tour='student-results']",
+        fallbackSelector: "[data-tour='student-results-table']",
+        placement: "bottom",
+        title: "Transparent Results & Feedback",
+        subtitle: "Explainable marks and rubric breakdowns",
+        description:
+          "After grading is published, inspect your question-by-question breakdown, model answers, and detailed constructive notes provided by your lecturers and AI grading.",
+        tip: "Click on any question to view the exact marking criteria and lecturer feedback basis.",
+        path: "/student/results",
+        iconName: "Trophy",
+        badge: "Grades & Rubrics",
+        actionLabel: "Explore Results",
+        highlights: [
+          "Clear distinction between human and AI-assisted evaluations",
+          "Actionable suggestions to improve in future assignments",
+          "Downloadable PDF assessment performance report",
+        ],
+      },
     ],
   },
   lecturer: {
@@ -141,6 +123,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
     steps: [
       {
         id: "lecturer-dashboard",
+        targetSelector: "[data-tour='lecturer-dashboard-metrics']",
+        fallbackSelector: "[data-tour='lecturer-dashboard']",
+        placement: "bottom",
         title: "Teaching Hub & Course Analytics",
         subtitle: "Monitor student cohorts and pending tasks",
         description:
@@ -158,7 +143,10 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "lecturer-create",
-        title: "Assessment Builder & Scheduling",
+        targetSelector: "[data-tour='lecturer-create-assessment']",
+        fallbackSelector: "[data-tour='lecturer-create']",
+        placement: "bottom",
+        title: "Assessment Builder & Registry",
         subtitle: "Design structured exams with granular policies",
         description:
           "Create timed assessments with diverse question types. Configure time limits, attempt limits, target class sections, and strictness thresholds for proctoring.",
@@ -168,13 +156,16 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
         badge: "Authoring",
         actionLabel: "Manage Assessments",
         highlights: [
-          "Support for MCQ, essays, code, matching, and fill-in-the-blanks",
+          "Support for MCQ, essays, case studies, matching, and code",
           "Granular scheduling with automated release and closing windows",
           "Configurable group submission rules and peer leadership",
         ],
       },
       {
         id: "lecturer-bank",
+        targetSelector: "[data-tour='lecturer-bank']",
+        fallbackSelector: "[data-tour='lecturer-bank-search']",
+        placement: "bottom",
         title: "Question Bank & AI Co-Authoring",
         subtitle: "Generate curriculum-aligned question items",
         description:
@@ -192,6 +183,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "lecturer-grading",
+        targetSelector: "[data-tour='lecturer-grading']",
+        fallbackSelector: "[data-tour='lecturer-grading-table']",
+        placement: "bottom",
         title: "Explainable Grading & AI Review",
         subtitle: "Human-in-the-loop transparent mark evaluation",
         description:
@@ -209,6 +203,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "lecturer-integrity",
+        targetSelector: "[data-tour='lecturer-integrity']",
+        fallbackSelector: "[data-tour='lecturer-integrity-table']",
+        placement: "bottom",
         title: "Real-Time Integrity & Proctoring",
         subtitle: "Audit session focus and potential infractions",
         description:
@@ -235,6 +232,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
     steps: [
       {
         id: "admin-users",
+        targetSelector: "[data-tour='admin-users']",
+        fallbackSelector: "[data-tour='admin-users-table']",
+        placement: "bottom",
         title: "User Management & Identity Governance",
         subtitle: "Manage accounts, approvals, and security roles",
         description:
@@ -252,12 +252,15 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "admin-academic",
+        targetSelector: "[data-tour='admin-academic']",
+        fallbackSelector: "[data-tour='admin-academic-tree']",
+        placement: "bottom",
         title: "Academic Structure & Hierarchies",
         subtitle: "Campuses, departments, courses & cohorts",
         description:
           "Set up institutional hierarchies: campuses, colleges, departments, academic programs, courses, and active class section enrollments.",
         tip: "Assign lecturers directly to courses and class sections for seamless access.",
-        path: "/admin/academic",
+        path: "/admin/academic/structure",
         iconName: "Building2",
         badge: "Academic Setup",
         actionLabel: "View Academic Setup",
@@ -269,6 +272,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "admin-accommodations",
+        targetSelector: "[data-tour='admin-accommodations']",
+        fallbackSelector: "[data-tour='admin-users']",
+        placement: "bottom",
         title: "Accessibility Accommodations & Audit",
         subtitle: "Disability support with immutable audit logs",
         description:
@@ -286,6 +292,9 @@ export const ROLE_TOURS: Record<string, RoleTourConfig> = {
       },
       {
         id: "admin-integrity",
+        targetSelector: "[data-tour='admin-integrity']",
+        fallbackSelector: "[data-tour='admin-integrity-stats']",
+        placement: "bottom",
         title: "Integrity Settings & AI Action Audit",
         subtitle: "System governance and AI model oversight",
         description:

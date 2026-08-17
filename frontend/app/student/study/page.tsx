@@ -144,7 +144,7 @@ export default function StudentStudyPage() {
   }, [plans]);
 
   return (
-    <div className="space-y-4 w-full mx-auto animate-in fade-in duration-300">
+    <div data-tour="student-study" className="space-y-4 w-full mx-auto animate-in fade-in duration-300">
 
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-border/20 pb-3">

@@ -592,6 +592,30 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
         if not batch:
             raise ValueError(f"Batch not found: {batch_id}")
 
+        # Defense-in-depth: Language policy check in worker
+        target_language = None
+        if batch.assessment_id:
+            from app.db.models.assessment import Assessment
+            assessment = await session.get(Assessment, batch.assessment_id)
+            if assessment:
+                target_language = getattr(assessment, "language", None)
+        if not target_language and batch.teaching_workspace_id:
+            from app.db.models.academic import TeachingWorkspace
+            ws = await session.get(TeachingWorkspace, batch.teaching_workspace_id)
+            if ws:
+                target_language = getattr(ws, "language", None)
+
+        from app.core.ai.language_policy import is_ai_allowed
+        if not is_ai_allowed(target_language):
+            err_msg = "AI generation is disabled for Kinyarwanda academic content (policy enforcement)."
+            await repo.update_batch_status(
+                batch_id=batch.id,
+                status=AIBatchStatus.FAILED,
+                error_message=err_msg,
+                completed_at=datetime.now(UTC),
+            )
+            return {"batch_id": batch_id, "status": "FAILED", "error": err_msg}
+
         # Mark as processing
         now = datetime.now(UTC)
         await repo.update_batch_status(

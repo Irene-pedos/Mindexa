@@ -69,6 +69,9 @@ class QuestionCreate(MindexaSchema):
     question_type: QuestionType
     content: str = Field(min_length=5, max_length=5000)
     case_study_context: str | None = Field(default=None, max_length=10000)
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool = False
+    answer_table_template: dict | list | None = None
     explanation: str | None = Field(default=None, max_length=2000)
     marks: int = Field(default=1, ge=1, le=100)
     difficulty: DifficultyLevel = DifficultyLevel.MEDIUM
@@ -103,6 +106,15 @@ class QuestionCreate(MindexaSchema):
             raise ValueError(
                 "True/False questions must have exactly two options."
             )
+        if self.question_type == QuestionType.CASE_STUDY:
+            if not self.case_study_context or not self.case_study_context.strip():
+                raise ValueError(
+                    "Case study questions require a non-empty case_study_context."
+                )
+            if not self.options:
+                raise ValueError(
+                    "Case study questions require at least one sub-question in options."
+                )
         return self
 
 
@@ -111,6 +123,9 @@ class QuestionUpdate(MindexaSchema):
 
     content: str | None = Field(default=None, min_length=5, max_length=5000)
     case_study_context: str | None = Field(default=None, max_length=10000)
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool | None = None
+    answer_table_template: dict | list | None = None
     explanation: str | None = Field(default=None, max_length=2000)
     marks: int | None = Field(default=None, ge=1, le=100)
     difficulty: DifficultyLevel | None = None
@@ -133,18 +148,22 @@ class QuestionSummaryResponse(MindexaSchema):
     marks: int
     difficulty: str
     topic_tag: str | None
+    requires_table_answer: bool = False
     is_approved: bool
     source_type: str
     created_at: datetime
 
 
 class QuestionDetailResponse(BaseAuditedResponse):
-    """Full question data including options and blanks."""
+    """Full question data including options, blanks, and structured tables."""
 
     subject_id: uuid.UUID | None
     question_type: str
     content: str
     case_study_context: str | None
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool = False
+    answer_table_template: dict | list | None = None
     explanation: str | None
     marks: int
     difficulty: str

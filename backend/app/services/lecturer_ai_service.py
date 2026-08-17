@@ -49,6 +49,14 @@ class LecturerAIService:
                 "Workspace not found or you do not have permission to access it."
             )
 
+        # Language policy check for lecturer AI assistance
+        from app.core.ai.language_policy import assert_ai_allowed
+        assert_ai_allowed(
+            getattr(workspace, "language", None),
+            action="lecturer_support",
+            context={"workspace_id": str(workspace.id)},
+        )
+
         # 2. Build Gateway
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()

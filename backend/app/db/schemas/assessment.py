@@ -18,6 +18,7 @@ from app.db.enums import (
     DifficultyLevel,
     GroupAssignmentMode,
     GradingMode,
+    LanguageEnum,
     QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
@@ -40,6 +41,7 @@ class AssessmentStep1Request(MindexaSchema):
     assessment_type: AssessmentType
     course_id: uuid.UUID
     subject_id: uuid.UUID | None = None
+    language: LanguageEnum = LanguageEnum.EN
     academic_year: str = Field(min_length=9, max_length=100)
     total_marks: int = Field(default=100, ge=1, le=1000)
     passing_marks: int | None = Field(default=None, ge=0)
@@ -250,6 +252,7 @@ class AssessmentSummaryResponse(MindexaSchema):
     title: str
     assessment_type: str
     status: str
+    language: LanguageEnum = LanguageEnum.EN
     total_marks: int
     window_start: datetime | None
     window_end: datetime | None
@@ -264,6 +267,7 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     instructions: str | None
     assessment_type: str
     status: str
+    language: LanguageEnum = LanguageEnum.EN
     course_id: uuid.UUID
     subject_id: uuid.UUID | None
     academic_year: str

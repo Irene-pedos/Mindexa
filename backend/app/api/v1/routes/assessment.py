@@ -92,6 +92,8 @@ async def list_assessments(
     status_filter: str | None = Query(default=None, alias="status"),
     assessment_type: str | None = Query(default=None),
     workspace_id: uuid.UUID | None = Query(default=None),
+    search: str | None = Query(default=None),
+    sort: str = Query(default="newest"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(require_active_user),
@@ -103,6 +105,8 @@ async def list_assessments(
         status=status_filter,
         assessment_type=assessment_type,
         workspace_id=workspace_id,
+        search=search,
+        sort=sort,
         page=page,
         page_size=page_size,
     )

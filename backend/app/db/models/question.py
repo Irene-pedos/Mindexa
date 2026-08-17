@@ -94,6 +94,22 @@ class Question(BaseModel, table=True):
     case_study_context: str | None = Field(default=None, nullable=True)
     computational_type: str | None = Field(default=None, nullable=True)
 
+    question_table_context: dict | list | None = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+        description="Structured table data attached to question stem: {title, headers: [], rows: [[]]}",
+    )
+    requires_table_answer: bool = Field(
+        default=False,
+        nullable=False,
+        description="Whether the student is required to respond with a structured table",
+    )
+    answer_table_template: dict | list | None = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+        description="Pre-populated template table grid for student answer: {headers: [], initial_rows: [[]], min_rows: 1}",
+    )
+
     marks: int = Field(default=1, nullable=False)
     difficulty: DifficultyLevel = Field(default=DifficultyLevel.MEDIUM, nullable=False, index=True)
     grading_mode: str = Field(default=GradingMode.AUTO.value, nullable=False, index=True)

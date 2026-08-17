@@ -203,7 +203,7 @@ class Settings(BaseSettings):
     # ─── AI / LLM ─────────────────────────────────────────────────────────────
     GROQ_API_KEY: str = ""
     GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
-    GROQ_DEFAULT_MODEL: str = "llama-3.3-70b-versatile"
+    GROQ_DEFAULT_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     JINA_API_KEY: str = ""
@@ -213,7 +213,7 @@ class Settings(BaseSettings):
     DEFAULT_LLM_PROVIDER: Literal["groq", "openai", "anthropic", "gemini"] = "groq"
     DEFAULT_EMBEDDING_PROVIDER: Literal["groq", "openai", "anthropic", "jina"] = "jina"
     DEFAULT_EMBEDDING_MODEL: str = "jina-embeddings-v3"
-    DEFAULT_LLM_MODEL: str = "llama-3.3-70b-versatile"
+    DEFAULT_LLM_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_DEFAULT_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_DEFAULT_MODEL: str = "claude-3-5-haiku-latest"
     AI_REQUEST_TIMEOUT_SECONDS: float = 30.0

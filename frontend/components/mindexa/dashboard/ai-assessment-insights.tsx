@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import {
-  BrainCircuit,
+  Sparkles,
   Lightbulb,
   AlertTriangle,
   TrendingUp,
@@ -75,7 +75,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <BrainCircuit className="size-4 text-primary" />
+          <Sparkles className="size-4 text-primary" />
           <span className="text-xs font-semibold text-foreground">AI Cohort Analysis</span>
         </div>
         <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60">

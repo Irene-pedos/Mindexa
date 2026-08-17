@@ -77,6 +77,9 @@ class QuestionCreateRequest(BaseModel):
     estimated_time_minutes: int | None = Field(default=None, ge=1)
     fill_blank_template: str | None = None
     correct_order_json: str | None = None
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool = False
+    answer_table_template: dict | list | None = None
     options: list[QuestionOptionCreate] = Field(default_factory=list)
     tag_names: list[str] = Field(
         default_factory=list,
@@ -153,6 +156,9 @@ class QuestionUpdateRequest(BaseModel):
     estimated_time_minutes: int | None = Field(default=None, ge=1)
     fill_blank_template: str | None = None
     correct_order_json: str | None = None
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool | None = None
+    answer_table_template: dict | list | None = None
     options: list[QuestionOptionCreate] | None = None
     tag_names: list[str] | None = None
     create_new_version: bool = Field(
@@ -195,6 +201,7 @@ class QuestionSummaryResponse(BaseModel):
     topic: str | None = Field(None, validation_alias="topic_tag")
     bloom_level: str | None = None
     suggested_marks: int | None = Field(None, alias="marks")
+    requires_table_answer: bool = False
     is_active: bool
     source_type: str
     version_number: int = Field(1, validation_alias="version")
@@ -227,6 +234,9 @@ class QuestionDetailResponse(BaseModel):
     fill_blank_template: str | None = None
     correct_order_json: str | None = None
     case_study_context: str | None = None
+    question_table_context: dict | list | None = None
+    requires_table_answer: bool = False
+    answer_table_template: dict | list | None = None
     computational_type: str | None = None
     is_active: bool
     version_number: int = Field(1, validation_alias="version")

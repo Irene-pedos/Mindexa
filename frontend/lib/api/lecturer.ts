@@ -201,6 +201,7 @@ export interface WorkspaceListItem {
   lecturer_name: string;
   institution_name: string;
   class_name: string;
+  language?: "EN" | "RW" | "FR" | "SW" | string;
 }
 
 export interface WorkspaceSectionResponse {
@@ -216,6 +217,7 @@ export interface WorkspaceDetail extends WorkspaceListItem {
   description?: string;
   department_name?: string;
   option_name?: string;
+  language?: "EN" | "RW" | "FR" | "SW" | string;
   sections?: WorkspaceSectionResponse[];
   roster: LecturerCourseRosterItem[];
 }

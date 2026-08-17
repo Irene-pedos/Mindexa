@@ -31,6 +31,33 @@ class ReviewAgentOutput(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0)
 
 
+def _format_student_answer(student_answer: str) -> str:
+    """If the student answer is formatted as a structured JSON table, convert to Markdown table."""
+    if not student_answer or not student_answer.strip():
+        return student_answer
+
+    trimmed = student_answer.strip()
+    if (trimmed.startswith("{") and trimmed.endswith("}")) or (trimmed.startswith("[") and trimmed.endswith("]")):
+        try:
+            data = json.loads(trimmed)
+            if isinstance(data, dict) and (data.get("type") == "table" or "headers" in data or "rows" in data):
+                headers = data.get("headers", [])
+                rows = data.get("rows", [])
+                if headers or rows:
+                    md_lines = []
+                    if data.get("title"):
+                        md_lines.append(f"**Table: {data['title']}**\n")
+                    if headers:
+                        md_lines.append("| " + " | ".join(str(h) for h in headers) + " |")
+                        md_lines.append("| " + " | ".join("---" for _ in headers) + " |")
+                    for row in rows:
+                        md_lines.append("| " + " | ".join(str(cell) for cell in row) + " |")
+                    return "\n".join(md_lines)
+        except Exception:
+            pass
+    return student_answer
+
+
 class ReviewAgent(BaseAgent):
     """Agent responsible for analyzing student answers and suggesting marks."""
 
@@ -55,15 +82,20 @@ class ReviewAgent(BaseAgent):
         basis_policy: str | None = None,
         basis_used: str | None = None,
         source_citations: list[str] | None = None,
+        language: str | None = None,
     ) -> tuple[ReviewAgentOutput, AICompletionResponse]:
         """
         Analyze a student response and suggest a grade, optionally refining based on lecturer feedback.
         """
+        if language:
+            from app.core.ai.language_policy import assert_ai_allowed
+            assert_ai_allowed(language, action="grade_response", context={"response_id": str(response_id) if response_id else None})
         prompt_template = self._get_prompt()
+        formatted_answer = _format_student_answer(student_answer)
         
         system_content = (
             prompt_template.replace("{{question_text}}", question_text)
-            .replace("{{student_answer}}", student_answer)
+            .replace("{{student_answer}}", formatted_answer)
             .replace("{{rubric_content}}", rubric_content)
             .replace("{{max_score}}", str(max_score))
             .replace("{{question_type}}", question_type)

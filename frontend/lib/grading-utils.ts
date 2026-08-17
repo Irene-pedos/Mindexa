@@ -23,7 +23,6 @@ export function isQuestionAutoGraded(q?: {
   return [
     "mcq",
     "truefalse",
-    "true_definition",
     "true_false",
     "matching",
     "fillblank",

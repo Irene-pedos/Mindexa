@@ -122,17 +122,36 @@ class GroupSubmissionRepository:
             await self.db.flush()
             return existing, False
 
-        answer = GroupSubmissionAnswer(
-            submission_id=submission_id,
-            question_id=question_id,
-            answer_content=answer_content,
-            notes_content=notes_content,
-            last_edited_by_id=editor_id,
-            last_edited_at=_utcnow(),
-        )
-        self.db.add(answer)
-        await self.db.flush()
-        return answer, True
+        try:
+            async with self.db.begin_nested():
+                answer = GroupSubmissionAnswer(
+                    submission_id=submission_id,
+                    question_id=question_id,
+                    answer_content=answer_content,
+                    notes_content=notes_content,
+                    last_edited_by_id=editor_id,
+                    last_edited_at=_utcnow(),
+                )
+                self.db.add(answer)
+                await self.db.flush()
+                return answer, True
+        except Exception:
+            result = await self.db.execute(
+                select(GroupSubmissionAnswer).where(
+                    GroupSubmissionAnswer.submission_id == submission_id,
+                    GroupSubmissionAnswer.question_id == question_id,
+                )
+            )
+            existing = result.scalar_one_or_none()
+            if existing:
+                existing.answer_content = answer_content
+                existing.notes_content = notes_content
+                existing.last_edited_by_id = editor_id
+                existing.last_edited_at = _utcnow()
+                existing.is_deleted = False
+                await self.db.flush()
+                return existing, False
+            raise
 
     async def add_comment(
         self,

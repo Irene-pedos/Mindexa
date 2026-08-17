@@ -91,6 +91,10 @@ class GenerateQuestionsRequest(BaseModel):
         default=None,
         description="Link this batch to a specific draft assessment (optional during early generation)"
     )
+    target_assessment_id: uuid.UUID | None = Field(
+        default=None,
+        description="Alias for assessment_id"
+    )
     target_section_id: uuid.UUID | None = Field(
         default=None,
         description="Optional: link this batch to a specific section of the assessment"
@@ -103,6 +107,10 @@ class GenerateQuestionsRequest(BaseModel):
     teaching_workspace_id: uuid.UUID | None = Field(
         default=None,
         description="Teaching workspace ID — used to retrieve uploaded course materials for RAG grounding"
+    )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description="Alias for teaching_workspace_id"
     )
     # Blueprint alignment
     blueprint_constraints: str | None = Field(

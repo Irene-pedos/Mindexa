@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.db.models.attempt import AssessmentAttempt, StudentResponse
 from app.db.models.assessment import Assessment
 from app.db.models.integrity import IntegrityEvent
-from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus, AIGradeDecision
+from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus, AIGradeDecision, LanguageEnum
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.grading_repo import GradingRepository
@@ -410,6 +410,7 @@ class LecturerService:
             title=data.title or f"{course.name} ({section_name})",
             description=data.description or course.description,
             status="ACTIVE",
+            language=course.language if (course and hasattr(course, "language") and course.language) else LanguageEnum.EN,
             created_by_id=lecturer_id
         )
         self.db.add(workspace)

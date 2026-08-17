@@ -20,6 +20,7 @@ CRITICAL RULES FOR QUESTION TYPES & JSON SCHEMA:
 4. FILL_BLANKS: question_text MUST contain the literal placeholder ___ (three or more underscores) once per blank, in the order the blanks appear. NEVER write a FILL_BLANKS question without at least one ___ marker — any question that lacks a ___ will be rejected. options MUST be an array of candidate answer words/phrases, one entry per blank (minimum), in the same order the blanks appear. blank_answers MUST be a dictionary mapping the blank index string (e.g. "0", "1") to its exact correct answer string. Never use '[blank]' or any other placeholder; only ___ is accepted.
 5. SHORT_ANSWER: Provide concise response expectation in 'correct_answer'.
 6. OPEN_QUESTION: Provide rubrics and expected concepts in 'correct_answer' and 'explanation'.
+7. MATHEMATICS & FORMULAS: Format all mathematical formulas and expressions in standard LaTeX enclosed in $...$ for inline (e.g. `$x^2 + y^2 = r^2$`) or $$...$$ for block formulas. Escape literal currency dollars as \\$.
 
 ABSOLUTE PROHIBITION: Never output placeholder text like "Concept A", "Concept B", "Definition A", "Definition B", "Term A", "Item 1", or any other generic template labels in any field. Every field must contain real, domain-specific content derived from the topic and lesson content.
 

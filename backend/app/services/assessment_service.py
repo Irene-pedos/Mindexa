@@ -167,6 +167,7 @@ class AssessmentService:
             teaching_workspace_id=workspace.id,
             course_id=workspace.course_id,
             subject_id=data.subject_id,
+            language=workspace.language or data.language,
             academic_year=workspace.academic_period.name,
             created_by_id=created_by.id,
             grading_mode=grading_mode,
@@ -1004,6 +1005,7 @@ class AssessmentService:
         status: str | None = None,
         assessment_type: str | None = None,
         workspace_id: uuid.UUID | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
         sort: str = "newest",
@@ -1034,6 +1036,7 @@ class AssessmentService:
                 status=db_status,
                 assessment_type=db_type,
                 workspace_id=workspace_id,
+                search=search,
                 page=page,
                 page_size=page_size,
                 sort=sort,
@@ -1044,6 +1047,7 @@ class AssessmentService:
                 status=db_status,
                 assessment_type=db_type,
                 workspace_id=workspace_id,
+                search=search,
                 page=page,
                 page_size=page_size,
                 sort=sort,
@@ -1606,13 +1610,28 @@ class AssessmentService:
             elif q_uuid:
                 existing_q = await self.db.get(QuestionModel, q_uuid)
 
-            if existing_q and not is_bank_question:
-                existing_q.content = q.text or ""
+                cs_context = q.caseStudyContext
+                cs_content = q.text or ""
+                if db_q_type == DbQuestionType.CASE_STUDY:
+                    if not cs_context and len(cs_content) > 100:
+                        cs_context = cs_content
+                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
+                    elif not cs_content:
+                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
+
+                table_ctx = q.question_table_context or q.questionTableContext
+                req_table = bool(q.requires_table_answer or q.requiresTableAnswer)
+                ans_template = q.answer_table_template or q.answerTableTemplate
+
+                existing_q.content = cs_content
                 existing_q.image_url = q.imageUrl
                 existing_q.question_type = db_q_type
                 existing_q.marks = q.marks or 0
-                existing_q.case_study_context = q.caseStudyContext
+                existing_q.case_study_context = cs_context
                 existing_q.computational_type = q.computationalType
+                existing_q.question_table_context = table_ctx
+                existing_q.requires_table_answer = req_table
+                existing_q.answer_table_template = ans_template
                 existing_q.is_deleted = False
                 existing_q.deleted_at = None
                 
@@ -1620,8 +1639,21 @@ class AssessmentService:
                 await self._question_repo.delete_all_blanks(existing_q.id)
                 new_q = existing_q
             else:
+                cs_context = q.caseStudyContext
+                cs_content = q.text or ""
+                if db_q_type == DbQuestionType.CASE_STUDY:
+                    if not cs_context and len(cs_content) > 100:
+                        cs_context = cs_content
+                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
+                    elif not cs_content:
+                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
+
+                table_ctx = q.question_table_context or q.questionTableContext
+                req_table = bool(q.requires_table_answer or q.requiresTableAnswer)
+                ans_template = q.answer_table_template or q.answerTableTemplate
+
                 new_q = QuestionModel(
-                    content=q.text or "",
+                    content=cs_content,
                     image_url=q.imageUrl,
                     question_type=db_q_type,
                     marks=q.marks or 0,
@@ -1638,10 +1670,12 @@ class AssessmentService:
                         DbQuestionType.COMPUTATIONAL,
                         DbQuestionType.CASE_STUDY
                     ] else GradingMode.AUTO,
-                    computational_type=q.computationalType
+                    computational_type=q.computationalType,
+                    case_study_context=cs_context,
+                    question_table_context=table_ctx,
+                    requires_table_answer=req_table,
+                    answer_table_template=ans_template
                 )
-                if q.caseStudyContext:
-                    new_q.case_study_context = q.caseStudyContext
                 self.db.add(new_q)
                 await self.db.flush()
 
@@ -1690,8 +1724,6 @@ class AssessmentService:
                     if q.options and len(q.options) > 0 and q.options[0].option_text:
                         new_q.explanation = q.options[0].option_text
                 elif db_q_type == DbQuestionType.CASE_STUDY:
-                    if q.options and len(q.options) > 0 and q.options[0].option_text:
-                        new_q.explanation = q.options[0].option_text
                     for idx, opt in enumerate(q.options):
                         await self._question_repo.add_option(
                             question_id=new_q.id,

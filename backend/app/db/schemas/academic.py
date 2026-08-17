@@ -11,7 +11,7 @@ from datetime import date, datetime
 
 from pydantic import Field, field_validator
 
-from app.db.enums import AcademicPeriodType, EnrollmentStatus, LecturerAssignmentRole, LocationType
+from app.db.enums import AcademicPeriodType, EnrollmentStatus, LanguageEnum, LecturerAssignmentRole, LocationType
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,6 +221,7 @@ class CourseCreate(MindexaSchema):
     title: str = Field(min_length=2, max_length=255)
     description: str | None = None
     credit_hours: int | None = Field(default=None, ge=1, le=30)
+    language: LanguageEnum = LanguageEnum.EN
 
 CourseCreate.model_rebuild()
 
@@ -229,6 +230,7 @@ class CourseUpdate(MindexaSchema):
     title: str | None = Field(default=None, min_length=2, max_length=255)
     description: str | None = None
     credit_hours: int | None = Field(default=None, ge=1, le=30)
+    language: LanguageEnum | None = None
     is_active: bool | None = None
     department_ids: list[uuid.UUID] | None = None
     option_ids: list[uuid.UUID] | None = None
@@ -245,6 +247,7 @@ class CourseResponse(BaseAuditedResponse):
     title: str = Field(validation_alias="name")
     description: str | None
     credit_hours: int | None
+    language: LanguageEnum = LanguageEnum.EN
     is_active: bool
     department_ids: list[uuid.UUID] = []
     option_ids: list[uuid.UUID] = []
@@ -259,6 +262,7 @@ class CourseSummaryResponse(MindexaSchema):
     id: uuid.UUID
     code: str
     title: str = Field(validation_alias="name")
+    language: LanguageEnum = LanguageEnum.EN
 
 CourseSummaryResponse.model_rebuild()
 

@@ -191,6 +191,124 @@ async def resolve_flag(
     }
 
 
+# ── ATTEMPT INTEGRITY CONTROLS (Lecturer/Admin) ───────────────────────────────
+
+
+@router.post(
+    "/attempt/{attempt_id}/toggle-flag",
+    response_model=dict,
+    summary="Toggle manual integrity flag on an attempt (lecturer/admin)",
+)
+async def toggle_attempt_flag(
+    attempt_id: uuid.UUID,
+    body: dict,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Manually flag or unflag a student attempt during grading or review.
+    """
+    from app.db.enums import IntegrityFlagRaisedBy, IntegrityFlagStatus, IntegrityRiskLevel
+    from app.db.repositories.attempt_repo import AttemptRepository
+    from app.db.repositories.result_repo import ResultRepository
+
+    is_flagged = bool(body.get("is_flagged", True))
+    reason = str(
+        body.get("reason")
+        or ("Flagged manually by lecturer" if is_flagged else "Unflagged by lecturer")
+    )
+
+    attempt_repo = AttemptRepository(db)
+    attempt = await attempt_repo.get_by_id_simple(attempt_id)
+    if not attempt:
+        raise NotFoundError("Attempt not found")
+
+    await attempt_repo.set_flagged(attempt_id, is_flagged)
+
+    integrity_repo = IntegrityRepository(db)
+    result_repo = ResultRepository(db)
+    result = await result_repo.get_by_attempt(attempt_id)
+
+    if is_flagged:
+        await integrity_repo.create_flag(
+            attempt_id=attempt_id,
+            assessment_id=attempt.assessment_id,
+            student_id=attempt.student_id,
+            raised_by=IntegrityFlagRaisedBy.SUPERVISOR,
+            raised_by_id=current_user.id,
+            description=reason,
+            risk_level=IntegrityRiskLevel.HIGH,
+        )
+        if result:
+            await result_repo.set_integrity_hold(result.id, True)
+    else:
+        open_flags = await integrity_repo.list_flags_for_attempt(attempt_id)
+        for f in open_flags:
+            if f.status in (IntegrityFlagStatus.OPEN, IntegrityFlagStatus.UNDER_REVIEW):
+                await integrity_repo.resolve_flag(
+                    flag_id=f.id,
+                    status=IntegrityFlagStatus.DISMISSED,
+                    resolved_by_id=current_user.id,
+                    resolution_notes=reason,
+                )
+        if result:
+            await result_repo.set_integrity_hold(result.id, False)
+
+    return {
+        "message": f"Attempt {'flagged' if is_flagged else 'unflagged'} successfully",
+        "attempt_id": str(attempt_id),
+        "is_flagged": is_flagged,
+    }
+
+
+@router.post(
+    "/attempt/{attempt_id}/lift-hold",
+    response_model=dict,
+    summary="Lift integrity hold on an attempt/result (lecturer/admin)",
+)
+async def lift_attempt_integrity_hold(
+    attempt_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Lifts integrity hold and unflags the attempt, allowing grade release.
+    """
+    from app.db.enums import IntegrityFlagStatus
+    from app.db.repositories.attempt_repo import AttemptRepository
+    from app.db.repositories.result_repo import ResultRepository
+
+    attempt_repo = AttemptRepository(db)
+    attempt = await attempt_repo.get_by_id_simple(attempt_id)
+    if not attempt:
+        raise NotFoundError("Attempt not found")
+
+    await attempt_repo.set_flagged(attempt_id, False)
+
+    integrity_repo = IntegrityRepository(db)
+    open_flags = await integrity_repo.list_flags_for_attempt(attempt_id)
+    for f in open_flags:
+        if f.status in (
+            IntegrityFlagStatus.OPEN,
+            IntegrityFlagStatus.UNDER_REVIEW,
+            IntegrityFlagStatus.CONFIRMED,
+        ):
+            await integrity_repo.resolve_flag(
+                flag_id=f.id,
+                status=IntegrityFlagStatus.DISMISSED,
+                resolved_by_id=current_user.id,
+                resolution_notes="Integrity hold manually lifted by lecturer/admin",
+            )
+
+    result_repo = ResultRepository(db)
+    result = await result_repo.get_by_attempt(attempt_id)
+    if result:
+        await result_repo.set_integrity_hold(result.id, False)
+
+    return {
+        "message": "Integrity hold lifted successfully",
+        "attempt_id": str(attempt_id),
+    }
 
 
 # ── AI FLAG EXPLAINER ─────────────────────────────────────────────────────────

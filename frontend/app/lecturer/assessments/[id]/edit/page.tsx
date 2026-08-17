@@ -43,7 +43,7 @@ import {
   CheckCircle2,
   FileText,
   Layout,
-  BrainCircuit,
+  Sparkles,
   ChevronDown,
   Check,
   X,
@@ -56,6 +56,8 @@ import {
   Calendar as CalendarIcon,
   Users,
   Upload,
+  Sigma,
+  Table as TableIcon,
 } from "lucide-react";
 import Image from "next/image";
 import { format } from "date-fns";
@@ -142,6 +144,10 @@ import { GroupBuilderDnd } from "@/components/mindexa/assessment/group-builder-d
 import { GroupQuestionEditor } from "@/components/mindexa/assessment/group-question-editor";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { summarizeQuestionMix } from "@/lib/grading-architecture";
+import { MathEditorDialog } from "@/components/mindexa/common/math-editor-dialog";
+import { TableEditor } from "@/components/mindexa/assessment/table-editor";
+import { TableContextViewer } from "@/components/mindexa/common/table-context-viewer";
+import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 
 import {
   DndContext,
@@ -256,6 +262,12 @@ interface Question {
   tolerance?: number;
   shuffleOptions?: boolean;
   caseSensitive?: boolean;
+  question_table_context?: any;
+  questionTableContext?: any;
+  requires_table_answer?: boolean;
+  requiresTableAnswer?: boolean;
+  answer_table_template?: any;
+  answerTableTemplate?: any;
 }
 
 const PREDEFINED_INSTRUCTIONS = [
@@ -656,6 +668,60 @@ function QuestionCard({
   workspaceId?: string;
 }) {
   const [showMediaUpload, setShowMediaUpload] = useState(!!question.imageUrl);
+  const [showTableStemEditor, setShowTableStemEditor] = useState(
+    !!(question.question_table_context || question.questionTableContext)
+  );
+  const [showTableAnswerEditor, setShowTableAnswerEditor] = useState(
+    !!(question.requires_table_answer || question.requiresTableAnswer)
+  );
+  const [mathDialogOpen, setMathDialogOpen] = useState(false);
+  const [mathTargetField, setMathTargetField] = useState<{
+    field: "text" | "solutionSteps" | "caseStudyContext" | "option";
+    optionIndex?: number;
+  } | null>(null);
+
+  const openMathEditor = (
+    field: "text" | "solutionSteps" | "caseStudyContext" | "option",
+    optionIndex?: number
+  ) => {
+    setMathTargetField({ field, optionIndex });
+    setMathDialogOpen(true);
+  };
+
+  const handleInsertMath = (mathString: string) => {
+    if (!mathTargetField) return;
+    if (mathTargetField.field === "text") {
+      onUpdate({
+        text: question.text ? `${question.text} ${mathString}` : mathString,
+      });
+    } else if (mathTargetField.field === "solutionSteps") {
+      onUpdate({
+        solutionSteps: question.solutionSteps
+          ? `${question.solutionSteps} ${mathString}`
+          : mathString,
+      });
+    } else if (mathTargetField.field === "caseStudyContext") {
+      onUpdate({
+        caseStudyContext: question.caseStudyContext
+          ? `${question.caseStudyContext} ${mathString}`
+          : mathString,
+      });
+    } else if (
+      mathTargetField.field === "option" &&
+      mathTargetField.optionIndex !== undefined
+    ) {
+      const idx = mathTargetField.optionIndex;
+      const currentOpt = question.options[idx];
+      if (currentOpt) {
+        onUpdateOption(idx, {
+          option_text: currentOpt.option_text
+            ? `${currentOpt.option_text} ${mathString}`
+            : mathString,
+        });
+      }
+    }
+    setMathDialogOpen(false);
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (disabled) return;
@@ -839,9 +905,22 @@ function QuestionCard({
         {/* Question Text & Media */}
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label className="text-sm font-semibold">Question Content</Label>
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Question Content</Label>
+              {!disabled && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => openMathEditor("text")}
+                  className="h-7 px-2 text-xs text-primary hover:bg-primary/10 gap-1 font-semibold"
+                >
+                  <Sigma className="size-3.5" /> Insert Math / Formula
+                </Button>
+              )}
+            </div>
             <Textarea
-              placeholder="Write your question text here..."
+              placeholder="Write your question text here... (Supports LaTeX: $formula$ or $$block$$)"
               value={question.text}
               disabled={disabled}
               onChange={(e) => onUpdate({ text: e.target.value })}
@@ -852,6 +931,137 @@ function QuestionCard({
                 Tip: Use <strong>[blank]</strong> to indicate where students
                 should type their answers.
               </p>
+            )}
+          </div>
+
+          {/* Structured Table Section */}
+          <div className="space-y-3 p-4 border rounded-xl bg-zinc-50/50 dark:bg-muted/10">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <TableIcon className="size-4 text-primary" />
+                <span className="text-xs font-bold uppercase tracking-wider text-foreground">
+                  Structured Tables & Datasets
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant={showTableStemEditor ? "default" : "outline"}
+                  size="sm"
+                  disabled={disabled}
+                  onClick={() => {
+                    const nextShow = !showTableStemEditor;
+                    setShowTableStemEditor(nextShow);
+                    if (
+                      nextShow &&
+                      !(
+                        question.question_table_context ||
+                        question.questionTableContext
+                      )
+                    ) {
+                      const initialTable = {
+                        title: "",
+                        headers: [
+                          "Item / Description",
+                          "Debit ($)",
+                          "Credit ($)",
+                        ],
+                        rows: [
+                          ["Initial Balance", "5,000", ""],
+                          ["Service Revenue", "", "2,500"],
+                        ],
+                      };
+                      onUpdate({
+                        question_table_context: initialTable,
+                        questionTableContext: initialTable,
+                      });
+                    }
+                  }}
+                  className="h-7 px-2.5 text-[11px]"
+                >
+                  {question.question_table_context || question.questionTableContext
+                    ? "Edit Reference Table"
+                    : "+ Add Reference Table"}
+                </Button>
+                {(question.type === "shortanswer" ||
+                  question.type === "essay" ||
+                  question.type === "computational" ||
+                  question.type === "casestudy") && (
+                  <Button
+                    type="button"
+                    variant={showTableAnswerEditor ? "default" : "outline"}
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => {
+                      const nextVal = !(
+                        question.requires_table_answer ||
+                        question.requiresTableAnswer
+                      );
+                      const updates: any = {
+                        requires_table_answer: nextVal,
+                        requiresTableAnswer: nextVal,
+                      };
+                      if (
+                        nextVal &&
+                        !(
+                          question.answer_table_template ||
+                          question.answerTableTemplate
+                        )
+                      ) {
+                        const defaultAnswerTable = {
+                          title: "Student Response Table",
+                          headers: ["Column 1", "Column 2", "Column 3"],
+                          rows: [["", "", ""]],
+                        };
+                        updates.answer_table_template = defaultAnswerTable;
+                        updates.answerTableTemplate = defaultAnswerTable;
+                      }
+                      onUpdate(updates);
+                      setShowTableAnswerEditor(nextVal);
+                    }}
+                    className="h-7 px-2.5 text-[11px]"
+                  >
+                    {question.requires_table_answer || question.requiresTableAnswer
+                      ? "✓ Requires Table Answer"
+                      : "Require Table Answer"}
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {showTableStemEditor && (
+              <div className="mt-3 p-3 bg-background border rounded-lg space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-muted-foreground">Question Stem Reference Table</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={disabled}
+                    onClick={() => {
+                      onUpdate({ question_table_context: undefined, questionTableContext: undefined });
+                      setShowTableStemEditor(false);
+                    }}
+                    className="h-6 text-[10px] text-destructive hover:bg-destructive/10"
+                  >
+                    Remove Table
+                  </Button>
+                </div>
+                <TableEditor
+                  initialData={question.question_table_context || question.questionTableContext}
+                  onChange={(data) => onUpdate({ question_table_context: data, questionTableContext: data })}
+                />
+              </div>
+            )}
+
+            {showTableAnswerEditor && (question.requires_table_answer || question.requiresTableAnswer) && (
+              <div className="mt-3 p-3 bg-background border rounded-lg space-y-2">
+                <span className="text-xs font-semibold text-muted-foreground">Student Answer Table Template Grid</span>
+                <TableEditor
+                  initialData={question.answer_table_template || question.answerTableTemplate}
+                  onChange={(data) => onUpdate({ answer_table_template: data, answerTableTemplate: data })}
+                />
+              </div>
             )}
           </div>
 
@@ -965,12 +1175,24 @@ function QuestionCard({
                   }
                 />
               </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            </div>            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
               <div className="space-y-2">
-                <Label className="text-xs font-semibold uppercase text-primary">
-                  Solution Steps / Grading Guidance
-                </Label>
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold uppercase text-primary">
+                    Solution Steps / Grading Guidance
+                  </Label>
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openMathEditor("solutionSteps")}
+                      className="h-6 px-2 text-[10px] text-primary hover:bg-primary/10 gap-1 font-semibold"
+                    >
+                      <Sigma className="size-3" /> Math
+                    </Button>
+                  )}
+                </div>
                 <Textarea
                   placeholder="Describe the mathematical proof or step-by-step solution steps..."
                   className="min-h-[80px] bg-background text-sm"
@@ -1007,9 +1229,22 @@ function QuestionCard({
         {question.type === "casestudy" && (
           <div className="space-y-4 pl-4 border-l-2 border-amber-500 bg-amber-50/50 p-4 rounded-r-lg">
             <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase text-amber-700">
-                Case Scenario / Background
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-semibold uppercase text-amber-700">
+                  Case Scenario / Background
+                </Label>
+                {!disabled && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openMathEditor("caseStudyContext")}
+                    className="h-6 px-2 text-[10px] text-amber-800 hover:bg-amber-100 gap-1 font-semibold"
+                  >
+                    <Sigma className="size-3" /> Math
+                  </Button>
+                )}
+              </div>
               <Textarea
                 placeholder="Paste the scenario, story, or data context here..."
                 className="min-h-[120px] bg-background text-sm leading-relaxed"
@@ -1164,15 +1399,27 @@ function QuestionCard({
                     onChange={(e) =>
                       onUpdateOption(oIdx, { option_text: e.target.value })
                     }
-                    className="h-9"
+                    className="h-9 flex-1"
                     placeholder={`Option ${oIdx + 1}`}
                   />
+                  {!disabled && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => openMathEditor("option", oIdx)}
+                      className="h-9 w-9 text-primary hover:bg-primary/10 shrink-0"
+                      title="Insert Math into Option"
+                    >
+                      <Sigma className="size-3.5" />
+                    </Button>
+                  )}
                   {!disabled && question.options.length > 2 && (
                     <Button
                       variant="ghost"
                       size="icon"
                       onClick={() => onRemoveOption(oIdx)}
-                      className="text-destructive h-9 w-9"
+                      className="text-destructive h-9 w-9 shrink-0"
                     >
                       <X className="size-4" />
                     </Button>
@@ -1257,7 +1504,7 @@ function QuestionCard({
                     <div key={oIdx} className="flex items-center gap-3">
                       <Badge
                         variant="outline"
-                        className="bg-emerald-50 text-emerald-700 border-emerald-200"
+                        className="size-8 flex items-center justify-center rounded font-mono shrink-0"
                       >
                         #{oIdx + 1}
                       </Badge>
@@ -1274,9 +1521,9 @@ function QuestionCard({
                           });
                         }}
                         className="flex-1 h-9"
-                        placeholder="Correct Answer"
+                        placeholder={`Correct answer for [blank] #${oIdx + 1}`}
                       />
-                      {!disabled && (
+                      {!disabled && question.options.filter((o) => o.is_correct).length > 1 && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1409,7 +1656,7 @@ function QuestionCard({
           <div className="space-y-4 pl-4 border-l-2 border-muted">
             <div className="p-4 rounded-lg bg-primary/5 border border-primary/10">
               <p className="text-xs text-primary font-semibold flex items-center gap-2 mb-1">
-                <BrainCircuit className="size-4" /> Short Answer Evaluation
+                <Sparkles className="size-4" /> Short Answer Evaluation
               </p>
               <p className="text-xs text-muted-foreground">
                 Students will be provided with a text input. AI will use the
@@ -1417,9 +1664,22 @@ function QuestionCard({
               </p>
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">
-                Model Answer / Explanation
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">
+                  Model Answer / Explanation
+                </Label>
+                {!disabled && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openMathEditor("option", 0)}
+                    className="h-7 px-2 text-xs text-primary hover:bg-primary/10 gap-1 font-semibold"
+                  >
+                    <Sigma className="size-3.5" /> Insert Math
+                  </Button>
+                )}
+              </div>
               <Textarea
                 placeholder="Define the model answer for grading guidance..."
                 className="min-h-[100px] text-sm"
@@ -1470,7 +1730,7 @@ function QuestionCard({
           <div className="space-y-4 pl-4 border-l-2 border-muted">
             <div className="p-4 rounded-lg bg-amber-500/5 border border-amber-500/10">
               <p className="text-xs text-amber-700 font-semibold flex items-center gap-2 mb-1">
-                <BrainCircuit className="size-4" /> Essay Evaluation
+                <Sparkles className="size-4" /> Essay Evaluation
               </p>
               <p className="text-xs text-muted-foreground">
                 Students will write an essay response. A grading rubric is
@@ -1478,9 +1738,22 @@ function QuestionCard({
               </p>
             </div>
             <div className="space-y-2">
-              <Label className="text-sm font-semibold">
-                Grading Guidance / Model Answer
-              </Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-semibold">
+                  Grading Guidance / Model Answer
+                </Label>
+                {!disabled && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => openMathEditor("option", 0)}
+                    className="h-7 px-2 text-xs text-amber-800 hover:bg-amber-100 gap-1 font-semibold"
+                  >
+                    <Sigma className="size-3.5" /> Insert Math
+                  </Button>
+                )}
+              </div>
               <Textarea
                 placeholder="Provide grading guidance or key points to look for in the essay..."
                 className="min-h-[100px] text-sm"
@@ -1547,6 +1820,12 @@ function QuestionCard({
           </div>
         )}
       </CardContent>
+
+      <MathEditorDialog
+        open={mathDialogOpen}
+        onOpenChange={setMathDialogOpen}
+        onInsert={handleInsertMath}
+      />
     </Card>
   );
 }
@@ -1566,13 +1845,36 @@ function ReviewQuestionCard({
         </span>
         <div className="space-y-3 flex-1">
           <div>
-            <p className="font-semibold text-lg leading-tight">
-              {question.text || (
+            <div className="font-semibold text-lg leading-tight">
+              {question.text ? (
+                renderRichMathText(question.text)
+              ) : (
                 <em className="text-muted-foreground font-normal italic">
                   No question text provided
                 </em>
               )}
-            </p>
+            </div>
+            {(question.question_table_context || question.questionTableContext) && (
+              <div className="mt-3 p-3 bg-background border rounded-xl space-y-1.5">
+                <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                  <TableIcon className="size-3.5 text-primary" /> Question Stem Reference Table
+                </div>
+                <TableContextViewer
+                  data={question.question_table_context || question.questionTableContext}
+                />
+              </div>
+            )}
+            {(question.requires_table_answer || question.requiresTableAnswer) &&
+              (question.answer_table_template || question.answerTableTemplate) && (
+                <div className="mt-3 p-3 bg-muted/20 border border-dashed rounded-xl space-y-1.5">
+                  <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
+                    <TableIcon className="size-3.5 text-primary" /> Expected Student Answer Table Template Grid
+                  </div>
+                  <TableContextViewer
+                    data={question.answer_table_template || question.answerTableTemplate}
+                  />
+                </div>
+              )}
             {question.imageUrl && (
               <div className="mt-3 inline-block p-1 border rounded-lg overflow-hidden">
                 <Image
@@ -1590,12 +1892,12 @@ function ReviewQuestionCard({
                 <span className="font-bold block mb-1 text-[10px] text-primary uppercase tracking-wider">
                   Case Scenario
                 </span>
-                {question.caseStudyContext}
+                {renderRichMathText(question.caseStudyContext)}
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Badge
               variant="secondary"
               className="h-5 text-[10px] uppercase font-bold"
@@ -1605,6 +1907,14 @@ function ReviewQuestionCard({
             <Badge variant="outline" className="h-5 text-[10px] font-medium">
               {question.marks} Marks
             </Badge>
+            {(question.requires_table_answer || question.requiresTableAnswer) && (
+              <Badge
+                variant="outline"
+                className="h-5 text-[10px] bg-primary/5 text-primary border-primary/20 gap-1 font-semibold"
+              >
+                <TableIcon className="size-3" /> Requires Table Answer
+              </Badge>
+            )}
           </div>
 
           {/* Options Preview */}
@@ -1621,9 +1931,9 @@ function ReviewQuestionCard({
                         : "bg-background border-border",
                     )}
                   >
-                    {opt.option_text}
+                    <div>{renderRichMathText(opt.option_text)}</div>
                     {opt.is_correct && (
-                      <CheckCircle2 className="size-3.5 text-emerald-500" />
+                      <CheckCircle2 className="size-3.5 text-emerald-500 shrink-0 ml-2" />
                     )}
                   </div>
                 ))}
@@ -1637,10 +1947,10 @@ function ReviewQuestionCard({
                     key={i}
                     className="flex items-center gap-4 bg-muted/10 p-2 px-3 rounded-md border border-dashed text-xs"
                   >
-                    <div className="font-medium flex-1">{opt.option_text}</div>
-                    <ChevronRight className="size-3 text-primary" />
+                    <div className="font-medium flex-1">{renderRichMathText(opt.option_text)}</div>
+                    <ChevronRight className="size-3 text-primary shrink-0" />
                     <div className="font-bold text-primary flex-1">
-                      {opt.option_text_right}
+                      {renderRichMathText(opt.option_text_right || "")}
                     </div>
                   </div>
                 ))}
@@ -1656,7 +1966,7 @@ function ReviewQuestionCard({
                     variant="outline"
                     className="h-7 bg-amber-50 text-amber-900 border-amber-200"
                   >
-                    #{i + 1}: {opt.option_text}
+                    #{i + 1}: {renderRichMathText(opt.option_text)}
                   </Badge>
                 ))}
               </div>
@@ -1672,7 +1982,7 @@ function ReviewQuestionCard({
                     <span className="size-5 bg-primary text-white rounded-full flex items-center justify-center text-[10px]">
                       {i + 1}
                     </span>
-                    {opt.option_text}
+                    {renderRichMathText(opt.option_text)}
                   </div>
                 ))}
               </div>
@@ -1686,8 +1996,11 @@ function ReviewQuestionCard({
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-primary not-italic mb-1">
                   Grading Key
                 </span>
-                {question.options[0]?.option_text ||
-                  "No grading rubric provided."}
+                {question.options[0]?.option_text ? (
+                  renderRichMathText(question.options[0].option_text)
+                ) : (
+                  "No grading rubric provided."
+                )}
               </div>
             )}
           </div>
@@ -1931,13 +2244,15 @@ const mapCandidateToQuestion = (
       },
     ];
   } else if (qType === "casestudy") {
-    caseStudyContext = text;
+    caseStudyContext =
+      candidate.case_study_context ||
+      candidate.caseStudyContext ||
+      text;
     const shortText =
-      explanation ||
-      "Analyze the following case scenario and answer the sub-questions:";
+      "Analyze the following case scenario and answer the sub-questions below.";
     const computedMarks = mappedOptions.reduce(
       (sum: number, o: QuestionOption) =>
-        sum + (parseInt(o.match_key || "0") || 0),
+        sum + (parseInt(o.match_key || "5") || 0),
       0,
     );
     return {
@@ -2012,7 +2327,7 @@ const STEPS_DATA = [
   { title: "Proctoring & Rules", icon: Shield },
   { title: "Target Audience", icon: Users },
   { title: "Blueprint", icon: Layout },
-  { title: "Questions & Bank", icon: BrainCircuit },
+  { title: "Questions & Bank", icon: Sparkles },
   { title: "Review & Save", icon: CheckCircle2 },
 ];
 
@@ -2519,6 +2834,26 @@ export default function EditAssessmentPage() {
                 aiGenerated:
                   aq.added_via === "ai_generated" || aq.question.ai_generated,
                 is_required: aq.is_required ?? true,
+                question_table_context:
+                  aq.question.question_table_context ||
+                  aq.question.questionTableContext,
+                questionTableContext:
+                  aq.question.question_table_context ||
+                  aq.question.questionTableContext,
+                requires_table_answer: !!(
+                  aq.question.requires_table_answer ||
+                  aq.question.requiresTableAnswer
+                ),
+                requiresTableAnswer: !!(
+                  aq.question.requires_table_answer ||
+                  aq.question.requiresTableAnswer
+                ),
+                answer_table_template:
+                  aq.question.answer_table_template ||
+                  aq.question.answerTableTemplate,
+                answerTableTemplate:
+                  aq.question.answer_table_template ||
+                  aq.question.answerTableTemplate,
               };
             }),
           );
@@ -2656,6 +2991,26 @@ export default function EditAssessmentPage() {
             aiGenerated:
               aq.added_via === "ai_generated" || aq.question.ai_generated,
             is_required: aq.is_required ?? true,
+            question_table_context:
+              aq.question.question_table_context ||
+              aq.question.questionTableContext,
+            questionTableContext:
+              aq.question.question_table_context ||
+              aq.question.questionTableContext,
+            requires_table_answer: !!(
+              aq.question.requires_table_answer ||
+              aq.question.requiresTableAnswer
+            ),
+            requiresTableAnswer: !!(
+              aq.question.requires_table_answer ||
+              aq.question.requiresTableAnswer
+            ),
+            answer_table_template:
+              aq.question.answer_table_template ||
+              aq.question.answerTableTemplate,
+            answerTableTemplate:
+              aq.question.answer_table_template ||
+              aq.question.answerTableTemplate,
           };
         }),
       );
@@ -2929,6 +3284,9 @@ export default function EditAssessmentPage() {
           computationalType: q.computationalType,
           caseStudyContext: q.caseStudyContext,
           is_required: q.is_required,
+          question_table_context: q.question_table_context || q.questionTableContext,
+          requires_table_answer: !!(q.requires_table_answer || q.requiresTableAnswer),
+          answer_table_template: q.answer_table_template || q.answerTableTemplate,
         };
       }),
       rules: {
@@ -3431,6 +3789,26 @@ export default function EditAssessmentPage() {
             wordLimit: unpacked.wordLimit,
             solutionSteps: unpacked.solutionSteps,
             tolerance: unpacked.tolerance,
+            question_table_context:
+              aq.question.question_table_context ||
+              aq.question.questionTableContext,
+            questionTableContext:
+              aq.question.question_table_context ||
+              aq.question.questionTableContext,
+            requires_table_answer: !!(
+              aq.question.requires_table_answer ||
+              aq.question.requiresTableAnswer
+            ),
+            requiresTableAnswer: !!(
+              aq.question.requires_table_answer ||
+              aq.question.requiresTableAnswer
+            ),
+            answer_table_template:
+              aq.question.answer_table_template ||
+              aq.question.answerTableTemplate,
+            answerTableTemplate:
+              aq.question.answer_table_template ||
+              aq.question.answerTableTemplate,
           };
         },
       );
@@ -5707,7 +6085,7 @@ export default function EditAssessmentPage() {
                                 setAiDrawerOpen(true);
                               }}
                             >
-                              <BrainCircuit className="size-4 text-primary animate-pulse" />
+                              <Sparkles className="size-4 text-primary animate-pulse" />
                               <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
                                 Generate with AI
                               </span>
@@ -6286,7 +6664,7 @@ export default function EditAssessmentPage() {
         <DialogContent className="sm:max-w-[650px] md:max-w-[700px] w-full p-6 flex flex-col max-h-[90vh]">
           <DialogHeader className="border-b pb-4 shrink-0">
             <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-              <BrainCircuit className="size-5 text-primary animate-pulse" /> AI
+              <Sparkles className="size-5 text-primary animate-pulse" /> AI
               Question Generator Settings
             </DialogTitle>
             <DialogDescription>
@@ -6584,7 +6962,7 @@ export default function EditAssessmentPage() {
                 </>
               ) : (
                 <>
-                  <BrainCircuit className="mr-2 h-4 w-4" /> Start AI Generation
+                  <Sparkles className="mr-2 h-4 w-4" /> Start AI Generation
                 </>
               )}
             </Button>
@@ -6640,7 +7018,7 @@ export default function EditAssessmentPage() {
                   </>
                 ) : (
                   <>
-                    <BrainCircuit className="mr-2 h-3.5 w-3.5 text-primary" />{" "}
+                    <Sparkles className="mr-2 h-3.5 w-3.5 text-primary" />{" "}
                     Retry Failed Sections
                   </>
                 )}

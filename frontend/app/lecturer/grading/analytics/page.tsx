@@ -11,7 +11,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
   BarChart3,
-  BrainCircuit,
   TrendingUp,
   CheckCircle2,
   AlertTriangle,
@@ -592,7 +591,7 @@ export default function AssessmentAnalyticsPage() {
               <div className="flex items-center justify-between border-b border-border/40 pb-3">
                 <div className="flex items-center gap-2">
                   <div className="p-1.5 rounded-md bg-primary/10 text-primary">
-                    <BrainCircuit className="size-4" />
+                    <Sparkles className="size-4" />
                   </div>
                   <h3 className="text-xs font-semibold text-foreground">AI Narrative & Cohort Insights</h3>
                 </div>

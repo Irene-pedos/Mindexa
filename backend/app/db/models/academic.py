@@ -17,6 +17,7 @@ from app.db.base import AuditedBaseModel, BaseModel, utcnow
 from app.db.enums import (
     AcademicPeriodType, 
     EnrollmentStatus, 
+    LanguageEnum,
     LecturerAssignmentRole, 
     LocationType,
     ClassSectionStatus
@@ -184,6 +185,10 @@ class TeachingWorkspace(AuditedBaseModel, table=True):
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None)
     status: str = Field(default="ACTIVE", max_length=50)
+    language: LanguageEnum = Field(
+        default=LanguageEnum.EN,
+        sa_column=Column(SA_Enum(LanguageEnum), nullable=False, server_default="EN", index=True),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     teaching_assignment: "TeachingAssignment" = Relationship(
@@ -605,6 +610,10 @@ class Course(BaseModel, table=True):
     academic_year: str = Field(nullable=False, max_length=100)
     description: Optional[str] = Field(default=None)
     credit_hours: int = Field(default=3, ge=1)
+    language: LanguageEnum = Field(
+        default=LanguageEnum.EN,
+        sa_column=Column(SA_Enum(LanguageEnum), nullable=False, server_default="EN", index=True),
+    )
     is_active: bool = Field(default=True, nullable=False, index=True)
 
     # ── External Integration ──────────────────────────────────────────────────

@@ -22,7 +22,7 @@ import {
   ArrowRight,
   BookOpen,
   GraduationCap,
-  BrainCircuit,
+  Sparkles,
   ShieldCheck,
   ChevronRight,
   MoreHorizontal,
@@ -153,7 +153,7 @@ export default function LecturerDashboard() {
       </div>
 
       {/* Metrics Overview */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div data-tour="lecturer-dashboard-metrics" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {metrics.map((stat, index) => (
           <Card key={index} className="rounded-xl shadow-none">
             <CardHeader className="border-0 pb-1 pt-3 px-4">
@@ -257,7 +257,7 @@ export default function LecturerDashboard() {
               {
                 label: "AI Faculty Assistant",
                 href: "/lecturer/ai-assistant",
-                icon: BrainCircuit,
+                icon: Sparkles,
                 variant: "outline" as const,
               },
               {

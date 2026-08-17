@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserStatus
 from app.core.exceptions import NotFoundError
-from app.db.enums import LecturerAssignmentRole, UserRole
+from app.db.enums import LanguageEnum, LecturerAssignmentRole, UserRole
 from app.db.models.academic import (
     Course, 
     CourseDepartment, 
@@ -438,6 +438,7 @@ class AdminService:
                 lecturer_name=lecturer_name,
                 student_count=student_count,
                 status="Active" if not c.is_deleted else "Deleted",
+                language=getattr(c, "language", LanguageEnum.EN),
                 academic_year=c.academic_year
             ))
 
@@ -454,6 +455,7 @@ class AdminService:
             name=data.title,
             description=data.description,
             credit_hours=data.credit_hours,
+            language=getattr(data, "language", LanguageEnum.EN) or LanguageEnum.EN,
             is_active=True
         )
         await self.course_repo.create(course)
@@ -557,10 +559,54 @@ class AdminService:
             course.academic_period_id = data.academic_period_id
         if data.academic_year is not None:
             course.academic_year = data.academic_year
+        if data.language is not None:
+            course.language = data.language
 
         await self.db.commit()
         await self.db.refresh(course)
         return course
+
+    async def sync_course_workspace_language(self, course_id: uuid.UUID) -> dict[str, Any]:
+        """Cascade course language down to all its active teaching workspaces and draft assessments."""
+        from sqlalchemy import update
+        from app.db.models.academic import TeachingWorkspace
+        from app.db.models.assessment import Assessment
+        from app.db.enums import AssessmentStatus
+
+        course = await self.course_repo.get_by_id(course_id)
+        if not course:
+            raise NotFoundError("Course", str(course_id))
+
+        # 1. Update workspaces
+        ws_stmt = (
+            update(TeachingWorkspace)
+            .where(TeachingWorkspace.course_id == course_id, TeachingWorkspace.is_deleted == False)
+            .values(language=course.language)
+        )
+        ws_res = await self.db.execute(ws_stmt)
+        updated_workspaces = ws_res.rowcount
+
+        # 2. Update DRAFT assessments
+        ass_stmt = (
+            update(Assessment)
+            .where(
+                Assessment.course_id == course_id,
+                Assessment.status == AssessmentStatus.DRAFT,
+                Assessment.is_deleted == False,
+            )
+            .values(language=course.language)
+        )
+        ass_res = await self.db.execute(ass_stmt)
+        updated_assessments = ass_res.rowcount
+
+        await self.db.commit()
+        return {
+            "course_id": str(course_id),
+            "course_code": course.code,
+            "language": course.language.value if hasattr(course.language, "value") else str(course.language),
+            "updated_workspaces": updated_workspaces,
+            "updated_draft_assessments": updated_assessments,
+        }
 
     async def list_lecturers(self) -> List[UserResponse]:
         """List all active lecturers for selection in course creation."""

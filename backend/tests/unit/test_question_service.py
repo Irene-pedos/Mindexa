@@ -69,3 +69,37 @@ async def test_create_question_marks_question_as_banked():
         source_type="manual",
         source_assessment_id=None,
     )
+
+
+@pytest.mark.asyncio
+async def test_question_repo_create_with_table_and_ai_fields():
+    from app.db.repositories.question_repo import QuestionRepository
+    
+    mock_db = AsyncMock()
+    repo = QuestionRepository(mock_db)
+    
+    user_id = uuid.uuid4()
+    ai_batch_id = uuid.uuid4()
+    ai_log_id = uuid.uuid4()
+    
+    q = await repo.create(
+        created_by_id=user_id,
+        question_type="short_answer",
+        content="Calculate total equity",
+        difficulty="medium",
+        source_type="ai_generated",
+        source_ai_batch_id=ai_batch_id,
+        ai_action_log_id=ai_log_id,
+        question_table_context={"headers": ["Asset", "Value"], "rows": [["Cash", "100"]]},
+        requires_table_answer=True,
+        answer_table_template={"headers": ["Account", "Amount"], "min_rows": 1}
+    )
+    
+    assert q is not None
+    assert q.created_by_id == user_id
+    assert q.source_ai_batch_id == ai_batch_id
+    assert q.ai_action_log_id == ai_log_id
+    assert q.requires_table_answer is True
+    assert q.question_table_context == {"headers": ["Asset", "Value"], "rows": [["Cash", "100"]]}
+    mock_db.add.assert_called_once_with(q)
+    mock_db.flush.assert_called_once()

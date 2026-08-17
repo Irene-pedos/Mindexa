@@ -117,3 +117,45 @@ async def get_ai_action_log_detail(
         raise NotFoundError("AI Action Log not found")
 
     return AIActionLogDetailResponse.model_validate(log)
+
+
+class MarkReviewedRequest(BaseModel):
+    category: str
+    item_id: uuid.UUID
+
+
+@router.get("/language-policy/report")
+async def get_language_policy_audit_report(
+    current_user: AdminUser,
+    include_reviewed: bool = Query(default=False),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Generates a 4-category remediation audit report for any AI usage
+    associated with Kinyarwanda courses/workspaces/assessments.
+    """
+    from app.services.ai_language_audit_service import AILanguageAuditService
+    service = AILanguageAuditService(db)
+    return await service.generate_audit_report(include_reviewed=include_reviewed, limit=limit)
+
+
+@router.post("/language-policy/mark-reviewed")
+async def mark_language_audit_item_reviewed(
+    body: MarkReviewedRequest,
+    current_user: AdminUser,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Marks an audit remediation item as manually reviewed and verified by staff.
+    """
+    from app.services.ai_language_audit_service import AILanguageAuditService
+    service = AILanguageAuditService(db)
+    success = await service.mark_item_manually_reviewed(
+        category=body.category,
+        item_id=body.item_id,
+        reviewer_id=current_user.id,
+    )
+    if not success:
+        raise NotFoundError("Audit item not found or failed to update")
+    return {"success": True, "item_id": str(body.item_id), "category": body.category}

@@ -291,6 +291,16 @@ class GradingService:
             ai_grading_basis = "GENERAL_KNOWLEDGE"
             fallback_reason = "Neither rubric nor matching course materials found in RAG."
 
+        # Check language policy before AI evaluation (Runtime routing)
+        from app.core.ai.language_policy import is_ai_allowed
+        assessment_lang = getattr(assessment, "language", None) if assessment else None
+        if not is_ai_allowed(assessment_lang):
+            item.status = GradingQueueStatus.PENDING_MANUAL
+            item.error_message = "AI grading disabled for Kinyarwanda language content. Routed to manual review."
+            await self.grading_repo.update_queue_item(item)
+            await self.db.commit()
+            return
+
         # 4. Call AI Review Agent
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
@@ -580,6 +590,14 @@ class GradingService:
             ai_grading_basis = "GENERAL_KNOWLEDGE"
             fallback_reason = "Neither rubric nor matching course materials found in RAG."
 
+        # Check language policy before AI re-evaluation
+        from app.core.ai.language_policy import assert_ai_allowed
+        assert_ai_allowed(
+            getattr(assessment, "language", None) if assessment else None,
+            action="reevaluate_response",
+            context={"response_id": str(response_id)},
+        )
+
         # Call AI Review Agent with lecturer feedback
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
@@ -764,6 +782,27 @@ class GradingService:
         if queue_item:
             await self.grading_repo.mark_ai_pre_graded(queue_item.id)
 
+        # Sync AI suggestion fields onto StudentResponse model if exists
+        try:
+            from app.db.models.attempt import StudentResponse
+            from sqlalchemy import update
+            await self.db.execute(
+                update(StudentResponse)
+                .where(StudentResponse.id == response_id)
+                .values(
+                    ai_grade_score=ai_suggested_score,
+                    ai_grade_confidence=ai_confidence,
+                    ai_grade_rationale=ai_rationale,
+                    ai_grade_decision="SUGGESTED",
+                )
+            )
+        except Exception as e:
+            logger.warning(
+                "failed_to_sync_student_response_ai_fields",
+                error=str(e),
+                response_id=str(response_id),
+            )
+
         return existing
 
     # -----------------------------------------------------------------------
@@ -915,6 +954,23 @@ class GradingService:
             review_duration_seconds=review_duration_seconds,
             lecturer_notes=internal_notes,
         )
+
+        # Sync decision onto StudentResponse row if exists
+        try:
+            from app.db.models.attempt import StudentResponse
+            from sqlalchemy import update
+            decision_val = decision.value if hasattr(decision, "value") else str(decision)
+            await self.db.execute(
+                update(StudentResponse)
+                .where(StudentResponse.id == response_id)
+                .values(ai_grade_decision=decision_val)
+            )
+        except Exception as e:
+            logger.warning(
+                "failed_to_sync_student_response_decision",
+                error=str(e),
+                response_id=str(response_id),
+            )
 
         # 3. Only if final, handle completion and result calculation
         if is_final:
@@ -1811,6 +1867,15 @@ class GradingService:
                 for c in rubric.criteria
             ])
 
+        # Check language policy before AI grading
+        from app.core.ai.language_policy import is_ai_allowed
+        from app.db.models.attempt import StudentGroup
+        group = await self.db.get(StudentGroup, group_answer.group_id)
+        if group and group.assessment_id:
+            assessment = await self.assessment_repo.get_by_id_simple(group.assessment_id)
+            if assessment and not is_ai_allowed(getattr(assessment, "language", None)):
+                return
+
         # Call AI Review Agent
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
@@ -1838,6 +1903,10 @@ class GradingService:
             group_answer.answer_content = {}
             
         group_answer.answer_content.update({
+            "ai_grade_score": ai_output.suggested_score,
+            "ai_grade_rationale": ai_output.rationale,
+            "ai_grade_confidence": ai_output.confidence,
+            "ai_grade_decision": "SUGGESTED",
             "ai_suggested_score": ai_output.suggested_score,
             "ai_rationale": ai_output.rationale,
             "ai_confidence": ai_output.confidence,

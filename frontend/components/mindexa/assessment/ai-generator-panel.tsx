@@ -13,7 +13,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import {
-  Loader2, BrainCircuit, AlertCircle, Sparkles, CheckCircle2, XCircle,
+  Loader2, AlertCircle, Sparkles, CheckCircle2, XCircle,
   Clock, Shield, BookOpen, FileText, Edit3, Info, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -26,6 +26,7 @@ import {
   ReviewAIQuestionRequest,
 } from "@/lib/api/ai-generation";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 
 // ─── AI Safety Notice ─────────────────────────────────────────────────────────
 function AISafetyNotice() {
@@ -73,12 +74,13 @@ const DIFFICULTIES = [
   { value: "hard",   label: "Hard",   color: "text-red-600" },
 ];
 
-// ─── Props ────────────────────────────────────────────────────────────────────
 export interface AIGeneratorPanelProps {
   /** ID of the draft assessment — AI will never touch finalized assessments */
   assessmentId?: string;
   /** Teaching workspace ID — used for RAG: retrieves lecturer's uploaded materials */
   workspaceId?: string;
+  /** Language policy for the assessment/workspace (e.g. EN, RW) */
+  language?: string;
   /** Target section ID to assign generated questions to */
   targetSectionId?: string;
   /** Pre-fill subject from assessment metadata */
@@ -153,7 +155,9 @@ function GeneratedQuestionCard({
         {/* Question Text */}
         <div>
           <p className="text-sm font-medium text-muted-foreground mb-1">Question:</p>
-          <p className="text-sm leading-relaxed">{question.parsed_question_text || "⚠️ Could not parse question text."}</p>
+          <div className="text-sm leading-relaxed font-medium text-foreground">
+            {question.parsed_question_text ? renderRichMathText(question.parsed_question_text) : "⚠️ Could not parse question text."}
+          </div>
         </div>
 
         {/* Options */}
@@ -172,7 +176,7 @@ function GeneratedQuestionCard({
                     : <XCircle className="size-3.5 opacity-40" />
                   }
                 </div>
-                <span>{opt.text}</span>
+                <span>{renderRichMathText(opt.text)}</span>
               </div>
             ))}
           </div>
@@ -189,7 +193,7 @@ function GeneratedQuestionCard({
             </CollapsibleTrigger>
             <CollapsibleContent>
               <div className="mt-2 p-3 bg-muted/30 rounded-md text-xs text-muted-foreground leading-relaxed whitespace-pre-wrap">
-                {question.parsed_explanation}
+                {renderRichMathText(question.parsed_explanation)}
               </div>
             </CollapsibleContent>
           </Collapsible>
@@ -239,9 +243,11 @@ function GeneratedQuestionCard({
 }
 
 // ─── Main Panel ───────────────────────────────────────────────────────────────
+// ─── Main Panel ───────────────────────────────────────────────────────────────
 export function AIGeneratorPanel({
   assessmentId,
   workspaceId,
+  language,
   targetSectionId,
   defaultSubject = "",
   defaultTopic = "",
@@ -318,6 +324,26 @@ export function AIGeneratorPanel({
       }
     }, 3000);
   }, [stopPolling]);
+
+  if (language === "RW") {
+    return (
+      <Card className="border-amber-500/30 bg-amber-500/5 rounded-2xl p-6">
+        <div className="flex items-start gap-4">
+          <div className="p-3 rounded-xl bg-amber-500/10 text-amber-600">
+            <AlertCircle className="size-6" />
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold text-sm text-amber-900 dark:text-amber-200">
+              AI Question Generation Disabled for Kinyarwanda
+            </h3>
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              In accordance with institutional academic integrity policies, automated AI question generation is disabled for Kinyarwanda-medium courses and assessments. Please author assessment questions manually using the Question Editor.
+            </p>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   const handleGenerate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -453,7 +479,7 @@ export function AIGeneratorPanel({
       <Card className="shadow-none border border-dashed border-primary/20 bg-muted/5">
         <CardHeader className="pb-4">
           <div className="flex items-center gap-2">
-            <BrainCircuit className="size-5 text-primary" />
+            <Sparkles className="size-5 text-primary" />
             <CardTitle className="text-lg">AI Question Generator</CardTitle>
           </div>
           <CardDescription>

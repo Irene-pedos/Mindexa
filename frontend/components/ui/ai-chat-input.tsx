@@ -44,6 +44,8 @@ interface AIChatInputProps {
   attachments?: Attachment[];
   setAttachments?: React.Dispatch<React.SetStateAction<Attachment[]>>;
   placeholders?: string[];
+  placeholder?: string;
+  disabled?: boolean;
   className?: string;
   onUploadFile?: (file: File) => Promise<{ id?: string; text?: string } | void>;
 }
@@ -61,6 +63,8 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
   attachments: externalAttachments,
   setAttachments: externalSetAttachments,
   placeholders = DEFAULT_PLACEHOLDERS,
+  placeholder,
+  disabled = false,
   className,
   onUploadFile,
 }) => {
@@ -318,12 +322,12 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                fileInputRef.current?.click();
+                if (!disabled) fileInputRef.current?.click();
               }}
-              className="p-2.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              className="p-2.5 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               title="Attach file (PDF, Word, Excel, CSV, Images)"
               type="button"
-              disabled={isReadingFile}
+              disabled={disabled || isReadingFile}
             >
               <Paperclip className={cn("size-4.5", isReadingFile && "animate-spin text-primary")} />
             </button>
@@ -335,42 +339,48 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="flex-1 border-0 outline-none py-2 px-1 text-sm bg-transparent w-full font-normal text-foreground"
+                disabled={disabled}
+                placeholder={disabled ? (placeholder || "AI Assistant disabled for this workspace policy") : undefined}
+                className="flex-1 border-0 outline-none py-2 px-1 text-sm bg-transparent w-full font-normal text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
                 style={{ position: "relative", zIndex: 1 }}
-                onFocus={handleActivate}
+                onFocus={() => {
+                  if (!disabled) handleActivate();
+                }}
               />
-              <div className="absolute left-0 top-0 w-full h-full pointer-events-none flex items-center px-1 py-2">
-                <AnimatePresence mode="wait">
-                  {showPlaceholder && !isActive && !inputValue && (
-                    <motion.span
-                      key={placeholderIndex}
-                      className="absolute left-1 top-1/2 -translate-y-1/2 text-muted-foreground/70 text-xs select-none pointer-events-none"
-                      style={{
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        zIndex: 0,
-                      }}
-                      variants={placeholderContainerVariants}
-                      initial="initial"
-                      animate="animate"
-                      exit="exit"
-                    >
-                      {placeholders[placeholderIndex]
-                        ?.split("")
-                        .map((char, i) => (
-                          <motion.span
-                            key={i}
-                            variants={letterVariants}
-                            style={{ display: "inline-block" }}
-                          >
-                            {char === " " ? "\u00A0" : char}
-                          </motion.span>
-                        ))}
-                    </motion.span>
-                  )}
-                </AnimatePresence>
-              </div>
+              {!disabled && (
+                <div className="absolute left-0 top-0 w-full h-full pointer-events-none flex items-center px-1 py-2">
+                  <AnimatePresence mode="wait">
+                    {showPlaceholder && !isActive && !inputValue && (
+                      <motion.span
+                        key={placeholderIndex}
+                        className="absolute left-1 top-1/2 -translate-y-1/2 text-muted-foreground/70 text-xs select-none pointer-events-none"
+                        style={{
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          zIndex: 0,
+                        }}
+                        variants={placeholderContainerVariants}
+                        initial="initial"
+                        animate="animate"
+                        exit="exit"
+                      >
+                        {placeholders[placeholderIndex]
+                          ?.split("")
+                          .map((char, i) => (
+                            <motion.span
+                              key={i}
+                              variants={letterVariants}
+                              style={{ display: "inline-block" }}
+                            >
+                              {char === " " ? "\u00A0" : char}
+                            </motion.span>
+                          ))}
+                      </motion.span>
+                    )}
+                  </AnimatePresence>
+                </div>
+              )}
             </div>
 
             {/* Stop or Send Action Button */}
@@ -390,12 +400,12 @@ export const AIChatInput: React.FC<AIChatInputProps> = ({
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  handleSend();
+                  if (!disabled) handleSend();
                 }}
-                disabled={!inputValue.trim() && attachments.length === 0}
+                disabled={disabled || (!inputValue.trim() && attachments.length === 0)}
                 className={cn(
                   "p-2.5 rounded-full transition-all font-medium justify-center shadow-xs",
-                  inputValue.trim() || attachments.length > 0
+                  !disabled && (inputValue.trim() || attachments.length > 0)
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
                     : "bg-muted text-muted-foreground/50 cursor-not-allowed"
                 )}

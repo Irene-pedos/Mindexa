@@ -26,6 +26,9 @@ export interface QuestionBankItem {
   bloom_level?: string;
   estimated_time_minutes?: number;
   options: QuestionOption[];
+  question_table_context?: any;
+  requires_table_answer?: boolean;
+  answer_table_template?: any;
   tags?: { id: string; name: string }[];
   created_at: string;
   updated_at?: string;
@@ -52,6 +55,9 @@ export interface QuestionCreateRequest {
   suggested_marks: number;
   estimated_time_minutes?: number;
   options: Omit<QuestionOption, "id">[];
+  question_table_context?: any;
+  requires_table_answer?: boolean;
+  answer_table_template?: any;
   tag_names?: string[];
 }
 

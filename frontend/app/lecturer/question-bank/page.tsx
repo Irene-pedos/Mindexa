@@ -39,10 +39,12 @@ import {
   X,
   CheckCircle2,
   AlertCircle,
-  BrainCircuit,
+  Sparkles,
   Database,
   ArrowRight,
   Upload,
+  Sigma,
+  Table as TableIcon,
 } from "lucide-react";
 import Image from "next/image";
 import {
@@ -58,6 +60,10 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
+import { MathEditorDialog } from "@/components/mindexa/common/math-editor-dialog";
+import { TableEditor } from "@/components/mindexa/assessment/table-editor";
+import { TableContextViewer } from "@/components/mindexa/common/table-context-viewer";
+import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 
 export default function LecturerQuestionBank() {
   const [searchTerm, setSearchTerm] = useState("");
@@ -78,6 +84,59 @@ export default function LecturerQuestionBank() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingId, setFormEditingId] = useState<string | null>(null);
   const [formLoading, setFormLoading] = useState(false);
+  const [showTableStemEditor, setShowTableStemEditor] = useState(false);
+  const [showTableAnswerEditor, setShowTableAnswerEditor] = useState(false);
+
+  // Math Editor Dialog State
+  const [mathDialogOpen, setMathDialogOpen] = useState(false);
+  const [mathTarget, setMathTarget] = useState<{
+    field: "content" | "explanation" | "hint" | "option";
+    optionIndex?: number;
+  } | null>(null);
+
+  const openMathEditor = (
+    field: "content" | "explanation" | "hint" | "option",
+    optionIndex?: number
+  ) => {
+    setMathTarget({ field, optionIndex });
+    setMathDialogOpen(true);
+  };
+
+  const handleInsertMath = (formattedMath: string) => {
+    if (!mathTarget) return;
+    if (mathTarget.field === "content") {
+      setFormData((prev) => ({
+        ...prev,
+        content: prev.content ? `${prev.content} ${formattedMath}` : formattedMath,
+      }));
+    } else if (mathTarget.field === "explanation") {
+      setFormData((prev) => ({
+        ...prev,
+        explanation: prev.explanation ? `${prev.explanation} ${formattedMath}` : formattedMath,
+      }));
+    } else if (mathTarget.field === "hint") {
+      setFormData((prev) => ({
+        ...prev,
+        hint: prev.hint ? `${prev.hint} ${formattedMath}` : formattedMath,
+      }));
+    } else if (mathTarget.field === "option" && mathTarget.optionIndex !== undefined) {
+      const idx = mathTarget.optionIndex;
+      setFormData((prev) => {
+        const nextOpts = [...prev.options];
+        if (nextOpts[idx]) {
+          nextOpts[idx] = {
+            ...nextOpts[idx],
+            option_text: nextOpts[idx].option_text
+              ? `${nextOpts[idx].option_text} ${formattedMath}`
+              : formattedMath,
+          };
+        }
+        return { ...prev, options: nextOpts };
+      });
+    }
+    setMathDialogOpen(false);
+  };
+
   const [formData, setFormData] = useState<QuestionCreateRequest>({
     content: "",
     explanation: "",
@@ -147,6 +206,8 @@ export default function LecturerQuestionBank() {
     setFormLoading(true);
     try {
       const data = await questionApi.getQuestion(id);
+      setShowTableStemEditor(!!data.question_table_context);
+      setShowTableAnswerEditor(!!data.requires_table_answer);
       setFormData({
         content: data.content,
         image_url: data.image_url,
@@ -156,6 +217,9 @@ export default function LecturerQuestionBank() {
         difficulty: data.difficulty.toLowerCase() as any,
         suggested_marks: data.marks,
         course_id: data.course_id,
+        question_table_context: data.question_table_context,
+        requires_table_answer: data.requires_table_answer,
+        answer_table_template: data.answer_table_template,
         options: data.options.map((opt) => ({
           option_text: opt.option_text,
           option_text_right: opt.option_text_right,
@@ -174,6 +238,8 @@ export default function LecturerQuestionBank() {
   const handleAdd = () => {
     setFormEditingId(null);
     setFormOpen(true);
+    setShowTableStemEditor(false);
+    setShowTableAnswerEditor(false);
     setFormData({
       content: "",
       image_url: undefined,
@@ -182,6 +248,9 @@ export default function LecturerQuestionBank() {
       question_type: "mcq",
       difficulty: "medium",
       suggested_marks: 1,
+      question_table_context: undefined,
+      requires_table_answer: false,
+      answer_table_template: undefined,
       options: [
         { option_text: "", is_correct: false, order_index: 1 },
         { option_text: "", is_correct: false, order_index: 2 },
@@ -282,7 +351,7 @@ export default function LecturerQuestionBank() {
   };
 
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div data-tour="lecturer-bank" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       {/* Header Container */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div>
@@ -407,7 +476,7 @@ export default function LecturerQuestionBank() {
                     )}
                     <div className="space-y-1.5 flex-1 min-w-0">
                       <div className="text-xs font-semibold leading-normal text-zinc-800 line-clamp-2">
-                        {q.content}
+                        {renderRichMathText(q.content)}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         <Badge
@@ -525,8 +594,13 @@ export default function LecturerQuestionBank() {
                       </span>
                       <div className="space-y-4">
                         <div className="text-xs font-semibold leading-relaxed p-4 rounded-xl border bg-zinc-50 text-zinc-800">
-                          {previewData.content}
+                          {renderRichMathText(previewData.content)}
                         </div>
+                        {previewData.question_table_context && (
+                          <div className="p-3 border rounded-xl bg-white">
+                            <TableContextViewer data={previewData.question_table_context} />
+                          </div>
+                        )}
                         {previewData.image_url && (
                           <div className="p-1.5 border rounded-xl bg-zinc-50 inline-block shadow-sm overflow-hidden max-w-full">
                             <Image
@@ -569,7 +643,7 @@ export default function LecturerQuestionBank() {
                                 >
                                   {String.fromCharCode(65 + idx)}
                                 </div>
-                                <span className="font-semibold">{opt.option_text}</span>
+                                <span className="font-semibold">{renderRichMathText(opt.option_text)}</span>
                               </div>
                               {opt.is_correct && <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />}
                             </div>
@@ -585,15 +659,15 @@ export default function LecturerQuestionBank() {
                             <h4 className="text-[9px] font-bold flex items-center gap-1.5 mb-1.5 text-primary uppercase tracking-wide">
                               <AlertCircle className="size-3.5" /> Logic Explanation
                             </h4>
-                            <p className="text-xs font-medium text-zinc-600 leading-relaxed italic">
-                              {previewData.explanation}
-                            </p>
+                            <div className="text-xs font-medium text-zinc-600 leading-relaxed italic">
+                              {renderRichMathText(previewData.explanation)}
+                            </div>
                           </div>
                         )}
                         {previewData.hint && (
                           <div className="p-4 rounded-xl bg-amber-50/40 border border-amber-100">
                             <h4 className="text-[9px] font-bold flex items-center gap-1.5 mb-1.5 text-amber-700 uppercase tracking-wide">
-                              <BrainCircuit className="size-3.5" /> Student Guidance Hint
+                              <Sparkles className="size-3.5" /> Student Guidance Hint
                             </h4>
                             <p className="text-xs font-medium text-amber-800 leading-relaxed italic">
                               {previewData.hint}
@@ -653,12 +727,23 @@ export default function LecturerQuestionBank() {
                     <div className="space-y-5">
                       <div className="space-y-4">
                         <div className="space-y-1.5">
-                          <Label htmlFor="content" className="text-xs font-bold text-zinc-700">
-                            Question Prompt
-                          </Label>
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="content" className="text-xs font-bold text-zinc-700">
+                              Question Prompt
+                            </Label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openMathEditor("content")}
+                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                            >
+                              <Sigma className="size-3" /> Insert Math / Formula
+                            </Button>
+                          </div>
                           <Textarea
                             id="content"
-                            placeholder="Type the core question or prompt instruction..."
+                            placeholder="Type the core question or prompt instruction... (LaTeX: $formula$ or $$block$$)"
                             className="min-h-[100px] text-xs font-medium p-3 rounded-lg border-zinc-200 bg-white"
                             value={formData.content}
                             onChange={(e) =>
@@ -666,6 +751,78 @@ export default function LecturerQuestionBank() {
                             }
                             required
                           />
+                        </div>
+
+                        {/* Structured Table Section */}
+                        <div className="space-y-3 p-3.5 border border-zinc-200 rounded-xl bg-zinc-50/50">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <TableIcon className="size-4 text-primary" />
+                              <span className="text-xs font-bold text-zinc-800">
+                                Structured Tables & Datasets
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <Button
+                                type="button"
+                                variant={showTableStemEditor ? "default" : "outline"}
+                                size="sm"
+                                onClick={() => setShowTableStemEditor(!showTableStemEditor)}
+                                className="h-7 text-[10px] font-bold uppercase rounded-lg px-2.5"
+                              >
+                                {formData.question_table_context ? "Edit Reference Table" : "+ Add Reference Table"}
+                              </Button>
+                              {(formData.question_type === "short_answer" || formData.question_type === "essay") && (
+                                <Button
+                                  type="button"
+                                  variant={showTableAnswerEditor ? "default" : "outline"}
+                                  size="sm"
+                                  onClick={() => {
+                                    const nextVal = !formData.requires_table_answer;
+                                    setFormData((prev) => ({ ...prev, requires_table_answer: nextVal }));
+                                    setShowTableAnswerEditor(nextVal);
+                                  }}
+                                  className="h-7 text-[10px] font-bold uppercase rounded-lg px-2.5"
+                                >
+                                  {formData.requires_table_answer ? "✓ Requires Table Answer" : "Require Table Answer"}
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {showTableStemEditor && (
+                            <div className="mt-3 p-3 bg-white border border-zinc-200 rounded-lg space-y-2">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-semibold text-zinc-600">Question Stem Reference Table</span>
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setFormData((prev) => ({ ...prev, question_table_context: undefined }));
+                                    setShowTableStemEditor(false);
+                                  }}
+                                  className="h-6 text-[10px] text-destructive hover:bg-destructive/10"
+                                >
+                                  Remove Table
+                                </Button>
+                              </div>
+                              <TableEditor
+                                initialData={formData.question_table_context}
+                                onChange={(data) => setFormData((prev) => ({ ...prev, question_table_context: data }))}
+                              />
+                            </div>
+                          )}
+
+                          {showTableAnswerEditor && formData.requires_table_answer && (
+                            <div className="mt-3 p-3 bg-white border border-zinc-200 rounded-lg space-y-2">
+                              <span className="text-xs font-semibold text-zinc-600">Student Answer Table Template Grid</span>
+                              <TableEditor
+                                initialData={formData.answer_table_template}
+                                onChange={(data) => setFormData((prev) => ({ ...prev, answer_table_template: data }))}
+                              />
+                            </div>
+                          )}
                         </div>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -728,15 +885,16 @@ export default function LecturerQuestionBank() {
                               onChange={(e) =>
                                 setFormData((prev) => ({
                                   ...prev,
-                                  suggested_marks: Number(e.target.value),
+                                  suggested_marks: parseInt(e.target.value) || 1,
                                 }))
                               }
+                              required
                             />
                           </div>
 
                           <div className="space-y-1.5">
                             <Label htmlFor="course" className="text-xs font-bold text-zinc-700">
-                              Course Assignment
+                              Linked Subject Ledger
                             </Label>
                             <Select
                               value={formData.course_id}
@@ -745,7 +903,7 @@ export default function LecturerQuestionBank() {
                               }
                             >
                               <SelectTrigger id="course" className="h-8.5 rounded-lg border-zinc-200 bg-white text-xs">
-                                <SelectValue placeholder="General Utility" />
+                                <SelectValue placeholder="General (All courses)" />
                               </SelectTrigger>
                               <SelectContent className="rounded-lg shadow-lg">
                                 {courses.map((c) => (
@@ -896,6 +1054,17 @@ export default function LecturerQuestionBank() {
                                   )}
                                 </div>
 
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-6 text-zinc-400 hover:text-primary rounded-lg shrink-0"
+                                  title="Insert Math Formula"
+                                  onClick={() => openMathEditor("option", idx)}
+                                >
+                                  <Sigma className="size-3.5" />
+                                </Button>
+
                                 {formData.question_type !== "true_false" &&
                                   formData.options.length > 1 && (
                                     <Button
@@ -917,9 +1086,20 @@ export default function LecturerQuestionBank() {
                       {/* Explanation and Hints */}
                       <div className="space-y-4 pt-2">
                         <div className="space-y-1.5">
-                          <Label htmlFor="explanation" className="text-xs font-bold text-zinc-700">
-                            Rubric Evaluation Guide
-                          </Label>
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="explanation" className="text-xs font-bold text-zinc-700">
+                              Rubric Evaluation Guide
+                            </Label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openMathEditor("explanation")}
+                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                            >
+                              <Sigma className="size-3" /> Insert Math
+                            </Button>
+                          </div>
                           <Textarea
                             id="explanation"
                             placeholder="Provide details on the correct answer rationale..."
@@ -932,9 +1112,20 @@ export default function LecturerQuestionBank() {
                         </div>
 
                         <div className="space-y-1.5">
-                          <Label htmlFor="hint" className="text-xs font-bold text-zinc-700">
-                            Assistance Hint
-                          </Label>
+                          <div className="flex items-center justify-between">
+                            <Label htmlFor="hint" className="text-xs font-bold text-zinc-700">
+                              Assistance Hint
+                            </Label>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => openMathEditor("hint")}
+                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                            >
+                              <Sigma className="size-3" /> Insert Math
+                            </Button>
+                          </div>
                           <Input
                             id="hint"
                             placeholder="Hint suggestion for students (optional)..."
@@ -982,6 +1173,12 @@ export default function LecturerQuestionBank() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <MathEditorDialog
+        open={mathDialogOpen}
+        onOpenChange={setMathDialogOpen}
+        onInsert={handleInsertMath}
+      />
     </div>
   );
 }

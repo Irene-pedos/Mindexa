@@ -22,6 +22,10 @@ export interface GradeReviewDetails {
   id: string;
   response_id: string;
   score: number | null;
+  ai_grade_score?: number | null;
+  ai_grade_confidence?: number | null;
+  ai_grade_rationale?: string | null;
+  ai_grade_decision?: string | null;
   ai_suggested_score: number | null;
   ai_rationale: string | null;
   ai_confidence: number | null;
@@ -47,6 +51,9 @@ export interface GradeReviewDetails {
   }> | null;
   detected_issues?: string[] | null;
   question_grading_mode?: "AUTO" | "AI_ASSISTED" | "MANUAL" | null;
+  source_citations?: string[] | null;
+  citations?: string[] | null;
+  basis_used?: string | null;
 }
 
 export const aiGradingApi = {

@@ -582,6 +582,14 @@ class BulkAssessmentQuestion(BaseModel):
     computationalType: str | None = None
     caseStudyContext: str | None = None
     is_required: bool | None = True
+    question_table_context: dict | list | None = Field(None, validation_alias="question_table_context")
+    questionTableContext: dict | list | None = Field(None, validation_alias="questionTableContext")
+    requires_table_answer: bool | None = Field(False, validation_alias="requires_table_answer")
+    requiresTableAnswer: bool | None = Field(False, validation_alias="requiresTableAnswer")
+    answer_table_template: dict | list | None = Field(None, validation_alias="answer_table_template")
+    answerTableTemplate: dict | list | None = Field(None, validation_alias="answerTableTemplate")
+
+    model_config = {"populate_by_name": True}
 
     @model_validator(mode="before")
     @classmethod

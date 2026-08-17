@@ -378,30 +378,182 @@ class ResultService:
         return await self._enrich_result_response(result)
 
     async def _enrich_result_response(self, result: AssessmentResult) -> dict:
-        """Add question and answer text to breakdowns for UI review."""
+        """Add question and answer text to breakdowns for UI review with full academic hierarchy."""
+        from sqlalchemy import select
         from app.schemas.result import AssessmentResultResponse
-        from app.db.models.academic import College, Department, Institution
-        from app.db.models.assessment import Assessment
+        from app.db.models.academic import (
+            AcademicPeriod,
+            ClassGroup,
+            ClassSection,
+            College,
+            Course,
+            Department,
+            Institution,
+            Option,
+            StudentEnrollment,
+            TeachingAssignment,
+            TeachingWorkspace,
+        )
+        from app.db.models.assessment import Assessment, AssessmentTargetSection
         
         resp = AssessmentResultResponse.model_validate(result)
         
-        # Load assessment info
+        # 1. Load attempt info
+        attempt = await self.attempt_repo.get_by_id_simple(result.attempt_id)
+        if attempt:
+            resp.submitted_at = attempt.submitted_at
+            resp.started_at = attempt.started_at
+
+        # 2. Load assessment and academic hierarchy
         assessment = await self.db.get(Assessment, result.assessment_id)
+        
+        inst_id: uuid.UUID | None = None
+        college_id: uuid.UUID | None = None
+        dept_id: uuid.UUID | None = None
+        option_id: uuid.UUID | None = None
+        class_section_id: uuid.UUID | None = None
+        academic_period_id: uuid.UUID | None = None
+
         if assessment:
             resp.assessment_title = assessment.title
             resp.academic_year = assessment.academic_year
             resp.course_code = assessment.course_code
             resp.course_name = assessment.course_name
-            if assessment.course:
-                if assessment.course.institution_id:
-                    institution = await self.db.get(Institution, assessment.course.institution_id)
-                    resp.institution_name = institution.name if institution else None
-                if assessment.course.department_id:
-                    department = await self.db.get(Department, assessment.course.department_id)
-                    resp.department_name = department.name if department else None
-                    if department and department.college_id:
-                        college = await self.db.get(College, department.college_id)
-                        resp.college_name = college.name if college else None
+            resp.duration_minutes = assessment.duration_minutes
+            resp.window_start = assessment.window_start
+            resp.window_end = assessment.window_end
+            
+            asmt_type = assessment.assessment_type
+            if hasattr(asmt_type, "value"):
+                asmt_type = asmt_type.value
+            resp.assessment_type = str(asmt_type)
+            
+            if hasattr(assessment, "level") and assessment.level:
+                resp.academic_level = str(assessment.level)
+
+            # Load Course
+            course = None
+            if assessment.course_id:
+                course = await self.db.get(Course, assessment.course_id)
+            elif assessment.course:
+                course = assessment.course
+
+            if course:
+                if not resp.academic_year and course.academic_year:
+                    resp.academic_year = course.academic_year
+                if not resp.course_code:
+                    resp.course_code = course.code
+                if not resp.course_name:
+                    resp.course_name = course.name
+                if not resp.academic_level and hasattr(course, "level") and course.level:
+                    resp.academic_level = str(course.level)
+                if course.institution_id:
+                    inst_id = course.institution_id
+                if course.department_id:
+                    dept_id = course.department_id
+                if course.academic_period_id:
+                    academic_period_id = course.academic_period_id
+
+            # Load Teaching Workspace & Assignment
+            if assessment.teaching_workspace_id:
+                workspace = await self.db.get(TeachingWorkspace, assessment.teaching_workspace_id)
+                if workspace:
+                    if workspace.class_section_id and not class_section_id:
+                        class_section_id = workspace.class_section_id
+                    if workspace.academic_period_id and not academic_period_id:
+                        academic_period_id = workspace.academic_period_id
+                    if workspace.teaching_assignment_id:
+                        assignment = await self.db.get(TeachingAssignment, workspace.teaching_assignment_id)
+                        if assignment:
+                            if assignment.institution_id and not inst_id:
+                                inst_id = assignment.institution_id
+                            if assignment.college_id and not college_id:
+                                college_id = assignment.college_id
+                            if assignment.department_id and not dept_id:
+                                dept_id = assignment.department_id
+                            if assignment.option_id and not option_id:
+                                option_id = assignment.option_id
+                            if assignment.class_section_id and not class_section_id:
+                                class_section_id = assignment.class_section_id
+                            if assignment.academic_period_id and not academic_period_id:
+                                academic_period_id = assignment.academic_period_id
+                            if assignment.academic_year and not resp.academic_year:
+                                resp.academic_year = assignment.academic_year
+
+        # 3. Resolve Target Class Section or Student's Enrollment Section
+        if not class_section_id:
+            try:
+                target_stmt = select(AssessmentTargetSection.class_section_id).where(
+                    AssessmentTargetSection.assessment_id == result.assessment_id
+                )
+                target_section_ids = (await self.db.scalars(target_stmt)).all()
+                if target_section_ids:
+                    enrollment_stmt = select(StudentEnrollment.class_section_id).where(
+                        StudentEnrollment.student_id == result.student_id,
+                        StudentEnrollment.class_section_id.in_(target_section_ids),
+                    )
+                    enrolled_sec = (await self.db.scalars(enrollment_stmt)).first()
+                    class_section_id = enrolled_sec or target_section_ids[0]
+                else:
+                    enrollment_stmt = select(StudentEnrollment.class_section_id).where(
+                        StudentEnrollment.student_id == result.student_id
+                    )
+                    class_section_id = (await self.db.scalars(enrollment_stmt)).first()
+            except Exception:
+                pass
+
+        # 4. Resolve Academic Section, Class Group & Degree Program (Option)
+        if class_section_id:
+            section = await self.db.get(ClassSection, class_section_id)
+            if section:
+                resp.class_name = section.name
+                if section.department_id and not dept_id:
+                    dept_id = section.department_id
+                if section.class_group_id:
+                    cg = await self.db.get(ClassGroup, section.class_group_id)
+                    if cg:
+                        if not resp.academic_level:
+                            resp.academic_level = cg.name if cg.name else (f"Level {cg.level}" if cg.level else None)
+                        if cg.option_id and not option_id:
+                            option_id = cg.option_id
+
+        if option_id:
+            opt = await self.db.get(Option, option_id)
+            if opt:
+                resp.option_name = opt.name
+                if not resp.academic_level and opt.name:
+                    resp.academic_level = opt.name
+                if opt.department_id and not dept_id:
+                    dept_id = opt.department_id
+
+        # 5. Resolve Department, College, Institution & Academic Period
+        if dept_id:
+            dept = await self.db.get(Department, dept_id)
+            if dept:
+                resp.department_name = dept.name
+                if dept.college_id and not college_id:
+                    college_id = dept.college_id
+                if dept.institution_id and not inst_id:
+                    inst_id = dept.institution_id
+
+        if college_id:
+            col = await self.db.get(College, college_id)
+            if col:
+                resp.college_name = col.name
+                resp.school_name = col.name
+                if col.institution_id and not inst_id:
+                    inst_id = col.institution_id
+
+        if inst_id:
+            inst = await self.db.get(Institution, inst_id)
+            if inst:
+                resp.institution_name = inst.name
+                resp.institution_logo_url = inst.logo_url
+
+        if academic_period_id and not resp.academic_year:
+            period = await self.db.get(AcademicPeriod, academic_period_id)
+            if period:
+                resp.academic_year = period.name
 
         # Load all questions and responses for this attempt
         responses = await self.submission_repo.list_responses_for_attempt(result.attempt_id)
@@ -420,6 +572,9 @@ class ResultService:
             bd.question_text = q.content
             bd.image_url = q.image_url
             bd.case_study_context = q.case_study_context
+            bd.question_table_context = q.question_table_context
+            bd.requires_table_answer = bool(q.requires_table_answer)
+            bd.answer_table_template = q.answer_table_template
             
             # Populate section title
             aq = aq_map.get(bd.question_id)
@@ -486,6 +641,26 @@ class ResultService:
             elif raw_q_type in ["ORDERING", "ORDERED_LIST"]:
                 sorted_opts = sorted(q.options, key=lambda o: (o.order_index if o.order_index is not None else 0))
                 bd.correct_answer = " -> ".join([o.content for o in sorted_opts])
+            elif raw_q_type in ["FILL_BLANK", "FILL_BLANKS"]:
+                if hasattr(q, "blanks") and q.blanks:
+                    sorted_blanks = sorted(q.blanks, key=lambda b: (b.blank_index if b.blank_index is not None else 0))
+                    bd.correct_answer = "; ".join([
+                        f"Blank {b.blank_index + 1}: " + " | ".join(b.accepted_answers or [])
+                        for b in sorted_blanks
+                    ])
+                    bd.blanks = [
+                        {
+                            "blank_index": b.blank_index,
+                            "accepted_answers": b.accepted_answers or [],
+                            "case_sensitive": bool(b.case_sensitive),
+                        }
+                        for b in sorted_blanks
+                    ]
+                elif q.options:
+                    sorted_opts = sorted(q.options, key=lambda o: (o.order_index if o.order_index is not None else 0))
+                    bd.correct_answer = "; ".join([
+                        f"Blank {i + 1}: {o.content}" for i, o in enumerate(sorted_opts)
+                    ])
             
             bd.options = [
                 {
