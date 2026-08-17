@@ -129,6 +129,27 @@ export const groupWorkApi = {
       body: JSON.stringify(data),
     }),
 
+  gradeQuestion: (
+    submissionId: string,
+    questionId: string,
+    data: {
+      score: number;
+      feedback?: string;
+      rubric_scores?: any;
+      is_final?: boolean;
+      is_ai_accepted?: boolean;
+    }
+  ) =>
+    apiClient(`/group-work/submissions/${submissionId}/questions/${questionId}/grade`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+
+  triggerQuestionAIReview: (submissionId: string, questionId: string) =>
+    apiClient(`/group-work/submissions/${submissionId}/questions/${questionId}/ai-review`, {
+      method: "POST",
+    }),
+
   releaseResult: (assessmentId: string, submissionId: string) =>
     apiClient(`/group-work/submissions/${submissionId}/release-result?assessment_id=${assessmentId}`, {
       method: "POST",

@@ -153,6 +153,27 @@ class GroupSubmissionRepository:
                 return existing, False
             raise
 
+    async def list_answers(self, submission_id: uuid.UUID) -> list[GroupSubmissionAnswer]:
+        """List all non-deleted answers for a group submission."""
+        result = await self.db.execute(
+            select(GroupSubmissionAnswer).where(
+                GroupSubmissionAnswer.submission_id == submission_id,
+                GroupSubmissionAnswer.is_deleted.is_(False),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def get_answer(self, submission_id: uuid.UUID, question_id: uuid.UUID) -> GroupSubmissionAnswer | None:
+        """Get a single question answer for a group submission."""
+        result = await self.db.execute(
+            select(GroupSubmissionAnswer).where(
+                GroupSubmissionAnswer.submission_id == submission_id,
+                GroupSubmissionAnswer.question_id == question_id,
+                GroupSubmissionAnswer.is_deleted.is_(False),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def add_comment(
         self,
         *,
@@ -414,21 +435,30 @@ class GroupSubmissionRepository:
         *,
         lecturer_id: uuid.UUID | None = None,
         assessment_id: uuid.UUID | None = None,
+        class_id: uuid.UUID | None = None,
         status: GroupSubmissionStatus | None = None,
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[GroupSubmission], int]:
         from app.db.models.assessment import Assessment
 
-        if status is None:
-            status = GroupSubmissionStatus.SUBMITTED
-
         stmt = select(GroupSubmission).join(
             Assessment, Assessment.id == GroupSubmission.assessment_id
         ).where(
-            GroupSubmission.status == status,
             GroupSubmission.is_deleted.is_(False),
         )
+
+        if status is not None:
+            stmt = stmt.where(GroupSubmission.status == status)
+        else:
+            # Default to all active submitted, graded, or appealed group submissions
+            stmt = stmt.where(
+                GroupSubmission.status.in_([
+                    GroupSubmissionStatus.SUBMITTED,
+                    GroupSubmissionStatus.GRADED,
+                    GroupSubmissionStatus.APPEALED,
+                ])
+            )
 
         if lecturer_id:
             stmt = stmt.where(Assessment.created_by_id == lecturer_id)

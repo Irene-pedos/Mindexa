@@ -1865,10 +1865,20 @@ class GradingService:
 
         # Check language policy before AI grading
         from app.core.ai.language_policy import is_ai_allowed
-        from app.db.models.attempt import StudentGroup
-        group = await self.db.get(StudentGroup, group_answer.group_id)
-        if group and group.assessment_id:
-            assessment = await self.assessment_repo.get_by_id_simple(group.assessment_id)
+        from app.db.models.attempt import GroupSubmission, StudentGroup
+
+        assessment_id = None
+        if hasattr(group_answer, "submission_id") and group_answer.submission_id:
+            sub = await self.db.get(GroupSubmission, group_answer.submission_id)
+            if sub:
+                assessment_id = sub.assessment_id
+        elif hasattr(group_answer, "group_id") and getattr(group_answer, "group_id", None):
+            group = await self.db.get(StudentGroup, group_answer.group_id)
+            if group:
+                assessment_id = group.assessment_id
+
+        if assessment_id:
+            assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
             if assessment and not is_ai_allowed(getattr(assessment, "language", None)):
                 return
 

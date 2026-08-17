@@ -156,3 +156,122 @@ class TestGroupGradingFlow:
         # Check database
         await db.refresh(submission)
         assert submission.result_released_at is not None
+
+    async def test_lecturer_fetches_group_submission_workspace(self, client: AsyncClient, db, make_auth_headers):
+        """Verify that a lecturer can fetch a group submission workspace for grading."""
+        assessment, group, submission, lecturer = await self._setup_data(db)
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+
+        response = await client.get(
+            f"/api/v1/grading/group-submission/{submission.id}",
+            headers=headers
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["submission_id"] == str(submission.id)
+        assert data["group_name"] == "Grading Team"
+        assert "questions" in data
+        assert "answers" in data
+
+    async def test_lecturer_grades_single_question_in_group_work(self, client: AsyncClient, db, make_auth_headers):
+        """Verify that a lecturer can score a single question in group SpeedGrader."""
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        # Create a question and link to assessment
+        q = Question(
+            content="Discuss the role of ACID properties.",
+            question_type=QuestionType.ESSAY,
+            marks=20,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq); await db.commit()
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+
+        payload = {
+            "score": 18.5,
+            "feedback": "Great explanation of Isolation and Durability.",
+            "is_final": True,
+        }
+
+        response = await client.put(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/grade",
+            json=payload,
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        ans_data = response.json()
+        assert ans_data["score"] == 18.5
+        assert ans_data["feedback"] == "Great explanation of Isolation and Durability."
+        assert ans_data["is_final"] is True
+
+    async def test_lecturer_triggers_ai_review_for_group_question(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
+        """Verify that a lecturer can trigger AI review on an open-ended group question."""
+        from unittest.mock import AsyncMock, MagicMock
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from app.agents.review_agent import ReviewAgentOutput
+        from app.agents.feedback_agent import FeedbackAgentOutput
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        # Create a question and existing group answer
+        q = Question(
+            content="Discuss ACID properties.",
+            question_type=QuestionType.ESSAY,
+            marks=10,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq)
+        g_ans = GroupSubmissionAnswer(
+            submission_id=submission.id,
+            question_id=q.id,
+            answer_content={"text": "Atomicity ensures all or nothing."},
+        )
+        db.add(g_ans)
+        await db.commit()
+
+        # Mock AI ReviewAgent and FeedbackAgent
+        mock_review = AsyncMock(return_value=(
+            ReviewAgentOutput(
+                suggested_score=9.0,
+                confidence=0.92,
+                rationale="Comprehensive and accurate explanation.",
+                is_correct=True,
+                criteria_scores=[],
+            ),
+            "raw completion text",
+        ))
+        mock_feedback = AsyncMock(return_value=FeedbackAgentOutput(
+            draft_feedback="Excellent explanation of database transaction principles.",
+            strengths=["Clear concise definition"],
+            areas_for_improvement=[],
+            suggestions=[],
+        ))
+
+        monkeypatch.setattr("app.agents.review_agent.ReviewAgent.review_response", mock_review)
+        monkeypatch.setattr("app.agents.feedback_agent.FeedbackAgent.draft_feedback", mock_feedback)
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+
+        response = await client.post(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/ai-review",
+            headers=headers,
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["ai_grade_score"] == 9.0
+        assert data["ai_grade_confidence"] == 0.92
+        assert data["ai_feedback_draft"] == "Excellent explanation of database transaction principles."
+

@@ -17,6 +17,7 @@ from app.schemas.group_work import (
     AutoGenerateGroupsRequest,
     CreateGroupAppealRequest,
     FinalizeGroupSubmissionRequest,
+    GradeGroupQuestionRequest,
     GroupCsvImportRequest,
     GroupCsvImportResponse,
     GroupWorkspaceResponse,
@@ -179,6 +180,24 @@ async def get_workspace(
         assessment_id=assessment_id,
         student_id=current_user.id,
     )
+
+
+@router.get(
+    "/submissions/{submission_id}/workspace",
+    response_model=GroupWorkspaceResponse,
+    summary="Get the full group workspace for a submission",
+)
+async def get_submission_workspace(
+    submission_id: uuid.UUID,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupWorkspaceResponse:
+    svc = _service(db)
+    return await svc.get_submission_workspace_for_lecturer(
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
 
 
 @router.put(
@@ -434,3 +453,47 @@ async def assign_reassessment(
     )
     await db.commit()
     return reassessment_id
+
+
+@router.put(
+    "/submissions/{submission_id}/questions/{question_id}/grade",
+    response_model=GroupSubmissionAnswerResponse,
+    summary="Grade or save draft for a single question in group work",
+)
+async def grade_submission_question(
+    submission_id: uuid.UUID,
+    question_id: uuid.UUID,
+    body: GradeGroupQuestionRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupSubmissionAnswerResponse:
+    svc = _service(db)
+    result = await svc.grade_submission_question(
+        submission_id=submission_id,
+        question_id=question_id,
+        data=body,
+        current_user=current_user,
+    )
+    await db.commit()
+    return result
+
+
+@router.post(
+    "/submissions/{submission_id}/questions/{question_id}/ai-review",
+    response_model=GroupSubmissionAnswerResponse,
+    summary="Trigger on-demand AI review for a group submission question",
+)
+async def trigger_question_ai_review(
+    submission_id: uuid.UUID,
+    question_id: uuid.UUID,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupSubmissionAnswerResponse:
+    svc = _service(db)
+    result = await svc.trigger_ai_review_for_group_question(
+        submission_id=submission_id,
+        question_id=question_id,
+        current_user=current_user,
+    )
+    await db.commit()
+    return result

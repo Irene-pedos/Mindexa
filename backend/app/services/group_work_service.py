@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.constants import UserRole
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from app.core.logger import get_logger
 from app.db.enums import (
     GroupActivityType,
     GroupAppealStatus,
@@ -18,15 +19,19 @@ from app.db.enums import (
     GroupSubmissionStatus,
     NotificationType,
     QuestionDistributionMode,
+    QuestionType,
     StudentGroupStatus,
 )
+from app.db.models.attempt import GroupSubmissionAnswer
 from app.db.models.auth import User, UserProfile
+from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.group_appeal_repo import GroupAppealRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.group_submission_repo import GroupSubmissionRepository
 from app.db.repositories.notification_repo import NotificationRepository
+from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.services.result_service import _compute_letter_grade
 from app.schemas.group_work import (
@@ -36,6 +41,7 @@ from app.schemas.group_work import (
     AutoGenerateGroupsRequest,
     CreateGroupAppealRequest,
     FinalizeGroupSubmissionRequest,
+    GradeGroupQuestionRequest,
     GroupCsvImportRequest,
     GroupCsvImportResponse,
     GroupWorkspaceAssessmentResponse,
@@ -58,6 +64,8 @@ from app.schemas.group_work import (
     StudentGroupResponse,
 )
 
+logger = get_logger("mindexa.group_work_service")
+
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
@@ -73,6 +81,7 @@ class GroupWorkService:
         self.notification_repo = NotificationRepository(db)
         self.result_repo = ResultRepository(db)
         self.attempt_repo = AttemptRepository(db)
+        self.question_repo = QuestionRepository(db)
 
     def _assert_can_edit(self, assessment, current_user: User) -> None:
         if current_user.role == UserRole.ADMIN.value:
@@ -633,6 +642,19 @@ class GroupWorkService:
             activity_type=GroupActivityType.SUBMISSION_FINALIZED,
         )
 
+        # ── Auto-grade deterministic closed questions immediately ──
+        try:
+            await self.process_auto_grading_for_submission(submission_id)
+        except Exception as e:
+            logger.warning("Failed auto-grading for group submission %s: %s", str(submission_id), str(e))
+
+        # ── Queue background AI grading for open-ended questions ──
+        try:
+            from app.workers.tasks.grading import trigger_ai_grading_for_group_submission
+            trigger_ai_grading_for_group_submission.delay(str(submission_id))
+        except Exception as e:
+            logger.warning("Could not enqueue Celery AI grading task for group submission %s: %s", str(submission_id), str(e))
+
         # Notify lecturer
         if assessment.created_by_id:
             await self.notification_repo.create(
@@ -868,42 +890,68 @@ class GroupWorkService:
     async def get_grading_queue(
         self,
         *,
-        lecturer_id: uuid.UUID,
+        lecturer_id: uuid.UUID | None = None,
         assessment_id: uuid.UUID | None = None,
+        class_id: uuid.UUID | None = None,
+        status: str | None = None,
         page: int = 1,
         page_size: int = 30,
     ) -> tuple[list[GroupSubmissionSummary], int]:
         """Fetch group submissions that need grading for a lecturer."""
         from app.db.enums import GroupSubmissionStatus, GroupAppealStatus, GroupApprovalStatus
-        from app.schemas.grading import GroupSubmissionSummary
+        from app.schemas.grading import GroupSubmissionSummary, GroupMemberSummary
+
+        status_enum = None
+        if status and status.upper() != "ALL":
+            try:
+                status_enum = GroupSubmissionStatus(status.upper())
+            except ValueError:
+                pass
 
         items, total = await self.submission_repo.get_grading_queue(
             lecturer_id=lecturer_id,
             assessment_id=assessment_id,
-            status=GroupSubmissionStatus.SUBMITTED,
+            class_id=class_id,
+            status=status_enum,
             page=page,
             page_size=page_size,
         )
 
+        # Collect student IDs from all groups to fetch user profiles in one batch
+        all_student_ids: list[uuid.UUID] = []
+        for item in items:
+            if item.group and hasattr(item.group, "members") and item.group.members:
+                for m in item.group.members:
+                    if not m.is_deleted:
+                        all_student_ids.append(m.student_id)
+
+        profiles = await self._get_user_profiles(all_student_ids)
+
         summaries = []
         for item in items:
-            # member_count from group relationship
-            member_count = 0
-            if item.group:
-                # We need to make sure members are loaded. 
-                # Our repo uses selectinload for assessment and group, 
-                # but we might need members of that group too.
-                # Since we don't have nested selectinload in the repo method yet,
-                # let's just count them if they are loaded or return 0.
-                member_count = len(item.group.members) if hasattr(item.group, "members") else 0
-            
-            has_active_appeal = any(
-                a.status == GroupAppealStatus.PENDING for a in item.appeals
-            ) if hasattr(item, "appeals") else False
+            members_list: list[GroupMemberSummary] = []
+            if item.group and hasattr(item.group, "members") and item.group.members:
+                approval_map = {
+                    appr.student_id: (appr.status.value if hasattr(appr.status, "value") else str(appr.status))
+                    for appr in (item.approvals or [])
+                }
+                for m in item.group.members:
+                    if not m.is_deleted:
+                        members_list.append(
+                            GroupMemberSummary(
+                                student_id=m.student_id,
+                                student_name=profiles.get(m.student_id, str(m.student_id)),
+                                is_leader=m.is_leader,
+                                approval_status=approval_map.get(m.student_id, "PENDING"),
+                            )
+                        )
 
-            approved_member_count = 0
-            if hasattr(item, "approvals") and item.approvals:
-                approved_member_count = sum(1 for appr in item.approvals if appr.status == GroupApprovalStatus.APPROVED)
+            member_count = len(members_list)
+            approved_member_count = sum(1 for m in members_list if m.approval_status == "APPROVED")
+
+            has_active_appeal = any(
+                a.status == GroupAppealStatus.PENDING for a in (item.appeals or [])
+            )
 
             summaries.append(
                 GroupSubmissionSummary(
@@ -914,15 +962,120 @@ class GroupWorkService:
                     assessment_title=item.assessment.title if item.assessment else "Unknown Assessment",
                     member_count=member_count,
                     approved_member_count=approved_member_count,
-                    status=item.status.value,
+                    members=members_list,
+                    status=item.status.value if hasattr(item.status, "value") else str(item.status),
                     score=item.total_score,
                     max_score=item.max_score,
+                    feedback=item.feedback,
                     submitted_at=item.submitted_at,
+                    graded_at=item.graded_at,
                     has_active_appeal=has_active_appeal,
                 )
             )
 
         return summaries, total
+
+    async def get_submission_workspace_for_lecturer(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        current_user: User,
+    ) -> GroupWorkspaceResponse:
+        """Fetch the full workspace for a group submission so a lecturer can grade it."""
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.", code="ASSESSMENT_NOT_FOUND")
+
+        group = await self.group_repo.get_by_id(submission.group_id, include_members=True)
+        if not group:
+            raise NotFoundError("Student group not found.", code="GROUP_NOT_FOUND")
+
+        materials = await self.submission_repo.list_materials(assessment_id=assessment.id, group_id=group.id)
+        answers = submission.answers or []
+        comments = submission.comments or []
+        approvals = submission.approvals or []
+        activity = submission.activity_logs or []
+        active_member_ids = await self.submission_repo.list_active_member_ids(submission.id)
+        appeal = await self.appeal_repo.get_active_by_submission(submission.id)
+        questions = await self._list_workspace_questions(assessment, group.id)
+        profiles = await self._get_user_profiles([member.student_id for member in group.members if not member.is_deleted])
+        approval_map = {approval.student_id: approval.status for approval in approvals}
+        participation_map: dict[uuid.UUID, int] = {}
+        question_title_map = {str(question.id): question.text for question in questions}
+
+        for entry in activity:
+            participation_map[entry.student_id] = participation_map.get(entry.student_id, 0) + 1
+
+        activity_responses = [
+            GroupActivityLogResponse(
+                id=item.id,
+                submission_id=item.submission_id,
+                student_id=item.student_id,
+                student_name=profiles.get(item.student_id, str(item.student_id)),
+                activity_type=item.activity_type,
+                question_id=item.question_id,
+                metadata_json=item.metadata_json,
+                details={"question_title": question_title_map.get(str(item.question_id))} if item.question_id else None,
+                created_at=item.created_at,
+            )
+            for item in activity
+        ]
+
+        return GroupWorkspaceResponse(
+            assessment_id=assessment.id,
+            group=await self._serialize_group(group),
+            group_name=group.name,
+            assessment=await self._serialize_workspace_assessment(assessment),
+            submission_id=submission.id,
+            submission_status=submission.status,
+            question_distribution_mode=assessment.question_distribution_mode,
+            questions=questions,
+            members=[
+                GroupWorkspaceMemberResponse(
+                    student_id=member.student_id,
+                    student_name=profiles.get(member.student_id, str(member.student_id)),
+                    group_role=member.group_role,
+                    is_leader=member.is_leader,
+                    participation_count=participation_map.get(member.student_id, 0),
+                    approval_status=approval_map.get(member.student_id, GroupApprovalStatus.PENDING),
+                    is_online=False,
+                )
+                for member in group.members
+                if not member.is_deleted
+            ],
+            materials=[GroupAssessmentMaterialResponse.model_validate(item) for item in materials],
+            answers=[
+                self._serialize_submission_answer(item, profiles)
+                for item in answers
+            ],
+            comments=[
+                GroupSubmissionCommentResponse(
+                    id=item.id,
+                    submission_id=item.submission_id,
+                    question_id=item.question_id,
+                    author_id=item.author_id,
+                    student_id=item.author_id,
+                    student_name=profiles.get(item.author_id, str(item.author_id)),
+                    body=item.body,
+                    created_at=item.created_at,
+                )
+                for item in comments
+            ],
+            approvals=[GroupSubmissionApprovalResponse.model_validate(item) for item in approvals],
+            activity_log=activity_responses,
+            activities=activity_responses,
+            active_member_ids=active_member_ids,
+            can_request_approval=False,
+            can_submit=False,
+            appeal=GroupAppealResponse.model_validate(appeal) if appeal else None,
+            total_score=submission.total_score,
+            feedback=submission.feedback,
+            member_overrides=submission.member_overrides,
+        )
 
     async def grade_group_submission(
         self,
@@ -1183,23 +1336,454 @@ class GroupWorkService:
         for aq in assessment_questions:
             if not aq.question:
                 continue
+            q = aq.question
+            raw_type = q.question_type.value if hasattr(q.question_type, "value") else str(q.question_type)
+            
+            # Fetch rubric if attached
+            rubric_data = None
+            if q.rubric_id:
+                rubric_obj = await self.assessment_repo.get_rubric_for_question(q.id)
+                if rubric_obj:
+                    rubric_data = {
+                        "id": str(rubric_obj.id),
+                        "title": rubric_obj.title,
+                        "description": rubric_obj.description,
+                        "criteria": [
+                            {
+                                "id": str(c.id),
+                                "title": c.name,
+                                "name": c.name,
+                                "description": c.description,
+                                "max_marks": c.weight,
+                                "weight": c.weight,
+                                "levels": [
+                                    {
+                                        "id": str(lvl.id),
+                                        "title": lvl.name,
+                                        "name": lvl.name,
+                                        "description": lvl.description,
+                                        "marks": lvl.score,
+                                        "score": lvl.score,
+                                    }
+                                    for lvl in getattr(c, "levels", []) or []
+                                ],
+                            }
+                            for c in getattr(rubric_obj, "criteria", []) or []
+                        ],
+                    }
+
+            # Fetch blanks if fill_blank
+            blanks_data = None
+            if raw_type in ("FILL_BLANK", "FILL_BLANKS", "fillblank"):
+                blanks_list = await self.question_repo.list_blanks(q.id)
+                if blanks_list:
+                    blanks_data = [
+                        {
+                            "id": str(b.id),
+                            "blank_index": b.blank_index,
+                            "accepted_answers": b.accepted_answers,
+                            "case_sensitive": b.case_sensitive,
+                        }
+                        for b in blanks_list
+                    ]
+
             questions.append(
                 GroupWorkspaceQuestionResponse(
-                    id=aq.question.id,
-                    text=aq.question.content,
-                    type=aq.question.question_type.value,
-                    marks=aq.marks_override or aq.question.marks,
+                    id=q.id,
+                    text=q.content,
+                    content=q.content,
+                    type=raw_type,
+                    question_type=raw_type,
+                    marks=aq.marks_override or q.marks,
                     order_index=aq.order_index,
                     options=[
                         GroupWorkspaceQuestionOptionResponse(
                             id=option.id,
                             text=option.content,
                         )
-                        for option in (aq.question.options or [])
+                        for option in (q.options or [])
                     ],
+                    case_study_context=getattr(q, "case_study_context", None),
+                    question_table_context=getattr(q, "question_table_context", None),
+                    image_url=getattr(q, "image_url", None),
+                    image_alt_text=getattr(q, "image_alt_text", None),
+                    rubric=rubric_data,
+                    blanks=blanks_data,
                 )
             )
         return questions
+
+    def _serialize_submission_answer(
+        self,
+        item: GroupSubmissionAnswer,
+        profiles: dict[uuid.UUID, str],
+    ) -> GroupSubmissionAnswerResponse:
+        content = dict(item.answer_content or {})
+        return GroupSubmissionAnswerResponse(
+            id=item.id,
+            question_id=item.question_id,
+            answer_content=content,
+            notes_content=item.notes_content,
+            last_edited_by_id=item.last_edited_by_id,
+            last_edited_at=item.last_edited_at,
+            last_modified_by_id=item.last_edited_by_id,
+            last_modified_by_name=profiles.get(item.last_edited_by_id) if item.last_edited_by_id else None,
+            last_modified_at=item.last_edited_at,
+            score=content.get("score"),
+            max_score=content.get("max_score"),
+            feedback=content.get("feedback"),
+            is_final=bool(content.get("is_final", False)),
+            is_auto_graded=bool(content.get("is_auto_graded", False)),
+            auto_grade_score=content.get("auto_grade_score"),
+            auto_grade_is_correct=content.get("auto_grade_is_correct"),
+            ai_grade_score=content.get("ai_grade_score") or content.get("ai_suggested_score"),
+            ai_grade_confidence=content.get("ai_grade_confidence") or content.get("ai_confidence"),
+            ai_grade_rationale=content.get("ai_grade_rationale") or content.get("ai_rationale"),
+            ai_grade_breakdown=content.get("ai_grade_breakdown"),
+            ai_feedback_draft=content.get("ai_feedback_draft"),
+            ai_feedback_strengths=content.get("ai_feedback_strengths"),
+            ai_feedback_improvements=content.get("ai_feedback_improvements"),
+            ai_feedback_suggestions=content.get("ai_feedback_suggestions"),
+            ai_grade_decision=content.get("ai_grade_decision"),
+            rubric_scores=content.get("rubric_scores"),
+        )
+
+    async def _compute_auto_score_for_group_answer(
+        self,
+        *,
+        answer_dict: dict[str, Any],
+        question: Question,
+        max_score: float,
+    ) -> tuple[float, bool]:
+        """
+        Evaluate auto-gradable closed questions (MCQ, TRUE_FALSE, ORDERING, MATCHING, FILL_BLANK)
+        from GroupSubmissionAnswer.answer_content against Question options/blanks.
+        """
+        options = await self.question_repo.list_options(question.id)
+        raw_type = (
+            question.question_type.value
+            if hasattr(question.question_type, "value")
+            else str(question.question_type)
+        )
+        try:
+            q_type = QuestionType(raw_type)
+        except Exception:
+            return 0.0, False
+
+        # ── MCQ ─────────────────────────────────────────────────────────────
+        if q_type == QuestionType.MCQ:
+            correct_ids = {str(o.id) for o in options if o.is_correct}
+            raw_ids = answer_dict.get("selected_option_ids") or []
+            if not raw_ids and answer_dict.get("selected_option_id"):
+                raw_ids = [answer_dict["selected_option_id"]]
+            student_ids = {str(i) for i in raw_ids}
+            is_correct = student_ids == correct_ids and bool(correct_ids)
+            return (max_score if is_correct else 0.0), is_correct
+
+        # ── TRUE/FALSE ───────────────────────────────────────────────────────
+        if q_type == QuestionType.TRUE_FALSE:
+            correct = next((o for o in options if o.is_correct), None)
+            raw_ids = answer_dict.get("selected_option_ids") or []
+            if not raw_ids and answer_dict.get("selected_option_id"):
+                raw_ids = [answer_dict["selected_option_id"]]
+            is_correct = bool(correct) and len(raw_ids) == 1 and str(raw_ids[0]) == str(correct.id)
+            return (max_score if is_correct else 0.0), is_correct
+
+        # ── ORDERING ────────────────────────────────────────────────────────
+        if q_type == QuestionType.ORDERING:
+            correct_order = [str(o.id) for o in sorted(options, key=lambda o: o.order_index)]
+            raw_order = answer_dict.get("ordered_option_ids") or answer_dict.get("text") or []
+            if isinstance(raw_order, str):
+                try:
+                    import json
+                    raw_order = json.loads(raw_order)
+                except Exception:
+                    raw_order = [raw_order]
+            student_order = [str(i) for i in raw_order]
+            if not correct_order:
+                return 0.0, False
+            if student_order == correct_order:
+                return max_score, True
+            correct_positions = sum(
+                1 for s, c in zip(student_order, correct_order) if s == c
+            )
+            score = round((correct_positions / len(correct_order)) * max_score, 2)
+            return score, score == max_score
+
+        # ── MATCHING ────────────────────────────────────────────────────────
+        if q_type == QuestionType.MATCHING:
+            pairs = answer_dict.get("match_pairs_json") or {}
+            correct_map = {str(o.id): o.match_value for o in options if o.match_value}
+            if not correct_map:
+                return 0.0, False
+            correct_count = sum(
+                1 for k, v in pairs.items()
+                if k in correct_map and correct_map[k] == v
+            )
+            score = round((correct_count / len(correct_map)) * max_score, 2)
+            return score, score == max_score
+
+        # ── FILL_BLANK ───────────────────────────────────────────────────────
+        if q_type == QuestionType.FILL_BLANK:
+            blanks = await self.question_repo.list_blanks(question.id)
+            if not blanks:
+                return 0.0, False
+            student_answers = answer_dict.get("fill_blank_answers") or {}
+            correct_count = 0
+            for blank in blanks:
+                student_val = str(student_answers.get(str(blank.blank_index), "")).strip()
+                accepted = blank.accepted_answers or []
+                if blank.case_sensitive:
+                    match = student_val in accepted
+                else:
+                    match = student_val.lower() in [a.lower() for a in accepted]
+                if match:
+                    correct_count += 1
+            score = round((correct_count / len(blanks)) * max_score, 2)
+            return score, score == max_score
+
+        return 0.0, False
+
+    async def process_auto_grading_for_submission(self, submission_id: uuid.UUID) -> dict[str, Any]:
+        """
+        Immediately auto-grades closed questions and flags open questions for AI processing.
+        """
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            return {"error": "Submission not found"}
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            return {"error": "Assessment not found"}
+
+        if assessment.question_distribution_mode == QuestionDistributionMode.PER_GROUP:
+            aq_rows = await self.assessment_repo.list_assessment_questions_for_group(assessment.id, submission.group_id)
+        else:
+            aq_rows = await self.assessment_repo.list_assessment_questions(assessment.id)
+
+        answers_map = {ans.question_id: ans for ans in (submission.answers or [])}
+        auto_count = 0
+        open_count = 0
+
+        for aq in aq_rows:
+            if not aq.question:
+                continue
+            question = aq.question
+            max_score = float(aq.marks_override if aq.marks_override is not None else question.marks)
+            raw_type = (
+                question.question_type.value
+                if hasattr(question.question_type, "value")
+                else str(question.question_type)
+            )
+            try:
+                q_type = QuestionType(raw_type)
+            except Exception:
+                q_type = QuestionType.SHORT_ANSWER
+
+            ans = answers_map.get(question.id)
+            if not ans:
+                editor_uuid = submission.submitted_by_id or submission.requested_by_id or uuid.UUID(int=0)
+                ans, _ = await self.submission_repo.upsert_answer(
+                    submission_id=submission.id,
+                    question_id=question.id,
+                    editor_id=editor_uuid,
+                    answer_content={"is_skipped": True},
+                    notes_content=None,
+                )
+
+            content = dict(ans.answer_content or {})
+            if q_type.is_auto_gradable:
+                score, is_correct = await self._compute_auto_score_for_group_answer(
+                    answer_dict=content,
+                    question=question,
+                    max_score=max_score,
+                )
+                content.update({
+                    "score": score,
+                    "max_score": max_score,
+                    "auto_grade_score": score,
+                    "auto_grade_is_correct": is_correct,
+                    "is_auto_graded": True,
+                    "is_final": True,
+                })
+                ans.answer_content = content
+                self.db.add(ans)
+                auto_count += 1
+            elif q_type.is_open_ended:
+                content.update({
+                    "max_score": max_score,
+                    "ai_grade_decision": "PENDING",
+                })
+                ans.answer_content = content
+                self.db.add(ans)
+                open_count += 1
+
+        await self.db.flush()
+        return {"auto_count": auto_count, "open_count": open_count}
+
+    async def process_ai_grading_for_submission(
+        self,
+        submission_id: uuid.UUID,
+        grading_service: Any = None,
+    ) -> dict[str, Any]:
+        """
+        Background job to evaluate open-ended questions using AI Review Agent and Feedback Agent.
+        """
+        from app.services.grading_service import GradingService
+        if grading_service is None:
+            grading_service = GradingService(self.db)
+
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            return {"error": "Submission not found"}
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            return {"error": "Assessment not found"}
+
+        answers = submission.answers or []
+        ai_processed = 0
+
+        for ans in answers:
+            question = await self.question_repo.get_by_id_simple(ans.question_id)
+            if not question:
+                continue
+            raw_type = (
+                question.question_type.value
+                if hasattr(question.question_type, "value")
+                else str(question.question_type)
+            )
+            try:
+                q_type = QuestionType(raw_type)
+            except Exception:
+                q_type = QuestionType.SHORT_ANSWER
+
+            if not q_type.is_open_ended:
+                continue
+
+            content = dict(ans.answer_content or {})
+            if content.get("is_skipped"):
+                content.update({
+                    "score": 0.0,
+                    "max_score": float(question.marks),
+                    "ai_grade_score": 0.0,
+                    "ai_grade_confidence": 1.0,
+                    "ai_grade_rationale": "No answer submitted for this question.",
+                    "ai_grade_decision": "SUGGESTED",
+                })
+                ans.answer_content = content
+                self.db.add(ans)
+                ai_processed += 1
+                continue
+
+            try:
+                await grading_service.process_ai_group_answer(ans)
+                ai_processed += 1
+            except Exception as e:
+                logger.warning("Failed AI review for group answer %s: %s", str(ans.id), str(e))
+
+        await self.db.flush()
+        return {"processed": ai_processed, "submission_id": str(submission_id)}
+
+    async def grade_submission_question(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        question_id: uuid.UUID,
+        data: GradeGroupQuestionRequest,
+        current_user: User,
+    ) -> GroupSubmissionAnswerResponse:
+        """
+        Grade or save draft evaluation for a single question in a group submission.
+        """
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.", code="ASSESSMENT_NOT_FOUND")
+        self._assert_can_edit(assessment, current_user)
+
+        ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
+        if not ans:
+            ans, _ = await self.submission_repo.upsert_answer(
+                submission_id=submission_id,
+                question_id=question_id,
+                editor_id=current_user.id,
+                answer_content={},
+                notes_content=None,
+            )
+
+        content = dict(ans.answer_content or {})
+        content.update({
+            "score": data.score,
+            "feedback": data.feedback,
+            "rubric_scores": data.rubric_scores,
+            "is_final": data.is_final,
+            "is_ai_accepted": data.is_ai_accepted,
+            "graded_by_id": str(current_user.id),
+            "graded_at": _utcnow().isoformat(),
+        })
+        ans.answer_content = content
+        ans.last_edited_by_id = current_user.id
+        ans.last_edited_at = _utcnow()
+        self.db.add(ans)
+        await self.db.flush()
+
+        # Recalculate total score across all questions in the submission
+        all_answers = await self.submission_repo.list_answers(submission_id)
+        total_score = 0.0
+        all_final = True
+        for a in all_answers:
+            c = a.answer_content or {}
+            s = c.get("score")
+            if s is not None:
+                total_score += float(s)
+            if not c.get("is_final", False):
+                all_final = False
+
+        submission.total_score = total_score
+        if data.is_final and all_final:
+            submission.status = GroupSubmissionStatus.GRADED
+            submission.graded_at = _utcnow()
+            submission.graded_by_id = current_user.id
+        self.db.add(submission)
+        await self.db.flush()
+
+        profiles = await self._get_user_profiles([current_user.id])
+        return self._serialize_submission_answer(ans, profiles)
+
+    async def trigger_ai_review_for_group_question(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        question_id: uuid.UUID,
+        current_user: User,
+    ) -> GroupSubmissionAnswerResponse:
+        """
+        Re-generate or execute AI review on demand for a single question in group work.
+        """
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.", code="ASSESSMENT_NOT_FOUND")
+        self._assert_can_edit(assessment, current_user)
+
+        ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
+        if not ans:
+            raise NotFoundError("Answer not found.", code="ANSWER_NOT_FOUND")
+
+        from app.services.grading_service import GradingService
+        grading_service = GradingService(self.db)
+        await grading_service.process_ai_group_answer(ans)
+        await self.db.flush()
+
+        profiles = await self._get_user_profiles([current_user.id])
+        return self._serialize_submission_answer(ans, profiles)
 
     async def _get_user_profiles(self, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, str]:
         if not user_ids:
@@ -1288,17 +1872,7 @@ class GroupWorkService:
             members=workspace_members,
             materials=[GroupAssessmentMaterialResponse.model_validate(item) for item in materials],
             answers=[
-                GroupSubmissionAnswerResponse(
-                    id=item.id,
-                    question_id=item.question_id,
-                    answer_content=item.answer_content,
-                    notes_content=item.notes_content,
-                    last_edited_by_id=item.last_edited_by_id,
-                    last_edited_at=item.last_edited_at,
-                    last_modified_by_id=item.last_edited_by_id,
-                    last_modified_by_name=profiles.get(item.last_edited_by_id) if item.last_edited_by_id else None,
-                    last_modified_at=item.last_edited_at,
-                )
+                self._serialize_submission_answer(item, profiles)
                 for item in answers
             ],
             comments=[

@@ -852,6 +852,8 @@ async def process_ai_queue_item_endpoint(
 )
 async def list_group_queue(
     assessment_id: uuid.UUID | None = Query(default=None),
+    class_id: uuid.UUID | None = Query(default=None),
+    status: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=30, ge=1, le=100),
     current_user=Depends(require_lecturer_or_admin),
@@ -859,9 +861,16 @@ async def list_group_queue(
 ) -> GroupGradingQueueListResponse:
     from app.services.group_work_service import GroupWorkService
     service = GroupWorkService(db)
+    user_role = (
+        current_user.role.value
+        if hasattr(current_user.role, "value")
+        else str(current_user.role)
+    )
     items, total = await service.get_grading_queue(
-        lecturer_id=current_user.id,
+        lecturer_id=current_user.id if user_role != "admin" else None,
         assessment_id=assessment_id,
+        class_id=class_id,
+        status=status,
         page=page,
         page_size=page_size,
     )
@@ -871,3 +880,67 @@ async def list_group_queue(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get(
+    "/group-submission/{submission_id}",
+    summary="Get group submission workspace and details for grading",
+)
+async def get_group_submission_workspace(
+    submission_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.group_work_service import GroupWorkService
+    service = GroupWorkService(db)
+    return await service.get_submission_workspace_for_lecturer(
+        submission_id=submission_id,
+        current_user=current_user,
+    )
+
+
+@router.put(
+    "/group-submission/{submission_id}/questions/{question_id}/grade",
+    summary="Grade a single question in group work SpeedGrader",
+)
+async def grade_group_question(
+    submission_id: uuid.UUID,
+    question_id: uuid.UUID,
+    body: dict,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.group_work_service import GroupWorkService
+    from app.schemas.group_work import GradeGroupQuestionRequest
+    service = GroupWorkService(db)
+    req = GradeGroupQuestionRequest(**body)
+    result = await service.grade_submission_question(
+        submission_id=submission_id,
+        question_id=question_id,
+        data=req,
+        current_user=current_user,
+    )
+    await db.commit()
+    return result
+
+
+@router.post(
+    "/group-submission/{submission_id}/questions/{question_id}/ai-review",
+    summary="Trigger AI review for a single question in group work SpeedGrader",
+)
+async def trigger_group_question_ai_review(
+    submission_id: uuid.UUID,
+    question_id: uuid.UUID,
+    current_user=Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    from app.services.group_work_service import GroupWorkService
+    service = GroupWorkService(db)
+    result = await service.trigger_ai_review_for_group_question(
+        submission_id=submission_id,
+        question_id=question_id,
+        current_user=current_user,
+    )
+    await db.commit()
+    return result
+

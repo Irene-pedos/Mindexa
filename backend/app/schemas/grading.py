@@ -301,6 +301,16 @@ class AttemptGradingSummary(BaseModel):
     is_fully_graded: bool
 
 
+class GroupMemberSummary(BaseModel):
+    """Member detail for group grading summary."""
+    student_id: uuid.UUID
+    student_name: str
+    avatar_url: str | None = None
+    is_leader: bool = False
+    participation_count: int = 0
+    approval_status: str = "PENDING"
+
+
 class GroupSubmissionSummary(BaseModel):
     """Simplified summary of a group submission for the grading queue."""
     id: uuid.UUID
@@ -310,10 +320,13 @@ class GroupSubmissionSummary(BaseModel):
     assessment_title: str
     member_count: int
     approved_member_count: int = 0
+    members: list[GroupMemberSummary] = []
     status: str
     score: float | None = None
     max_score: float | None = None
+    feedback: str | None = None
     submitted_at: datetime | None = None
+    graded_at: datetime | None = None
     has_active_appeal: bool = False
 
 

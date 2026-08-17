@@ -39,6 +39,7 @@ import { gradingApi } from "@/lib/api/grading";
 import { resultApi } from "@/lib/api/result";
 import { toast } from "sonner";
 import { AssessmentSummary } from "../types";
+import { getReleaseStatusStyles } from "@/lib/grading-utils";
 
 interface ClassStatRecord {
   class_id: string;
@@ -51,17 +52,21 @@ interface ClassStatRecord {
 }
 
 interface StudentResultSummary {
-  id: string;
-  attempt_id: string;
+  id?: string;
+  attempt_id: string | null;
   student_id: string;
   student_name: string;
-  total_score: number;
-  max_score: number;
-  percentage: number;
+  total_score: number | null;
+  max_score: number | null;
+  percentage: number | null;
   letter_grade: string | null;
-  is_passing: boolean;
+  is_passing?: boolean;
   is_released: boolean;
   integrity_hold: boolean;
+  can_release: boolean;
+  status: string;
+  graded_question_count?: number;
+  total_question_count?: number;
 }
 
 function ResultReleaseContent() {
@@ -167,9 +172,9 @@ function ResultReleaseContent() {
 
   const handleSelectAllResults = (checked: boolean) => {
     if (checked) {
-      // Only select unreleased, non-hold graded students
+      // Select all unreleased, non-hold graded students that can be released
       const eligible = studentResults
-        .filter(r => !r.is_released && !r.integrity_hold && r.attempt_id)
+        .filter(r => r.can_release && r.attempt_id)
         .map(r => r.attempt_id as string);
       setSelectedResultIds(eligible);
     } else {
@@ -378,7 +383,7 @@ function ResultReleaseContent() {
                                 <Button
                                   size="xs"
                                   variant="outline"
-                                  disabled={!isFullyGraded || isReleasing}
+                                  disabled={c.reviewed_count === 0 || isReleasing}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     requestReleaseClass(c.class_id, c.class_name);
@@ -508,10 +513,10 @@ function ResultReleaseContent() {
                       ) : (
                         <div>
                           {selectedClass.pending_review_count > 0 && (
-                            <div className="p-3.5 bg-amber-50 border-b border-amber-100 flex items-start gap-2.5 text-amber-800">
-                              <AlertTriangle className="size-4 shrink-0 mt-0.5" />
+                            <div className="p-3.5 bg-amber-500/10 border-b border-amber-500/20 flex items-start gap-2.5 text-amber-800 dark:text-amber-300">
+                              <AlertTriangle className="size-4 shrink-0 mt-0.5 text-amber-600" />
                               <p className="text-[11px] leading-normal font-medium">
-                                Results cannot be released because there are still <strong>{selectedClass.pending_review_count}</strong> unreviewed submissions. All student submissions must be reviewed and graded before result release is allowed.
+                                There are <strong>{selectedClass.pending_review_count}</strong> unreviewed submission(s) in this section. Fully graded students are eligible and can be released individually or in batch below.
                               </p>
                             </div>
                           )}
@@ -523,10 +528,10 @@ function ResultReleaseContent() {
                                   <Checkbox
                                     checked={
                                       selectedResultIds.length > 0 && 
-                                      selectedResultIds.length === studentResults.filter(r => !r.is_released && !r.integrity_hold && r.attempt_id).length
+                                      selectedResultIds.length === studentResults.filter(r => r.can_release && r.attempt_id).length
                                     }
                                     onCheckedChange={handleSelectAllResults}
-                                    disabled={selectedClass.pending_review_count > 0 || isReleasing}
+                                    disabled={studentResults.filter(r => r.can_release && r.attempt_id).length === 0 || isReleasing}
                                   />
                                 </TableHead>
                                 <TableHead className="text-xs font-semibold text-muted-foreground">Student Name</TableHead>
@@ -538,7 +543,7 @@ function ResultReleaseContent() {
                             </TableHeader>
                             <TableBody>
                               {studentResults.map((r) => {
-                                const isEligible = !r.is_released && !r.integrity_hold && selectedClass.pending_review_count === 0 && r.attempt_id;
+                                const isEligible = Boolean(r.can_release && r.attempt_id);
                                 const isSelected = r.attempt_id ? selectedResultIds.includes(r.attempt_id) : false;
 
                                 return (
@@ -571,13 +576,25 @@ function ResultReleaseContent() {
                                     <TableCell className="text-right pr-6">
                                       <Badge
                                         variant="outline"
-                                        className={`text-[9px] font-bold uppercase tracking-wider font-mono ${
+                                        className={`text-[9px] font-bold uppercase tracking-wider font-mono ${getReleaseStatusStyles(
                                           r.is_released
-                                            ? "bg-indigo-500/5 text-indigo-600 border-indigo-500/25"
-                                            : "bg-muted/10 text-muted-foreground border-border/50"
-                                        }`}
+                                            ? "RELEASED"
+                                            : r.integrity_hold
+                                            ? "INTEGRITY_HOLD"
+                                            : r.can_release
+                                            ? "PENDING_RELEASE"
+                                            : r.status || "INCOMPLETE"
+                                        )}`}
                                       >
-                                        {r.is_released ? "Released" : "Unreleased"}
+                                        {r.is_released
+                                          ? "Released"
+                                          : r.integrity_hold
+                                          ? "Integrity Hold"
+                                          : r.can_release
+                                          ? "Pending Release"
+                                          : r.status === "GRADING_IN_PROGRESS"
+                                          ? "Grading In Progress"
+                                          : r.status?.replace(/_/g, " ") || "Incomplete"}
                                       </Badge>
                                     </TableCell>
                                   </TableRow>
@@ -589,10 +606,10 @@ function ResultReleaseContent() {
                       )}
                     </CardContent>
                     
-                    {selectedClass.pending_review_count === 0 && studentResults.length > 0 && (
+                    {studentResults.length > 0 && (
                       <CardFooter className="p-4 border-t border-border/30 bg-muted/10 flex justify-between gap-3">
                         <span className="text-[10px] text-muted-foreground font-semibold font-mono">
-                          Selected: {selectedResultIds.length} / {studentResults.filter(r => !r.is_released && !r.integrity_hold && r.attempt_id).length} Eligible
+                          Selected: {selectedResultIds.length} / {studentResults.filter(r => r.can_release && r.attempt_id).length} Eligible
                         </span>
 
                         <div className="flex gap-2">
@@ -607,11 +624,11 @@ function ResultReleaseContent() {
                           </Button>
                           <Button
                             size="sm"
-                            disabled={studentResults.every(r => r.is_released) || isReleasing}
+                            disabled={studentResults.filter(r => r.can_release).length === 0 || isReleasing}
                             onClick={() => requestReleaseClass(selectedClass.class_id, selectedClass.class_name)}
                             className="h-8 text-xs font-bold rounded-lg"
                           >
-                            <Unlock className="size-3.5 mr-1.5" /> Release All Graded
+                            <Unlock className="size-3.5 mr-1.5" /> Release All Graded ({studentResults.filter(r => r.can_release).length})
                           </Button>
                         </div>
                       </CardFooter>

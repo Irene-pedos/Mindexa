@@ -74,3 +74,35 @@ async def _trigger_grading_async(attempt_id: str) -> dict[str, Any]:
             "counts": counts,
             "result_status": result_status,
         }
+
+
+@celery.task(
+    bind=True,
+    base=MindexaTask,
+    name="app.workers.tasks.grading.trigger_ai_grading_for_group_submission",
+    max_retries=3,
+    queue="grading",
+)
+def trigger_ai_grading_for_group_submission(self: MindexaTask, submission_id: str) -> dict[str, Any]:
+    """
+    Trigger the background AI evaluation pipeline for open-ended questions in a group submission.
+    """
+    return _run(_trigger_group_grading_async(submission_id))
+
+
+async def _trigger_group_grading_async(submission_id: str) -> dict[str, Any]:
+    from app.db.session import AsyncSessionLocal
+    from app.services.group_work_service import GroupWorkService
+    from app.services.grading_service import GradingService
+
+    async with AsyncSessionLocal() as session:
+        sub_uuid = uuid.UUID(submission_id)
+        group_service = GroupWorkService(session)
+        grading_service = GradingService(session)
+
+        result = await group_service.process_ai_grading_for_submission(
+            submission_id=sub_uuid,
+            grading_service=grading_service,
+        )
+        await session.commit()
+        return result

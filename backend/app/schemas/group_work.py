@@ -107,6 +107,23 @@ class GroupSubmissionAnswerResponse(BaseModel):
     last_modified_by_id: uuid.UUID | None = None
     last_modified_by_name: str | None = None
     last_modified_at: datetime | None = None
+    score: float | None = None
+    max_score: float | None = None
+    feedback: str | None = None
+    is_final: bool = False
+    is_auto_graded: bool = False
+    auto_grade_score: float | None = None
+    auto_grade_is_correct: bool | None = None
+    ai_grade_score: float | None = None
+    ai_grade_confidence: float | None = None
+    ai_grade_rationale: str | None = None
+    ai_grade_breakdown: list[dict[str, Any]] | dict[str, Any] | None = None
+    ai_feedback_draft: str | None = None
+    ai_feedback_strengths: list[str] | None = None
+    ai_feedback_improvements: list[str] | None = None
+    ai_feedback_suggestions: list[str] | None = None
+    ai_grade_decision: str | None = None
+    rubric_scores: list[dict[str, Any]] | dict[str, Any] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -157,10 +174,18 @@ class GroupWorkspaceQuestionOptionResponse(BaseModel):
 class GroupWorkspaceQuestionResponse(BaseModel):
     id: uuid.UUID
     text: str
+    content: str | None = None
     type: str
-    marks: int
+    question_type: str | None = None
+    marks: float | int
     order_index: int
     options: list[GroupWorkspaceQuestionOptionResponse] = []
+    case_study_context: str | None = None
+    question_table_context: dict[str, Any] | list[Any] | None = None
+    image_url: str | None = None
+    image_alt_text: str | None = None
+    rubric: dict[str, Any] | None = None
+    blanks: list[dict[str, Any]] | None = None
 
 
 class GroupWorkspaceMemberResponse(BaseModel):
@@ -301,3 +326,12 @@ class ResolveGroupAppealRequest(BaseModel):
     approve: bool
     decision: str = Field(..., min_length=10, max_length=5000)
     feedback: str | None = Field(default=None, max_length=5000)
+
+
+class GradeGroupQuestionRequest(BaseModel):
+    """Payload for a lecturer to score or save draft for a single question in group work."""
+    score: float = Field(..., ge=0)
+    feedback: str | None = Field(default=None, max_length=5000)
+    rubric_scores: list[dict[str, Any]] | dict[str, Any] | None = None
+    is_final: bool = True
+    is_ai_accepted: bool = False

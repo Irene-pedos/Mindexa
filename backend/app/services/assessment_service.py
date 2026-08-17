@@ -1552,6 +1552,8 @@ class AssessmentService:
         # Add or update questions
         from app.db.models.question import Question as QuestionModel
 
+        used_question_ids: set[uuid.UUID] = set()
+
         for i, q in enumerate(data.questions):
             q_type_map = {
                 "mcq": DbQuestionType.MCQ,
@@ -1601,28 +1603,41 @@ class AssessmentService:
                             QuestionModel.is_deleted == False
                         )
                     )
-                    existing_copy = res.scalars().first()
+                    copies = res.scalars().all()
+                    for c in copies:
+                        if c.id not in used_question_ids:
+                            existing_copy = c
+                            break
                 if existing_copy:
                     existing_q = existing_copy
                     is_bank_question = False
                 else:
                     existing_q = None
-            elif q_uuid:
-                existing_q = await self.db.get(QuestionModel, q_uuid)
+            elif q_uuid and q_uuid not in used_question_ids:
+                candidate_q = await self.db.get(QuestionModel, q_uuid)
+                if candidate_q:
+                    # Check if candidate_q is owned by this assessment and safe to update in-place
+                    if candidate_q.source_assessment_id == assessment.id and not candidate_q.is_in_question_bank:
+                        existing_q = candidate_q
+                    else:
+                        # Belongs to bank or another assessment; treat as parent for a new copy
+                        existing_q = None
+                        is_bank_question = True
 
-                cs_context = q.caseStudyContext
-                cs_content = q.text or ""
-                if db_q_type == DbQuestionType.CASE_STUDY:
-                    if not cs_context and len(cs_content) > 100:
-                        cs_context = cs_content
-                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
-                    elif not cs_content:
-                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
+            cs_context = q.caseStudyContext
+            cs_content = q.text or ""
+            if db_q_type == DbQuestionType.CASE_STUDY:
+                if not cs_context and len(cs_content) > 100:
+                    cs_context = cs_content
+                    cs_content = "Analyze the following case scenario and answer the sub-questions below."
+                elif not cs_content:
+                    cs_content = "Analyze the following case scenario and answer the sub-questions below."
 
-                table_ctx = q.question_table_context or q.questionTableContext
-                req_table = bool(q.requires_table_answer or q.requiresTableAnswer)
-                ans_template = q.answer_table_template or q.answerTableTemplate
+            table_ctx = q.question_table_context or q.questionTableContext
+            req_table = bool(q.requires_table_answer or q.requiresTableAnswer)
+            ans_template = q.answer_table_template or q.answerTableTemplate
 
+            if existing_q is not None and existing_q.id not in used_question_ids:
                 existing_q.content = cs_content
                 existing_q.image_url = q.imageUrl
                 existing_q.question_type = db_q_type
@@ -1639,19 +1654,6 @@ class AssessmentService:
                 await self._question_repo.delete_all_blanks(existing_q.id)
                 new_q = existing_q
             else:
-                cs_context = q.caseStudyContext
-                cs_content = q.text or ""
-                if db_q_type == DbQuestionType.CASE_STUDY:
-                    if not cs_context and len(cs_content) > 100:
-                        cs_context = cs_content
-                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
-                    elif not cs_content:
-                        cs_content = "Analyze the following case scenario and answer the sub-questions below."
-
-                table_ctx = q.question_table_context or q.questionTableContext
-                req_table = bool(q.requires_table_answer or q.requiresTableAnswer)
-                ans_template = q.answer_table_template or q.answerTableTemplate
-
                 new_q = QuestionModel(
                     content=cs_content,
                     image_url=q.imageUrl,
@@ -1678,6 +1680,8 @@ class AssessmentService:
                 )
                 self.db.add(new_q)
                 await self.db.flush()
+
+            used_question_ids.add(new_q.id)
 
             # Handle options based on question type
             if q.options:

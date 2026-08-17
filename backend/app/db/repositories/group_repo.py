@@ -92,6 +92,14 @@ class GroupRepository:
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_by_id(
+        self,
+        group_id: uuid.UUID,
+        *,
+        include_members: bool = False,
+    ) -> StudentGroup | None:
+        return await self.get_group_by_id(group_id, include_members=include_members)
+
     async def get_student_group_for_assessment(
         self,
         *,

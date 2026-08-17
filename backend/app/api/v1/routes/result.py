@@ -573,28 +573,12 @@ async def get_release_readiness_queue(
     final_counts_res = await db.execute(final_count_stmt)
     final_counts = dict(final_counts_res.all())
 
-    # Check if all attempts/results are fully graded
-    class_fully_graded = True
-    for s in students:
-        student_id = s[0]
-        result = results.get(student_id)
-        attempt = attempts.get(student_id)
-        if result:
-            if result.total_question_count > 0:
-                if result.graded_question_count < result.total_question_count:
-                    class_fully_graded = False
-            elif not result.is_group_result:
-                class_fully_graded = False
-        elif attempt:
-            tot = resp_counts.get(attempt.id, 0)
-            fin = final_counts.get(attempt.id, 0)
-            if fin < tot or tot == 0:
-                class_fully_graded = False
-        else:
-            class_fully_graded = False
-
-    # Populate response items list
+    # Track grading completeness across students who actually submitted.
+    # Students with no attempt and no result never block anyone else.
+    submitted_count = 0
+    fully_graded_submitted_count = 0
     items = []
+
     for s in students:
         student_id = s[0]
         email = s[1]
@@ -609,8 +593,18 @@ async def get_release_readiness_queue(
         result = results.get(student_id)
 
         attempt_id = attempt.id if attempt else (result.attempt_id if result else None)
-        tot = result.total_question_count if (result and result.total_question_count > 0) else (resp_counts.get(attempt_id, 0) if attempt_id else 0)
-        fin = result.graded_question_count if (result and result.graded_question_count > 0) else (final_counts.get(attempt_id, 0) if attempt_id else 0)
+        has_submission = (attempt_id is not None) or (result is not None)
+
+        tot = (
+            result.total_question_count
+            if (result and result.total_question_count > 0)
+            else (resp_counts.get(attempt_id, 0) if attempt_id else 0)
+        )
+        fin = (
+            result.graded_question_count
+            if (result and result.graded_question_count > 0)
+            else (final_counts.get(attempt_id, 0) if attempt_id else 0)
+        )
 
         integrity_hold = result.integrity_hold if result else False
         is_released = result.is_released if result else False
@@ -620,13 +614,22 @@ async def get_release_readiness_queue(
         percentage = result.percentage if result else None
         letter_grade = result.letter_grade.value if (result and result.letter_grade) else None
 
-        has_submission = (attempt_id is not None) or (result is not None)
+        # This student's OWN grading completeness — independent of classmates.
+        is_individually_fully_graded = has_submission and (
+            (tot > 0 and fin >= tot) or (result is not None and result.is_group_result)
+        )
+
+        if has_submission:
+            submitted_count += 1
+            if is_individually_fully_graded:
+                fully_graded_submitted_count += 1
+
+        # Per-student release eligibility. No dependency on the rest of the class.
         can_release = (
-            class_fully_graded and
-            has_submission and
-            not is_released and
-            not integrity_hold and
-            (fin >= tot and tot > 0)
+            has_submission
+            and is_individually_fully_graded
+            and not is_released
+            and not integrity_hold
         )
 
         status = "NOT_SUBMITTED"
@@ -635,12 +638,10 @@ async def get_release_readiness_queue(
                 status = "RELEASED"
             elif integrity_hold:
                 status = "INTEGRITY_HOLD"
-            elif fin < tot or tot == 0:
+            elif not is_individually_fully_graded:
                 status = "GRADING_IN_PROGRESS"
-            elif can_release:
-                status = "PENDING_RELEASE"
             else:
-                status = "AWAITING_CLASS_COMPLETION"
+                status = "PENDING_RELEASE"
 
         items.append({
             "student_id": student_id,
@@ -657,5 +658,8 @@ async def get_release_readiness_queue(
             "percentage": percentage,
             "letter_grade": letter_grade,
         })
+
+    # Purely informational — "have all students who actually submitted been fully graded?"
+    class_fully_graded = submitted_count > 0 and fully_graded_submitted_count == submitted_count
 
     return ReleaseQueueResponse(items=items, class_fully_graded=class_fully_graded)
