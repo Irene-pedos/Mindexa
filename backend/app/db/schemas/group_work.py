@@ -93,7 +93,8 @@ class GroupAssessmentMaterialResponse(BaseAuditedResponse):
 
 
 class GroupSubmissionAnswerResponse(BaseAuditedResponse):
-    submission_id: uuid.UUID
+    id: uuid.UUID | None = None
+    submission_id: uuid.UUID | None = None
     question_id: uuid.UUID
     answer_content: dict[str, Any] | None = None
     notes_content: dict[str, Any] | None = None
@@ -102,6 +103,27 @@ class GroupSubmissionAnswerResponse(BaseAuditedResponse):
     last_modified_by_id: uuid.UUID | None = None
     last_modified_by_name: str | None = None
     last_modified_at: datetime | None = None
+    score: float | None = None
+    max_score: float | None = None
+    feedback: str | None = None
+    is_final: bool = False
+    is_auto_graded: bool = False
+    auto_grade_score: float | None = None
+    auto_grade_is_correct: bool | None = None
+    ai_grade_score: float | None = None
+    ai_grade_confidence: float | None = None
+    ai_grade_rationale: str | None = None
+    ai_grade_breakdown: list[dict[str, Any]] | dict[str, Any] | None = None
+    ai_feedback_draft: str | None = None
+    ai_feedback_strengths: list[str] | None = None
+    ai_feedback_improvements: list[str] | None = None
+    ai_feedback_suggestions: list[str] | None = None
+    ai_grade_decision: str | None = None
+    rubric_scores: list[dict[str, Any]] | dict[str, Any] | None = None
+    ai_grading_basis: str | None = None
+    rag_used: bool = False
+    ai_context_sources: list[str] | None = None
+    rag_chunk_ids: list[str] | None = None
 
 
 class GroupSubmissionCommentResponse(MindexaSchema):
@@ -143,10 +165,18 @@ class GroupWorkspaceQuestionOptionResponse(MindexaSchema):
 class GroupWorkspaceQuestionResponse(MindexaSchema):
     id: uuid.UUID
     text: str
+    content: str | None = None
     type: str
-    marks: int
+    question_type: str | None = None
+    marks: float | int
     order_index: int
     options: list[GroupWorkspaceQuestionOptionResponse] = Field(default_factory=list)
+    case_study_context: str | None = None
+    question_table_context: dict[str, Any] | list[Any] | None = None
+    image_url: str | None = None
+    image_alt_text: str | None = None
+    rubric: dict[str, Any] | None = None
+    blanks: list[dict[str, Any]] | None = None
 
 
 class GroupWorkspaceMemberResponse(MindexaSchema):

@@ -657,11 +657,10 @@ class BulkAssessmentMetadata(BaseModel):
     @model_validator(mode="after")
     def validate_peer_evaluation(self) -> "BulkAssessmentMetadata":
         if self.peerEvaluationEnabled:
-            if not self.peerEvaluationDeadline:
-                raise ValueError("peerEvaluationDeadline is required when peerEvaluationEnabled is True.")
-            deadline_source = self.windowEnd or self.date
-            if deadline_source and self.peerEvaluationDeadline <= deadline_source:
-                raise ValueError("peerEvaluationDeadline must be after the group submission deadline.")
+            if self.peerEvaluationDeadline:
+                deadline_source = self.windowEnd or self.date
+                if deadline_source and self.peerEvaluationDeadline <= deadline_source:
+                    raise ValueError("peerEvaluationDeadline must be after the group submission deadline.")
             if self.peerEvaluationWeightPercent is not None:
                 if not (0 < self.peerEvaluationWeightPercent <= 100):
                     raise ValueError("peerEvaluationWeightPercent must be between 1 and 100.")

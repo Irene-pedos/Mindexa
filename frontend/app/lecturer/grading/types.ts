@@ -242,12 +242,14 @@ export interface RubricScore {
   criterion_id?: string;
   criterion?: string;
   criterion_title?: string;
+  level_id?: string;
   score?: number;
   marks_awarded?: number;
   max?: number;
   max_score?: number;
   notes?: string;
   description?: string;
+  feedback?: string;
 }
 
 export interface SubmissionRecord extends AiSuggestion {

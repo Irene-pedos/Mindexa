@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models.auth import User
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin, require_student
+from app.schemas.grading import SuggestChangesRequest
 from app.schemas.group_work import (
     AddGroupCommentRequest,
     ApproveGroupAppealRequest,
@@ -493,6 +494,29 @@ async def trigger_question_ai_review(
     result = await svc.trigger_ai_review_for_group_question(
         submission_id=submission_id,
         question_id=question_id,
+        current_user=current_user,
+    )
+    await db.commit()
+    return result
+
+
+@router.post(
+    "/submissions/{submission_id}/questions/{question_id}/suggest-changes",
+    response_model=GroupSubmissionAnswerResponse,
+    summary="Suggest changes to AI review for a group submission question",
+)
+async def suggest_group_question_ai_changes(
+    submission_id: uuid.UUID,
+    question_id: uuid.UUID,
+    body: SuggestChangesRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> GroupSubmissionAnswerResponse:
+    svc = _service(db)
+    result = await svc.suggest_ai_changes_for_group_question(
+        submission_id=submission_id,
+        question_id=question_id,
+        feedback=body.feedback,
         current_user=current_user,
     )
     await db.commit()

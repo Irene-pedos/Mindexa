@@ -115,6 +115,8 @@ def create_celery() -> Celery:
         "tasks.process_uploaded_document": {"queue": "rag"},
         "app.workers.tasks.grading.trigger_grading_for_attempt": {"queue": "grading"},
         "app.workers.tasks.process_ai_grading_job": {"queue": "grading"},
+        "app.workers.tasks.grading.trigger_ai_grading_for_group_submission": {"queue": "grading"},
+        "app.workers.tasks.grading.trigger_ai_grading_for_group_question": {"queue": "grading"},
         "app.workers.tasks.send_email_notification": {"queue": "email"},
         "app.workers.tasks.purge_old_logs": {"queue": "cleanup"},
         "app.workers.tasks.cleanup_expired_tokens": {"queue": "cleanup"},

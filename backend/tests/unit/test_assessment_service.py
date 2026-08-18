@@ -45,14 +45,15 @@ def test_bulk_assessment_metadata_peer_evaluation_validation():
     from app.schemas.assessment import BulkAssessmentMetadata
     from datetime import datetime, timedelta
 
-    # 1. peerEvaluationEnabled is True, but peerEvaluationDeadline is missing -> should raise ValueError
-    with pytest.raises(ValueError, match="peerEvaluationDeadline is required"):
-        BulkAssessmentMetadata(
-            title="Group Project",
-            peerEvaluationEnabled=True,
-            peerEvaluationDeadline=None,
-            peerEvaluationWeightPercent=20,
-        )
+    # 1. peerEvaluationEnabled is True, but peerEvaluationDeadline is None (Draft in progress) -> should succeed
+    draft_meta = BulkAssessmentMetadata(
+        title="Group Project Draft",
+        peerEvaluationEnabled=True,
+        peerEvaluationDeadline=None,
+        peerEvaluationWeightPercent=20,
+    )
+    assert draft_meta.peerEvaluationEnabled is True
+    assert draft_meta.peerEvaluationDeadline is None
 
     # 2. peerEvaluationDeadline <= windowEnd -> should raise ValueError
     now = datetime.now()

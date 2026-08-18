@@ -492,7 +492,7 @@ export default function StudentDashboard() {
                   className="h-8 text-[10px] font-bold uppercase"
                   asChild
                 >
-                  <Link href={`/student/results/${v.assessment_id ?? v.id}`}>
+                  <Link href={`/student/results/${v.id}`}>
                     Review Audit
                   </Link>
                 </Button>

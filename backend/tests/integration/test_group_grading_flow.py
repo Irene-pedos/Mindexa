@@ -96,6 +96,21 @@ class TestGroupGradingFlow:
         group = StudentGroup(assessment_id=assessment.id, name="Grading Team", is_locked=True)
         db.add(group); await db.flush()
 
+        student = User(
+            email=f"student_gw_{uuid.uuid4().hex[:6]}@test.ac", 
+            hashed_password="...", 
+            role=UserRole.STUDENT,
+            email_verified=True,
+        )
+        db.add(student); await db.flush()
+
+        gm = StudentGroupMember(
+            group_id=group.id,
+            student_id=student.id,
+            is_leader=True,
+        )
+        db.add(gm); await db.flush()
+
         submission = GroupSubmission(
             assessment_id=assessment.id, 
             group_id=group.id, 
@@ -103,11 +118,6 @@ class TestGroupGradingFlow:
         )
         db.add(submission); await db.commit()
 
-        return assessment, group, submission, lecturer
-
-        db.add(submission)
-        await db.commit()
-        
         return assessment, group, submission, lecturer
 
     async def test_lecturer_grades_group_submission(self, client: AsyncClient, db, make_auth_headers):
@@ -212,6 +222,37 @@ class TestGroupGradingFlow:
         assert ans_data["feedback"] == "Great explanation of Isolation and Durability."
         assert ans_data["is_final"] is True
 
+        # Verify derived AssessmentResult row was created for the group member
+        from app.db.repositories.result_repo import ResultRepository
+        result_repo = ResultRepository(db)
+        derived_results = await result_repo.list_by_group_submission(submission.id)
+        assert len(derived_results) >= 1
+        res = derived_results[0]
+        assert res.total_score == 18.5
+        assert res.max_score == 100.0 or res.max_score == 20.0
+        assert res.letter_grade is not None
+
+        # Release the result
+        rel_resp = await client.post(
+            f"/api/v1/group-work/submissions/{submission.id}/release-result?assessment_id={assessment.id}",
+            headers=headers,
+        )
+        assert rel_resp.status_code == 204
+
+        # Student fetches the released result
+        student_headers = make_auth_headers(user_id=str(res.student_id), role=UserRole.STUDENT)
+        student_res = await client.get(
+            f"/api/v1/results/attempt/{res.id}",
+            headers=student_headers,
+        )
+        assert student_res.status_code == 200
+        student_data = student_res.json()
+        assert len(student_data["breakdowns"]) >= 1
+        bd = student_data["breakdowns"][0]
+        assert bd["score"] == 18.5
+        assert bd["feedback"] == "Great explanation of Isolation and Durability."
+        assert bd["question_text"] == "Discuss the role of ACID properties."
+
     async def test_lecturer_triggers_ai_review_for_group_question(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
         """Verify that a lecturer can trigger AI review on an open-ended group question."""
         from unittest.mock import AsyncMock, MagicMock
@@ -271,7 +312,283 @@ class TestGroupGradingFlow:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["ai_grade_score"] == 9.0
-        assert data["ai_grade_confidence"] == 0.92
-        assert data["ai_feedback_draft"] == "Excellent explanation of database transaction principles."
+        assert data["ai_grade_decision"] in ("PROCESSING", "SUGGESTED")
+
+        # Execute background AI evaluation job
+        from app.services.group_work_service import GroupWorkService
+        from app.services.grading_service import GradingService
+        await GroupWorkService(db).process_ai_grading_for_single_question(
+            submission_id=submission.id,
+            question_id=q.id,
+            grading_service=GradingService(db),
+        )
+        await db.commit()
+
+        ws_res = await client.get(
+            f"/api/v1/grading/group-submission/{submission.id}",
+            headers=headers,
+        )
+        assert ws_res.status_code == 200
+        ws_data = ws_res.json()
+        eval_ans = next(a for a in ws_data["answers"] if a["question_id"] == str(q.id))
+        assert eval_ans["ai_grade_score"] == 9.0
+        assert eval_ans["ai_grade_confidence"] == 0.92
+        assert eval_ans["ai_feedback_draft"] == "Excellent explanation of database transaction principles."
+
+    async def test_rubric_context_and_serialization_with_attached_rubric(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
+        """Verify that attached rubrics build AI context without attribute errors and serialize cleanly."""
+        from unittest.mock import AsyncMock
+        from app.db.models.assessment import Rubric, RubricCriterion, RubricCriterionLevel
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from app.agents.review_agent import ReviewAgentOutput
+        from app.agents.feedback_agent import FeedbackAgentOutput
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        # 1. Create a Rubric with Criteria and Levels
+        rubric = Rubric(
+            title="Database Analysis Rubric",
+            description="Grading rubric for database architecture essays.",
+            created_by_id=lecturer.id,
+        )
+        db.add(rubric); await db.flush()
+
+        criterion = RubricCriterion(
+            rubric_id=rubric.id,
+            title="Architectural Depth",
+            description="Depth of database system analysis",
+            max_marks=15,
+            order_index=0,
+        )
+        db.add(criterion); await db.flush()
+
+        level = RubricCriterionLevel(
+            criterion_id=criterion.id,
+            label="Exemplary",
+            description="Exceptional depth and mastery of database internals",
+            marks=15,
+            order_index=0,
+        )
+        db.add(level); await db.flush()
+
+        # 2. Create question linked to rubric
+        q = Question(
+            content="Evaluate relational vs distributed storage engines.",
+            question_type=QuestionType.ESSAY,
+            marks=15,
+            rubric_id=rubric.id,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq)
+        g_ans = GroupSubmissionAnswer(
+            submission_id=submission.id,
+            question_id=q.id,
+            answer_content={"text": "Distributed storage achieves scalability via partitioning."},
+        )
+        db.add(g_ans)
+        await db.commit()
+
+        # 3. Test workspace question serialization
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+        ws_res = await client.get(
+            f"/api/v1/grading/group-submission/{submission.id}",
+            headers=headers,
+        )
+        assert ws_res.status_code == 200
+        ws_data = ws_res.json()
+        matched_q = next((item for item in ws_data["questions"] if item["id"] == str(q.id)), None)
+        assert matched_q is not None
+        assert matched_q["rubric"] is not None
+        assert matched_q["rubric"]["title"] == "Database Analysis Rubric"
+        assert len(matched_q["rubric"]["criteria"]) == 1
+        crit_data = matched_q["rubric"]["criteria"][0]
+        assert crit_data["title"] == "Architectural Depth"
+        assert crit_data["max_marks"] == 15
+        assert len(crit_data["levels"]) == 1
+        lvl_data = crit_data["levels"][0]
+        assert lvl_data["label"] == "Exemplary"
+        assert lvl_data["marks"] == 15
+
+        # 4. Test AI review invocation builds rubric context without crash
+        captured_rubric_content = []
+        captured_kwargs = []
+
+        async def fake_review(self, *args, **kwargs):
+            captured_rubric_content.append(kwargs.get("rubric_content"))
+            captured_kwargs.append(kwargs)
+            return (
+                ReviewAgentOutput(
+                    suggested_score=14.0,
+                    confidence=0.95,
+                    rationale="Thorough comparative evaluation.",
+                    is_correct=True,
+                    criteria_scores=[],
+                ),
+                "raw completion text",
+            )
+
+        mock_feedback = AsyncMock(return_value=FeedbackAgentOutput(
+            draft_feedback="Exceptional understanding of distributed architectures.",
+            strengths=["Comprehensive architectural depth"],
+            areas_for_improvement=[],
+            suggestions=[],
+        ))
+
+        monkeypatch.setattr("app.agents.review_agent.ReviewAgent.review_response", fake_review)
+        monkeypatch.setattr("app.agents.feedback_agent.FeedbackAgent.draft_feedback", mock_feedback)
+
+        ai_res = await client.post(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/ai-review",
+            headers=headers,
+        )
+
+        assert ai_res.status_code == 200
+
+        # Run background evaluation
+        from app.services.group_work_service import GroupWorkService
+        from app.services.grading_service import GradingService
+        await GroupWorkService(db).process_ai_grading_for_single_question(
+            submission_id=submission.id,
+            question_id=q.id,
+            grading_service=GradingService(db),
+        )
+        await db.commit()
+
+        assert len(captured_rubric_content) == 1
+        assert "Architectural Depth: Depth of database system analysis (15 marks)" in captured_rubric_content[0]
+        assert captured_kwargs[0]["basis_used"] == "RUBRIC"
+
+    async def test_ai_group_grading_skipped_short_circuit(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
+        """Verify that skipped/empty group question answers short-circuit without calling AI agents."""
+        from unittest.mock import AsyncMock
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+        from app.db.models.attempt import GroupSubmissionAnswer
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        q = Question(
+            content="Explain CAP theorem tradeoffs.",
+            question_type=QuestionType.ESSAY,
+            marks=10,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq)
+
+        ans = GroupSubmissionAnswer(
+            submission_id=submission.id,
+            question_id=q.id,
+            answer_content={"is_skipped": True, "text": ""},
+        )
+        db.add(ans); await db.commit()
+
+        # Mock review agent to fail if called
+        review_mock = AsyncMock(side_effect=AssertionError("ReviewAgent should not be called for skipped questions"))
+        monkeypatch.setattr("app.agents.review_agent.ReviewAgent.review_response", review_mock)
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+        ai_res = await client.post(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/ai-review",
+            headers=headers,
+        )
+
+        assert ai_res.status_code == 200
+
+        # Run background evaluation
+        from app.services.group_work_service import GroupWorkService
+        from app.services.grading_service import GradingService
+        await GroupWorkService(db).process_ai_grading_for_single_question(
+            submission_id=submission.id,
+            question_id=q.id,
+            grading_service=GradingService(db),
+        )
+        await db.commit()
+
+        ws_res = await client.get(
+            f"/api/v1/grading/group-submission/{submission.id}",
+            headers=headers,
+        )
+        assert ws_res.status_code == 200
+        ws_data = ws_res.json()
+        eval_ans = next(a for a in ws_data["answers"] if a["question_id"] == str(q.id))
+        assert eval_ans["ai_grade_score"] == 0.0
+        assert eval_ans["ai_grade_confidence"] == 1.0
+        assert eval_ans["ai_grading_basis"] == "GENERAL_KNOWLEDGE"
+        assert eval_ans["rag_used"] is False
+        assert "No response provided" in eval_ans["ai_grade_rationale"]
+        assert not review_mock.called
+
+    async def test_lecturer_suggests_changes_for_group_question(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
+        """Verify that lecturer can submit guidance to re-evaluate a group question AI grade."""
+        from unittest.mock import AsyncMock
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+        from app.db.models.attempt import GroupSubmissionAnswer
+        from app.agents.review_agent import ReviewAgentOutput
+        from app.agents.feedback_agent import FeedbackAgentOutput
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        q = Question(
+            content="Discuss ACID transaction properties in distributed databases.",
+            question_type=QuestionType.ESSAY,
+            marks=10,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq)
+
+        ans = GroupSubmissionAnswer(
+            submission_id=submission.id,
+            question_id=q.id,
+            answer_content={"text": "Atomicity ensures all-or-nothing completion."},
+        )
+        db.add(ans); await db.commit()
+
+        captured_guidance = []
+
+        async def fake_review(self, *args, **kwargs):
+            captured_guidance.append(kwargs.get("lecturer_feedback"))
+            return (
+                ReviewAgentOutput(
+                    suggested_score=8.5,
+                    confidence=0.91,
+                    rationale="Updated score taking lecturer partial credit guidance into account.",
+                    is_correct=True,
+                    criteria_scores=[],
+                ),
+                "raw completion text",
+            )
+
+        mock_feedback = AsyncMock(return_value=FeedbackAgentOutput(
+            draft_feedback="Good explanation with partial credit applied.",
+            strengths=["Clear atomicity explanation"],
+            areas_for_improvement=[],
+            suggestions=[],
+        ))
+
+        monkeypatch.setattr("app.agents.review_agent.ReviewAgent.review_response", fake_review)
+        monkeypatch.setattr("app.agents.feedback_agent.FeedbackAgent.draft_feedback", mock_feedback)
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+        res = await client.post(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/suggest-changes",
+            headers=headers,
+            json={"feedback": "Award partial credit for atomicity definition."},
+        )
+
+        assert res.status_code == 200
+        data = res.json()
+        assert data["ai_grade_score"] == 8.5
+        assert len(captured_guidance) == 1
+        assert "Award partial credit for atomicity definition." in captured_guidance[0]
+
+
 

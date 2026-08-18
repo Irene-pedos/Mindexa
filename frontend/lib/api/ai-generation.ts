@@ -165,6 +165,33 @@ function _parseBatchQuestions(batch: any): AIGenerationBatchDetailResponse {
         console.error("Failed to parse options JSON for generated question", q.id);
       }
     }
+
+    const qType = (q.question_type || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if ((qType === "truefalse" || qType === "true_false") && _options.length === 1) {
+      const first = _options[0];
+      const isFirstTrue = (first.text || "").trim().toLowerCase() === "true";
+      const isFirstCorrect = Boolean(first.is_correct);
+      if (isFirstTrue) {
+        _options = [
+          first,
+          {
+            text: "False",
+            is_correct: !isFirstCorrect,
+            explanation: isFirstCorrect ? undefined : (first.explanation || "The statement is false."),
+          },
+        ];
+      } else {
+        _options = [
+          {
+            text: "True",
+            is_correct: !isFirstCorrect,
+            explanation: isFirstCorrect ? undefined : (first.explanation || "The statement is true."),
+          },
+          first,
+        ];
+      }
+    }
+
     return { ...q, _options };
   });
 

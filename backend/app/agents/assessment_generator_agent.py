@@ -154,8 +154,8 @@ class AssessmentGeneratorAgent(BaseAgent):
             .replace("{{marks_per_question}}", marks_str)
         )
 
-        # Token budget: Keep max output tokens sensible to avoid Groq's 6000 TPM rate limit.
-        max_tokens = min(300 * count + 200, 2500)
+        # Token budget: Provide ample room for multi-question options, explanations, and rubrics
+        max_tokens = min(1000 * count + 1000, 4000)
 
         request = AICompletionRequest(
             messages=[
@@ -190,10 +190,14 @@ class AssessmentGeneratorAgent(BaseAgent):
             prompt_version=f"{self.prompt_name}_{self.prompt_version}",
         )
 
-        parsed_questions = self._parse_generated_questions(response.content)
+        parsed_questions = self._parse_generated_questions(response.content, expected_question_type=question_type)
         return parsed_questions, system_content
 
-    def _parse_generated_questions(self, content: str) -> list[GeneratedQuestion]:
+    def _parse_generated_questions(
+        self,
+        content: str,
+        expected_question_type: str | None = None,
+    ) -> list[GeneratedQuestion]:
         """Parse and normalize common AI response payload variants."""
         import structlog
         logger = structlog.get_logger(__name__)
@@ -229,10 +233,9 @@ class AssessmentGeneratorAgent(BaseAgent):
             import json_repair
             data = json_repair.loads(clean_content)
             if data is None:
-                # Fall back to standard json loads to let normal exception raise if completely empty/unrepairable
                 data = json.loads(clean_content, strict=False)
 
-            normalized_items = self._coerce_payload_to_question_items(data)
+            normalized_items = self._coerce_payload_to_question_items(data, expected_question_type=expected_question_type)
             
             questions = []
             for item in normalized_items:
@@ -257,7 +260,11 @@ class AssessmentGeneratorAgent(BaseAgent):
         except ValidationError:
             raise
 
-    def _coerce_payload_to_question_items(self, data: Any) -> list[dict[str, Any]]:
+    def _coerce_payload_to_question_items(
+        self,
+        data: Any,
+        expected_question_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
@@ -278,14 +285,18 @@ class AssessmentGeneratorAgent(BaseAgent):
         for item in items:
             if not isinstance(item, dict):
                 raise ValueError("Each AI question entry must be an object.")
-            normalized_items.append(self._normalize_question_item(item))
+            normalized_items.append(self._normalize_question_item(item, question_type=expected_question_type))
 
         if not normalized_items:
             raise ValueError("AI response did not contain any question entries.")
 
         return normalized_items
 
-    def _normalize_question_item(self, item: dict[str, Any]) -> dict[str, Any]:
+    def _normalize_question_item(
+        self,
+        item: dict[str, Any],
+        question_type: str | None = None,
+    ) -> dict[str, Any]:
         question_text = (
             item.get("question")
             or item.get("stem")
@@ -323,6 +334,48 @@ class AssessmentGeneratorAgent(BaseAgent):
                 elif isinstance(opt, str):
                     normalized_options.append({"text": opt, "is_correct": False, "explanation": None})
 
+        # Defensively normalize True/False questions so they always contain both options
+        q_type_str = str(question_type or item.get("question_type") or "").lower()
+        if q_type_str in ("true_false", "truefalse") or (
+            normalized_options
+            and len(normalized_options) <= 2
+            and any(opt.get("text", "").strip().lower() in ("true", "false") for opt in normalized_options)
+        ):
+            true_opt = next((opt for opt in normalized_options if opt.get("text", "").strip().lower() == "true"), None)
+            false_opt = next((opt for opt in normalized_options if opt.get("text", "").strip().lower() == "false"), None)
+            if true_opt and not false_opt:
+                is_true_correct = true_opt.get("is_correct", False)
+                normalized_options = [
+                    true_opt,
+                    {
+                        "text": "False",
+                        "is_correct": not is_true_correct,
+                        "explanation": None if is_true_correct else (true_opt.get("explanation") or "The statement is false."),
+                    },
+                ]
+            elif false_opt and not true_opt:
+                is_false_correct = false_opt.get("is_correct", False)
+                normalized_options = [
+                    {
+                        "text": "True",
+                        "is_correct": not is_false_correct,
+                        "explanation": None if is_false_correct else (false_opt.get("explanation") or "The statement is true."),
+                    },
+                    false_opt,
+                ]
+            elif not true_opt and not false_opt and normalized_options:
+                first = normalized_options[0]
+                is_correct = first.get("is_correct", True)
+                normalized_options = [
+                    {"text": "True", "is_correct": is_correct, "explanation": first.get("explanation")},
+                    {"text": "False", "is_correct": not is_correct, "explanation": None},
+                ]
+            elif not normalized_options:
+                normalized_options = [
+                    {"text": "True", "is_correct": True, "explanation": "The statement is true."},
+                    {"text": "False", "is_correct": False, "explanation": "The statement is false."},
+                ]
+
         explanation = (
             item.get("explanation")
             or item.get("model_answer")
@@ -344,8 +397,9 @@ class AssessmentGeneratorAgent(BaseAgent):
         """Get specific guidance for each question type."""
         instructions = {
             "mcq": (
-                "Provide exactly 4 options. Mark exactly 1 as is_correct=true. "
-                "Distractors must be plausible but clearly wrong. "
+                "In the 'options' array, provide EXACTLY 4 options (A, B, C, D). "
+                "Mark exactly 1 as is_correct=true and the remaining 3 as is_correct=false. "
+                "Distractors must be plausible but definitively incorrect. "
                 + (
                     "Each distractor should address a common misconception drawn from the course material."
                     if is_rag else
@@ -353,7 +407,10 @@ class AssessmentGeneratorAgent(BaseAgent):
                 )
             ),
             "true_false": (
-                "Provide exactly 2 options: True and False. Mark the correct one. "
+                "In the 'options' array, provide EXACTLY 2 options: "
+                '[{"text": "True", "is_correct": true/false, "explanation": "..."}, '
+                '{"text": "False", "is_correct": true/false, "explanation": "..."}]. '
+                "Exactly ONE of the two options MUST have is_correct: true, and the other MUST have is_correct: false. "
                 + (
                     "The statement must be directly verifiable from the course material."
                     if is_rag else
@@ -371,9 +428,11 @@ class AssessmentGeneratorAgent(BaseAgent):
                 "'Model Answer: <insert key points that must appear in a full-mark answer>\\n\\nRubric: <insert detailed rubric: marks for argument, evidence, structure, conclusion>\\n\\nWord Limit: <insert expected number, e.g. 500> words'."
             ),
             "matching": (
-                "Provide matching pairs. In each option: 'text' is the left-side item, "
-                "'explanation' is the correct right-side match. All 'is_correct' should be true. "
-                "Provide at least 4 pairs. "
+                "In the 'options' array, provide 4 to 6 matching pairs. "
+                "For EACH option object: "
+                "- 'text' MUST be the left-column concept/term (e.g. '<header> element'). "
+                "- 'explanation' MUST be the right-column matching definition/target (e.g. 'Introductory content or navigation links'). "
+                "- 'is_correct' MUST be true for all pairs. "
                 + (
                     "All terms must come from the course material."
                     if is_rag else
@@ -382,7 +441,7 @@ class AssessmentGeneratorAgent(BaseAgent):
             ),
             "fill_blank": (
                 "Use '___' in the question text for each blank. "
-                "Each option is a correct answer for one blank (in order). All options should have is_correct: true. "
+                "In the 'options' array, provide the correct answer for each blank in order. All options should have is_correct: true. "
                 + (
                     "Blanks must target key terms, definitions, or values from the course material."
                     if is_rag else
@@ -405,7 +464,7 @@ class AssessmentGeneratorAgent(BaseAgent):
                 "'Solution Steps: <insert step-by-step worked solution and formula details>\\n\\nNumerical Answer: <insert exact numerical answer value>\\n\\nTolerance: <insert tolerance value, e.g. 0.05>'."
             ),
             "ordering": (
-                "Provide items in their CORRECT sequence in the options array. "
+                "In the 'options' array, provide 3 to 6 items in their CORRECT chronological or logical sequence. "
                 "All ordering options should have is_correct: true. "
                 + (
                     "Items must represent a meaningful process or sequence from the course material."

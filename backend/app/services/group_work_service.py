@@ -441,6 +441,72 @@ class GroupWorkService:
             member_overrides=submission.member_overrides,
         )
 
+    def _validate_group_answer_content_shape(
+        self, q_type: str, answer_content: dict[str, Any] | None
+    ) -> None:
+        if answer_content is None:
+            return
+        if not isinstance(answer_content, dict):
+            raise ValidationError(
+                f"Invalid answer format for question type {q_type}. Expected a JSON object.",
+                code="INVALID_ANSWER_PAYLOAD",
+            )
+
+        q_type_upper = q_type.upper()
+        if q_type_upper in {"MCQ", "TRUE_FALSE"}:
+            if "selected_option_ids" in answer_content:
+                opts = answer_content["selected_option_ids"]
+                if opts is not None and not isinstance(opts, list):
+                    raise ValidationError(
+                        "selected_option_ids must be a list of option IDs.",
+                        code="INVALID_OPTION_SELECTION",
+                    )
+            elif "selected_option_id" in answer_content:
+                opt = answer_content["selected_option_id"]
+                if opt is not None and not isinstance(opt, (str, uuid.UUID)):
+                    raise ValidationError(
+                        "selected_option_id must be an option ID string.",
+                        code="INVALID_OPTION_SELECTION",
+                    )
+        elif q_type_upper in {"SHORT_ANSWER", "ESSAY", "COMPUTATIONAL"}:
+            if "text" in answer_content:
+                text_val = answer_content["text"]
+                if text_val is not None and not isinstance(text_val, str):
+                    raise ValidationError(
+                        "Answer text must be a string.",
+                        code="INVALID_TEXT_ANSWER",
+                    )
+        elif q_type_upper == "ORDERING":
+            if "ordered_option_ids" in answer_content:
+                ordered = answer_content["ordered_option_ids"]
+                if ordered is not None and not isinstance(ordered, list):
+                    raise ValidationError(
+                        "ordered_option_ids must be an ordered list of option IDs.",
+                        code="INVALID_ORDERING_ANSWER",
+                    )
+        elif q_type_upper == "MATCHING":
+            pairs = (
+                answer_content.get("matches")
+                or answer_content.get("matching_answers")
+                or answer_content.get("pairs")
+            )
+            if pairs is not None and not isinstance(pairs, (list, dict)):
+                raise ValidationError(
+                    "Matching pairs must be a list of match entries or a mapping object.",
+                    code="INVALID_MATCHING_ANSWER",
+                )
+        elif q_type_upper == "FILL_BLANK":
+            blanks = (
+                answer_content.get("fill_blank_answers")
+                or answer_content.get("blanks")
+                or answer_content.get("answers")
+            )
+            if blanks is not None and not isinstance(blanks, (list, dict)):
+                raise ValidationError(
+                    "Fill-in-blank answers must be a dictionary or list of answers.",
+                    code="INVALID_FILL_BLANK_ANSWER",
+                )
+
     async def save_group_answer(
         self,
         *,
@@ -464,6 +530,15 @@ class GroupWorkService:
             aq = await self.assessment_repo.get_assessment_question(assessment.id, question_id)
             if aq and aq.group_id and aq.group_id != group.id:
                 raise ValidationError("This question is not assigned to your group.", code="QUESTION_NOT_FOR_GROUP")
+
+        # Validate question answer content shape against question type
+        if data.answer_content is not None:
+            question = await self.question_repo.get_by_id_simple(question_id)
+            if question:
+                q_type = getattr(question, "question_type", None)
+                if q_type:
+                    q_type_str = q_type.value if hasattr(q_type, "value") else str(q_type)
+                    self._validate_group_answer_content_shape(q_type_str, data.answer_content)
 
         answer, _ = await self.submission_repo.upsert_answer(
             submission_id=submission_id,
@@ -1105,6 +1180,32 @@ class GroupWorkService:
         )
 
         # ── Atomically reconcile derived AssessmentResult for all active members ──
+        await self._reconcile_group_results(
+            submission=submission,
+            assessment=assessment,
+            total_score=data.total_score,
+            max_score=data.max_score,
+            is_final=is_final,
+            member_overrides=data.member_overrides,
+            current_user=current_user,
+        )
+
+    async def _reconcile_group_results(
+        self,
+        *,
+        submission: GroupSubmission,
+        assessment: Assessment,
+        total_score: float,
+        max_score: float,
+        is_final: bool,
+        member_overrides: dict[str, float] | None = None,
+        current_user: User | None = None,
+    ) -> None:
+        """
+        Atomically reconcile per-member AssessmentResult records derived from a group submission.
+        Updates letter grades, percentages, pass/fail status, and handles automatic release when applicable.
+        """
+        submission_id = submission.id
         members = await self.group_repo.list_members(submission.group_id)
         active_members = [m for m in members if not m.is_deleted]
         active_student_ids = {m.student_id for m in active_members}
@@ -1133,15 +1234,17 @@ class GroupWorkService:
         if hasattr(release_mode, "value"):
             release_mode = release_mode.value
 
+        overrides = member_overrides or submission.member_overrides or {}
+
         for member in active_members:
             member_id_str = str(member.student_id)
             # 1. Calculate per-student score from overrides or default total_score
             student_score = (
-                data.member_overrides.get(member_id_str, data.total_score)
-                if data.member_overrides and member_id_str in data.member_overrides
-                else data.total_score
+                overrides.get(member_id_str, total_score)
+                if overrides and member_id_str in overrides
+                else total_score
             )
-            percentage = round((student_score / data.max_score) * 100, 2) if (data.max_score and data.max_score > 0) else 0.0
+            percentage = round((student_score / max_score) * 100, 2) if (max_score and max_score > 0) else 0.0
             passing_pct = (assessment.passing_marks / assessment.total_marks * 100) if (assessment.total_marks and assessment.passing_marks) else 50.0
             is_passing = percentage >= passing_pct
             letter_grade = _compute_letter_grade(percentage)
@@ -1162,7 +1265,7 @@ class GroupWorkService:
                 group_submission_id=submission.id,
                 attempt_id=member_attempt.id if member_attempt else None,
                 total_score=student_score,
-                max_score=data.max_score,
+                max_score=max_score,
                 percentage=percentage,
                 letter_grade=letter_grade,
                 is_passing=is_passing,
@@ -1178,9 +1281,10 @@ class GroupWorkService:
             and is_final
             and total_questions_count > 0
             and completed_answers_count >= total_questions_count
+            and current_user is not None
         ):
             await self.release_group_result(
-                assessment_id=assessment_id,
+                assessment_id=assessment.id,
                 submission_id=submission_id,
                 current_user=current_user,
             )
@@ -1351,19 +1455,20 @@ class GroupWorkService:
                         "criteria": [
                             {
                                 "id": str(c.id),
-                                "title": c.name,
-                                "name": c.name,
+                                "title": c.title,
+                                "name": c.title,
                                 "description": c.description,
-                                "max_marks": c.weight,
-                                "weight": c.weight,
+                                "max_marks": c.max_marks,
+                                "weight": c.max_marks,
                                 "levels": [
                                     {
                                         "id": str(lvl.id),
-                                        "title": lvl.name,
-                                        "name": lvl.name,
+                                        "title": lvl.label,
+                                        "name": lvl.label,
+                                        "label": lvl.label,
                                         "description": lvl.description,
-                                        "marks": lvl.score,
-                                        "score": lvl.score,
+                                        "marks": lvl.marks,
+                                        "score": lvl.marks,
                                     }
                                     for lvl in getattr(c, "levels", []) or []
                                 ],
@@ -1446,6 +1551,10 @@ class GroupWorkService:
             ai_feedback_suggestions=content.get("ai_feedback_suggestions"),
             ai_grade_decision=content.get("ai_grade_decision"),
             rubric_scores=content.get("rubric_scores"),
+            ai_grading_basis=content.get("ai_grading_basis"),
+            rag_used=bool(content.get("rag_used", False)),
+            ai_context_sources=content.get("ai_context_sources"),
+            rag_chunk_ids=content.get("rag_chunk_ids"),
         )
 
     async def _compute_auto_score_for_group_answer(
@@ -1705,6 +1814,9 @@ class GroupWorkService:
             raise NotFoundError("Assessment not found.", code="ASSESSMENT_NOT_FOUND")
         self._assert_can_edit(assessment, current_user)
 
+        if data.is_final and data.score is None:
+            raise ValidationError("Score is required when finalizing a question grade.", code="SCORE_REQUIRED")
+
         ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
         if not ans:
             ans, _ = await self.submission_repo.upsert_answer(
@@ -1744,15 +1856,53 @@ class GroupWorkService:
                 all_final = False
 
         submission.total_score = total_score
-        if data.is_final and all_final:
+        max_score = float(assessment.total_marks or 100.0)
+        submission.max_score = max_score
+
+        is_sub_final = bool(data.is_final and all_final)
+        if is_sub_final:
             submission.status = GroupSubmissionStatus.GRADED
             submission.graded_at = _utcnow()
             submission.graded_by_id = current_user.id
         self.db.add(submission)
         await self.db.flush()
 
+        # Atomically reconcile derived AssessmentResult rows for all active members
+        await self._reconcile_group_results(
+            submission=submission,
+            assessment=assessment,
+            total_score=total_score,
+            max_score=max_score,
+            is_final=is_sub_final,
+            member_overrides=submission.member_overrides,
+            current_user=current_user,
+        )
+
         profiles = await self._get_user_profiles([current_user.id])
         return self._serialize_submission_answer(ans, profiles)
+
+    async def process_ai_grading_for_single_question(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        question_id: uuid.UUID,
+        grading_service: Any,
+    ) -> dict[str, Any]:
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+
+        ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
+        if not ans:
+            raise NotFoundError("Answer not found.", code="ANSWER_NOT_FOUND")
+
+        await grading_service.process_ai_group_answer(ans)
+        await self.db.flush()
+        return {
+            "submission_id": str(submission_id),
+            "question_id": str(question_id),
+            "status": "completed",
+        }
 
     async def trigger_ai_review_for_group_question(
         self,
@@ -1763,6 +1913,59 @@ class GroupWorkService:
     ) -> GroupSubmissionAnswerResponse:
         """
         Re-generate or execute AI review on demand for a single question in group work.
+        Dispatches background Celery job and immediately returns the answer in PROCESSING state.
+        """
+        submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
+        if not submission:
+            raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
+
+        assessment = await self.assessment_repo.get_by_id(submission.assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.", code="ASSESSMENT_NOT_FOUND")
+        self._assert_can_edit(assessment, current_user)
+
+        ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
+        if not ans:
+            raise NotFoundError("Answer not found.", code="ANSWER_NOT_FOUND")
+
+        # Mark answer content as PROCESSING
+        if ans.answer_content is None:
+            ans.answer_content = {}
+        ans.answer_content.update({
+            "ai_grade_decision": "PROCESSING",
+            "ai_grade_rationale": "AI evaluation in progress...",
+        })
+        self.db.add(ans)
+        await self.db.flush()
+
+        # Enqueue background Celery task
+        try:
+            from app.workers.tasks.grading import trigger_ai_grading_for_group_question
+            trigger_ai_grading_for_group_question.delay(str(submission_id), str(question_id))
+        except Exception as e:
+            logger.warning(
+                "Could not enqueue Celery AI grading task for group question %s: %s. Falling back to inline evaluation.",
+                str(question_id),
+                str(e),
+            )
+            from app.services.grading_service import GradingService
+            grading_service = GradingService(self.db)
+            await grading_service.process_ai_group_answer(ans)
+            await self.db.flush()
+
+        profiles = await self._get_user_profiles([current_user.id])
+        return self._serialize_submission_answer(ans, profiles)
+
+    async def suggest_ai_changes_for_group_question(
+        self,
+        *,
+        submission_id: uuid.UUID,
+        question_id: uuid.UUID,
+        feedback: str,
+        current_user: User,
+    ) -> GroupSubmissionAnswerResponse:
+        """
+        Re-evaluate a single group question incorporating lecturer guidance/feedback.
         """
         submission = await self.submission_repo.get_by_id(submission_id, include_related=True)
         if not submission:
@@ -1779,7 +1982,7 @@ class GroupWorkService:
 
         from app.services.grading_service import GradingService
         grading_service = GradingService(self.db)
-        await grading_service.process_ai_group_answer(ans)
+        await grading_service.process_ai_group_answer(ans, lecturer_feedback=feedback)
         await self.db.flush()
 
         profiles = await self._get_user_profiles([current_user.id])

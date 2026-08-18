@@ -150,6 +150,12 @@ export const groupWorkApi = {
       method: "POST",
     }),
 
+  suggestChanges: (submissionId: string, questionId: string, feedback: string) =>
+    apiClient(`/group-work/submissions/${submissionId}/questions/${questionId}/suggest-changes`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    }),
+
   releaseResult: (assessmentId: string, submissionId: string) =>
     apiClient(`/group-work/submissions/${submissionId}/release-result?assessment_id=${assessmentId}`, {
       method: "POST",

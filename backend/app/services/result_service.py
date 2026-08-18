@@ -31,6 +31,8 @@ from app.db.models.result import AssessmentResult
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.grading_repo import GradingRepository
+from app.db.repositories.group_submission_repo import GroupSubmissionRepository
+from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 
@@ -63,6 +65,8 @@ class ResultService:
         self.attempt_repo = AttemptRepository(db)
         self.assessment_repo = AssessmentRepository(db)
         self.submission_repo = SubmissionRepository(db)
+        self.group_submission_repo = GroupSubmissionRepository(db)
+        self.question_repo = QuestionRepository(db)
 
     async def _notify_result_released(
         self,
@@ -457,7 +461,7 @@ class ResultService:
         Supports lookup by attempt_id OR direct result.id.
         Raises NotFoundError if not released yet.
         """
-        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(attempt_id)
+        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(attempt_id, student_id=student_id)
         if not result:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
 
@@ -666,12 +670,16 @@ class ResultService:
             if period:
                 resp.academic_year = period.name
 
-        # 6. Group Result Special Handling: No fake breakdown generation
+        # 6. Group Result Handling: Populate breakdowns from GroupSubmissionAnswer rows
         if result.is_group_result:
             from app.db.models.attempt import GroupSubmission, StudentGroup
+            from app.db.enums import QuestionDistributionMode
+            from app.schemas.result import ResultBreakdownItem
+            
             resp.is_group_result = True
             resp.group_submission_id = result.group_submission_id
             resp.breakdowns = []
+            
             if result.group_submission_id:
                 group_sub = await self.db.get(GroupSubmission, result.group_submission_id)
                 if group_sub:
@@ -682,6 +690,139 @@ class ResultService:
                     if group:
                         resp.group_id = group.id
                         resp.group_name = group.name
+
+                    # Load group answers
+                    group_answers = await self.group_submission_repo.list_answers(group_sub.id)
+                    answers_map = {a.question_id: a for a in group_answers}
+
+                    # Load assessment questions for group
+                    if assessment and assessment.question_distribution_mode == QuestionDistributionMode.PER_GROUP:
+                        aq_rows = await self.assessment_repo.list_assessment_questions_for_group(result.assessment_id, group_sub.group_id)
+                    else:
+                        aq_rows = await self.assessment_repo.list_assessment_questions(result.assessment_id)
+
+                    for aq in aq_rows:
+                        if not aq.question:
+                            continue
+                        q = aq.question
+                        ans = answers_map.get(q.id)
+                        ans_content = ans.answer_content if (ans and ans.answer_content) else {}
+
+                        score = ans_content.get("score")
+                        if score is None:
+                            score = ans_content.get("auto_grade_score")
+                        if score is None:
+                            score = ans_content.get("ai_grade_score")
+
+                        max_score = ans_content.get("max_score")
+                        if max_score is None:
+                            max_score = float(aq.marks_override or q.marks or 0.0)
+
+                        feedback = ans_content.get("feedback") or ans_content.get("ai_feedback_draft")
+                        is_correct = ans_content.get("auto_grade_is_correct")
+                        was_skipped = bool(ans_content.get("is_skipped", False))
+
+                        grading_mode = None
+                        if ans_content.get("graded_by_id"):
+                            grading_mode = "MANUAL"
+                        elif ans_content.get("is_auto_graded"):
+                            grading_mode = "AUTO"
+                        elif ans_content.get("ai_grade_decision") or ans_content.get("ai_grade_score"):
+                            grading_mode = "AI_ASSISTED"
+
+                        # Safe question type
+                        raw_q_type = q.question_type.value if hasattr(q.question_type, "value") else str(q.question_type)
+                        q_type_str = raw_q_type.lower()
+
+                        # Student answer formatting
+                        student_answer = ans_content.get("text") or ans_content.get("answer_text") or ""
+                        student_answer_json = None
+
+                        if raw_q_type in ["MCQ", "TRUE_FALSE"]:
+                            opt_id = ans_content.get("selected_option_id")
+                            if opt_id:
+                                opt = next((o for o in (q.options or []) if str(o.id) == str(opt_id)), None)
+                                student_answer = opt.content if opt else str(opt_id)
+                            elif ans_content.get("selected_option_ids"):
+                                opt_ids = ans_content.get("selected_option_ids") or []
+                                student_answer = ", ".join([
+                                    next((o.content for o in (q.options or []) if str(o.id) == str(oid)), str(oid))
+                                    for oid in opt_ids
+                                ])
+                        elif raw_q_type == "MATCHING":
+                            student_answer_json = ans_content.get("match_pairs") or ans_content.get("match_pairs_json")
+                        elif raw_q_type in ["FILL_BLANK", "FILL_BLANKS", "fillblank"]:
+                            student_answer_json = ans_content.get("blanks") or ans_content.get("fill_blank_answers")
+                        elif raw_q_type in ["ORDERING", "ORDERED_LIST"]:
+                            student_answer_json = ans_content.get("ordered_ids") or ans_content.get("ordered_option_ids")
+                        elif ans_content.get("table_data"):
+                            student_answer_json = ans_content.get("table_data")
+
+                        # Correct answers formatting
+                        correct_answer = None
+                        blanks_data = None
+                        if raw_q_type in ["MCQ", "TRUE_FALSE"]:
+                            correct_opts = [o.content for o in (q.options or []) if o.is_correct]
+                            correct_answer = ", ".join(correct_opts) if correct_opts else None
+                        elif raw_q_type == "MATCHING":
+                            correct_answer = ", ".join([f"{o.content} -> {o.match_value}" for o in (q.options or []) if o.match_value])
+                        elif raw_q_type in ["ORDERING", "ORDERED_LIST"]:
+                            sorted_opts = sorted((q.options or []), key=lambda o: (o.order_index if o.order_index is not None else 0))
+                            correct_answer = " -> ".join([o.content for o in sorted_opts])
+                        elif raw_q_type in ["FILL_BLANK", "FILL_BLANKS", "fillblank"]:
+                            q_blanks = getattr(q, "blanks", None)
+                            if not q_blanks:
+                                q_blanks = await self.question_repo.list_blanks(q.id)
+                            if q_blanks:
+                                sorted_blanks = sorted(q_blanks, key=lambda b: (b.blank_index if b.blank_index is not None else 0))
+                                correct_answer = "; ".join([
+                                    f"Blank {b.blank_index + 1}: " + " | ".join(b.accepted_answers or [])
+                                    for b in sorted_blanks
+                                ])
+                                blanks_data = [
+                                    {
+                                        "blank_index": b.blank_index,
+                                        "accepted_answers": b.accepted_answers or [],
+                                        "case_sensitive": bool(b.case_sensitive),
+                                    }
+                                    for b in sorted_blanks
+                                ]
+
+                        bd_item = ResultBreakdownItem(
+                            id=ans.id if ans else uuid.uuid4(),
+                            question_id=q.id,
+                            score=float(score) if score is not None else None,
+                            max_score=float(max_score),
+                            is_correct=is_correct,
+                            feedback=feedback,
+                            grading_mode=grading_mode,
+                            was_skipped=was_skipped,
+                            question_text=q.content,
+                            question_type=q_type_str,
+                            section_title=aq.assessment_section.title if aq.assessment_section else None,
+                            imageUrl=q.image_url,
+                            case_study_context=q.case_study_context,
+                            questionTableContext=q.question_table_context,
+                            requiresTableAnswer=bool(q.requires_table_answer),
+                            answerTableTemplate=q.answer_table_template,
+                            student_answer=student_answer,
+                            student_answer_json=student_answer_json,
+                            correct_answer=correct_answer,
+                            options=[
+                                {
+                                    "id": str(o.id),
+                                    "text": o.content,
+                                    "is_correct": o.is_correct,
+                                    "match_key": o.match_key,
+                                    "match_value": o.match_value,
+                                    "order_index": o.order_index,
+                                }
+                                for o in (q.options or [])
+                            ],
+                            blanks=blanks_data,
+                        )
+                        resp.breakdowns.append(bd_item)
+
             return resp.model_dump()
 
         # Load all questions and responses for this attempt

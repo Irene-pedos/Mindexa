@@ -236,20 +236,30 @@ class ResultRepository:
         return result.scalar_one_or_none()
 
     async def get_by_attempt_or_id_with_breakdowns(
-        self, identifier: uuid.UUID
+        self, identifier: uuid.UUID, student_id: uuid.UUID | None = None
     ) -> AssessmentResult | None:
+        from sqlalchemy import and_
+        or_clauses = [
+            AssessmentResult.attempt_id == identifier,
+            AssessmentResult.id == identifier,
+        ]
+        if student_id is not None:
+            or_clauses.append(
+                and_(
+                    AssessmentResult.assessment_id == identifier,
+                    AssessmentResult.student_id == student_id,
+                )
+            )
         result = await self.db.execute(
             select(AssessmentResult)
             .options(selectinload(AssessmentResult.breakdowns))
             .where(
-                or_(
-                    AssessmentResult.attempt_id == identifier,
-                    AssessmentResult.id == identifier,
-                ),
+                or_(*or_clauses),
                 AssessmentResult.is_deleted == False,  # noqa: E712
             )
+            .order_by(AssessmentResult.created_at.desc())
         )
-        return result.scalar_one_or_none()
+        return result.scalars().first()
 
     async def list_by_assessment(
         self,

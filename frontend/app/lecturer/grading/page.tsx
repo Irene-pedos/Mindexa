@@ -882,6 +882,10 @@ function LecturerGradingQueueContent() {
     "questions" | "roster" | "activity"
   >("questions");
   const [isTriggeringAi, setIsTriggeringAi] = useState(false);
+  const [groupFeedbackDraft, setGroupFeedbackDraft] = useState<string>("");
+  const [groupStrengths, setGroupStrengths] = useState<string[]>([]);
+  const [groupImprovements, setGroupImprovements] = useState<string[]>([]);
+  const [groupSuggestions, setGroupSuggestions] = useState<string[]>([]);
 
   // Group Question-Level Grades Data Model
   const [groupQuestionScores, setGroupQuestionScores] = useState<
@@ -1313,6 +1317,66 @@ function LecturerGradingQueueContent() {
     }
   };
 
+  // Poll group submission workspace when active answer is processing AI evaluation
+  useEffect(() => {
+    if (!selectedGroupSubmission?.id) return;
+    const activeQ = selectedGroupSubmission.questions?.[groupGraderActiveQuestionIndex];
+    if (!activeQ) return;
+    const activeAns = selectedGroupSubmission.answers?.find(
+      (a: any) => a.question_id === activeQ.id,
+    );
+    const isProcessing =
+      activeAns?.ai_grade_decision === "PROCESSING" ||
+      activeAns?.ai_grade_decision === "PENDING";
+
+    if (!isProcessing) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const workspaceData: any = await gradingApi.getGroupSubmissionWorkspace(
+          selectedGroupSubmission.id,
+        );
+        if (workspaceData?.answers) {
+          const freshActiveAns = workspaceData.answers.find(
+            (a: any) => a.question_id === activeQ.id,
+          );
+          if (
+            freshActiveAns &&
+            freshActiveAns.ai_grade_decision !== "PROCESSING" &&
+            freshActiveAns.ai_grade_decision !== "PENDING"
+          ) {
+            setSelectedGroupSubmission((prev: any) => {
+              if (!prev) return null;
+              return {
+                ...prev,
+                answers: workspaceData.answers,
+              };
+            });
+            if (
+              freshActiveAns.ai_grade_score !== undefined &&
+              freshActiveAns.ai_grade_score !== null
+            ) {
+              setGroupScore(String(freshActiveAns.ai_grade_score));
+            }
+            if (freshActiveAns.ai_feedback_draft) {
+              setGroupFeedback(freshActiveAns.ai_feedback_draft);
+            }
+            toast.success("AI review completed for this question!");
+          }
+        }
+      } catch (e) {
+        console.error("Failed polling group workspace", e);
+      }
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [
+    selectedGroupSubmission?.id,
+    selectedGroupSubmission?.questions,
+    selectedGroupSubmission?.answers,
+    groupGraderActiveQuestionIndex,
+  ]);
+
   // Question navigation in SpeedGrader
   const handleSelectQuestion = (idx: number) => {
     setActiveQuestionIndex(idx);
@@ -1381,16 +1445,26 @@ function LecturerGradingQueueContent() {
   const triggerDebouncedAutosave = useCallback(
     (scoreVal: string, feedbackVal: string, rubrics: RubricScore[]) => {
       if (!activeSubmission?.id || !selectedStudent || !activeAttempt) return;
+
+      const currentQ = activeAttempt.questions?.[activeQuestionIndex];
+      const maxMarks = currentQ?.marks || DEFAULT_QUESTION_MAX_MARKS;
+      const trimmed = scoreVal.trim();
+      let numScore: number | undefined = undefined;
+
+      if (trimmed !== "") {
+        const parsed = parseFloat(trimmed);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxMarks) {
+          // Invalid score (partial entry or out of bounds) -> skip autosave to prevent saving corrupt or null values
+          return;
+        }
+        numScore = parsed;
+      }
+
       if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
 
       setAutosaveStatus("saving");
       autosaveTimerRef.current = setTimeout(async () => {
         try {
-          const currentQ = activeAttempt.questions?.[activeQuestionIndex];
-          const maxMarks = currentQ?.marks || DEFAULT_QUESTION_MAX_MARKS;
-          const numScore =
-            scoreVal.trim() === "" ? undefined : parseFloat(scoreVal);
-
           const payload: any = {
             score: numScore,
             feedback: feedbackVal,
@@ -1504,16 +1578,27 @@ function LecturerGradingQueueContent() {
         selectedGroupSubmission.questions?.[groupGraderActiveQuestionIndex];
       if (!activeQ) return;
 
+      const maxMarks = activeQ.marks || DEFAULT_QUESTION_MAX_MARKS;
+      const trimmed = scoreVal.trim();
+      let numScore: number | undefined = undefined;
+
+      if (trimmed !== "") {
+        const parsed = parseFloat(trimmed);
+        if (!Number.isFinite(parsed) || parsed < 0 || parsed > maxMarks) {
+          // Invalid or incomplete score mid-typing -> skip autosave to avoid saving 0 or corrupt score
+          return;
+        }
+        numScore = parsed;
+      }
+
       if (groupAutosaveTimerRef.current)
         clearTimeout(groupAutosaveTimerRef.current);
 
       setAutosaveStatus("saving");
       groupAutosaveTimerRef.current = setTimeout(async () => {
         try {
-          const numScore =
-            scoreVal.trim() === "" ? undefined : parseFloat(scoreVal);
           const payload: any = {
-            score: numScore !== undefined && !isNaN(numScore) ? numScore : 0,
+            score: numScore,
             feedback: feedbackVal,
             is_final: false,
             is_ai_accepted: isGroupAiAccepted,
@@ -1671,16 +1756,22 @@ function LecturerGradingQueueContent() {
       });
 
       if (
-        updatedAns.ai_grade_score !== undefined &&
-        updatedAns.ai_grade_score !== null
+        updatedAns.ai_grade_decision === "PROCESSING" ||
+        updatedAns.ai_grade_decision === "PENDING"
       ) {
-        setGroupScore(String(updatedAns.ai_grade_score));
+        toast.info("AI evaluation queued. Review will update automatically once completed.");
+      } else {
+        if (
+          updatedAns.ai_grade_score !== undefined &&
+          updatedAns.ai_grade_score !== null
+        ) {
+          setGroupScore(String(updatedAns.ai_grade_score));
+        }
+        if (updatedAns.ai_feedback_draft) {
+          setGroupFeedback(updatedAns.ai_feedback_draft);
+        }
+        toast.success("AI review completed successfully!");
       }
-      if (updatedAns.ai_feedback_draft) {
-        setGroupFeedback(updatedAns.ai_feedback_draft);
-      }
-
-      toast.success("AI review refreshed successfully!");
     } catch (err: any) {
       toast.error(err?.message || "Failed to trigger AI review");
     } finally {
@@ -3886,8 +3977,14 @@ function LecturerGradingQueueContent() {
                   );
                   const maxMarks = activeQ.marks || DEFAULT_QUESTION_MAX_MARKS;
                   const isAuto = Boolean(activeAns?.is_auto_graded);
+                  const isProcessing = Boolean(
+                    isTriggeringAi ||
+                      activeAns?.ai_grade_decision === "PROCESSING" ||
+                      activeAns?.ai_grade_decision === "PENDING",
+                  );
                   const hasAi = Boolean(
-                    activeAns?.ai_grade_score !== undefined &&
+                    !isProcessing &&
+                      activeAns?.ai_grade_score !== undefined &&
                       activeAns?.ai_grade_score !== null,
                   );
                   const confidence = activeAns?.ai_grade_confidence ?? 0.85;
@@ -3895,180 +3992,87 @@ function LecturerGradingQueueContent() {
 
                   return (
                     <div className="space-y-4">
-                      {/* AI Evaluation Section */}
-                      <div className="border border-border/50 bg-card rounded-2xl p-4 shadow-2xs space-y-3">
-                        <div className="flex items-center justify-between border-b border-border/30 pb-2">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                            <Sparkles className="size-3.5 text-primary" />
-                            {isAuto ? "Deterministic Auto-Grading" : "AI Review & Assistant"}
-                          </span>
-                          {!isAuto && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={handleTriggerGroupAiReview}
-                              disabled={isTriggeringAi}
-                              className="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground"
-                              title="Re-run AI review for this question"
-                            >
-                              {isTriggeringAi ? (
-                                <Loader2 className="size-3 animate-spin mr-1" />
-                              ) : (
-                                <RefreshCcw className="size-3 mr-1" />
-                              )}
-                              Re-evaluate
-                            </Button>
-                          )}
+                      {/* AI Review & Feedback Components */}
+                      {!isAuto ? (
+                        <>
+                          <AIReviewPanel
+                            isGroupWork={true}
+                            groupSubmissionId={selectedGroupSubmission.id}
+                            groupQuestionId={activeQ.id}
+                            groupAnswerData={activeAns}
+                            maxScore={maxMarks}
+                            onSuggestionApplied={(score, feedback) => {
+                              setGroupScore(score.toString());
+                              const fb = feedback || "";
+                              if (feedback) setGroupFeedback(fb);
+                              setIsGroupAiAccepted(true);
+                              setIsGroupEditing(true);
+                              triggerDebouncedGroupAutosave(
+                                score.toString(),
+                                fb || groupFeedback,
+                                groupRubricScores,
+                              );
+                            }}
+                            onSuggestionLoaded={(
+                              draft,
+                              strengths,
+                              improvements,
+                              suggestions,
+                            ) => {
+                              setGroupFeedbackDraft(draft);
+                              setGroupStrengths(strengths);
+                              setGroupImprovements(improvements);
+                              setGroupSuggestions(suggestions);
+                            }}
+                          />
+
+                          <AIFeedbackEditor
+                            isGroupWork={true}
+                            groupSubmissionId={selectedGroupSubmission.id}
+                            groupQuestionId={activeQ.id}
+                            initialDraft={
+                              activeAns?.ai_feedback_draft ||
+                              groupFeedbackDraft ||
+                              undefined
+                            }
+                            initialStrengths={
+                              activeAns?.ai_feedback_strengths || groupStrengths
+                            }
+                            initialImprovements={
+                              activeAns?.ai_feedback_improvements ||
+                              groupImprovements
+                            }
+                            initialSuggestions={
+                              activeAns?.ai_feedback_suggestions ||
+                              groupSuggestions
+                            }
+                            onDraftApplied={(text) => {
+                              setGroupFeedback(text);
+                              setIsGroupAiAccepted(true);
+                              setIsGroupEditing(true);
+                              triggerDebouncedGroupAutosave(
+                                groupScore,
+                                text,
+                                groupRubricScores,
+                              );
+                            }}
+                          />
+                        </>
+                      ) : (
+                        <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1.5 text-emerald-950 dark:text-emerald-200">
+                          <div className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
+                            <CheckCircle2 className="size-3.5" />
+                            <span>Closed Question Auto-Graded</span>
+                          </div>
+                          <p className="text-[11px] leading-relaxed">
+                            Evaluated strictly against key choices. Score:{" "}
+                            <span className="font-bold font-mono">
+                              {activeAns?.score ?? activeAns?.auto_grade_score ?? 0}
+                            </span>{" "}
+                            / {maxMarks} pts.
+                          </p>
                         </div>
-
-                        {isAuto ? (
-                          <div className="p-3 rounded-xl bg-emerald-500/5 border border-emerald-500/20 text-xs space-y-1.5 text-emerald-950 dark:text-emerald-200">
-                            <div className="flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
-                              <CheckCircle2 className="size-3.5" />
-                              <span>Closed Question Auto-Graded</span>
-                            </div>
-                            <p className="text-[11px] leading-relaxed">
-                              Evaluated strictly against key choices. Score:{" "}
-                              <span className="font-bold font-mono">
-                                {activeAns?.score ?? activeAns?.auto_grade_score ?? 0}
-                              </span>{" "}
-                              / {maxMarks} pts.
-                            </p>
-                          </div>
-                        ) : hasAi ? (
-                          <div className="space-y-3 text-xs">
-                            {/* Confidence Meter */}
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between text-[11px]">
-                                <span className="text-muted-foreground font-medium">
-                                  Confidence Level
-                                </span>
-                                <span
-                                  className={cn(
-                                    "font-mono font-semibold",
-                                    confidencePct >= 85
-                                      ? "text-emerald-600"
-                                      : confidencePct >= 65
-                                        ? "text-amber-600"
-                                        : "text-rose-600",
-                                  )}
-                                >
-                                  {confidencePct}% Confidence
-                                </span>
-                              </div>
-                              <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
-                                <div
-                                  className={cn(
-                                    "h-full rounded-full transition-all",
-                                    confidencePct >= 85
-                                      ? "bg-emerald-500"
-                                      : confidencePct >= 65
-                                        ? "bg-amber-500"
-                                        : "bg-rose-500",
-                                  )}
-                                  style={{ width: `${confidencePct}%` }}
-                                />
-                              </div>
-                            </div>
-
-                            {/* AI Score & Accept Button */}
-                            <div className="p-3 rounded-xl bg-purple-500/5 border border-purple-500/20 space-y-2">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-semibold text-purple-900 dark:text-purple-300">
-                                  AI Suggested Score
-                                </span>
-                                <span className="font-mono font-bold text-sm text-purple-700 dark:text-purple-400">
-                                  {activeAns.ai_grade_score} / {maxMarks}
-                                </span>
-                              </div>
-
-                              <Button
-                                size="sm"
-                                onClick={() => {
-                                  setGroupScore(String(activeAns.ai_grade_score));
-                                  if (activeAns.ai_feedback_draft) {
-                                    setGroupFeedback(activeAns.ai_feedback_draft);
-                                  }
-                                  setIsGroupAiAccepted(true);
-                                  setIsGroupEditing(true);
-                                  triggerDebouncedGroupAutosave(
-                                    String(activeAns.ai_grade_score),
-                                    activeAns.ai_feedback_draft || groupFeedback,
-                                    groupRubricScores,
-                                  );
-                                  toast.success("AI suggestion accepted into evaluation card.");
-                                }}
-                                className="w-full h-7 text-xs font-medium rounded-lg bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1 shadow-2xs"
-                              >
-                                <CheckCircle2 className="size-3" />
-                                <span>Accept AI Suggestion</span>
-                              </Button>
-                            </div>
-
-                            {/* AI Rationale */}
-                            {activeAns.ai_grade_rationale && (
-                              <div className="space-y-1">
-                                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                                  AI Rationale
-                                </p>
-                                <p className="text-[11px] leading-relaxed text-foreground/90 bg-muted/10 p-2 rounded-lg border border-border/30">
-                                  {activeAns.ai_grade_rationale}
-                                </p>
-                              </div>
-                            )}
-
-                            {/* Strengths & Improvements */}
-                            {Array.isArray(activeAns.ai_feedback_strengths) &&
-                              activeAns.ai_feedback_strengths.length > 0 && (
-                                <div className="space-y-1">
-                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">
-                                    Identified Strengths
-                                  </p>
-                                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-muted-foreground">
-                                    {activeAns.ai_feedback_strengths.map((str: string, i: number) => (
-                                      <li key={i}>{str}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-
-                            {Array.isArray(activeAns.ai_feedback_improvements) &&
-                              activeAns.ai_feedback_improvements.length > 0 && (
-                                <div className="space-y-1">
-                                  <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                                    Areas for Improvement
-                                  </p>
-                                  <ul className="list-disc list-inside space-y-0.5 text-[11px] text-muted-foreground">
-                                    {activeAns.ai_feedback_improvements.map((imp: string, i: number) => (
-                                      <li key={i}>{imp}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              )}
-                          </div>
-                        ) : (
-                          <div className="p-4 rounded-xl border border-dashed border-border/60 bg-muted/5 text-center space-y-2">
-                            <Sparkles className="size-5 text-muted-foreground/60 mx-auto" />
-                            <p className="text-xs text-muted-foreground font-medium">
-                              No AI suggestion recorded yet.
-                            </p>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={handleTriggerGroupAiReview}
-                              disabled={isTriggeringAi}
-                              className="h-7 text-xs rounded-lg border-border/60"
-                            >
-                              {isTriggeringAi ? (
-                                <Loader2 className="size-3 animate-spin mr-1" />
-                              ) : (
-                                <Sparkles className="size-3 mr-1 text-primary" />
-                              )}
-                              Run AI Evaluation
-                            </Button>
-                          </div>
-                        )}
-                      </div>
+                      )}
 
                       {/* Question Grading Decision Card */}
                       <div className="border border-border/50 bg-card rounded-2xl p-4 shadow-2xs space-y-3.5">

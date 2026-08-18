@@ -321,7 +321,7 @@ async def draft_feedback(
         rubric_content = "Standard academic evaluation"
         if rubric:
             rubric_content = "\n".join([
-                f"- {c.name}: {c.description} ({c.weight} marks)"
+                f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
                 for c in rubric.criteria
             ])
             
@@ -481,12 +481,12 @@ async def get_grade_for_response(
             max_s_g = float(q.marks) if q else 10.0
             ratio_g = ref_score_g / max_s_g if max_s_g > 0 else 0.8
             for criterion in rubric.criteria:
-                pts_g = round(criterion.weight * ratio_g, 1)
+                pts_g = round(criterion.max_marks * ratio_g, 1)
                 alignment_g.append({
-                    "criterion": criterion.name,
+                    "criterion": criterion.title,
                     "description": criterion.description or "",
                     "points_awarded": pts_g,
-                    "max_points": float(criterion.weight),
+                    "max_points": float(criterion.max_marks),
                     "matched": pts_g > 0
                 })
                 
@@ -580,12 +580,12 @@ async def get_grade_for_response(
                 max_s = grade.max_score or 10.0
                 ratio = ref_score / max_s if max_s > 0 else 0.8
                 for criterion in q_obj.rubric.criteria:
-                    pts = round(criterion.weight * ratio, 1)
+                    pts = round(criterion.max_marks * ratio, 1)
                     alignment.append({
-                        "criterion": criterion.name,
+                        "criterion": criterion.title,
                         "description": criterion.description or "",
                         "points_awarded": pts,
-                        "max_points": float(criterion.weight),
+                        "max_points": float(criterion.max_marks),
                         "matched": pts > 0
                     })
                 
@@ -899,48 +899,5 @@ async def get_group_submission_workspace(
     )
 
 
-@router.put(
-    "/group-submission/{submission_id}/questions/{question_id}/grade",
-    summary="Grade a single question in group work SpeedGrader",
-)
-async def grade_group_question(
-    submission_id: uuid.UUID,
-    question_id: uuid.UUID,
-    body: dict,
-    current_user=Depends(require_lecturer_or_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    from app.services.group_work_service import GroupWorkService
-    from app.schemas.group_work import GradeGroupQuestionRequest
-    service = GroupWorkService(db)
-    req = GradeGroupQuestionRequest(**body)
-    result = await service.grade_submission_question(
-        submission_id=submission_id,
-        question_id=question_id,
-        data=req,
-        current_user=current_user,
-    )
-    await db.commit()
-    return result
 
-
-@router.post(
-    "/group-submission/{submission_id}/questions/{question_id}/ai-review",
-    summary="Trigger AI review for a single question in group work SpeedGrader",
-)
-async def trigger_group_question_ai_review(
-    submission_id: uuid.UUID,
-    question_id: uuid.UUID,
-    current_user=Depends(require_lecturer_or_admin),
-    db: AsyncSession = Depends(get_db),
-):
-    from app.services.group_work_service import GroupWorkService
-    service = GroupWorkService(db)
-    result = await service.trigger_ai_review_for_group_question(
-        submission_id=submission_id,
-        question_id=question_id,
-        current_user=current_user,
-    )
-    await db.commit()
-    return result
 

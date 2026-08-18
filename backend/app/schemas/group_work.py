@@ -99,6 +99,7 @@ class GroupAssessmentMaterialResponse(BaseModel):
 
 class GroupSubmissionAnswerResponse(BaseModel):
     id: uuid.UUID
+    submission_id: uuid.UUID | None = None
     question_id: uuid.UUID
     answer_content: dict[str, Any] | None = None
     notes_content: dict[str, Any] | None = None
@@ -124,6 +125,10 @@ class GroupSubmissionAnswerResponse(BaseModel):
     ai_feedback_suggestions: list[str] | None = None
     ai_grade_decision: str | None = None
     rubric_scores: list[dict[str, Any]] | dict[str, Any] | None = None
+    ai_grading_basis: str | None = None
+    rag_used: bool = False
+    ai_context_sources: list[str] | None = None
+    rag_chunk_ids: list[str] | None = None
 
     model_config = {"from_attributes": True}
 
@@ -330,7 +335,7 @@ class ResolveGroupAppealRequest(BaseModel):
 
 class GradeGroupQuestionRequest(BaseModel):
     """Payload for a lecturer to score or save draft for a single question in group work."""
-    score: float = Field(..., ge=0)
+    score: float | None = Field(default=None, ge=0)
     feedback: str | None = Field(default=None, max_length=5000)
     rubric_scores: list[dict[str, Any]] | dict[str, Any] | None = None
     is_final: bool = True

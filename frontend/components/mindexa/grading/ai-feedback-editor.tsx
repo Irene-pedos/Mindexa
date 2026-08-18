@@ -13,10 +13,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { Loader2, Sparkles, CheckCircle2, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { aiGradingApi } from "@/lib/api/ai-grading";
+import { groupWorkApi } from "@/lib/api/group-work";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 
 interface AIFeedbackEditorProps {
-  responseId: string;
+  responseId?: string;
+  isGroupWork?: boolean;
+  groupSubmissionId?: string;
+  groupQuestionId?: string;
   initialDraft?: string;
   initialStrengths?: string[];
   initialImprovements?: string[];
@@ -25,7 +29,10 @@ interface AIFeedbackEditorProps {
 }
 
 export function AIFeedbackEditor({ 
-  responseId, 
+  responseId,
+  isGroupWork,
+  groupSubmissionId,
+  groupQuestionId,
   initialDraft,
   initialStrengths,
   initialImprovements,
@@ -52,19 +59,34 @@ export function AIFeedbackEditor({
   const handleGenerateDraft = async () => {
     setDrafting(true);
     try {
-      const res = await aiGradingApi.requestAIFeedbackDraft(responseId);
-      
-      setDraftText(res.ai_feedback_draft || "");
-      setStrengths(res.ai_feedback_strengths || []);
-      setImprovements(res.ai_feedback_improvements || []);
-      setSuggestions(res.ai_feedback_suggestions || []);
-      
-      toast.success("Feedback draft generated successfully.");
-      
-      if (onDraftApplied) {
-        onDraftApplied(res.ai_feedback_draft || "");
+      if (isGroupWork && groupSubmissionId && groupQuestionId) {
+        const res = await groupWorkApi.triggerQuestionAIReview(
+          groupSubmissionId,
+          groupQuestionId,
+        );
+        setDraftText(res.ai_feedback_draft || "");
+        setStrengths(res.ai_feedback_strengths || []);
+        setImprovements(res.ai_feedback_improvements || []);
+        setSuggestions(res.ai_feedback_suggestions || []);
+
+        toast.success("Group feedback draft generated successfully.");
+        if (onDraftApplied && res.ai_feedback_draft) {
+          onDraftApplied(res.ai_feedback_draft);
+        }
+      } else if (responseId) {
+        const res = await aiGradingApi.requestAIFeedbackDraft(responseId);
+        
+        setDraftText(res.ai_feedback_draft || "");
+        setStrengths(res.ai_feedback_strengths || []);
+        setImprovements(res.ai_feedback_improvements || []);
+        setSuggestions(res.ai_feedback_suggestions || []);
+        
+        toast.success("Feedback draft generated successfully.");
+        
+        if (onDraftApplied) {
+          onDraftApplied(res.ai_feedback_draft || "");
+        }
       }
-      
     } catch (err: any) {
       toast.error(err.message || "Failed to generate feedback draft.");
     } finally {

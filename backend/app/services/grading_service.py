@@ -229,7 +229,7 @@ class GradingService:
             rubric_id_used = rubric.id
             # Format rubric for AI context
             rubric_content = "\n".join([
-                f"- {c.name}: {c.description} ({c.weight} marks)"
+                f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
                 for c in rubric.criteria
             ])
 
@@ -245,35 +245,17 @@ class GradingService:
             from app.services.rag_service import RAGService
             rag_service = RAGService(self.db)
             try:
-                # We retrieve chunks matching the question content to inject into instructions
                 rag_res = await rag_service.retrieve_context_for_lecturer(
                     topic=question.content,
                     teaching_workspace_id=assessment.teaching_workspace_id,
-                    top_k=4
+                    top_k=4,
                 )
                 course_context = rag_res.context_string
-                
-                # Perform a direct vector query to fetch chunk IDs and display names for durable auditing
-                query_embedding = await rag_service._embed_question(question.content)
-                embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
-                
-                from sqlalchemy import text
-                stmt = text("""
-                    SELECT rc.id, lm.display_name
-                    FROM resource_chunks rc
-                    JOIN academic_resources ar ON ar.id = rc.resource_id
-                    JOIN lecturer_materials lm ON lm.academic_resource_id = ar.id
-                    WHERE lm.teaching_workspace_id = :ws_id
-                      AND lm.is_deleted = false
-                    ORDER BY rc.embedding <=> :embed::vector
-                    LIMIT 4
-                """).bindparams(ws_id=assessment.teaching_workspace_id, embed=embedding_literal)
-                
-                rag_res = await self.db.execute(stmt)
-                for chunk_uuid, doc_name in rag_res.all():
-                    rag_chunk_ids.append(str(chunk_uuid))
-                    if doc_name not in ai_context_sources:
-                        ai_context_sources.append(doc_name)
+                for cid in rag_res.chunk_ids_used:
+                    rag_chunk_ids.append(str(cid))
+                for c in rag_res.citations:
+                    if c.resource_name and c.resource_name not in ai_context_sources:
+                        ai_context_sources.append(c.resource_name)
             except Exception as e:
                 logger.warning("RAG retrieval failed inside grading service: %s", str(e))
 
@@ -504,7 +486,7 @@ class GradingService:
         rubric_content = "Generic academic standards"
         if rubric:
             rubric_content = "\n".join([
-                f"- {c.name}: {c.description} ({c.weight} marks)"
+                f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
                 for c in rubric.criteria
             ])
 
@@ -1841,9 +1823,10 @@ class GradingService:
     async def process_ai_group_answer(
         self,
         group_answer,
+        lecturer_feedback: str | None = None,
     ) -> None:
         """
-        Orchestrate AI grading for a single group work answer.
+        Orchestrate AI grading for a single group work answer, optionally incorporating lecturer feedback.
         """
         import uuid
         from app.db.models.question import Question
@@ -1859,11 +1842,11 @@ class GradingService:
         rubric_content = "Generic academic standards"
         if rubric:
             rubric_content = "\n".join([
-                f"- {c.name}: {c.description} ({c.weight} marks)"
+                f"- {c.title}: {c.description or ''} ({c.max_marks} marks)"
                 for c in rubric.criteria
             ])
 
-        # Check language policy before AI grading
+        # Check language policy and resolve assessment
         from app.core.ai.language_policy import is_ai_allowed
         from app.db.models.attempt import GroupSubmission, StudentGroup
 
@@ -1877,10 +1860,78 @@ class GradingService:
             if group:
                 assessment_id = group.assessment_id
 
+        assessment = None
         if assessment_id:
             assessment = await self.assessment_repo.get_by_id_simple(assessment_id)
             if assessment and not is_ai_allowed(getattr(assessment, "language", None)):
                 return
+
+        # Check if question was skipped or has empty response
+        ans_dict = group_answer.answer_content or {}
+        is_skipped = bool(ans_dict.get("is_skipped", False))
+        student_answer_raw = ans_dict.get("text") or ans_dict.get("answer_text") or ans_dict.get("selected_option_id")
+        student_answer_str = str(student_answer_raw).strip() if student_answer_raw is not None else ""
+
+        if is_skipped or not student_answer_str:
+            # Short-circuit without burning LLM calls
+            if group_answer.answer_content is None:
+                group_answer.answer_content = {}
+            group_answer.answer_content.update({
+                "score": 0.0,
+                "max_score": float(question.marks),
+                "ai_grade_score": 0.0,
+                "ai_grade_rationale": "No response provided for this question.",
+                "ai_grade_confidence": 1.0,
+                "ai_grade_decision": "SUGGESTED",
+                "ai_suggested_score": 0.0,
+                "ai_rationale": "No response provided for this question.",
+                "ai_confidence": 1.0,
+                "ai_grading_basis": "GENERAL_KNOWLEDGE",
+                "rag_used": False,
+                "ai_context_sources": [],
+                "rag_chunk_ids": [],
+                "ai_feedback_draft": "No answer was submitted for this question.",
+                "ai_feedback_strengths": [],
+                "ai_feedback_improvements": ["Ensure all questions are attempted before final submission."],
+                "ai_feedback_suggestions": [],
+            })
+            self.db.add(group_answer)
+            await self.db.flush()
+            return
+
+        # RAG Retrieval for Course Materials
+        course_context = ""
+        rag_chunk_ids = []
+        ai_context_sources = []
+
+        if assessment and assessment.teaching_workspace_id:
+            from app.services.rag_service import RAGService
+            rag_service = RAGService(self.db)
+            try:
+                rag_res = await rag_service.retrieve_context_for_lecturer(
+                    topic=question.content,
+                    teaching_workspace_id=assessment.teaching_workspace_id,
+                    top_k=4,
+                )
+                course_context = rag_res.context_string
+                for cid in rag_res.chunk_ids_used:
+                    rag_chunk_ids.append(str(cid))
+                for c in rag_res.citations:
+                    if c.resource_name and c.resource_name not in ai_context_sources:
+                        ai_context_sources.append(c.resource_name)
+            except Exception as e:
+                logger.warning("RAG retrieval failed inside group AI grading: %s", str(e))
+
+        # Determine AI grading basis cascade
+        ai_grading_basis = "GENERAL_KNOWLEDGE"
+        if rubric and course_context:
+            ai_grading_basis = "RAG_AND_RUBRIC"
+        elif rubric:
+            ai_grading_basis = "RUBRIC"
+        elif course_context:
+            ai_grading_basis = "RAG_CONTEXT"
+        else:
+            ai_grading_basis = "GENERAL_KNOWLEDGE"
 
         # Call AI Review Agent
         from app.agents.review_agent import ReviewAgent
@@ -1891,17 +1942,19 @@ class GradingService:
         gateway = AIGateway(self.db, provider)
         agent = ReviewAgent(gateway)
 
-        # Get group answer text
-        ans_dict = group_answer.answer_content or {}
-        student_answer = ans_dict.get("text") or ans_dict.get("selected_option_id") or "No answer provided"
+        raw_q_type = question.question_type.value if hasattr(question.question_type, "value") else str(question.question_type)
 
         ai_output, raw_completion = await agent.review_response(
             question_text=question.content,
-            student_answer=student_answer,
+            student_answer=student_answer_str,
             rubric_content=rubric_content,
             max_score=float(question.marks),
-            question_type=question.question_type,
+            question_type=raw_q_type,
             response_id=group_answer.id,
+            lecturer_feedback=lecturer_feedback,
+            course_context=course_context if course_context else None,
+            basis_used=ai_grading_basis,
+            source_citations=ai_context_sources if ai_context_sources else None,
         )
 
         # Update group answer JSONB content with AI suggestion
@@ -1916,6 +1969,10 @@ class GradingService:
             "ai_suggested_score": ai_output.suggested_score,
             "ai_rationale": ai_output.rationale,
             "ai_confidence": ai_output.confidence,
+            "ai_grading_basis": ai_grading_basis,
+            "rag_used": bool(course_context),
+            "ai_context_sources": ai_context_sources,
+            "rag_chunk_ids": rag_chunk_ids,
         })
 
         # Automatically generate feedback draft
@@ -1923,12 +1980,12 @@ class GradingService:
         feedback_agent = FeedbackAgent(gateway)
         fb_output = await feedback_agent.draft_feedback(
             lecturer_id=uuid.UUID(int=0),  # System
-            assessment_title="Assessment",
+            assessment_title=assessment.title if assessment else "Assessment",
             score=ai_output.suggested_score,
             max_score=float(question.marks),
             rubric_content=rubric_content,
             lecturer_notes=ai_output.rationale,
-            student_response_summary=student_answer[:500],
+            student_response_summary=student_answer_str[:500],
         )
         
         group_answer.answer_content.update({

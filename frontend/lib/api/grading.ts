@@ -22,15 +22,6 @@ export const gradingApi = {
     return apiClient(`/grading/group-queue${queryString ? `?${queryString}` : ""}`);
   },
   getGroupSubmissionWorkspace: (submissionId: string) => apiClient(`/grading/group-submission/${submissionId}`),
-  gradeGroupQuestion: (submissionId: string, questionId: string, data: Record<string, any>) =>
-    apiClient(`/grading/group-submission/${submissionId}/questions/${questionId}/grade`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    }),
-  triggerGroupQuestionAiReview: (submissionId: string, questionId: string) =>
-    apiClient(`/grading/group-submission/${submissionId}/questions/${questionId}/ai-review`, {
-      method: "POST",
-    }),
   getGradeDetail: (responseId: string) => apiClient(`/grading/response/${responseId}`),
   saveGrade: (responseId: string, data: Record<string, unknown>) => {
     const payload: Record<string, any> = { ...data };

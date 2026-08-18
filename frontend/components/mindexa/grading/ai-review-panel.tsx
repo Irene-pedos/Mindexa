@@ -27,8 +27,19 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
 import { aiGradingApi, GradeReviewDetails } from "@/lib/api/ai-grading";
+import { gradingApi } from "@/lib/api/grading";
+import { groupWorkApi } from "@/lib/api/group-work";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Tooltip,
   TooltipContent,
@@ -39,8 +50,12 @@ import { cn } from "@/lib/utils";
 
 interface AIReviewPanelProps {
   queueItemId?: string;
-  responseId: string;
+  responseId?: string;
   maxScore: number;
+  isGroupWork?: boolean;
+  groupSubmissionId?: string;
+  groupQuestionId?: string;
+  groupAnswerData?: any;
   onSuggestionApplied?: (score: number, feedback?: string) => void;
   onSuggestionLoaded?: (
     draft: string,
@@ -54,10 +69,14 @@ export function AIReviewPanel({
   queueItemId,
   responseId,
   maxScore,
+  isGroupWork,
+  groupSubmissionId,
+  groupQuestionId,
+  groupAnswerData,
   onSuggestionApplied,
   onSuggestionLoaded,
 }: AIReviewPanelProps) {
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isGroupWork);
   const [requesting, setRequesting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [details, setDetails] = useState<GradeReviewDetails | null>(null);
@@ -68,13 +87,86 @@ export function AIReviewPanel({
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [pollCount, setPollCount] = useState(0);
   const [pollTimeoutReached, setPollTimeoutReached] = useState(false);
+  const [suggestModalOpen, setSuggestModalOpen] = useState(false);
+  const [suggestFeedback, setSuggestFeedback] = useState("");
+  const [suggestSubmitting, setSuggestSubmitting] = useState(false);
   const onSuggestionLoadedRef = useRef(onSuggestionLoaded);
 
   useEffect(() => {
     onSuggestionLoadedRef.current = onSuggestionLoaded;
   }, [onSuggestionLoaded]);
 
+  const mapGroupAnswerToDetails = useCallback(
+    (ans: any): GradeReviewDetails => {
+      const isProcessing =
+        ans?.ai_grade_decision === "PROCESSING" ||
+        ans?.ai_grade_decision === "PENDING";
+      const confidence = ans?.ai_grade_confidence ?? ans?.ai_confidence ?? null;
+      return {
+        id: ans?.id || `${groupSubmissionId}-${groupQuestionId}`,
+        response_id: ans?.id || `${groupSubmissionId}-${groupQuestionId}`,
+        score: ans?.score ?? null,
+        ai_grade_score: ans?.ai_grade_score ?? ans?.ai_suggested_score ?? null,
+        ai_suggested_score:
+          ans?.ai_suggested_score ?? ans?.ai_grade_score ?? null,
+        ai_confidence: confidence,
+        ai_confidence_level:
+          confidence !== null && confidence !== undefined
+            ? confidence >= 0.8
+              ? "HIGH"
+              : confidence >= 0.5
+                ? "MEDIUM"
+                : "LOW"
+            : null,
+        ai_rationale: ans?.ai_grade_rationale ?? ans?.ai_rationale ?? null,
+        ai_grading_basis: ans?.ai_grading_basis ?? null,
+        ai_feedback_draft: ans?.ai_feedback_draft ?? null,
+        ai_feedback_strengths: Array.isArray(ans?.ai_feedback_strengths)
+          ? ans.ai_feedback_strengths
+          : [],
+        ai_feedback_improvements: Array.isArray(ans?.ai_feedback_improvements)
+          ? ans.ai_feedback_improvements
+          : [],
+        ai_feedback_suggestions: Array.isArray(ans?.ai_feedback_suggestions)
+          ? ans.ai_feedback_suggestions
+          : [],
+        source_citations: Array.isArray(ans?.ai_context_sources)
+          ? ans.ai_context_sources
+          : [],
+        citations: Array.isArray(ans?.ai_context_sources)
+          ? ans.ai_context_sources
+          : [],
+        is_final: false,
+        ai_review_status: isProcessing ? "PROCESSING" : "COMPLETED",
+        rubric_scores: ans?.rubric_scores ?? null,
+      };
+    },
+    [groupSubmissionId, groupQuestionId],
+  );
+
   const loadDetails = useCallback(async () => {
+    if (isGroupWork) {
+      if (groupAnswerData) {
+        const mapped = mapGroupAnswerToDetails(groupAnswerData);
+        setDetails(mapped);
+        if (onSuggestionLoadedRef.current) {
+          onSuggestionLoadedRef.current(
+            mapped.ai_feedback_draft || "",
+            mapped.ai_feedback_strengths || [],
+            mapped.ai_feedback_improvements || [],
+            mapped.ai_feedback_suggestions || [],
+          );
+        }
+      }
+      setLoading(false);
+      return;
+    }
+
+    if (!responseId) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
@@ -95,15 +187,30 @@ export function AIReviewPanel({
     } finally {
       setLoading(false);
     }
-  }, [responseId]);
+  }, [isGroupWork, groupAnswerData, mapGroupAnswerToDetails, responseId]);
 
   useEffect(() => {
-    setPollCount(0);
-    setPollTimeoutReached(false);
-    loadDetails();
-  }, [loadDetails]);
+    if (isGroupWork && groupAnswerData) {
+      const mapped = mapGroupAnswerToDetails(groupAnswerData);
+      setDetails(mapped);
+      if (onSuggestionLoadedRef.current) {
+        onSuggestionLoadedRef.current(
+          mapped.ai_feedback_draft || "",
+          mapped.ai_feedback_strengths || [],
+          mapped.ai_feedback_improvements || [],
+          mapped.ai_feedback_suggestions || [],
+        );
+      }
+      setLoading(false);
+    } else if (!isGroupWork) {
+      setPollCount(0);
+      setPollTimeoutReached(false);
+      loadDetails();
+    }
+  }, [isGroupWork, groupAnswerData, mapGroupAnswerToDetails, loadDetails]);
 
   useEffect(() => {
+    if (isGroupWork) return;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     const isPending =
       details?.ai_review_status === "PENDING" ||
@@ -122,13 +229,56 @@ export function AIReviewPanel({
     return () => {
       if (timeoutId) clearTimeout(timeoutId);
     };
-  }, [details?.ai_review_status, pollCount, pollTimeoutReached, loadDetails]);
+  }, [
+    isGroupWork,
+    details?.ai_review_status,
+    pollCount,
+    pollTimeoutReached,
+    loadDetails,
+  ]);
 
   const hasSuggestion =
     details?.ai_suggested_score !== null &&
     details?.ai_suggested_score !== undefined;
 
   const handleRequestSuggestion = async () => {
+    if (isGroupWork && groupSubmissionId && groupQuestionId) {
+      if (hasSuggestion) {
+        if (
+          !confirm(
+            "This will discard your current edits and generate a new AI review. Do you want to continue?",
+          )
+        ) {
+          return;
+        }
+      }
+      setRequesting(true);
+      setError(null);
+      try {
+        const res = await groupWorkApi.triggerQuestionAIReview(
+          groupSubmissionId,
+          groupQuestionId,
+        );
+        const mapped = mapGroupAnswerToDetails(res);
+        setDetails(mapped);
+        if (onSuggestionLoadedRef.current) {
+          onSuggestionLoadedRef.current(
+            mapped.ai_feedback_draft || "",
+            mapped.ai_feedback_strengths || [],
+            mapped.ai_feedback_improvements || [],
+            mapped.ai_feedback_suggestions || [],
+          );
+        }
+        toast.success("AI review initiated for group question.");
+      } catch (err: any) {
+        setError(err?.message || "Failed to trigger AI review.");
+        toast.error("AI evaluation failed");
+      } finally {
+        setRequesting(false);
+      }
+      return;
+    }
+
     const triggerId = queueItemId || responseId;
     if (!triggerId) {
       toast.error(
@@ -705,24 +855,146 @@ export function AIReviewPanel({
         )}
       </CardContent>
 
-      {hasSuggestion && onSuggestionApplied && (
-        <CardFooter className="p-4 pt-0 border-t border-primary/10 bg-muted/5 flex justify-end">
+      {hasSuggestion && (
+        <CardFooter className="p-4 pt-0 border-t border-primary/10 bg-muted/5 flex items-center justify-between gap-2 flex-wrap">
           <Button
             size="sm"
-            variant="secondary"
-            onClick={() =>
-              onSuggestionApplied(
-                details.ai_suggested_score as number,
-                details.ai_feedback_draft || "",
-              )
-            }
-            disabled={details.is_final}
-            className="font-medium cursor-pointer"
+            variant="outline"
+            onClick={() => setSuggestModalOpen(true)}
+            disabled={details?.is_final || requesting}
+            className="text-xs h-8 border-border/60 hover:bg-primary/5 cursor-pointer"
           >
-            Use Suggested Score
+            <Sparkles className="size-3 mr-1 text-primary" />
+            Suggest Changes to AI
           </Button>
+
+          {onSuggestionApplied && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() =>
+                onSuggestionApplied(
+                  details.ai_suggested_score as number,
+                  details.ai_feedback_draft || "",
+                )
+              }
+              disabled={details.is_final}
+              className="font-medium cursor-pointer text-xs h-8"
+            >
+              Use Suggested Score
+            </Button>
+          )}
         </CardFooter>
       )}
+
+      {/* Modal for Lecturers to Suggest Changes to AI */}
+      <Dialog open={suggestModalOpen} onOpenChange={setSuggestModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="size-4 text-primary" />
+              Suggest Changes to AI
+            </DialogTitle>
+            <DialogDescription className="text-xs leading-normal text-muted-foreground">
+              Provide guidance or clarification for the AI. It will re-read the student&apos;s
+              response alongside your instructions, source materials, and rubric to adjust its evaluation.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (!suggestFeedback.trim()) {
+                toast.error("Please enter your guidance or feedback for the AI.");
+                return;
+              }
+              try {
+                setSuggestSubmitting(true);
+                if (isGroupWork && groupSubmissionId && groupQuestionId) {
+                  const res = await groupWorkApi.suggestChanges(
+                    groupSubmissionId,
+                    groupQuestionId,
+                    suggestFeedback.trim(),
+                  );
+                  const mapped = mapGroupAnswerToDetails(res);
+                  setDetails(mapped);
+                  if (onSuggestionLoadedRef.current) {
+                    onSuggestionLoadedRef.current(
+                      mapped.ai_feedback_draft || "",
+                      mapped.ai_feedback_strengths || [],
+                      mapped.ai_feedback_improvements || [],
+                      mapped.ai_feedback_suggestions || [],
+                    );
+                  }
+                  if (onSuggestionApplied) {
+                    onSuggestionApplied(
+                      mapped.ai_suggested_score as number,
+                      mapped.ai_feedback_draft || "",
+                    );
+                  }
+                } else if (responseId) {
+                  await gradingApi.suggestChanges(responseId, suggestFeedback.trim());
+                  await loadDetails();
+                }
+                toast.success("AI evaluation updated with your feedback!");
+                setSuggestModalOpen(false);
+                setSuggestFeedback("");
+              } catch (err: any) {
+                toast.error(err?.message || "Failed to submit changes to AI.");
+              } finally {
+                setSuggestSubmitting(false);
+              }
+            }}
+            className="space-y-4 pt-2"
+          >
+            <div className="space-y-2">
+              <Textarea
+                placeholder="e.g. 'Award partial credit for mentioning atomicity and durability in paragraph 2, but penalize the missing concurrency isolation discussion.'"
+                value={suggestFeedback}
+                onChange={(e) => setSuggestFeedback(e.target.value)}
+                rows={4}
+                className="text-xs resize-none"
+                disabled={suggestSubmitting}
+                autoFocus
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Tip: Point out specific criteria, paragraphs, or reference concepts the AI may have underweighted.
+              </p>
+            </div>
+
+            <DialogFooter className="flex items-center justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setSuggestModalOpen(false)}
+                disabled={suggestSubmitting}
+                className="text-xs"
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                size="sm"
+                disabled={suggestSubmitting || !suggestFeedback.trim()}
+                className="text-xs"
+              >
+                {suggestSubmitting ? (
+                  <>
+                    <Loader2 className="size-3 mr-1.5 animate-spin" />
+                    Re-evaluating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="size-3 mr-1.5" />
+                    Re-evaluate with Guidance
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
