@@ -269,6 +269,8 @@ class GroupWorkspaceResponse(BaseModel):
     total_score: float | None = None
     feedback: str | None = None
     member_overrides: dict[str, float] | None = None
+    result_released_at: datetime | None = None
+    is_released: bool = False
 
 
 class SaveGroupAnswerRequest(BaseModel):

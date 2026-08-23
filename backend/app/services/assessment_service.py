@@ -47,8 +47,10 @@ from app.db.models.auth import User
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.group_repo import GroupRepository
+from app.db.repositories.group_submission_repo import GroupSubmissionRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.repositories.question_repo import QuestionRepository
+from app.db.repositories.result_repo import ResultRepository
 from app.schemas.assessment import (AddQuestionToAssessmentRequest,
                                     AssessmentCreateRequest,
                                     AssessmentGeneralUpdate,
@@ -70,6 +72,8 @@ class AssessmentService:
         self._repo = AssessmentRepository(db)
         self._attempt_repo = AttemptRepository(db)
         self._group_repo = GroupRepository(db)
+        self._group_submission_repo = GroupSubmissionRepository(db)
+        self._result_repo = ResultRepository(db)
         self._notification_repo = NotificationRepository(db)
         self._question_repo = QuestionRepository(db)
         self._blueprint_service = BlueprintService(db)
@@ -513,6 +517,17 @@ class AssessmentService:
             "randomize_questions": data.randomize_questions,
             "randomize_options": data.randomize_options,
         }
+
+        if data.allow_resume is not None:
+            update_fields["allow_resume"] = data.allow_resume
+        if data.integrity_profile_id is not None:
+            update_fields["integrity_profile_id"] = data.integrity_profile_id
+        elif data.integrity_profile_code:
+            from app.db.repositories.integrity_repo import IntegrityRepository
+            integrity_repo = IntegrityRepository(self.db)
+            profile = await integrity_repo.get_profile_by_code(data.integrity_profile_code)
+            if profile:
+                update_fields["integrity_profile_id"] = profile.id
 
         if data.window_start:
             update_fields["window_start"] = data.window_start
@@ -1070,40 +1085,63 @@ class AssessmentService:
 
             # Populate student status if current user is a student
             if current_user.role == UserRole.STUDENT.value:
-                attempts, _ = await self._attempt_repo.list_by_student(
-                    student_id=current_user.id,
-                    assessment_id=a.id
-                )
-                summary.attempts_used = len(attempts)
-                if not attempts:
-                    summary.student_status = "NOT_STARTED"
-                else:
-                    # Check if any attempt is submitted or in progress
-                    # Sort attempts by submitted_at desc to find the primary one
-                    submitted_attempts = [att for att in attempts if att.status in [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]]
-                    if submitted_attempts:
-                        summary.student_status = "SUBMITTED"
-                        # Use the most recent submitted attempt for the result link
-                        submitted_attempts.sort(key=lambda x: x.submitted_at or x.started_at, reverse=True)
-                        summary.student_attempt_id = submitted_attempts[0].id
-                    else:
-                        summary.student_status = "IN_PROGRESS"
-                        # For IN_PROGRESS, use the most recent active attempt
-                        summary.student_attempt_id = attempts[0].id
-                        summary.student_attempt_expires_at = attempts[0].expires_at
-
-                    # For group work, reflect group submission status
-                    if a.is_group_assessment and attempts[0].group_id:
-                        from app.db.models.attempt import GroupSubmission
-                        from sqlalchemy import select
-                        sub_stmt = select(GroupSubmission).where(
-                            GroupSubmission.assessment_id == a.id,
-                            GroupSubmission.group_id == attempts[0].group_id
+                if a.is_group_assessment:
+                    group = await self._group_repo.get_student_group_for_assessment(
+                        assessment_id=a.id, student_id=current_user.id
+                    )
+                    submission = None
+                    if group:
+                        submission = await self._group_submission_repo.get_by_assessment_group(
+                            assessment_id=a.id, group_id=group.id
                         )
-                        sub_res = await self.db.execute(sub_stmt)
-                        submission = sub_res.scalar_one_or_none()
-                        if submission and submission.status in [GroupSubmissionStatus.SUBMITTED, GroupSubmissionStatus.APPROVED]:
-                             summary.student_status = "SUBMITTED"
+
+                    if not group or not submission:
+                        summary.student_status = "NOT_STARTED"
+                        summary.attempts_used = 0
+                    elif submission.status in (
+                        GroupSubmissionStatus.SUBMITTED,
+                        GroupSubmissionStatus.APPROVED,
+                        GroupSubmissionStatus.GRADED,
+                    ):
+                        summary.attempts_used = 1
+                        summary.student_status = (
+                            "GRADED"
+                            if submission.status == GroupSubmissionStatus.GRADED
+                            else "SUBMITTED"
+                        )
+                        # Resolve derived AssessmentResult for student
+                        res = await self._result_repo.get_by_group_member(
+                            assessment_id=a.id,
+                            student_id=current_user.id,
+                            group_submission_id=submission.id,
+                        )
+                        if res:
+                            summary.student_attempt_id = res.id
+                    else:
+                        summary.attempts_used = 1
+                        summary.student_status = "IN_PROGRESS"
+                else:
+                    attempts, _ = await self._attempt_repo.list_by_student(
+                        student_id=current_user.id,
+                        assessment_id=a.id
+                    )
+                    summary.attempts_used = len(attempts)
+                    if not attempts:
+                        summary.student_status = "NOT_STARTED"
+                    else:
+                        # Check if any attempt is submitted or in progress
+                        # Sort attempts by submitted_at desc to find the primary one
+                        submitted_attempts = [att for att in attempts if att.status in [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]]
+                        if submitted_attempts:
+                            summary.student_status = "SUBMITTED"
+                            # Use the most recent submitted attempt for the result link
+                            submitted_attempts.sort(key=lambda x: x.submitted_at or x.started_at, reverse=True)
+                            summary.student_attempt_id = submitted_attempts[0].id
+                        else:
+                            summary.student_status = "IN_PROGRESS"
+                            # For IN_PROGRESS, use the most recent active attempt
+                            summary.student_attempt_id = attempts[0].id
+                            summary.student_attempt_expires_at = attempts[0].expires_at
 
             summary_items.append(summary)
 
@@ -1353,7 +1391,7 @@ class AssessmentService:
                 "grading_mode": GradingMode.MANUAL,
                 "result_release_mode": (
                     ResultReleaseMode.SCHEDULED if data.rules.resultRelease == "scheduled"
-                    else (ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE)
+                    else (ResultReleaseMode.IMMEDIATE if data.rules.resultRelease == "immediate" else ResultReleaseMode.MANUAL)
                 ),
                 "total_marks": sum(s.marks for s in data.blueprint),
                 "passing_marks": data.metadata.passing_marks,
@@ -1397,7 +1435,7 @@ class AssessmentService:
                 grading_mode=GradingMode.MANUAL,
                 result_release_mode=(
                     ResultReleaseMode.SCHEDULED if data.rules.resultRelease == "scheduled"
-                    else (ResultReleaseMode.MANUAL if data.rules.resultRelease == "manual" else ResultReleaseMode.IMMEDIATE)
+                    else (ResultReleaseMode.IMMEDIATE if data.rules.resultRelease == "immediate" else ResultReleaseMode.MANUAL)
                 ),
                 total_marks=sum(s.marks for s in data.blueprint),
                 passing_marks=data.metadata.passing_marks,
@@ -1438,6 +1476,23 @@ class AssessmentService:
                 # Keep existing password hash for draft updates
                 access_password_hash = assessment.access_password_hash
 
+        # Resolve Institutional Integrity Profile FK
+        integrity_profile_id = None
+        profile_code = data.rules.integrityProfileCode or (
+            "HOMEWORK" if data.metadata.mode in ("Homework", "Groupwork")
+            else ("PRACTICE" if data.metadata.mode == "Practice" else "SECURE_ASSESSMENT")
+        )
+        if profile_code:
+            from app.db.repositories.integrity_repo import IntegrityRepository
+            integrity_repo = IntegrityRepository(self.db)
+            profile = await integrity_repo.get_profile_by_code(profile_code)
+            if profile:
+                integrity_profile_id = profile.id
+
+        is_resume_allowed = data.rules.allowResume if data.rules.allowResume is not None else (
+            data.metadata.mode in ("Homework", "Groupwork", "Practice")
+        )
+
         security_fields = {
             "max_attempts": data.rules.attempts,
             "window_start": window_start,
@@ -1450,6 +1505,8 @@ class AssessmentService:
             "ai_assistance_allowed": data.rules.aiAllowed,
             "is_open_book": data.rules.openBook,
             "integrity_monitoring_enabled": data.rules.integrityMonitoring if data.rules.integrityMonitoring is not None else True,
+            "integrity_profile_id": integrity_profile_id,
+            "allow_resume": is_resume_allowed,
             "randomize_questions": data.rules.shuffleQuestions,
             "randomize_options": data.rules.shuffleOptions,
             "late_submission_allowed": data.rules.lateSubmissionAllowed,

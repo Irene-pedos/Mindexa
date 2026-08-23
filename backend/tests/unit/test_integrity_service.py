@@ -70,3 +70,37 @@ async def test_evaluate_risk_refresh_auto_submits_immediately():
     )
     assert action_req == "AUTO_SUBMIT"
     assert details["rule_key"] == "browser_refresh"
+
+
+@pytest.mark.asyncio
+async def test_evaluate_risk_homework_and_practice_have_no_warnings():
+    db = AsyncMock()
+    service = IntegrityService(db)
+
+    for asmt_type in ["HOMEWORK", "PRACTICE"]:
+        mock_assessment = MagicMock()
+        mock_assessment.integrity_profile_id = None
+        mock_assessment.integrity_policy_json = None
+        mock_assessment.assessment_type = asmt_type
+        mock_assessment.integrity_monitoring_enabled = False
+        mock_assessment.is_supervised = False
+        db.get = AsyncMock(return_value=mock_assessment)
+
+        for event in [
+            IntegrityEventType.TAB_SWITCH,
+            IntegrityEventType.COPY_ATTEMPT,
+            IntegrityEventType.PASTE_ATTEMPT,
+            IntegrityEventType.WINDOW_BLUR,
+            IntegrityEventType.SCREEN_BLURRING,
+            IntegrityEventType.FULLSCREEN_EXIT,
+        ]:
+            warning, action_req, details = await service.evaluate_risk(
+                attempt_id=uuid.uuid4(),
+                assessment_id=uuid.uuid4(),
+                student_id=uuid.uuid4(),
+                event_type=event,
+                trigger_event_id=uuid.uuid4(),
+            )
+            assert action_req == "NONE"
+            assert warning is None
+            assert details is None

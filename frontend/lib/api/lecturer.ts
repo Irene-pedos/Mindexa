@@ -202,6 +202,7 @@ export interface WorkspaceListItem {
   institution_name: string;
   class_name: string;
   language?: "EN" | "RW" | "FR" | "SW" | string;
+  banner_image_url?: string | null;
 }
 
 export interface WorkspaceSectionResponse {
@@ -226,6 +227,7 @@ export interface WorkspaceCreateRequest {
   teaching_assignment_id: string;
   title?: string;
   description?: string;
+  banner_image_url?: string;
 }
 
 export const lecturerApi = {
@@ -250,6 +252,20 @@ export const lecturerApi = {
   archiveWorkspace: async (workspaceId: string): Promise<any> => {
     return apiClient(`/lecturers/me/workspaces/${workspaceId}`, {
       method: "DELETE",
+    });
+  },
+  updateWorkspace: async (workspaceId: string, data: Partial<WorkspaceCreateRequest>): Promise<WorkspaceDetail> => {
+    return apiClient(`/lecturers/me/workspaces/${workspaceId}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+  },
+  uploadImage: async (file: File): Promise<{ url: string }> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return apiClient("/questions/upload-image", {
+      method: "POST",
+      body: formData,
     });
   },
   enrollStudent: async (workspaceId: string, email: string): Promise<any> => {

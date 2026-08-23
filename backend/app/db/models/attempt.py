@@ -258,6 +258,10 @@ class AssessmentAttempt(BaseModel, table=True):
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True, index=True),
     )
+    paused_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(DateTime(timezone=True), nullable=True),
+    )
     last_activity_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(DateTime(timezone=True), nullable=True),

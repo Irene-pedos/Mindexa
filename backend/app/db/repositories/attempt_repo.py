@@ -232,12 +232,22 @@ class AttemptRepository:
         return list(result.scalars().all()), total
 
     async def list_expired_in_progress(self) -> list[AssessmentAttempt]:
-        """Return all IN_PROGRESS attempts where expires_at < now. Used by auto-submit task."""
+        """Return all IN_PROGRESS and PAUSED attempts where expires_at < now or window has closed. Used by auto-submit task."""
+        from app.db.models.assessment import Assessment
         now = _utcnow()
         result = await self.db.execute(
-            select(AssessmentAttempt).where(
-                AssessmentAttempt.status == AttemptStatus.IN_PROGRESS,
-                AssessmentAttempt.expires_at < now,
+            select(AssessmentAttempt)
+            .outerjoin(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
+            .where(
+                AssessmentAttempt.status.in_([AttemptStatus.IN_PROGRESS, AttemptStatus.PAUSED]),
+                or_(
+                    AssessmentAttempt.expires_at < now,
+                    and_(
+                        Assessment.window_end.is_not(None),
+                        Assessment.window_end < now,
+                        Assessment.late_submission_allowed.is_(False),
+                    ),
+                ),
                 AssessmentAttempt.is_deleted.is_(False),
             )
         )

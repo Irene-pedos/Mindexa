@@ -196,6 +196,14 @@ class IntegrityService:
         """
         from app.db.models.assessment import Assessment
         assessment = await self.db.get(Assessment, assessment_id)
+
+        # Homework, Practice, and unmonitored assessments are completely free of browser violation rules
+        if assessment and (
+            assessment.assessment_type in ("HOMEWORK", "PRACTICE")
+            or assessment.integrity_monitoring_enabled is False
+            or assessment.is_supervised is False
+        ) and event_type != "TIME_EXPIRED":
+            return None, "NONE", None
         
         # Load profile
         rules = {}

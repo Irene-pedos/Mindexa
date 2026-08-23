@@ -182,7 +182,14 @@ class AIGateway:
             attempt = 0
             while True:
                 try:
-                    return await provider.complete(request)
+                    res = await provider.complete(request)
+                    if not res.content or not res.content.strip():
+                        if attempt < max_retries:
+                            attempt += 1
+                            await sleep(1.0)
+                            continue
+                        raise ServiceUnavailableError(f"{provider.name} returned an empty completion.")
+                    return res
                 except RateLimitError as exc:
                     if attempt >= max_retries:
                         errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")

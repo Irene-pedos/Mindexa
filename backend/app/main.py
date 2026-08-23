@@ -8,7 +8,7 @@ from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
                                auth, blueprint, gemini, grading, group_work,
                                health, integrity, lecturer, notification,
                                question, resource, result, student, student_ai, student_resources,
-                               study_planner, submission)
+                               study_planner, study_reader, submission)
 from app.core.config import settings
 from app.core.handlers import register_exception_handlers
 from app.core.logging import get_logger
@@ -64,7 +64,7 @@ def create_app() -> FastAPI:
                                    gemini, grading, group_work, health,
                                    integrity, lecturer, lecturer_ai, notification, question,
                                    resource, result, student, student_ai,
-                                   student_resources, submission)
+                                   student_resources, study_planner, study_reader, submission)
 
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
     app.include_router(admin_ai_audit.router, prefix=settings.API_V1_STR)
@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(student_resources.router, prefix=settings.API_V1_STR)
+    app.include_router(study_reader.router, prefix=settings.API_V1_STR)
     app.include_router(student_ai.router, prefix=settings.API_V1_STR)
     app.include_router(study_planner.router, prefix=settings.API_V1_STR)
     app.include_router(lecturer.router, prefix=settings.API_V1_STR)

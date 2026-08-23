@@ -77,6 +77,19 @@ class StudentAIService:
                     context={"workspace_id": str(target_ws_id)},
                 )
 
+        # If attempt_id is provided, verify assessment allows AI assistance
+        is_in_assessment = getattr(body, "is_in_assessment", False) or getattr(body, "attempt_id", None) is not None
+        if body.attempt_id:
+            from app.db.repositories.attempt_repo import AttemptRepository
+            att_repo = AttemptRepository(self.db)
+            attempt = await att_repo.get_by_id(body.attempt_id)
+            if attempt and attempt.assessment:
+                if not attempt.assessment.ai_assistance_allowed:
+                    raise PermissionDeniedError(
+                        "AI assistance is disabled for this assessment.",
+                        code="AI_ASSISTANCE_NOT_ALLOWED",
+                    )
+
         # 1. Build Gateway
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
@@ -93,6 +106,11 @@ class StudentAIService:
             teaching_workspace_id=getattr(body, "teaching_workspace_id", None),
             thinking_mode=getattr(body, "thinking_mode", False),
             deep_search_mode=getattr(body, "deep_search_mode", False),
+            is_in_assessment=is_in_assessment,
+            attempt_id=getattr(body, "attempt_id", None),
+            question_id=getattr(body, "question_id", None),
+            selected_text=getattr(body, "selected_text", None),
+            current_page=getattr(body, "current_page", None),
             db=self.db,
         )
 

@@ -170,6 +170,22 @@ class TestGroupResultsPipeline:
         db.add(assessment)
         await db.flush()
 
+        from app.db.enums import QuestionType
+        from app.db.models.question import Question, AssessmentQuestion
+
+        q = Question(
+            created_by_id=lecturer.id,
+            question_type=QuestionType.ESSAY,
+            content="Provide a collaborative system architecture report.",
+            marks=100.0,
+        )
+        db.add(q)
+        await db.flush()
+
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq)
+        await db.flush()
+
         group = StudentGroup(assessment_id=assessment.id, name="Team Alpha", is_locked=True)
         db.add(group)
         await db.flush()
@@ -338,7 +354,7 @@ class TestGroupResultsPipeline:
         assert view_data["is_group_result"] is True
         assert view_data["group_name"] == "Team Alpha"
         assert view_data["group_feedback"] == "Team performed well, student 2 had custom contributions."
-        assert view_data["breakdowns"] == []
+        assert len(view_data["breakdowns"]) == 1
         assert view_data["total_score"] == 80.0
 
         # S1 views their transcript /results/me

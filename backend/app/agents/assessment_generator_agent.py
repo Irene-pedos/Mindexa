@@ -179,19 +179,29 @@ class AssessmentGeneratorAgent(BaseAgent):
             max_tokens=max_tokens,
         )
 
-        response = await self.gateway.complete(
-            request,
-            action_type=AIActionType.QUESTION_GENERATION,
-            actor_id=lecturer_id,
-            actor_role="lecturer",
-            subject_entity_type="ai_generation_batch",
-            subject_entity_id=batch_id,
-            prompt_summary=f"Generating {count} {question_type} questions for {topic} [RAG: {'yes' if course_material_context else 'no'}]",
-            prompt_version=f"{self.prompt_name}_{self.prompt_version}",
-        )
+        max_attempts = 2
+        last_exc: Exception | None = None
+        for gen_attempt in range(max_attempts):
+            try:
+                response = await self.gateway.complete(
+                    request,
+                    action_type=AIActionType.QUESTION_GENERATION,
+                    actor_id=lecturer_id,
+                    actor_role="lecturer",
+                    subject_entity_type="ai_generation_batch",
+                    subject_entity_id=batch_id,
+                    prompt_summary=f"Generating {count} {question_type} questions for {topic} [RAG: {'yes' if course_material_context else 'no'}] (attempt {gen_attempt + 1})",
+                    prompt_version=f"{self.prompt_name}_{self.prompt_version}",
+                )
 
-        parsed_questions = self._parse_generated_questions(response.content, expected_question_type=question_type)
-        return parsed_questions, system_content
+                parsed_questions = self._parse_generated_questions(response.content, expected_question_type=question_type)
+                return parsed_questions, system_content
+            except Exception as exc:
+                last_exc = exc
+                if gen_attempt < max_attempts - 1:
+                    request.temperature = min(0.7, request.temperature + 0.1)
+                    continue
+                raise last_exc
 
     def _parse_generated_questions(
         self,
@@ -203,12 +213,14 @@ class AssessmentGeneratorAgent(BaseAgent):
         logger = structlog.get_logger(__name__)
         try:
             content_str = content.strip()
-            match = re.search(r"```json\s*(.*?)\s*```", content_str, re.DOTALL)
-            if not match:
-                match = re.search(r"```\s*(.*?)\s*```", content_str, re.DOTALL)
+            clean_content = content_str
 
-            if match:
-                clean_content = match.group(1).strip()
+            # If wrapped in markdown code fences at the start and end, strip the outermost fence only
+            if content_str.startswith("```"):
+                first_nl = content_str.find("\n")
+                last_ticks = content_str.rfind("```")
+                if first_nl != -1 and last_ticks > first_nl:
+                    clean_content = content_str[first_nl + 1:last_ticks].strip()
             else:
                 first_curly = content_str.find("{")
                 first_square = content_str.find("[")
@@ -227,11 +239,16 @@ class AssessmentGeneratorAgent(BaseAgent):
 
                 if start != -1 and end != -1 and start < end:
                     clean_content = content_str[start:end + 1].strip()
-                else:
-                    clean_content = content_str
 
             import json_repair
-            data = json_repair.loads(clean_content)
+            data = None
+            try:
+                data = json.loads(clean_content)
+            except Exception:
+                data = json_repair.loads(clean_content)
+
+            if data is None:
+                data = json_repair.loads(content_str)
             if data is None:
                 data = json.loads(clean_content, strict=False)
 
@@ -265,6 +282,13 @@ class AssessmentGeneratorAgent(BaseAgent):
         data: Any,
         expected_question_type: str | None = None,
     ) -> list[dict[str, Any]]:
+        import json_repair
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = json_repair.loads(data)
+
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
@@ -283,6 +307,19 @@ class AssessmentGeneratorAgent(BaseAgent):
 
         normalized_items: list[dict[str, Any]] = []
         for item in items:
+            if isinstance(item, str):
+                try:
+                    parsed_sub = json.loads(item)
+                    if isinstance(parsed_sub, dict):
+                        item = parsed_sub
+                except Exception:
+                    try:
+                        parsed_sub = json_repair.loads(item)
+                        if isinstance(parsed_sub, dict):
+                            item = parsed_sub
+                    except Exception:
+                        pass
+
             if not isinstance(item, dict):
                 raise ValueError("Each AI question entry must be an object.")
             normalized_items.append(self._normalize_question_item(item, question_type=expected_question_type))

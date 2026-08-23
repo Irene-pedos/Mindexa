@@ -4523,10 +4523,15 @@ export default function NewAssessmentBuilder() {
           title: activeMetadata.title || "Untitled Assessment",
           description: activeMetadata.description || "",
           mode: activeMetadata.mode || "CAT",
-          assessment_type:
-            activeMetadata.mode === "Groupwork"
-              ? "GROUP_WORK"
-              : activeMetadata.mode.toUpperCase(),
+          assessment_type: (() => {
+            const m = activeMetadata.mode;
+            if (m === "Groupwork") return "GROUP_WORK";
+            if (m === "Practice") return "FORMATIVE";
+            if (m === "Homework") return "HOMEWORK";
+            if (m === "Summative") return "SUMMATIVE";
+            if (m === "Formative") return "FORMATIVE";
+            return m.toUpperCase();
+          })(),
           institution_id: activeMetadata.institution_id || undefined,
           course_id: activeMetadata.course_id || undefined,
           department_ids: activeMetadata.department_ids || [],
@@ -5470,12 +5475,87 @@ export default function NewAssessmentBuilder() {
                       value={metadata.mode}
                       onValueChange={(v: any) => {
                         const isGroup = v === "Groupwork";
+                        const isHomework = v === "Homework";
+                        const isPractice = v === "Practice";
+                        const isStrict = v === "CAT" || v === "Summative" || v === "Formative";
+
+                        let updatedSelectedInstructions = metadata.selectedInstructions;
+                        let updatedRules = { ...rules };
+
+                        if (isHomework) {
+                          // Homework: students are free, all presets unchecked, open-book/AI/resume allowed, proctoring & lockdown off
+                          updatedSelectedInstructions = [];
+                          updatedRules = {
+                            ...updatedRules,
+                            supervised: false,
+                            browserRestricted: false,
+                            integrityMonitoring: false,
+                            aiAllowed: true,
+                            openBook: true,
+                            allowResume: true,
+                            integrityProfileCode: "HOMEWORK",
+                            shuffleQuestions: false,
+                            shuffleOptions: false,
+                          };
+                        } else if (isPractice) {
+                          // Practice: low-stakes self-assessment, open-book/AI/resume allowed, integrity monitoring off
+                          updatedSelectedInstructions = [];
+                          updatedRules = {
+                            ...updatedRules,
+                            supervised: false,
+                            browserRestricted: false,
+                            integrityMonitoring: false,
+                            aiAllowed: true,
+                            openBook: true,
+                            allowResume: true,
+                            integrityProfileCode: "PRACTICE",
+                            shuffleQuestions: false,
+                            shuffleOptions: false,
+                          };
+                        } else if (isGroup) {
+                          updatedRules = {
+                            ...updatedRules,
+                            supervised: false,
+                            browserRestricted: false,
+                            integrityMonitoring: false,
+                            aiAllowed: true,
+                            openBook: true,
+                            allowResume: true,
+                            integrityProfileCode: "HOMEWORK",
+                            shuffleQuestions: false,
+                            shuffleOptions: false,
+                          };
+                        } else if (isStrict) {
+                          if (updatedSelectedInstructions.length === 0) {
+                            updatedSelectedInstructions = [
+                              "Fullscreen required",
+                              "No tab switching",
+                              "No external materials allowed",
+                              "Time strictly enforced",
+                            ];
+                          }
+                          updatedRules = {
+                            ...updatedRules,
+                            supervised: true,
+                            browserRestricted: true,
+                            integrityMonitoring: true,
+                            aiAllowed: false,
+                            openBook: false,
+                            allowResume: false,
+                            integrityProfileCode: "SECURE_ASSESSMENT",
+                            shuffleQuestions: true,
+                            shuffleOptions: true,
+                          };
+                        }
+
                         const updated = {
                           ...metadata,
                           mode: v,
                           is_group_assessment: isGroup,
+                          selectedInstructions: updatedSelectedInstructions,
                         };
                         setMetadata(updated);
+                        setRules(updatedRules);
                         triggerDebouncedAutosave(1, updated);
                       }}
                     >
@@ -5909,6 +5989,29 @@ export default function NewAssessmentBuilder() {
                     </CardTitle>
                   </CardHeader>
                   <CardContent className="p-5 space-y-6">
+                    {metadata.mode === "Homework" && (
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-3.5 flex items-start gap-3">
+                        <Info className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Homework Assessment — Open Resource & AI Assisted Mode</p>
+                          <p className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed">
+                            Proctoring, Safe Browser lockdown, and strict integrity checks are disabled by default for homework coursework.
+                            Students have full access to AI assistance and course learning materials, and can pause/resume their attempt before the deadline.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                    {metadata.mode === "Practice" && (
+                      <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-3.5 flex items-start gap-3">
+                        <Info className="size-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5">
+                          <p className="text-xs font-semibold text-blue-800 dark:text-blue-300">Practice Assessment — Low-Stakes Self-Assessment Mode</p>
+                          <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-relaxed">
+                            Proctoring, Safe Browser lockdown, and integrity violation monitoring are disabled. Students can freely reference materials, use AI assistance, and practice without any penalties.
+                          </p>
+                        </div>
+                      </div>
+                    )}
                     {metadata.mode === "Groupwork" && (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3.5 flex items-start gap-3">
                         <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />

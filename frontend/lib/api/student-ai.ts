@@ -16,6 +16,10 @@ export interface StudentSupportRequest {
   teaching_workspace_id?: string;
   thinking_mode?: boolean;
   deep_search_mode?: boolean;
+  attempt_id?: string;
+  question_id?: string;
+  assessment_id?: string;
+  is_in_assessment?: boolean;
 }
 
 export interface StudentSupportResponse {

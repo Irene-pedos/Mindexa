@@ -1,46 +1,26 @@
 import uuid
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db.models.academic import (Campus, ClassGroup, ClassSection, College,
+                                    Course, Department, Institution, Option,
+                                    TeachingAssignment)
+from app.db.schemas.academic import (AcademicPeriodResponse,
+                                     ClassGroupResponse, CourseCreate,
+                                     CourseResponse, DepartmentResponse,
+                                     InstitutionResponse, OptionResponse)
+from app.db.schemas.auth import UserResponse
+from app.db.schemas.teaching_assignment import TeachingAssignmentDetailResponse
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer
 from app.schemas.admin import AdminCourseListResponse
-from app.schemas.lecturer import (
-    LecturerDashboardResponse, 
-    LecturerCourseDetail,
-    WorkspaceCreate,
-    WorkspaceDetail,
-    WorkspaceListItem,
-)
+from app.schemas.lecturer import (AddStudentRequest, LecturerCourseDetail,
+                                  LecturerDashboardResponse,
+                                  StudentCourseRecordResponse, WorkspaceCreate,
+                                  WorkspaceDetail, WorkspaceListItem,
+                                  WorkspaceUpdate)
 from app.services.lecturer_service import LecturerService
-
-from app.db.models.academic import (
-    Institution,
-    Campus,
-    College,
-    Department,
-    Option,
-    Course,
-    ClassGroup,
-    ClassSection,
-    TeachingAssignment,
-)
-from app.db.schemas.teaching_assignment import TeachingAssignmentDetailResponse
-from app.db.schemas.academic import (
-    CourseCreate,
-    CourseResponse,
-    InstitutionResponse,
-    AcademicPeriodResponse,
-    DepartmentResponse,
-    OptionResponse,
-    ClassGroupResponse,
-)
-from app.db.schemas.auth import UserResponse
-from app.schemas.lecturer import (
-    AddStudentRequest,
-    StudentCourseRecordResponse,
-)
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/lecturers", tags=["Lecturers"])
 
@@ -112,14 +92,14 @@ async def list_my_assignments(
         .outerjoin(ClassGroup, ClassSection.class_group_id == ClassGroup.id)
         .where(TeachingAssignment.lecturer_id == current_user.id, TeachingAssignment.is_active == True)
     )
-    
+
     result = await db.execute(stmt)
     items = []
-    
+
     for row in result.all():
         # assignment is the first element of the tuple
         assignment = row[0]
-        
+
         # Build dictionary from model and join results
         data = assignment.model_dump()
         data.update({
@@ -134,9 +114,9 @@ async def list_my_assignments(
             "class_group_name": row.class_group_name,
             "class_group_level": row.class_group_level
         })
-        
+
         items.append(TeachingAssignmentDetailResponse(**data))
-        
+
     return items
 
 
@@ -188,6 +168,23 @@ async def get_workspace_detail(
     return await service.get_workspace_detail(current_user.id, workspace_id)
 
 
+@router.patch(
+    "/me/workspaces/{workspace_id}",
+    response_model=WorkspaceDetail,
+    summary="Update an operational workspace",
+)
+async def update_workspace(
+    workspace_id: uuid.UUID,
+    body: WorkspaceUpdate,
+    current_user=Depends(require_lecturer),
+    db: AsyncSession = Depends(get_db),
+) -> WorkspaceDetail:
+    """Updates editable workspace metadata for the owning lecturer."""
+    service = LecturerService(db)
+    await service.update_workspace(current_user.id, workspace_id, body)
+    return await service.get_workspace_detail(current_user.id, workspace_id)
+
+
 @router.delete(
     "/me/workspaces/{workspace_id}",
     summary="Archive/Suspend an operational workspace",
@@ -204,7 +201,7 @@ async def delete_workspace(
     if not ws or ws.teaching_assignment.lecturer_id != current_user.id:
          from app.core.exceptions import NotFoundError
          raise NotFoundError("Workspace", str(workspace_id))
-    
+
     ws.soft_delete()
     await db.commit()
     return {"success": True, "message": "Workspace archived successfully"}
@@ -330,6 +327,7 @@ async def list_option_classes(
 ) -> list[ClassGroupResponse]:
     """Returns class levels assigned to the lecturer for a specific program."""
     from app.db.models.academic import ClassGroup
+
     # Try to find specific classes/levels linked via teaching assignments (if assigned to a section)
     stmt = (
         select(ClassGroup)
@@ -344,7 +342,7 @@ async def list_option_classes(
     )
     result = await db.execute(stmt)
     items = list(result.scalars().all())
-    
+
     # Fallback: if no specific section assigned, show all class groups (levels) for the assigned option
     if not items:
         stmt_fallback = (
@@ -360,7 +358,7 @@ async def list_option_classes(
         )
         result = await db.execute(stmt_fallback)
         items = list(result.scalars().all())
-        
+
     return items
 
 

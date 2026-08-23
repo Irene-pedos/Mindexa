@@ -85,8 +85,17 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
   }, [fetchStats]);
 
   const handleModerate = async () => {
-    if (!selectedResponse || !newScore || reason.length < 10) {
-      toast.error("Please provide a valid score and detailed reason (min 10 chars)");
+    if (!selectedResponse) return;
+    const maxMarks = Number(selectedResponse.max_score ?? 10);
+    const parsedScore = parseFloat(newScore);
+
+    if (isNaN(parsedScore) || parsedScore < 0 || parsedScore > maxMarks) {
+      toast.error(`Score must be between 0 and ${maxMarks}`);
+      return;
+    }
+
+    if (!reason || reason.trim().length < 10) {
+      toast.error("Please provide a detailed revision reason (min 10 chars)");
       return;
     }
 
@@ -94,8 +103,8 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
     try {
       await gradingApi.moderateGrade({
         response_id: selectedResponse.response_id,
-        new_score: parseFloat(newScore),
-        revision_reason: reason
+        new_score: parsedScore,
+        revision_reason: reason.trim(),
       });
       toast.success("Grade superseded and revised successfully");
       setSelectedResponse(null);
@@ -266,7 +275,7 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
                                        <div className="grid grid-cols-2 gap-4 bg-muted/30 p-3 rounded border">
                                           <div className="flex flex-col gap-0.5">
                                              <span className="text-[10px] font-bold uppercase text-muted-foreground">Original Score</span>
-                                             <span className="text-sm font-mono font-bold">{o.score} / 10</span>
+                                             <span className="text-sm font-mono font-bold">{o.score} / {o.max_score ?? 10}</span>
                                           </div>
                                           <div className="flex flex-col gap-0.5">
                                              <span className="text-[10px] font-bold uppercase text-muted-foreground">AI Suggestion</span>
@@ -275,13 +284,24 @@ export function ModerationPanel({ questionId }: ModerationPanelProps) {
                                        </div>
 
                                        <div className="space-y-2">
-                                          <Label className="text-xs font-semibold">Revised Score</Label>
+                                          <Label className="text-xs font-semibold">Revised Score (Max: {o.max_score ?? 10} pts)</Label>
                                           <div className="relative">
                                              <Input 
                                                type="number" 
+                                               min={0}
+                                               max={Number(selectedResponse?.max_score ?? o.max_score ?? 10)}
+                                               step="any"
                                                className="font-bold text-lg h-10 w-24 pr-8"
                                                value={newScore}
                                                onChange={(e) => setNewScore(e.target.value)}
+                                               onBlur={(e) => {
+                                                 const val = parseFloat(e.target.value);
+                                                 const maxMarks = Number(selectedResponse?.max_score ?? o.max_score ?? 10);
+                                                 if (!isNaN(val)) {
+                                                   if (val < 0) setNewScore("0");
+                                                   else if (val > maxMarks) setNewScore(String(maxMarks));
+                                                 }
+                                               }}
                                              />
                                              <span className="absolute left-16 top-1/2 -translate-y-1/2 text-[10px] font-bold text-muted-foreground">PTS</span>
                                           </div>

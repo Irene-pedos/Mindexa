@@ -1,80 +1,81 @@
-// app/(student)/courses/page.tsx
+﻿// app/student/courses/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import React, { useEffect, useState, useMemo } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import {
   BookOpen,
+  Search,
+  GraduationCap,
+  ChevronDown,
+  ChevronRight,
   Calendar,
-  Award,
-  BarChart3,
-  Clock,
-  FileText,
-  GraduationCap
 } from "lucide-react";
 import Link from "next/link";
 import {
   studentApi,
   StudentCourseListItem,
-  StudentDashboardResponse,
 } from "@/lib/api/student";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { cn } from "@/lib/utils";
 
-export default function StudentWorkspacesPage() {
+const STATUS_COLORS: Record<string, string> = {
+  ACTIVE: "text-success bg-success/10 border-success/20",
+  COMPLETED: "text-primary bg-primary/10 border-primary/20",
+  INACTIVE: "text-muted-foreground bg-muted border-border",
+};
+
+function statusLabel(s: string) {
+  if (s === "ACTIVE") return "Active";
+  if (s === "COMPLETED") return "Completed";
+  return s ?? "Active";
+}
+
+export default function StudentCoursesPage() {
   const [workspaces, setWorkspaces] = useState<StudentCourseListItem[]>([]);
-  const [dashboardData, setDashboardData] =
-    useState<StudentDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
-    async function loadData() {
-      try {
-        const [wsData, dashData] = await Promise.all([
-          studentApi.getWorkspaces(),
-          studentApi.getDashboard(),
-        ]);
-        setWorkspaces(wsData);
-        setDashboardData(dashData);
-      } catch (err) {
-        console.error("Failed to load workspaces or dashboard data", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
+    studentApi.getWorkspaces().then(setWorkspaces).catch(console.error).finally(() => setLoading(false));
   }, []);
 
-  const avgProgress =
-    workspaces.length > 0
-      ? Math.round(
-          workspaces.reduce((acc, curr) => acc + curr.progress, 0) /
-            workspaces.length,
-        )
-      : 0;
+  const filtered = useMemo(() => {
+    const q = searchQuery.toLowerCase();
+    if (!q) return workspaces;
+    return workspaces.filter(
+      (w) => w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q),
+    );
+  }, [workspaces, searchQuery]);
+
+  const grouped = useMemo(() => {
+    const map: Record<string, StudentCourseListItem[]> = {};
+    filtered.forEach((ws) => {
+      const key = ws.academic_year || "Ongoing";
+      if (!map[key]) map[key] = [];
+      map[key].push(ws);
+    });
+    return Object.entries(map).sort(([a], [b]) => b.localeCompare(a));
+  }, [filtered]);
+
+  const toggleYear = (year: string) =>
+    setCollapsedYears((prev) => ({ ...prev, [year]: !prev[year] }));
 
   if (loading) {
     return (
-      <div className="space-y-6 w-full mx-auto animate-in fade-in duration-300">
-        <div className="flex justify-between items-center">
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="h-4 w-96 opacity-60" />
-          </div>
-          <Skeleton className="h-10 w-32 rounded-lg" />
+      <div className="w-full space-y-4 animate-pulse">
+        <div className="flex justify-between items-center border-b pb-3">
+          <Skeleton className="h-6 w-44 rounded-md" />
+          <Skeleton className="h-8 w-52 rounded-lg" />
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <Skeleton key={i} className="h-44 w-full rounded-xl" />
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          {[...Array(6)].map((_, i) => (
+            <Skeleton key={i} className="h-44 rounded-xl" />
           ))}
         </div>
       </div>
@@ -82,89 +83,138 @@ export default function StudentWorkspacesPage() {
   }
 
   return (
-    <div className="space-y-5 w-full mx-auto animate-in fade-in duration-300">
+    <div className="w-full space-y-4 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
         <div className="space-y-0.5">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground flex items-center gap-2">
-            <GraduationCap className="size-4.5 text-primary" /> My Enrolled Courses
+          <h1 className="text-lg font-semibold text-foreground flex items-center gap-2">
+            <GraduationCap className="size-4.5 text-primary" />
+            My Courses
           </h1>
-          <p className="text-xs text-muted-foreground font-medium">Overview of your enrolled academic modules and study progress</p>
+          <p className="text-xs text-muted-foreground font-medium">
+            {filtered.length} enrolled course{filtered.length !== 1 ? "s" : ""}
+          </p>
         </div>
-        <Button variant="outline" size="sm" asChild className="h-8.5 px-3.5 rounded-lg border-border/60 text-xs font-semibold">
-          <Link href="/student/schedule">
-            <Calendar className="mr-1.5 size-3.5 text-muted-foreground" /> View Schedule
-          </Link>
-        </Button>
+        <div className="relative w-full sm:w-60">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+          <Input
+            placeholder="Search courses…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="pl-8 h-8 text-xs bg-background border-border/60"
+          />
+        </div>
       </div>
 
-      {/* Modules Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {workspaces.length === 0 ? (
-          <div className="col-span-full py-16 text-center border-2 border-dashed rounded-xl bg-muted/5 border-border/30">
-            <BookOpen className="size-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-xs font-semibold text-muted-foreground">No enrolled courses found.</p>
-          </div>
-        ) : (
-          workspaces.map((ws) => (
-            <Card key={ws.id} className="flex flex-col bg-card hover:border-primary/20 shadow-xs transition-all duration-200 rounded-xl border border-border/60 overflow-hidden">
-              <CardHeader className="pb-1.5 pt-3.5 px-4">
-                <div className="flex items-start justify-between gap-3 min-w-0 w-full">
-                  <div className="space-y-0.5 min-w-0 flex-1">
-                    <CardTitle className="text-base font-semibold block truncate text-foreground w-full" title={ws.title}>
-                      {ws.title}
-                    </CardTitle>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Badge variant="outline" className="text-[10px] font-semibold px-1.5 h-5">{ws.code}</Badge>
-                      <span className="text-xs text-muted-foreground font-medium">{ws.academic_year || "Global"}</span>
-                    </div>
+      {filtered.length === 0 ? (
+        <div className="py-16 text-center border-2 border-dashed rounded-xl border-border/30 bg-muted/5">
+          <BookOpen className="size-9 mx-auto mb-3 text-muted-foreground/30" />
+          <p className="text-xs font-medium text-muted-foreground">No courses found</p>
+          {searchQuery && (
+            <p className="text-[11px] text-muted-foreground/70 mt-1">Try adjusting your search</p>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {grouped.map(([year, courses]) => {
+            const isCollapsed = !!collapsedYears[year];
+            return (
+              <div key={year} className="border border-border/50 rounded-xl overflow-hidden bg-card/30">
+                <button
+                  type="button"
+                  onClick={() => toggleYear(year)}
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b border-border/40 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="flex items-center gap-2">
+                    {isCollapsed
+                      ? <ChevronRight className="size-3.5 text-muted-foreground" />
+                      : <ChevronDown className="size-3.5 text-muted-foreground" />}
+                    <Calendar className="size-3.5 text-muted-foreground" />
+                    <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                      Academic Period: {year}
+                    </span>
+                    <Badge variant="secondary" className="text-[9px] font-semibold h-4 px-1.5 bg-muted/60">
+                      {courses.length} {courses.length === 1 ? "course" : "courses"}
+                    </Badge>
                   </div>
-                  <BookOpen className="size-5 text-muted-foreground opacity-60 shrink-0 mt-0.5" />
-                </div>
-              </CardHeader>
+                </button>
 
-              <CardContent className="space-y-3 pb-3.5 px-4 flex-1 flex flex-col justify-between">
-                <div className="space-y-1.5">
-                  <div className="flex justify-between items-center text-xs text-muted-foreground font-medium">
-                    <span>Course Progress</span>
-                    <span className="font-semibold text-foreground">{ws.progress}%</span>
-                  </div>
-                  <Progress value={ws.progress} className="h-1.5" />
-                </div>
+                {!isCollapsed && (
+                  <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in duration-150">
+                    {courses.map((ws) => (
+                      <Card
+                        key={ws.id}
+                        className="flex flex-col overflow-hidden hover:border-primary/30 transition-all duration-200 shadow-xs border-border/60 rounded-xl"
+                      >
+                        {ws.banner_image_url ? (
+                          <div
+                            className="h-20 bg-cover bg-center shrink-0"
+                            style={{ backgroundImage: `url(${ws.banner_image_url})` }}
+                          />
+                        ) : (
+                          <div className="h-20 bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center shrink-0">
+                            <BookOpen className="size-7 text-primary/25" />
+                          </div>
+                        )}
 
-                <div className="grid grid-cols-2 gap-2 pt-2 border-t border-border/40 text-xs font-medium">
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Instructor</p>
-                    <p className="font-medium text-foreground/80 truncate mt-0.5" title={ws.lecturer_name}>{ws.lecturer_name}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-muted-foreground text-[10px] uppercase font-bold tracking-wider">Status</p>
-                    <p className={cn(
-                      "font-semibold mt-0.5",
-                      ws.status === 'ACTIVE' ? 'text-success' :
-                      ws.status === 'COMPLETED' ? 'text-primary' :
-                      'text-muted-foreground'
-                    )}>
-                      {ws.status === 'ACTIVE' ? 'Active' : ws.status === 'COMPLETED' ? 'Completed' : ws.status || 'Active'}
-                    </p>
-                  </div>
-                </div>
+                        <CardHeader className="px-3.5 pt-3 pb-1.5">
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] font-mono px-1.5 h-4 mb-1.5 border-border/50"
+                              >
+                                {ws.code}
+                              </Badge>
+                              <CardTitle className="text-xs font-semibold leading-snug text-foreground line-clamp-2">
+                                {ws.title}
+                              </CardTitle>
+                            </div>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[9px] h-4 px-1.5 shrink-0 font-medium capitalize",
+                                STATUS_COLORS[ws.status] ?? STATUS_COLORS.INACTIVE,
+                              )}
+                            >
+                              {statusLabel(ws.status)}
+                            </Badge>
+                          </div>
+                        </CardHeader>
 
-                <div className="flex gap-2 pt-2 mt-auto">
-                  <Button asChild size="sm" className="flex-1 h-8 text-xs font-semibold rounded-lg shadow-none">
-                    <Link href={`/student/courses/${ws.id}`}>View Course</Link>
-                  </Button>
-                  <Button asChild variant="outline" size="sm" className="w-8 h-8 p-0 rounded-lg border-border/60">
-                    <Link href="/student/assessments" title="Assessments">
-                      <FileText className="size-3.5 text-muted-foreground" />
-                    </Link>
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          ))
-        )}
-      </div>
+                        <CardContent className="px-3.5 pb-3.5 pt-0 flex flex-col gap-2.5 flex-1">
+                          {ws.lecturer_name && (
+                            <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
+                              <GraduationCap className="size-3 shrink-0" />
+                              <span className="truncate">{ws.lecturer_name}</span>
+                            </p>
+                          )}
+
+                          <div className="space-y-1">
+                            <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
+                              <span>Progress</span>
+                              <span className="text-foreground font-semibold">{ws.progress}%</span>
+                            </div>
+                            <Progress value={ws.progress} className="h-1.5" />
+                          </div>
+
+                          <Button
+                            asChild
+                            size="sm"
+                            className="w-full h-7 text-xs font-semibold rounded-lg shadow-none mt-auto"
+                          >
+                            <Link href={`/student/courses/${ws.id}`}>View Course</Link>
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

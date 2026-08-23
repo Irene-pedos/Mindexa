@@ -6,6 +6,10 @@ import { fileURLToPath } from "url";
 const appRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
+  experimental: {
+    proxyClientMaxBodySize: "100mb",
+  },
+  serverExternalPackages: ["pdfjs-dist", "canvas"],
   turbopack: {
     root: appRoot,
     // Explicitly resolve CSS-imported packages to frontend/node_modules.
@@ -14,24 +18,30 @@ const nextConfig: NextConfig = {
     // causing "Can't resolve 'tailwindcss'" even though it is installed in
     // frontend/node_modules.
     resolveAlias: {
-      tailwindcss: path.join(appRoot, "node_modules", "tailwindcss", "index.css"),
+      tailwindcss: path.join(
+        appRoot,
+        "node_modules",
+        "tailwindcss",
+        "index.css",
+      ),
       "tw-animate-css": path.join(
         appRoot,
         "node_modules",
         "tw-animate-css",
         "dist",
-        "tw-animate.css"
+        "tw-animate.css",
       ),
       "shadcn/tailwind.css": path.join(
         appRoot,
         "node_modules",
         "shadcn",
-        "tailwind.css"
+        "tailwind.css",
       ),
     },
   },
   async rewrites() {
-    const backendOrigin = process.env.BACKEND_INTERNAL_URL?.trim() || "http://localhost:8000";
+    const backendOrigin =
+      process.env.BACKEND_INTERNAL_URL?.trim() || "http://localhost:8000";
 
     return [
       {
@@ -41,6 +51,10 @@ const nextConfig: NextConfig = {
       {
         source: "/health/:path*",
         destination: `${backendOrigin}/health/:path*`,
+      },
+      {
+        source: "/uploads/:path*",
+        destination: `${backendOrigin}/uploads/:path*`,
       },
     ];
   },

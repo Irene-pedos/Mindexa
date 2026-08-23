@@ -15,9 +15,14 @@ export interface AssessmentConfig {
   is_password_protected?: boolean;
   access_password?: string;
   
-  // Security Fields
+  // Security & Environment Fields
   is_supervised?: boolean;
   fullscreen_required?: boolean;
+  allow_resume?: boolean;
+  ai_assistance_allowed?: boolean;
+  is_open_book?: boolean;
+  integrity_monitoring_enabled?: boolean;
+  integrity_profile_id?: string;
 
   // Group Work Fields
   is_group_assessment?: boolean;

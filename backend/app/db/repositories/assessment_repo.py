@@ -1604,3 +1604,21 @@ class AssessmentRepository:
             .limit(page_size)
         )
         return list(result.scalars().all()), total
+
+    async def has_open_ended_questions(self, assessment_id: uuid.UUID) -> bool:
+        """Check if an assessment contains any open-ended questions requiring manual/AI review."""
+        from app.db.enums import QuestionType
+        from app.db.models.question import AssessmentQuestion, Question
+
+        open_types = [t.value for t in QuestionType if t.is_open_ended]
+        result = await self.db.execute(
+            select(func.count(AssessmentQuestion.id))
+            .join(Question, Question.id == AssessmentQuestion.question_id)
+            .where(
+                AssessmentQuestion.assessment_id == assessment_id,
+                col(Question.question_type).in_(open_types),
+                AssessmentQuestion.is_deleted == False,  # noqa: E712
+                Question.is_deleted == False,  # noqa: E712
+            )
+        )
+        return bool((result.scalar_one() or 0) > 0)

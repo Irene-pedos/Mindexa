@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-import uuid
 import random
+import uuid
 from datetime import UTC, datetime
-from sqlalchemy import select, func, and_, not_, exists
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from app.db.enums import AttemptStatus, AssessmentType, AssessmentStatus
-from app.db.models.academic import Course, TeachingWorkspace, StudentEnrollment, ClassSection
+from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus
+from app.db.models.academic import (ClassSection, Course, StudentEnrollment,
+                                    TeachingWorkspace)
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.resource import LecturerMaterial
@@ -18,17 +16,15 @@ from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.result_repo import ResultRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
-from app.schemas.student import (
-    StudentActiveAttempt,
-    StudentDashboardResponse,
-    StudentDashboardSummary,
-    StudentRecentResult,
-    StudentScheduleEvent,
-    StudentScheduleResponse,
-    StudentUpcomingAssessment,
-    PerformanceTrendItem,
-    StudentCourseListItem,
-)
+from app.schemas.student import (PerformanceTrendItem, StudentActiveAttempt,
+                                 StudentCourseListItem,
+                                 StudentDashboardResponse,
+                                 StudentDashboardSummary, StudentRecentResult,
+                                 StudentScheduleEvent, StudentScheduleResponse,
+                                 StudentUpcomingAssessment)
+from sqlalchemy import and_, exists, func, not_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 
 class StudentService:
@@ -43,7 +39,7 @@ class StudentService:
     async def get_dashboard_data(self, student_id: uuid.UUID) -> StudentDashboardResponse:
         """Aggregate student-scoped data for the main dashboard view."""
         from app.schemas.student import DashboardMetric
-        
+
         # 1. Fetch ALL released results for calculation accuracy
         # Note: For students with 1000s of results, we might want to optimize this,
         # but for typical academic use, fetching all results is fine for the dashboard.
@@ -52,10 +48,10 @@ class StudentService:
             AssessmentResult.is_released == True,
             AssessmentResult.is_deleted == False
         ).order_by(AssessmentResult.released_at.desc())
-        
+
         res = await self.db.execute(all_results_stmt)
         results = list(res.scalars().all())
-        
+
         now = datetime.now(UTC)
         first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -158,13 +154,16 @@ class StudentService:
             )
             r_full = (await self.db.execute(stmt_r)).scalar_one()
             assessment = r_full.attempt.assessment if r_full.attempt else None
-            
+            if not assessment and r_full.assessment_id:
+                stmt_a = select(Assessment).where(Assessment.id == r_full.assessment_id).options(selectinload(Assessment.course))
+                assessment = (await self.db.execute(stmt_a)).scalar_one_or_none()
+
             recent_results_data.append(StudentRecentResult(
-                id=r.attempt_id,
+                id=r.attempt_id or r.id,
                 assessment_title=assessment.title if assessment else "Unknown",
                 assessment_type=assessment.assessment_type if assessment else AssessmentType.CAT,
-                course_code=assessment.course_code if assessment else None,
-                course_name=assessment.course_name if assessment else None,
+                course_code=assessment.course.code if assessment and assessment.course else (getattr(assessment, "course_code", None) if assessment else None),
+                course_name=assessment.course.name if assessment and assessment.course else (getattr(assessment, "course_name", None) if assessment else None),
                 academic_year=assessment.academic_year if assessment else None,
                 score=r.total_score or 0.0,
                 total_marks=r.max_score or 100.0,
@@ -176,18 +175,18 @@ class StudentService:
         # 8. Performance Trend (Real data from DB)
         from dateutil.relativedelta import relativedelta
         trend_data = []
-        
+
         # We look back 6 months
         for i in range(5, -1, -1):
             month_date = now - relativedelta(months=i)
             start_of_month = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
             end_of_month = (start_of_month + relativedelta(months=1))
             m = start_of_month.strftime("%b")
-            
+
             # Student's average for this month (using our pre-fetched all_results)
             student_month_results = [r.percentage for r in results if r.released_at and start_of_month <= r.released_at < end_of_month]
             student_avg = sum(student_month_results) / len(student_month_results) if student_month_results else 0.0
-            
+
             # Real Platform average for this month (all released results)
             global_avg_stmt = select(func.avg(AssessmentResult.percentage)).where(
                 AssessmentResult.is_released == True,
@@ -197,7 +196,7 @@ class StudentService:
             )
             global_avg_res = await self.db.execute(global_avg_stmt)
             global_avg = global_avg_res.scalar() or 0.0
-            
+
             trend_data.append(PerformanceTrendItem(
                 month=m,
                 score=round(float(student_avg), 1),
@@ -217,11 +216,11 @@ class StudentService:
     async def list_workspaces(self, student_id: uuid.UUID) -> list[StudentCourseListItem]:
         """List all operational teaching workspaces the student is enrolled in."""
         workspaces = await self.workspace_repo.list_by_student(student_id)
-        
+
         items = []
         for ws in workspaces:
             progress = await self._calculate_workspace_progress(student_id, ws.id)
-            
+
             lecturer = ws.teaching_assignment.lecturer.profile
             items.append(StudentCourseListItem(
                 id=ws.id,
@@ -242,7 +241,7 @@ class StudentService:
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
         progress = await self._calculate_workspace_progress(student_id, workspace_id)
-        
+
         materials_count = (await self.db.execute(select(func.count(LecturerMaterial.id)).where(
             LecturerMaterial.teaching_workspace_id == workspace_id,
             LecturerMaterial.is_student_visible == True,
@@ -268,6 +267,7 @@ class StudentService:
             "materials": materials_count,
             "assessments": assessments_count,
             "academic_year": ws.academic_period.name if ws.academic_period else "GLOBAL",
+            "banner_image_url": ws.banner_image_url,
         }
 
     async def _calculate_workspace_progress(self, student_id: uuid.UUID, workspace_id: uuid.UUID) -> int:
@@ -278,7 +278,7 @@ class StudentService:
             Assessment.is_deleted == False
         )
         total_count = (await self.db.execute(total_stmt)).scalar_one() or 1
-        
+
         comp_stmt = select(func.count(func.distinct(AssessmentAttempt.assessment_id))).where(
             AssessmentAttempt.student_id == student_id,
             AssessmentAttempt.assessment_id.in_(
@@ -315,7 +315,8 @@ class StudentService:
             ))
 
         # Include Study Plan sessions
-        from app.db.repositories.study_planner_repo import StudyPlannerRepository
+        from app.db.repositories.study_planner_repo import \
+            StudyPlannerRepository
         sp_repo = StudyPlannerRepository(self.db)
         study_sessions = await sp_repo.list_upcoming_sessions_for_student(student_id)
         for s in study_sessions:

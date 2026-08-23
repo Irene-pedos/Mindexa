@@ -1,57 +1,43 @@
 from __future__ import annotations
 
 import uuid
-from typing import List
 from datetime import UTC, datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, cast, Date, or_
-from sqlalchemy.orm import selectinload
+from typing import List
 
-from app.db.models.attempt import AssessmentAttempt, StudentResponse
+from app.core.exceptions import NotFoundError
+from app.db.enums import (AIGradeDecision, AssessmentStatus, AttemptStatus,
+                          GradingMode, GradingQueueStatus, LanguageEnum)
+from app.db.models.academic import (AcademicPeriod, ClassGroup, ClassSection,
+                                    Course, CourseDepartment, CourseOption,
+                                    Institution, LecturerCourseAssignment,
+                                    Option, StudentEnrollment,
+                                    TeachingAssignment, TeachingWorkspace)
 from app.db.models.assessment import Assessment
+from app.db.models.attempt import AssessmentAttempt, StudentResponse
 from app.db.models.integrity import IntegrityEvent
-from app.db.enums import AssessmentStatus, GradingQueueStatus, GradingMode, AttemptStatus, AIGradeDecision, LanguageEnum
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
+from app.db.repositories.auth import UserRepository
+from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.integrity_repo import IntegrityRepository
-from app.core.exceptions import NotFoundError
-from app.schemas.lecturer import (
-    LecturerChartDataPoint,
-    LecturerDashboardResponse,
-    LecturerDashboardSummary,
-    LecturerPendingItem,
-    LecturerRecentSubmission,
-    LecturerCourseDetail,
-    LecturerCourseRosterItem,
-    WorkspaceListItem,
-    WorkspaceDetail,
-    WorkspaceCreate,
-)
-
-from app.db.models.academic import (
-    Course, 
-    ClassSection, 
-    StudentEnrollment, 
-    LecturerCourseAssignment, 
-    Institution, 
-    AcademicPeriod,
-    CourseDepartment,
-    CourseOption,
-    Option,
-    ClassGroup,
-    TeachingAssignment,
-    TeachingWorkspace
-)
-from app.db.repositories.course_repo import CourseRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
-from app.db.repositories.auth import UserRepository
 from app.db.schemas.academic import CourseCreate, CourseResponse
-from app.schemas.lecturer import (
-    AddStudentRequest,
-    StudentRecordAttempt,
-    StudentCourseRecordResponse,
-)
+from app.schemas.lecturer import (AddStudentRequest, LecturerChartDataPoint,
+                                  LecturerCourseDetail,
+                                  LecturerCourseRosterItem,
+                                  LecturerDashboardResponse,
+                                  LecturerDashboardSummary,
+                                  LecturerPendingItem,
+                                  LecturerRecentSubmission,
+                                  StudentCourseRecordResponse,
+                                  StudentRecordAttempt, WorkspaceCreate,
+                                  WorkspaceDetail, WorkspaceListItem,
+                                  WorkspaceUpdate)
+from sqlalchemy import Date, cast, func, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
 
 class LecturerService:
     def __init__(self, db: AsyncSession) -> None:
@@ -65,8 +51,8 @@ class LecturerService:
         self.user_repo = UserRepository(db)
 
     async def add_student_to_workspace(self, lecturer_id: uuid.UUID, workspace_id: uuid.UUID, email: str) -> bool:
+        from app.db.enums import EnrollmentStatus, UserRole
         from app.db.models.auth import User
-        from app.db.enums import UserRole, EnrollmentStatus
 
         # 1. Fetch Workspace
         ws = await self.workspace_repo.get_by_id(workspace_id)
@@ -119,7 +105,7 @@ class LecturerService:
                 .limit(1)
             )
             target_section_id = (await self.db.execute(section_stmt)).scalar_one_or_none()
-            
+
             if not target_section_id:
                 from app.core.exceptions import ValidationError
                 raise ValidationError("Cannot add student: This course has no active class sections.")
@@ -158,7 +144,7 @@ class LecturerService:
         row = res.first()
         if not row:
             raise NotFoundError("Student enrollment not found in this workspace")
-        
+
         user, profile, enrollment = row
 
         # 3. Fetch all attempts for assessments in this workspace
@@ -216,7 +202,7 @@ class LecturerService:
             )
             .order_by(TeachingWorkspace.created_at.desc())
         )
-        
+
         # Paginate
         res = await self.db.execute(stmt)
         workspaces = res.scalars().all()
@@ -227,7 +213,7 @@ class LecturerService:
             # Refresh with relationships
             ws = await self.workspace_repo.get_by_id(ws.id)
             student_count = await self.workspace_repo.get_student_count(ws.id)
-            
+
             # Performance avg
             from app.db.models.result import AssessmentResult
             perf_stmt = (
@@ -252,7 +238,9 @@ class LecturerService:
                 performance_avg=float(avg_perf),
                 lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
                 institution_name=ws.course.institution.name,
-                class_name=ws.class_section.name if ws.class_section else "GLOBAL"
+                class_name=ws.class_section.name if ws.class_section else "GLOBAL",
+                language=ws.language,
+                banner_image_url=ws.banner_image_url,
             ))
 
         return items, total
@@ -266,12 +254,12 @@ class LecturerService:
             raise NotFoundError("Workspace", str(workspace_id))
 
         student_count = await self.workspace_repo.get_student_count(workspace_id)
-        
+
         sections = await self.workspace_repo.resolve_workspace_sections(workspace_id)
         section_ids = [s.id for s in sections]
 
         from app.db.enums import EnrollmentStatus
-        from app.db.models.academic import ClassSection, ClassGroup
+        from app.db.models.academic import ClassGroup, ClassSection
 
         if not section_ids:
             rows = []
@@ -294,12 +282,12 @@ class LecturerService:
         roster = []
         for user, profile, section in rows:
             total_ass_stmt = select(func.count(Assessment.id)).where(
-                Assessment.teaching_workspace_id == workspace_id, 
+                Assessment.teaching_workspace_id == workspace_id,
                 Assessment.status == AssessmentStatus.PUBLISHED,
                 Assessment.is_deleted == False
             )
             total_ass_count = (await self.db.execute(total_ass_stmt)).scalar_one() or 1
-            
+
             comp_ass_stmt = (
                 select(func.count(AssessmentAttempt.id))
                 .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
@@ -368,6 +356,8 @@ class LecturerService:
             lecturer_name=f"{lect_p.first_name} {lect_p.last_name}",
             status=ws.status,
             class_name=ws.class_section.name if ws.class_section else "GLOBAL",
+            language=ws.language,
+            banner_image_url=ws.banner_image_url,
             department_name=ws.class_section.department.name if ws.class_section and ws.class_section.department else "N/A",
             option_name=ws.class_section.class_group.option.name if ws.class_section and ws.class_section.class_group and ws.class_section.class_group.option else "N/A",
             roster=roster,
@@ -418,6 +408,28 @@ class LecturerService:
         await self.db.refresh(workspace)
         return workspace
 
+    async def update_workspace(
+        self,
+        lecturer_id: uuid.UUID,
+        workspace_id: uuid.UUID,
+        data: WorkspaceUpdate,
+    ) -> TeachingWorkspace:
+        workspace = await self.workspace_repo.get_by_id(workspace_id)
+        if not workspace:
+            raise NotFoundError("Workspace", str(workspace_id))
+        if workspace.teaching_assignment.lecturer_id != lecturer_id:
+            from app.core.exceptions import AuthorizationError
+            raise AuthorizationError("You are not authorized to update this workspace")
+
+        update_data = data.model_dump(exclude_unset=True)
+        if update_data:
+            update_data["updated_by_id"] = lecturer_id
+            for field, value in update_data.items():
+                setattr(workspace, field, value)
+            await self.db.flush()
+            await self.db.refresh(workspace)
+        return workspace
+
     async def get_dashboard_data(self, lecturer_id: uuid.UUID) -> LecturerDashboardResponse:
         from app.db.models.integrity import IntegrityEvent
         from app.schemas.lecturer import DashboardMetric
@@ -463,7 +475,7 @@ class LecturerService:
             curr = (await self.db.execute(stmt_today)).scalar_one()
             # Yesterday
             stmt_yest = select(func.count(IntegrityEvent.id)).join(Assessment, Assessment.id == IntegrityEvent.assessment_id).where(
-                Assessment.created_by_id == lecturer_id, 
+                Assessment.created_by_id == lecturer_id,
                 IntegrityEvent.created_at >= yesterday_start,
                 IntegrityEvent.created_at < today_start
             )
@@ -492,7 +504,7 @@ class LecturerService:
                 if aid not in assessment_counts:
                     assessment_counts[aid] = {"count": 0, "title": title}
                 assessment_counts[aid]["count"] += 1
-            
+
         for aid, info in assessment_counts.items():
             pending_items_data.append(LecturerPendingItem(
                 id=uuid.uuid4(),
@@ -505,7 +517,7 @@ class LecturerService:
 
         # 3. Recent Submissions
         recent_attempts = await self.attempt_repo.list_recent_submissions_by_lecturer(lecturer_id)
-        
+
         recent_submissions_data = []
         for a in recent_attempts:
             student_name = "Student"
@@ -583,8 +595,8 @@ class LecturerService:
         from app.db.models.auth import User, UserProfile
         alert_stmt = (
             select(
-                IntegrityEvent, 
-                UserProfile, 
+                IntegrityEvent,
+                UserProfile,
                 Assessment.title.label("assessment_title")
             )
             .join(Assessment, Assessment.id == IntegrityEvent.assessment_id)
@@ -603,7 +615,7 @@ class LecturerService:
             event = row[0]
             profile = row[1]
             ass_title = row[2]
-            
+
             severity = "low"
             risk_score = 10
             if event.event_type in ["DEVTOOLS_DETECTED", "SUSPICIOUS_DEVICE"]:
@@ -677,12 +689,12 @@ class LecturerService:
         items = []
         for c, role in rows:
             student_count = await self.course_repo.get_student_count(c.id)
-            
+
             # Calculate real performance average
-            from app.db.models.result import AssessmentResult
-            from app.db.models.attempt import AssessmentAttempt
             from app.db.models.assessment import Assessment
-            
+            from app.db.models.attempt import AssessmentAttempt
+            from app.db.models.result import AssessmentResult
+
             perf_stmt = (
                 select(func.avg(AssessmentResult.percentage))
                 .join(AssessmentAttempt, AssessmentAttempt.id == AssessmentResult.attempt_id)
@@ -711,19 +723,14 @@ class LecturerService:
         return items, total
 
     async def get_course_detail(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> LecturerCourseDetail:
-        from app.db.models.academic import (
-            Course, 
-            ClassSection, 
-            StudentEnrollment, 
-            Department, 
-            Option, 
-            CourseDepartment, 
-            CourseOption
-        )
+        from app.db.models.academic import (ClassSection, Course,
+                                            CourseDepartment, CourseOption,
+                                            Department, Option,
+                                            StudentEnrollment)
+        from app.db.models.assessment import Assessment
+        from app.db.models.attempt import AssessmentAttempt
         from app.db.models.auth import User, UserProfile
         from app.db.models.result import AssessmentResult
-        from app.db.models.attempt import AssessmentAttempt
-        from app.db.models.assessment import Assessment
 
         # 1. Fetch Course
         stmt = select(Course).where(Course.id == course_id, Course.is_deleted == False)
@@ -733,13 +740,14 @@ class LecturerService:
             raise NotFoundError("Course not found")
 
         # 2. Fetch student count and roster via resolved section IDs for active teaching assignments
-        from app.db.models.academic import TeachingAssignment, ClassGroup, ClassSection
+        from app.db.models.academic import (ClassGroup, ClassSection,
+                                            TeachingAssignment)
         ta_stmt = select(TeachingAssignment).where(
             TeachingAssignment.course_id == course_id,
             TeachingAssignment.is_active == True
         )
         teaching_assignments = (await self.db.execute(ta_stmt)).scalars().all()
-        
+
         section_ids = set()
         for ta in teaching_assignments:
             if ta.class_section_id:
@@ -799,7 +807,7 @@ class LecturerService:
             total_ass_stmt = select(func.count(Assessment.id)).where(Assessment.course_id == course_id, Assessment.is_deleted == False)
             total_ass_res = await self.db.execute(total_ass_stmt)
             total_ass_count = total_ass_res.scalar_one() or 1
-            
+
             comp_ass_stmt = (
                 select(func.count(AssessmentAttempt.id))
                 .join(Assessment, Assessment.id == AssessmentAttempt.assessment_id)
@@ -812,7 +820,7 @@ class LecturerService:
             )
             comp_ass_res = await self.db.execute(comp_ass_stmt)
             comp_ass_count = comp_ass_res.scalar_one() or 0
-            
+
             progress = int((comp_ass_count / total_ass_count) * 100)
 
             roster.append(LecturerCourseRosterItem(
@@ -893,9 +901,9 @@ class LecturerService:
 
     async def delete_course(self, lecturer_id: uuid.UUID, course_id: uuid.UUID) -> bool:
         """Soft delete a course if the lecturer is the primary owner."""
-        from app.db.models.academic import TeachingAssignment
-        from app.db.enums import LecturerAssignmentRole
         from app.core.exceptions import AuthorizationError
+        from app.db.enums import LecturerAssignmentRole
+        from app.db.models.academic import TeachingAssignment
 
         # 1. Verify lecturer is primary assigned to this course
         assign_stmt = select(TeachingAssignment).where(
@@ -918,8 +926,8 @@ class LecturerService:
 
     async def list_lecturers(self) -> list[UserResponse]:
         """Returns a list of all active lecturers for colleague selection."""
-        from app.db.models.auth import User, UserProfile
         from app.db.enums import UserRole, UserStatus
+        from app.db.models.auth import User, UserProfile
         from sqlalchemy.orm import selectinload
 
         stmt = (

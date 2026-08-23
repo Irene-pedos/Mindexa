@@ -253,9 +253,26 @@ export function getAssessmentProgressStatus(assessment: {
   };
 }
 
-export function isHighSecurityAssessment(type?: string | null, isSupervised?: boolean): boolean {
+export function isHighSecurityAssessment(
+  type?: string | null,
+  isSupervised?: boolean,
+  integrityMonitoringEnabled?: boolean | null,
+): boolean {
   const t = normalizeQuestionType(type);
-  const highSecurityTypes = new Set(["cat", "summative", "formative", "group_work", "group-work"]);
+
+  // Homework and Groupwork are never high-security
+  if (t === "homework" || t === "group_work" || t === "groupwork") {
+    return false;
+  }
+
+  // FORMATIVE is high-security only when integrity monitoring is explicitly enabled
+  // (integrity_monitoring_enabled === false means it's a Practice session)
+  if (t === "formative") {
+    return integrityMonitoringEnabled !== false;
+  }
+
+  // CAT, SUMMATIVE, REASSESSMENT, and anything supervised is high-security
+  const highSecurityTypes = new Set(["cat", "summative", "reassessment"]);
   return highSecurityTypes.has(t) || !!isSupervised;
 }
 

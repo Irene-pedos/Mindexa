@@ -247,6 +247,9 @@ class AssessmentSecuritySettingsUpdate(BaseModel):
     ai_assistance_allowed: bool = False
     is_open_book: bool = False
     integrity_monitoring_enabled: bool = True
+    allow_resume: bool | None = None
+    integrity_profile_id: uuid.UUID | None = None
+    integrity_profile_code: str | None = None
     randomize_questions: bool = Field(default=False, alias="randomise_questions")
     randomize_options: bool = Field(default=False, alias="randomise_options")
 
@@ -687,6 +690,8 @@ class BulkAssessmentRules(BaseModel):
     requireAllMemberParticipation: bool | None = False
     supervisor_ids: list[uuid.UUID] | None = []
     integrityMonitoring: bool | None = True
+    allowResume: bool | None = False
+    integrityProfileCode: str | None = None
 
     @model_validator(mode="before")
     @classmethod

@@ -9,20 +9,16 @@ import uuid
 from datetime import date, datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint, String, Text, Enum as SA_Enum
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlmodel import Field, Relationship
-
 from app.db.base import AuditedBaseModel, BaseModel, utcnow
-from app.db.enums import (
-    AcademicPeriodType, 
-    EnrollmentStatus, 
-    LanguageEnum,
-    LecturerAssignmentRole, 
-    LocationType,
-    ClassSectionStatus
-)
+from app.db.enums import (AcademicPeriodType, ClassSectionStatus,
+                          EnrollmentStatus, LanguageEnum,
+                          LecturerAssignmentRole, LocationType)
 from app.db.mixins import composite_index
+from sqlalchemy import Column, DateTime
+from sqlalchemy import Enum as SA_Enum
+from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship
 
 if TYPE_CHECKING:
     from app.db.models.assessment import Assessment, AssessmentTargetSection
@@ -184,6 +180,7 @@ class TeachingWorkspace(AuditedBaseModel, table=True):
     # -- Customisation --
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None)
+    banner_image_url: Optional[str] = Field(default=None, max_length=500)
     status: str = Field(default="ACTIVE", max_length=50)
     language: LanguageEnum = Field(
         default=LanguageEnum.EN,
@@ -470,7 +467,7 @@ class LecturerCourseAssignment(BaseModel, table=True):
     """Junction table: Lecturer ↔ Course (shared teaching)."""
 
     __tablename__ = "lecturer_course_assignment"
-    
+
     lecturer_id: uuid.UUID = Field(
         sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id"), primary_key=True)
     )
@@ -561,7 +558,7 @@ class Subject(BaseModel, table=True):
     institution: Optional["Institution"] = Relationship(back_populates="subjects")
     department: Optional["Department"] = Relationship(back_populates="subjects")
     course_subjects: List["CourseSubject"] = Relationship(back_populates="subject")
-    
+
     assessments: List["Assessment"] = Relationship(back_populates="subject")
 
 
@@ -624,11 +621,11 @@ class Course(BaseModel, table=True):
     institution: Optional["Institution"] = Relationship(back_populates="courses")
     department: Optional["Department"] = Relationship(back_populates="courses")
     academic_period: Optional["AcademicPeriod"] = Relationship(back_populates="courses")
-    
+
     # Enable 1..N lecturers per course
     assignments: List["TeachingAssignment"] = Relationship(back_populates="course")
     lecturer_course_assignments: List["LecturerCourseAssignment"] = Relationship(back_populates="course")
-    
+
     assessments: List["Assessment"] = Relationship(back_populates="course")
     workspaces: List["TeachingWorkspace"] = Relationship(back_populates="course")
 
@@ -710,7 +707,7 @@ class ClassSection(BaseModel, table=True):
     )
     name: str = Field(nullable=False, max_length=100) # e.g. IT Level 6 A
     capacity: Optional[int] = Field(default=None, nullable=True)
-    
+
     # ── Operational Logistics ────────────────────────────────────────────────
     location_type: LocationType = Field(
         default=LocationType.PHYSICAL_ROOM,
@@ -729,7 +726,7 @@ class ClassSection(BaseModel, table=True):
     department: Optional["Department"] = Relationship()
     enrollments: List["StudentEnrollment"] = Relationship(back_populates="class_section")
     assessment_targets: List["AssessmentTargetSection"] = Relationship(back_populates="class_section")
-    
+
     workspaces: List["TeachingWorkspace"] = Relationship(back_populates="class_section")
 
 

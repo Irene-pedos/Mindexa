@@ -80,6 +80,7 @@ export interface StudentCourseListItem {
   academic_year: string;
   language?: "EN" | "RW" | "FR" | "SW";
   workspace_id?: string | null;
+  banner_image_url?: string | null;
 }
 
 export interface StudentDashboardResponse {
@@ -105,6 +106,7 @@ export interface StudentCourseDetail {
   assessments: number;
   academic_year: string;
   language?: "EN" | "RW" | "FR" | "SW" | string;
+  banner_image_url?: string | null;
 }
 
 export interface StudentScheduleEvent {

@@ -41,9 +41,11 @@ import {
   AlertCircle,
   Zap,
   XCircle,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
 import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
-import { cn } from "@/lib/utils";
+import { cn, formatAssessmentType } from "@/lib/utils";
 import { assessmentApi } from "@/lib/api/assessment";
 import { notificationApi } from "@/lib/api/notification";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
@@ -173,9 +175,13 @@ export default function StudentAssessmentsPage() {
     return matchesSearch && matchesType && matchesTab();
   });
 
-  const getAssessmentTypeLabel = (type: string) => {
+  const getAssessmentTypeLabel = (type: string, assessment?: any) => {
     if (!type) return "";
-    return type.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+    return formatAssessmentType(type, {
+      integrity_monitoring_enabled: assessment?.integrity_monitoring_enabled,
+      is_supervised: assessment?.is_supervised,
+      allow_resume: assessment?.allow_resume,
+    });
   };
 
   const getStatusInfo = (assessment: any) => {
@@ -280,7 +286,7 @@ export default function StudentAssessmentsPage() {
                   <BookOpen className="size-3.5 opacity-70" />
                   <span>{assessment.course_code || "GEN-001"} - {assessment.subject || assessment.course_name || "General"}</span>
                   <span className="text-muted-foreground/30">•</span>
-                  <span>{getAssessmentTypeLabel(assessment.assessment_type)}</span>
+                  <span>{getAssessmentTypeLabel(assessment.assessment_type, assessment)}</span>
                 </div>
               </div>
               <Badge variant={status.variant} className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full inline-flex items-center gap-1.5 capitalize shadow-none border", status.color)}>
@@ -522,98 +528,200 @@ export default function StudentAssessmentsPage() {
         open={!!selectedAssessmentForStart} 
         onOpenChange={(open) => { if (!open) setSelectedAssessmentForStart(null); }}
       >
-        <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
-          <DialogHeader className="space-y-1">
-            <div className="flex items-center justify-between">
-              <DialogTitle className="text-base font-semibold text-foreground">
-                Pre-flight Security Check-in
-              </DialogTitle>
-              <ContextualExplainer topic="start-assessment" variant="pill" label="What to expect?" />
-            </div>
-            <DialogDescription className="text-xs text-muted-foreground">
-              Please review the following requirements before starting the assessment.
-            </DialogDescription>
-          </DialogHeader>
+        {(() => {
+          const typeStr = (selectedAssessmentForStart?.assessment_type || selectedAssessmentForStart?.type || "").toUpperCase();
+          const isHomework = typeStr === "HOMEWORK";
+          const isPractice =
+            typeStr === "FORMATIVE" &&
+            selectedAssessmentForStart?.integrity_monitoring_enabled === false;
+          const isOpen = isHomework || isPractice;
 
-          <div className="space-y-3.5 my-3">
-            {/* Fullscreen Rules */}
-            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
-              <ShieldAlert className="size-4 text-primary shrink-0 mt-0.5" />
-              <div className="space-y-0.5 flex-1">
+          return (
+            <DialogContent className="max-w-xl max-h-[85vh] overflow-y-auto p-6 rounded-2xl border border-border bg-card">
+              <DialogHeader className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
-                  <ContextualExplainer topic="fullscreen-integrity" variant="icon" />
+                  <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+                    {isHomework ? (
+                      <>
+                        <BookOpen className="size-4.5 text-emerald-600" />
+                        <span>Homework Evaluation Check-in</span>
+                      </>
+                    ) : isPractice ? (
+                      <>
+                        <Sparkles className="size-4.5 text-blue-500" />
+                        <span>Practice Session Check-in</span>
+                      </>
+                    ) : (
+                      <span>Pre-flight Security Check-in</span>
+                    )}
+                  </DialogTitle>
+                  <ContextualExplainer topic="start-assessment" variant="pill" label="What to expect?" />
                 </div>
-                <p className="text-[11px] text-muted-foreground leading-normal font-medium">
-                  {selectedAssessmentForStart?.fullscreen_required 
-                    ? "This exam enforces lock-down fullscreen. You must not exit fullscreen mode." 
-                    : "Standard environment monitoring is active. Do not close the browser."}
-                </p>
+                <DialogDescription className="text-xs text-muted-foreground">
+                  {isHomework 
+                    ? "Please review the homework guidelines and submission window before beginning."
+                    : isPractice
+                      ? "This is an open practice session. You are free to reference materials, use AI assistance, and pause at any time."
+                      : "Please review the following requirements before starting the assessment."}
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-3.5 my-3">
+                {isOpen ? (
+                  <>
+                    {/* Open Environment */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-emerald-500/20 bg-emerald-500/5">
+                      <BookOpen className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 flex-1">
+                        <p className="text-xs font-semibold text-foreground">Open Resource Environment</p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          {isPractice
+                            ? "You are free to reference textbooks, notes, search the web, and use any study resources."
+                            : "You are free to research, reference course notes, textbooks, and approved academic materials while completing this homework."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* AI Study Assistant */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-primary/20 bg-primary/5">
+                      <Sparkles className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 flex-1">
+                        <p className="text-xs font-semibold text-foreground">AI Study Assistant Enabled</p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          An interactive AI Study Tutor is available directly in your workspace to explain concepts and search your course materials with citations.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Pause & Resume */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+                      <RotateCcw className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 flex-1">
+                        <p className="text-xs font-semibold text-foreground">
+                          {isPractice ? "Self-Paced (Pause & Resume)" : "Take-Home Flexibility (Pause & Resume)"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          {isPractice
+                            ? "You can pause, exit, and resume your practice session at any time — there is no time penalty."
+                            : "You can save your progress, exit, and resume your homework session anytime before the final submission deadline."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* No Integrity Monitoring */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-blue-500/20 bg-blue-500/5">
+                      <CheckCircle2 className="size-4 text-blue-600 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 flex-1">
+                        <p className="text-xs font-semibold text-foreground">No Integrity Monitoring</p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          Tab switching, copy/paste, window blur, and browser focus changes are not monitored and will not trigger warnings.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Submission Deadline (homework only) */}
+                    {isHomework && (
+                      <div className="flex items-start gap-3 p-3 rounded-xl border border-amber-500/20 bg-amber-500/5">
+                        <Clock className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                        <div className="space-y-0.5 flex-1">
+                          <p className="text-xs font-semibold text-foreground">Submission Deadline & Auto-Finalize</p>
+                          <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                            Ensure all answers are submitted before the assessment window closes. When the deadline arrives, your attempt will automatically finalize and submit.
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    {/* Fullscreen Rules */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+                      <ShieldAlert className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-0.5 flex-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-xs font-semibold text-foreground">Fullscreen Environment</p>
+                          <ContextualExplainer topic="fullscreen-integrity" variant="icon" />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          {selectedAssessmentForStart?.fullscreen_required 
+                            ? "This exam enforces lock-down fullscreen. You must not exit fullscreen mode." 
+                            : "Standard environment monitoring is active. Do not close the browser."}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Tab Switching Rules */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+                      <ShieldAlert className="size-4 text-red-500 shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-semibold text-foreground">Tab and App Switching Prohibited</p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          Switching tabs, opening developer tools, or resizing the window registers as a violation. Multiple violations will cause automatic submission.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Attempt Limits */}
+                    <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
+                      <History className="size-4 text-primary shrink-0 mt-0.5" />
+                      <div className="space-y-0.5">
+                        <p className="text-xs font-semibold text-foreground">Attempt Tracking</p>
+                        <p className="text-[11px] text-muted-foreground leading-normal font-medium">
+                          Attempt {Math.min(selectedAssessmentForStart?.max_attempts, (selectedAssessmentForStart?.attempts_used || 0) + 1)} of {selectedAssessmentForStart?.max_attempts}. 
+                          Remaining attempts: {Math.max(0, (selectedAssessmentForStart?.max_attempts || 1) - (selectedAssessmentForStart?.attempts_used || 0))}.
+                        </p>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {/* Checkbox Agreement */}
+                <div className="flex items-start gap-2.5 pt-1">
+                  <Checkbox 
+                    id="integrity-agree" 
+                    checked={checklistAgreed} 
+                    onCheckedChange={(checked) => setChecklistAgreed(!!checked)}
+                    className="mt-0.5 border-border/70"
+                  />
+                  <Label htmlFor="integrity-agree" className="text-xs text-muted-foreground leading-normal font-medium cursor-pointer">
+                    {isHomework 
+                      ? "I understand the homework guidelines and submission deadline. I am ready to begin."
+                      : isPractice
+                        ? "I understand this is an open practice session. I am ready to begin."
+                        : "I understand and agree to the academic integrity protocols. I am ready to begin this supervised assessment."}
+                  </Label>
+                </div>
               </div>
-            </div>
 
-            {/* Tab Switching Rules */}
-            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
-              <ShieldAlert className="size-4 text-red-500 shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Tab and App Switching Prohibited</p>
-                <p className="text-[11px] text-muted-foreground leading-normal font-medium">
-                  Switching tabs, opening developer tools, or resizing the window registers as a violation. Multiple violations will cause automatic submission.
-                </p>
-              </div>
-            </div>
-
-            {/* Attempt Limits */}
-            <div className="flex items-start gap-3 p-3 rounded-xl border border-border/40 bg-muted/10">
-              <History className="size-4 text-primary shrink-0 mt-0.5" />
-              <div className="space-y-0.5">
-                <p className="text-xs font-semibold text-foreground">Attempt Tracking</p>
-                <p className="text-[11px] text-muted-foreground leading-normal font-medium">
-                  Attempt {Math.min(selectedAssessmentForStart?.max_attempts, (selectedAssessmentForStart?.attempts_used || 0) + 1)} of {selectedAssessmentForStart?.max_attempts}. 
-                  Remaining attempts: {Math.max(0, (selectedAssessmentForStart?.max_attempts || 1) - (selectedAssessmentForStart?.attempts_used || 0))}.
-                </p>
-              </div>
-            </div>
-
-            {/* Checkbox Agreement */}
-            <div className="flex items-start gap-2.5 pt-1">
-              <Checkbox 
-                id="integrity-agree" 
-                checked={checklistAgreed} 
-                onCheckedChange={(checked) => setChecklistAgreed(!!checked)}
-                className="mt-0.5 border-border/70"
-              />
-              <Label htmlFor="integrity-agree" className="text-xs text-muted-foreground leading-normal font-medium cursor-pointer">
-                I understand and agree to the academic integrity protocols. I am ready to begin this supervised assessment.
-              </Label>
-            </div>
-          </div>
-
-          <DialogFooter className="flex sm:justify-end gap-2 pt-2 border-t border-border/40">
-            <Button 
-              variant="outline" 
-              size="sm" 
-              onClick={() => setSelectedAssessmentForStart(null)}
-              className="h-8.5 text-xs font-medium rounded-lg border-border/60"
-            >
-              Cancel
-            </Button>
-            <Button 
-              size="sm" 
-              disabled={!checklistAgreed}
-              onClick={() => {
-                if (selectedAssessmentForStart) {
-                  router.push(`/student/assessments/${selectedAssessmentForStart.id}/take`);
-                  setSelectedAssessmentForStart(null);
-                }
-              }}
-              className="h-8.5 text-xs font-semibold rounded-lg shadow-none"
-            >
-              Start Assessment
-            </Button>
-          </DialogFooter>
-        </DialogContent>
+              <DialogFooter className="flex sm:justify-end gap-2 pt-2 border-t border-border/40">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={() => setSelectedAssessmentForStart(null)}
+                  className="h-8.5 text-xs font-medium rounded-lg border-border/60"
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  size="sm" 
+                  disabled={!checklistAgreed}
+                  onClick={() => {
+                    if (selectedAssessmentForStart) {
+                      router.push(`/student/assessments/${selectedAssessmentForStart.id}/take`);
+                      setSelectedAssessmentForStart(null);
+                    }
+                  }}
+                  className="h-8.5 text-xs font-semibold rounded-lg shadow-none"
+                >
+                  {isHomework ? "Start Homework" : isPractice ? "Start Practice" : "Start Assessment"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          );
+        })()}
       </Dialog>
     </div>
   );
 }
+
+

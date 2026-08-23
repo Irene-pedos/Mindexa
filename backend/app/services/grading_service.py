@@ -1682,6 +1682,12 @@ class GradingService:
         if not existing.is_final:
             raise ConflictError("Only finalised grades can be moderated. Use manual grading for pending items.")
 
+        if new_score < 0 or (existing.max_score is not None and new_score > existing.max_score):
+            raise ValidationError(
+                f"Score {new_score} is out of range [0, {existing.max_score}]",
+                code="SCORE_OUT_OF_RANGE",
+            )
+
         # 2. Check if the result was already released (post-release correction)
         existing_result = await self.result_repo.get_by_attempt(existing.attempt_id)
         was_released = bool(existing_result and existing_result.is_released)

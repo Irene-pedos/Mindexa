@@ -130,6 +130,11 @@ from app.db.models.learning_unit import (
     StudentLearningUnitProgress,
     AssessmentLearningUnitCoverage,
 )
+from app.db.models.study_reader import (
+    StudentReadingProgress,
+    StudentMaterialAnnotation,
+    StudentMaterialKeyPoint,
+)
 
 __all__: list[str] = [
     # ── Audit ──────────────────────────────────────────────────────────────────
@@ -220,4 +225,8 @@ __all__: list[str] = [
     "LearningUnit",
     "StudentLearningUnitProgress",
     "AssessmentLearningUnitCoverage",
+    # ── Study Reader ───────────────────────────────────────────────────────────
+    "StudentReadingProgress",
+    "StudentMaterialAnnotation",
+    "StudentMaterialKeyPoint",
 ]

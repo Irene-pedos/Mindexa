@@ -43,7 +43,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import Link from "next/link";
 import { assessmentApi } from "@/lib/api/assessment";
-import { cn } from "@/lib/utils";
+import { cn, formatAssessmentType } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -88,6 +88,9 @@ interface Assessment {
   course_code: string | null;
   created_at: string;
   updated_at: string;
+  integrity_monitoring_enabled?: boolean;
+  is_supervised?: boolean;
+  allow_resume?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -984,7 +987,11 @@ export default function ManageAssessmentsPage() {
                                   variant="outline"
                                   className="text-[8px] font-bold uppercase tracking-tight h-4 px-1.5 rounded border-muted/50 text-muted-foreground/80"
                                 >
-                                  {item.assessment_type}
+                                  {formatAssessmentType(item.assessment_type, {
+                                    integrity_monitoring_enabled: item.integrity_monitoring_enabled,
+                                    is_supervised: item.is_supervised,
+                                    allow_resume: item.allow_resume,
+                                  })}
                                 </Badge>
                               </TableCell>
 

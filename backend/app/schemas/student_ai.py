@@ -32,6 +32,12 @@ class StudentSupportRequest(BaseModel):
     teaching_workspace_id: uuid.UUID | None = Field(default=None, description="Scope RAG retrieval to specific course workspace")
     thinking_mode: bool = Field(default=False, description="Enable Chain-of-Thought deep reasoning with larger token budget")
     deep_search_mode: bool = Field(default=False, description="Enable expanded RAG search (top_k=16 multi-chunk retrieval)")
+    attempt_id: uuid.UUID | None = Field(default=None, description="Live attempt ID if invoked inside assessment workspace")
+    question_id: uuid.UUID | None = Field(default=None, description="Current question ID if student focused on a question")
+    assessment_id: uuid.UUID | None = Field(default=None, description="Assessment ID")
+    is_in_assessment: bool = Field(default=False, description="Flag indicating live assessment tutor mode")
+    current_page: int | None = Field(default=None, description="Active page number in study reader")
+    selected_text: str | None = Field(default=None, max_length=4000, description="Selected text excerpt in study reader")
 
     model_config = {"str_strip_whitespace": True}
 

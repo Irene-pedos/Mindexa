@@ -237,8 +237,9 @@ class ResultService:
             and result.graded_question_count >= result.total_question_count
         )
 
+        has_open_ended = await self.assessment_repo.has_open_ended_questions(attempt.assessment_id)
         if (
-            release_mode == ResultReleaseMode.IMMEDIATE.value
+            (release_mode == ResultReleaseMode.IMMEDIATE.value or not has_open_ended)
             and not result.integrity_hold
             and not result.is_released
             and is_fully_graded
@@ -293,9 +294,13 @@ class ResultService:
                     if grade and grade.score is not None
                     else None
                 ),
-                "feedback": grade.feedback if grade else None,
+                "feedback": (grade.feedback or grade.ai_feedback_draft) if grade else None,
                 "grading_mode": grade.grading_mode if grade else None,
-                "feedback_author_basis": grade.feedback_author_basis if grade else "LECTURER",
+                "feedback_author_basis": (
+                    grade.feedback_author_basis
+                    if (grade and grade.feedback)
+                    else ("AI" if (grade and grade.ai_feedback_draft) else "LECTURER")
+                ),
                 "was_skipped": response.is_skipped if response else False,
             })
 

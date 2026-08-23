@@ -25,7 +25,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
-from app.db.enums import AssessmentStatus, AttemptStatus, StudentGroupStatus
+from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus, StudentGroupStatus
 from app.db.models.attempt import AssessmentAttempt
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -228,6 +228,88 @@ class AttemptService:
     # -----------------------------------------------------------------------
     # RESUME ATTEMPT
     # -----------------------------------------------------------------------
+    # PAUSE ATTEMPT
+    # -----------------------------------------------------------------------
+
+    async def pause_attempt(
+        self,
+        *,
+        attempt_id: uuid.UUID,
+        student_id: uuid.UUID,
+        access_token: uuid.UUID,
+    ) -> AssessmentAttempt:
+        """
+        Pause an active IN_PROGRESS attempt for take-home/homework assessments.
+        """
+        attempt = await self.attempt_repo.get_by_access_token(attempt_id, access_token)
+        if not attempt:
+            raise AuthorizationError(
+                "Invalid access token for this attempt",
+                code="INVALID_ACCESS_TOKEN",
+            )
+
+        if attempt.student_id != student_id:
+            raise AuthorizationError(
+                "You do not own this attempt",
+                code="ATTEMPT_OWNERSHIP_VIOLATION",
+            )
+
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            raise ConflictError(
+                f"Attempt is in status '{attempt.status}' — only IN_PROGRESS attempts can be paused",
+                code="ATTEMPT_NOT_IN_PROGRESS",
+            )
+
+        # Check if pause/resume is allowed
+        if attempt.assessment:
+            is_open_assessment = (
+                attempt.assessment.assessment_type == AssessmentType.HOMEWORK
+                or str(attempt.assessment.assessment_type).upper() == "HOMEWORK"
+                or attempt.assessment.assessment_type == AssessmentType.FORMATIVE
+                or str(attempt.assessment.assessment_type).upper() == "FORMATIVE"
+            )
+            if not attempt.assessment.allow_resume and not is_open_assessment:
+                raise AuthorizationError(
+                    f"Pausing and resuming is disabled for {attempt.assessment.assessment_type} assessments.",
+                    code="PAUSE_DISABLED",
+                )
+
+        now = _utcnow()
+
+        # Check if window or duration deadline has already passed
+        effective_deadline = attempt.expires_at
+        if attempt.assessment and attempt.assessment.window_end:
+            grace = timedelta(minutes=attempt.assessment.grace_period_minutes or 0)
+            window_cutoff = attempt.assessment.window_end + grace
+            if not attempt.assessment.late_submission_allowed:
+                if effective_deadline:
+                    effective_deadline = min(effective_deadline, window_cutoff)
+                else:
+                    effective_deadline = window_cutoff
+
+        if effective_deadline and now >= effective_deadline:
+            await self._auto_submit(attempt)
+            raise ValidationError(
+                "Assessment deadline has passed. Your attempt has been automatically finalized.",
+                code="ASSESSMENT_WINDOW_CLOSED",
+            )
+
+        await self.attempt_repo.update_fields(
+            attempt_id,
+            status=AttemptStatus.PAUSED,
+            paused_at=now,
+            last_activity_at=now,
+        )
+        attempt.status = AttemptStatus.PAUSED
+        attempt.paused_at = now
+
+        # Append audit log for state-changing pause action
+        await self._append_submit_logs(attempt_id, change_type="pause")
+        return attempt
+
+    # -----------------------------------------------------------------------
+    # RESUME ATTEMPT
+    # -----------------------------------------------------------------------
 
     async def resume_attempt(
         self,
@@ -237,7 +319,7 @@ class AttemptService:
         access_token: uuid.UUID,
     ) -> AssessmentAttempt:
         """
-        Resume a PAUSED attempt, issuing a fresh access_token.
+        Resume a PAUSED or IN_PROGRESS attempt, issuing a fresh access_token.
 
         Security: the old access_token must match before issuing the new one.
         This prevents a different browser/device from resuming a paused attempt
@@ -256,28 +338,46 @@ class AttemptService:
                 code="ATTEMPT_OWNERSHIP_VIOLATION",
             )
 
-        if attempt.status != AttemptStatus.PAUSED:
+        if attempt.status not in (AttemptStatus.PAUSED, AttemptStatus.IN_PROGRESS):
             raise ConflictError(
-                f"Attempt is in status '{attempt.status}' — only PAUSED attempts can be resumed",
+                f"Attempt is in status '{attempt.status}' — only active or PAUSED attempts can be resumed",
                 code="ATTEMPT_NOT_PAUSABLE",
             )
 
-        # SECURITY: Only allow resume for certain assessment types
+        # SECURITY: Only allow resume for assessments configured to allow resume or open-type assessments
         if attempt.assessment:
-            strict_types = ["CAT", "SUMMATIVE", "FORMATIVE", "PRACTICE"]
-            if attempt.assessment.assessment_type in strict_types:
+            is_open_assessment = (
+                attempt.assessment.assessment_type == AssessmentType.HOMEWORK
+                or str(attempt.assessment.assessment_type).upper() == "HOMEWORK"
+                or attempt.assessment.assessment_type == AssessmentType.FORMATIVE
+                or str(attempt.assessment.assessment_type).upper() == "FORMATIVE"
+            )
+            if not attempt.assessment.allow_resume and not is_open_assessment:
                 raise AuthorizationError(
                     f"Resuming is disabled for {attempt.assessment.assessment_type} assessments to maintain integrity. "
                     "Please contact your invigilator if you believe this is an error.",
-                    code="RESUME_DISABLED"
+                    code="RESUME_DISABLED",
                 )
 
         # Check window still open
         now = _utcnow()
-        if attempt.expires_at and attempt.expires_at <= now:
+        effective_deadline = attempt.expires_at
+        if attempt.assessment and attempt.assessment.window_end:
+            grace = timedelta(minutes=attempt.assessment.grace_period_minutes or 0)
+            window_cutoff = attempt.assessment.window_end + grace
+            if not attempt.assessment.late_submission_allowed:
+                if effective_deadline:
+                    effective_deadline = min(effective_deadline, window_cutoff)
+                else:
+                    effective_deadline = window_cutoff
+
+        if effective_deadline and now >= effective_deadline:
             # Auto-submit instead
             await self._auto_submit(attempt)
-            return attempt
+            raise ValidationError(
+                "Assessment window closed while paused. Your attempt has been automatically submitted.",
+                code="ASSESSMENT_WINDOW_CLOSED",
+            )
 
         # Rotate access token for security (new browser session)
         new_token = uuid.uuid4()
@@ -290,6 +390,9 @@ class AttemptService:
         )
         attempt.status = AttemptStatus.IN_PROGRESS
         attempt.access_token = new_token
+
+        # Append audit log for state-changing resume action
+        await self._append_submit_logs(attempt_id, change_type="resume")
         return attempt
 
     # -----------------------------------------------------------------------

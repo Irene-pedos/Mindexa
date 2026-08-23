@@ -34,6 +34,9 @@ from app.schemas.group_work import (
     StudentGroupResponse,
 )
 from app.services.group_work_service import GroupWorkService
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/group-work", tags=["Group Work"])
 
@@ -314,6 +317,16 @@ async def submit_group_work(
         data=body,
     )
     await db.commit()
+
+    try:
+        from app.workers.tasks.grading import trigger_ai_grading_for_group_submission
+        trigger_ai_grading_for_group_submission.delay(str(submission_id))
+    except Exception as e:
+        logger.warning(
+            "Could not enqueue Celery AI grading task for group submission %s: %s",
+            str(submission_id),
+            str(e),
+        )
 
 
 # ── APPEALS ──────────────────────────────────────────────────────────────────

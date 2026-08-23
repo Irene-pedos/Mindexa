@@ -48,7 +48,10 @@ import {
   Info,
   Menu,
   Table as TableIcon,
+  Sparkles,
+  RotateCcw,
 } from "lucide-react";
+import { AssessmentAskAiPanel } from "@/components/mindexa/assessment/assessment-ask-ai-panel";
 import { SharedMatchingDnd } from "@/components/mindexa/assessment/matching-dnd";
 import { SharedFillInTheBlanksDnd } from "@/components/mindexa/assessment/fill-in-the-blanks-dnd";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
@@ -205,6 +208,8 @@ export interface AssessmentMeta {
   sections?: any[];
   instructions?: string;
   language?: "EN" | "RW" | "FR" | "SW" | string;
+  integrity_monitoring_enabled?: boolean;
+  allow_resume?: boolean;
 }
 
 export interface SavedSubmission {
@@ -353,6 +358,7 @@ function useIntegrityMonitor({
   stage,
   assessment,
   isHighSecurity,
+  isOpenAssessment,
   handleIntegrityEvent,
   setIsFullscreen,
   setIsScreenBlurred,
@@ -360,6 +366,7 @@ function useIntegrityMonitor({
   stage: Stage;
   assessment: AssessmentMeta | null;
   isHighSecurity: boolean;
+  isOpenAssessment: boolean;
   handleIntegrityEvent: (
     type: string,
     metadata?: Record<string, unknown>,
@@ -367,9 +374,12 @@ function useIntegrityMonitor({
   setIsFullscreen: (val: boolean) => void;
   setIsScreenBlurred: (val: boolean) => void;
 }) {
+  // If open assessment (Homework or Practice) or integrity monitoring disabled, completely bypass all event interception!
+  const isMonitoringActive = !isOpenAssessment && assessment?.integrity_monitoring_enabled !== false && isHighSecurity;
+
   // Fullscreen enforcement
   useEffect(() => {
-    if (stage !== "taking" || !assessment?.fullscreen_required) return;
+    if (stage !== "taking" || !isMonitoringActive || !assessment?.fullscreen_required) return;
 
     const checkFullscreen = () => {
       const isFull = !!document.fullscreenElement;
@@ -386,6 +396,7 @@ function useIntegrityMonitor({
     };
   }, [
     stage,
+    isMonitoringActive,
     assessment?.fullscreen_required,
     handleIntegrityEvent,
     setIsFullscreen,
@@ -393,24 +404,25 @@ function useIntegrityMonitor({
 
   // Tab visibility changes
   useEffect(() => {
-    if (stage !== "taking" || !isHighSecurity) return;
+    if (stage !== "taking" || !isMonitoringActive) return;
     const handleVisibilityChange = () => {
       if (document.hidden) handleIntegrityEvent("TAB_SWITCH");
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-  }, [stage, isHighSecurity, handleIntegrityEvent]);
+  }, [stage, isMonitoringActive, handleIntegrityEvent]);
 
   // Other monitored browser events & screen blurring
   useEffect(() => {
-    if (stage !== "taking") return;
+    if (stage !== "taking" || !isMonitoringActive) {
+      setIsScreenBlurred(false);
+      return;
+    }
 
     const handleBlur = () => {
       setIsScreenBlurred(true);
       // "WINDOW_BLUR" is the DB-valid enum value for focus-lost events.
-      // The backend also maps SCREEN_BLURRING → WINDOW_BLUR in its rule key
-      // lookup, but the DB INSERT itself must use the valid enum value.
       handleIntegrityEvent("WINDOW_BLUR", {
         details: "Focus lost to external task or app",
       });
@@ -454,7 +466,6 @@ function useIntegrityMonitor({
           window.outerHeight - window.innerHeight > threshold) &&
         (widthDiff > 50 || heightDiff > 50)
       ) {
-        // DEVTOOLS_DETECTED is not a valid DB enum value yet — log locally.
         console.warn("[Integrity] DevTools activity detected");
         toast.warning("Developer Tools activity is monitored.");
       }
@@ -477,12 +488,11 @@ function useIntegrityMonitor({
       document.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("resize", handleResize);
     };
-  }, [stage, handleIntegrityEvent, setIsScreenBlurred]);
+  }, [stage, isMonitoringActive, handleIntegrityEvent, setIsScreenBlurred]);
 
-  // AI Assistance checking
+  // AI extension detection (only for monitored assessments where AI is not allowed)
   useEffect(() => {
-    if (stage !== "taking" || !assessment) return;
-
+    if (stage !== "taking" || !assessment || isOpenAssessment) return;
     if (assessment.ai_assistance_allowed === false) {
       const ua = navigator.userAgent.toLowerCase();
       const aiKeywords = [
@@ -496,23 +506,12 @@ function useIntegrityMonitor({
         "chathub",
       ];
       const detectedKeyword = aiKeywords.find((kw) => ua.includes(kw));
-
       const windowKeys = Object.keys(window);
-      const extensionKeywords = [
-        "gpt",
-        "openai",
-        "copilot",
-        "gemini",
-        "monica",
-        "sider",
-      ];
+      const extensionKeywords = ["gpt", "openai", "copilot", "gemini", "monica", "sider"];
       const detectedProperty = windowKeys.find((key) =>
         extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
       );
-
       if (detectedKeyword || detectedProperty) {
-        // AI_EXTENSION_DETECTED is not yet a valid DB enum value — log locally
-        // and show the toast, but don't send to the API to avoid a 500 error.
         console.warn("[Integrity] AI extension detected", {
           detected_keyword: detectedKeyword,
           detected_property: detectedProperty,
@@ -522,7 +521,7 @@ function useIntegrityMonitor({
         );
       }
     }
-  }, [stage, assessment, handleIntegrityEvent]);
+  }, [stage, assessment, handleIntegrityEvent, isOpenAssessment]);
 }
 
 function useOfflineSync({
@@ -1048,6 +1047,34 @@ export default function TakeAssessmentPage() {
     Record<string, boolean>
   >({});
   const [showTerminateConfirm, setShowTerminateConfirm] = useState(false);
+  const [showPauseConfirm, setShowPauseConfirm] = useState(false);
+  const [isPausing, setIsPausing] = useState(false);
+
+  const isHomeworkAssessment = useMemo(() => {
+    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    return t === "HOMEWORK";
+  }, [assessment]);
+
+  // Practice = FORMATIVE type with integrity monitoring explicitly disabled
+  const isPracticeAssessment = useMemo(() => {
+    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    return (
+      t === "FORMATIVE" &&
+      (assessment?.integrity_monitoring_enabled === false ||
+        assessment?.is_supervised === false)
+    );
+  }, [assessment]);
+
+  // Open assessment = Homework, Practice (FORMATIVE + no monitoring), or Groupwork
+  const isOpenAssessment = useMemo(() => {
+    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    const isGroupWork = t === "GROUP_WORK" || t === "GROUPWORK";
+    const isPractice =
+      t === "FORMATIVE" &&
+      (assessment?.integrity_monitoring_enabled === false ||
+        assessment?.is_supervised === false);
+    return t === "HOMEWORK" || isPractice || isGroupWork;
+  }, [assessment]);
 
   useEffect(() => {
     if (!showSubmitConfirm) {
@@ -1199,6 +1226,7 @@ export default function TakeAssessmentPage() {
       isHighSecurityAssessment(
         assessment?.assessment_type,
         assessment?.is_supervised,
+        assessment?.integrity_monitoring_enabled,
       ),
     [assessment],
   );
@@ -1257,7 +1285,7 @@ export default function TakeAssessmentPage() {
 
   const handleIntegrityEvent = useCallback(
     async (type: string, metadata: Record<string, unknown> = {}) => {
-      if (!attemptId || !attemptToken) return;
+      if (!attemptId || !attemptToken || isOpenAssessment || assessment?.integrity_monitoring_enabled === false) return;
       try {
         const res = await attemptApi.recordIntegrityEvent(
           attemptId,
@@ -1291,13 +1319,14 @@ export default function TakeAssessmentPage() {
         console.error("Failed to record integrity event", err);
       }
     },
-    [attemptId, attemptToken, autoSubmit],
+    [attemptId, attemptToken, autoSubmit, isOpenAssessment, assessment?.integrity_monitoring_enabled],
   );
 
   useIntegrityMonitor({
     stage,
     assessment,
     isHighSecurity,
+    isOpenAssessment,
     handleIntegrityEvent,
     setIsFullscreen,
     setIsScreenBlurred,
@@ -1936,11 +1965,41 @@ export default function TakeAssessmentPage() {
   };
 
   const handleExitEnvironment = () => {
-    if (stage === "taking" && isHighSecurity) {
-      setShowTerminateConfirm(true);
-      return;
+    if (stage === "taking") {
+      if (isHomeworkAssessment || (assessment as any)?.allow_resume) {
+        setShowPauseConfirm(true);
+        return;
+      }
+      if (isHighSecurity) {
+        setShowTerminateConfirm(true);
+        return;
+      }
     }
     router.back();
+  };
+
+  const handlePauseAndExit = async () => {
+    if (!attemptId || !attemptToken) {
+      router.push("/student/assessments");
+      return;
+    }
+    setIsPausing(true);
+    try {
+      await saveAllPendingAnswers();
+      await attemptApi.pauseAttempt(attemptId, attemptToken);
+      sessionStorage.setItem(`attempt_token_${attemptId}`, attemptToken);
+      sessionStorage.setItem(`active_attempt_${assessmentId}`, attemptId);
+      toast.success("Homework progress saved. You can resume anytime before the deadline.");
+      setShowPauseConfirm(false);
+      router.push("/student/assessments");
+    } catch (err: any) {
+      console.error("Pause attempt error:", err);
+      toast.info("Saved locally. You can resume before the deadline.");
+      setShowPauseConfirm(false);
+      router.push("/student/assessments");
+    } finally {
+      setIsPausing(false);
+    }
   };
 
   const handleStartAssessment = () => {
@@ -1985,16 +2044,29 @@ export default function TakeAssessmentPage() {
     try {
       let data = pendingAttemptStartData;
       if (!data) {
-        data = await attemptApi.startAttempt({
-          assessment_id: assessmentId,
-          password: passwordInput || undefined,
-        });
+        try {
+          data = await attemptApi.startAttempt({
+            assessment_id: assessmentId,
+            password: passwordInput || undefined,
+          });
+        } catch (startErr: any) {
+          const errMsg = startErr?.message || "";
+          if (startErr?.code === "ATTEMPT_ALREADY_ACTIVE" || errMsg.includes("already have an active attempt")) {
+            const storedAttemptId = sessionStorage.getItem(`active_attempt_${assessmentId}`) || attemptId;
+            const storedToken = storedAttemptId ? sessionStorage.getItem(`attempt_token_${storedAttemptId}`) : null;
+            if (storedAttemptId && storedToken) {
+              data = await attemptApi.resumeAttempt(storedAttemptId, storedToken).catch(() => null);
+            }
+          }
+          if (!data) throw startErr;
+        }
       }
       if (controller.signal.aborted) return;
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
       setPendingAttemptStartData(null);
       sessionStorage.setItem(`attempt_token_${data.id}`, data.access_token);
+      sessionStorage.setItem(`active_attempt_${assessmentId}`, data.id);
       setExpiresAt(data.expires_at);
 
       const attemptData = await attemptApi.getAttemptDetail(
@@ -2928,7 +3000,11 @@ export default function TakeAssessmentPage() {
             className="h-8 px-3 text-xs font-medium border border-border/60 rounded-lg hover:bg-muted/50 transition-colors"
           >
             <ArrowLeft className="size-3.5 mr-1" />{" "}
-            {isHighSecurity ? "Terminate" : "Exit"}
+            {(assessment as any)?.allow_resume || isHomeworkAssessment
+              ? "Pause & Exit"
+              : isHighSecurity
+                ? "Terminate"
+                : "Exit"}
           </Button>
           <Separator orientation="vertical" className="h-5" />
           <div className="min-w-0 flex items-center gap-2">
@@ -2947,6 +3023,14 @@ export default function TakeAssessmentPage() {
                 )}
               >
                 {assessment.is_open_book ? "Open Book" : "Closed Book"}
+              </Badge>
+            )}
+            {assessment?.ai_assistance_allowed && stage === "taking" && (
+              <Badge
+                variant="outline"
+                className="text-[10px] py-0 font-bold uppercase tracking-wider h-5 px-2 shrink-0 select-none border-primary/20 bg-primary/5 text-primary"
+              >
+                AI Allowed
               </Badge>
             )}
           </div>
@@ -3234,41 +3318,64 @@ export default function TakeAssessmentPage() {
 
       {stage === "readiness" &&
         (() => {
-          const readinessItems = [
-            assessment?.fullscreen_required && {
-              text: "You must remain in full-screen mode throughout this assessment.",
-              icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
-            },
-            assessment?.is_supervised && {
-              text: "This session is actively monitored by your lecturer.",
-              icon: <Shield className="size-4 text-primary shrink-0" />,
-            },
-            assessment?.ai_assistance_allowed === false && {
-              text: "AI tools and browser extensions are blocked during this assessment.",
-              icon: <Lock className="size-4 text-destructive shrink-0" />,
-            },
-            {
-              text: "Your browser activity is logged. Tab switches, copy attempts, and window focus changes are recorded.",
-              icon: <Check className="size-4 text-emerald-600 shrink-0" />,
-            },
-            {
-              text: `Receiving 3 integrity warnings will terminate your session. You currently have 0 warnings.`,
-              icon: (
-                <AlertTriangle className="size-4 text-amber-600 shrink-0" />
-              ),
-            },
-            assessment?.duration_minutes && {
-              text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
-              icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
-            },
-          ].filter(Boolean) as { text: string; icon: React.ReactNode }[];
+          const readinessItems = isOpenAssessment
+            ? [
+                {
+                  text: isPracticeAssessment
+                    ? "Practice Environment: You are free to reference textbooks, notes, and study resources without penalty."
+                    : "Open Resource Environment: You are free to reference textbooks, course notes, and approved academic materials.",
+                  icon: <BookOpen className="size-4 text-emerald-600 shrink-0" />,
+                },
+                (assessment?.ai_assistance_allowed || isOpenAssessment) && {
+                  text: "AI Study Assistant Enabled: An AI tutor is available in your workspace to answer conceptual questions.",
+                  icon: <Sparkles className="size-4 text-primary shrink-0" />,
+                },
+                ((assessment as any)?.allow_resume || isOpenAssessment) && {
+                  text: isPracticeAssessment
+                    ? "Self-Paced Flexibility: You may pause, exit, and resume your practice session at any time."
+                    : "Take-Home Flexibility: You may pause, exit, and resume your session anytime before the final deadline.",
+                  icon: <RotateCcw className="size-4 text-primary shrink-0" />,
+                },
+                assessment?.end_date && {
+                  text: `Submission Deadline: All work must be submitted by ${new Date(assessment.end_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} on ${new Date(assessment.end_date).toLocaleDateString([], { month: "short", day: "numeric" })}. Attempts will auto-submit when the window expires.`,
+                  icon: <Clock className="size-4 text-amber-600 shrink-0" />,
+                },
+              ].filter(Boolean) as { text: string; icon: React.ReactNode }[]
+            : [
+                assessment?.fullscreen_required && {
+                  text: "You must remain in full-screen mode throughout this assessment.",
+                  icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
+                },
+                assessment?.is_supervised && {
+                  text: "This session is actively monitored by your lecturer.",
+                  icon: <Shield className="size-4 text-primary shrink-0" />,
+                },
+                assessment?.ai_assistance_allowed === false && {
+                  text: "AI tools and browser extensions are blocked during this assessment.",
+                  icon: <Lock className="size-4 text-destructive shrink-0" />,
+                },
+                {
+                  text: "Your browser activity is logged. Tab switches, copy attempts, and window focus changes are recorded.",
+                  icon: <Check className="size-4 text-emerald-600 shrink-0" />,
+                },
+                {
+                  text: `Receiving 3 integrity warnings will terminate your session. You currently have 0 warnings.`,
+                  icon: (
+                    <AlertTriangle className="size-4 text-amber-600 shrink-0" />
+                  ),
+                },
+                assessment?.duration_minutes && {
+                  text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
+                  icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
+                },
+              ].filter(Boolean) as { text: string; icon: React.ReactNode }[];
 
           return (
             <div className="flex-1 flex items-center justify-center p-4">
               <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
                 <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
                   <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    Protocol Declaration
+                    {isHomeworkAssessment ? "Homework Protocol Declaration" : isPracticeAssessment ? "Practice Protocol Declaration" : "Protocol Declaration"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6 space-y-6">
@@ -3297,8 +3404,11 @@ export default function TakeAssessmentPage() {
                         htmlFor="readiness"
                         className="text-xs font-medium leading-relaxed cursor-pointer text-primary/80 select-none"
                       >
-                        I declare and commit adherence to the institutional
-                        academic integrity standards.
+                        {isHomeworkAssessment
+                          ? "I understand the homework guidelines and submission deadline. I am ready to begin."
+                          : isPracticeAssessment
+                            ? "I understand this is an open practice session. I am ready to begin."
+                            : "I declare and commit adherence to the institutional academic integrity standards."}
                       </Label>
                     </div>
                     <Button
@@ -3306,10 +3416,12 @@ export default function TakeAssessmentPage() {
                       disabled={!readinessChecked}
                       className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
                     >
-                      Start Timer & Begin Assessment
+                      {isHomeworkAssessment ? "Begin Homework" : isPracticeAssessment ? "Begin Practice" : "Start Timer & Begin Assessment"}
                     </Button>
                     <p className="text-[10px] text-muted-foreground text-center font-medium">
-                      Note: The assessment countdown timer begins immediately.
+                      {isOpenAssessment
+                        ? "Note: You can pause and return to this session anytime."
+                        : "Note: The assessment countdown timer begins immediately."}
                     </p>
                   </div>
                 </CardContent>
@@ -3997,7 +4109,7 @@ export default function TakeAssessmentPage() {
       )}
 
       {/* Screen Blurring Overlay */}
-      {isScreenBlurred && stage === "taking" && (
+      {isScreenBlurred && !isOpenAssessment && stage === "taking" && (
         <div
           onClick={() => setIsScreenBlurred(false)}
           className="fixed inset-0 z-50 flex flex-col items-center justify-center p-6 bg-background/85 backdrop-blur-md cursor-pointer text-center animate-in fade-in duration-200"
@@ -4027,7 +4139,7 @@ export default function TakeAssessmentPage() {
       )}
 
       {/* Auto-Submission Violation Dialog */}
-      <Dialog open={autoSubmitModalOpen} onOpenChange={() => {}}>
+      <Dialog open={autoSubmitModalOpen && !isOpenAssessment} onOpenChange={() => {}}>
         <DialogContent className="max-w-md p-6 rounded-xl border border-destructive/30 bg-card text-center sm:text-center">
           <DialogHeader className="space-y-2">
             <div className="size-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
@@ -4070,7 +4182,7 @@ export default function TakeAssessmentPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={warningModalOpen} onOpenChange={() => {}}>
+      <Dialog open={warningModalOpen && !isOpenAssessment} onOpenChange={() => {}}>
         <DialogContent
           className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background"
           role="alertdialog"
@@ -4278,6 +4390,66 @@ export default function TakeAssessmentPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Pause Homework / Practice Assessment Modal */}
+      <Dialog
+        open={showPauseConfirm}
+        onOpenChange={setShowPauseConfirm}
+      >
+        <DialogContent className="sm:max-w-md p-6 border border-border/80 shadow-xl rounded-2xl bg-card text-center">
+          <div className="mx-auto size-12 rounded-full bg-primary/10 flex items-center justify-center mb-2 text-primary">
+            <RotateCcw className="size-6" />
+          </div>
+          <DialogTitle className="text-base font-semibold text-foreground">
+            {isHomeworkAssessment
+              ? "Pause Homework Assessment?"
+              : isPracticeAssessment
+                ? "Pause Practice Session?"
+                : "Pause Assessment?"}
+          </DialogTitle>
+          <p className="text-xs text-muted-foreground mt-2 mb-5 leading-relaxed font-normal">
+            {isPracticeAssessment
+              ? "Your answers and current progress will be saved. You can return and resume your practice session at any time."
+              : "Your answers and current progress will be saved. You can return and resume your attempt anytime before the submission window closes."}
+          </p>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              className="flex-1 h-9 text-xs rounded-xl"
+              onClick={() => setShowPauseConfirm(false)}
+              disabled={isPausing}
+            >
+              Keep Working
+            </Button>
+            <Button
+              className="flex-1 h-9 text-xs font-semibold rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground"
+              onClick={handlePauseAndExit}
+              disabled={isPausing}
+            >
+              {isPausing ? (
+                <>
+                  <Loader2 className="size-3.5 animate-spin mr-1.5" /> Saving...
+                </>
+              ) : (
+                "Pause & Return to Dashboard"
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Floating In-Assessment AI Assistant */}
+      {assessment?.ai_assistance_allowed && stage === "taking" && (
+        <AssessmentAskAiPanel
+          assessmentTitle={assessment?.title || "Assessment Workspace"}
+          currentQuestionText={currentQ?.text || currentQ?.content || ""}
+          currentSectionTitle={currentQ?.section_title || ""}
+          teachingWorkspaceId={(assessment as any)?.teaching_workspace_id}
+          attemptId={attemptId || undefined}
+          questionId={currentQ?.id || undefined}
+          assessmentId={assessmentId}
+        />
+      )}
     </div>
   );
 }

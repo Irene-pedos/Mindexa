@@ -33,6 +33,7 @@ import {
   CheckCircle2,
   BookOpen,
   Library,
+  ImageIcon,
 } from "lucide-react";
 import { lecturerApi } from "@/lib/api/lecturer";
 import { academicApi, TeachingAssignment } from "@/lib/api/academic";
@@ -53,6 +54,7 @@ export default function NewWorkspacePage() {
   const [formData, setFormData] = useState({
     title: "",
     description: "",
+    banner_image_url: "",
   });
 
   const [courseNotes, setCourseNotes] = useState<File[]>([]);
@@ -95,6 +97,7 @@ export default function NewWorkspacePage() {
         teaching_assignment_id: selectedAssignment.id,
         title: formData.title,
         description: formData.description,
+        ...(formData.banner_image_url ? { banner_image_url: formData.banner_image_url } : {}),
       });
 
       if (courseNotes.length > 0) {
@@ -249,7 +252,38 @@ export default function NewWorkspacePage() {
                   />
                 </div>
 
+                {/* Banner Image URL */}
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="banner" className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">
+                      <ImageIcon className="size-3.5 text-zinc-400" /> Course Banner Image URL
+                    </Label>
+                    <Badge variant="outline" className="text-[9px] font-bold text-zinc-400 bg-zinc-50 border-zinc-200">
+                      Optional
+                    </Badge>
+                  </div>
+                  <Input
+                    id="banner"
+                    type="url"
+                    placeholder="https://example.com/course-banner.jpg"
+                    className="h-9 rounded-lg border-zinc-200 bg-white text-xs font-medium"
+                    value={formData.banner_image_url}
+                    onChange={(e) => setFormData((prev) => ({ ...prev, banner_image_url: e.target.value }))}
+                    disabled={!selectedAssignment}
+                  />
+                  {formData.banner_image_url && (
+                    <div
+                      className="h-24 rounded-lg bg-cover bg-center border border-zinc-200 overflow-hidden"
+                      style={{ backgroundImage: `url(${formData.banner_image_url})` }}
+                    />
+                  )}
+                  <p className="text-[10px] text-muted-foreground font-medium">
+                    A banner image helps students quickly identify the course topic.
+                  </p>
+                </div>
+
                 {/* Materials Uploader */}
+
                 <div className="pt-4 border-t border-zinc-100 space-y-3">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-bold text-zinc-700 flex items-center gap-1.5">

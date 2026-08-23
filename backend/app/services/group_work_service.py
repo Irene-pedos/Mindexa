@@ -439,6 +439,8 @@ class GroupWorkService:
             total_score=submission.total_score,
             feedback=submission.feedback,
             member_overrides=submission.member_overrides,
+            result_released_at=submission.result_released_at,
+            is_released=bool(submission.result_released_at),
         )
 
     def _validate_group_answer_content_shape(
@@ -722,13 +724,6 @@ class GroupWorkService:
             await self.process_auto_grading_for_submission(submission_id)
         except Exception as e:
             logger.warning("Failed auto-grading for group submission %s: %s", str(submission_id), str(e))
-
-        # ── Queue background AI grading for open-ended questions ──
-        try:
-            from app.workers.tasks.grading import trigger_ai_grading_for_group_submission
-            trigger_ai_grading_for_group_submission.delay(str(submission_id))
-        except Exception as e:
-            logger.warning("Could not enqueue Celery AI grading task for group submission %s: %s", str(submission_id), str(e))
 
         # Notify lecturer
         if assessment.created_by_id:
@@ -1150,6 +1145,8 @@ class GroupWorkService:
             total_score=submission.total_score,
             feedback=submission.feedback,
             member_overrides=submission.member_overrides,
+            result_released_at=submission.result_released_at,
+            is_released=bool(submission.result_released_at),
         )
 
     async def grade_group_submission(
@@ -1275,9 +1272,10 @@ class GroupWorkService:
                 total_question_count=total_questions_count,
             )
 
-        # Automatic Release for IMMEDIATE mode if fully graded
+        # Automatic Release for IMMEDIATE mode (or closed-only assessments with no open-ended questions) if fully graded
+        has_open_ended = await self.assessment_repo.has_open_ended_questions(assessment.id)
         if (
-            release_mode == ResultReleaseMode.IMMEDIATE.value
+            (release_mode == ResultReleaseMode.IMMEDIATE.value or not has_open_ended)
             and is_final
             and total_questions_count > 0
             and completed_answers_count >= total_questions_count
@@ -1817,6 +1815,27 @@ class GroupWorkService:
         if data.is_final and data.score is None:
             raise ValidationError("Score is required when finalizing a question grade.", code="SCORE_REQUIRED")
 
+        # Resolve AssessmentQuestion row to find max_score
+        if assessment.question_distribution_mode == QuestionDistributionMode.PER_GROUP:
+            assessment_questions = await self.assessment_repo.list_assessment_questions_for_group(assessment.id, submission.group_id)
+        else:
+            assessment_questions = await self.assessment_repo.list_assessment_questions(assessment.id)
+
+        aq = next((aq for aq in assessment_questions if aq.question_id == question_id), None)
+        if not aq or not aq.question:
+            question = await self.question_repo.get_by_id(question_id)
+            if not question:
+                raise NotFoundError("Question not found.", code="QUESTION_NOT_FOUND")
+            max_score = float(question.marks or 0.0)
+        else:
+            max_score = float(aq.marks_override if aq.marks_override is not None else (aq.question.marks or 0.0))
+
+        if data.score is not None and (data.score < 0 or data.score > max_score):
+            raise ValidationError(
+                f"Score {data.score} is out of range [0, {max_score}]",
+                code="SCORE_OUT_OF_RANGE",
+            )
+
         ans = next((a for a in (submission.answers or []) if a.question_id == question_id), None)
         if not ans:
             ans, _ = await self.submission_repo.upsert_answer(
@@ -2101,4 +2120,6 @@ class GroupWorkService:
             total_score=submission.total_score,
             feedback=submission.feedback,
             member_overrides=submission.member_overrides,
+            result_released_at=submission.result_released_at,
+            is_released=bool(submission.result_released_at),
         )

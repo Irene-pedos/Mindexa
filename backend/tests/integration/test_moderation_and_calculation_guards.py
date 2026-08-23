@@ -417,3 +417,134 @@ class TestModerationAndCalculationGuards:
         view_data = view_res.json()
         assert view_data["total_score"] == 19.0
         assert view_data["is_post_release_corrected"] is True
+
+    async def test_moderate_grade_score_out_of_range_rejected(self, db, client: AsyncClient, make_auth_headers):
+        data = await self._setup_data(db)
+        lecturer = data["lecturer"]
+        student = data["student"]
+        assessment = data["assessment"]
+        attempt = data["attempt"]
+        q1 = data["q1"]
+        r1 = data["r1"]
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+
+        g1 = SubmissionGrade(
+            attempt_id=attempt.id,
+            response_id=r1.id,
+            question_id=q1.id,
+            student_id=student.id,
+            assessment_id=assessment.id,
+            score=8.0,
+            max_score=10.0,
+            grading_mode=GradingMode.MANUAL,
+            is_final=True,
+            created_by_id=lecturer.id,
+            is_current=True,
+        )
+        db.add(g1)
+        await db.flush()
+
+        # Moderate with score > max_score (50 > 10)
+        res_high = await client.post("/api/v1/grading/moderate", json={
+            "response_id": str(r1.id),
+            "new_score": 50.0,
+            "revision_reason": "Testing score exceeding question max marks",
+        }, headers=headers)
+        assert res_high.status_code in (400, 422)
+
+        # Moderate with negative score
+        res_neg = await client.post("/api/v1/grading/moderate", json={
+            "response_id": str(r1.id),
+            "new_score": -5.0,
+            "revision_reason": "Testing negative score rejection",
+        }, headers=headers)
+        assert res_neg.status_code in (400, 422)
+
+    async def test_closed_only_assessment_auto_releases_even_in_manual_mode(self, db, client: AsyncClient, make_auth_headers):
+        """Verify that an assessment with only closed questions auto-releases upon calculation even in MANUAL release mode."""
+        data = await self._setup_data(db)
+        lecturer = data["lecturer"]
+        student = data["student"]
+        workspace = (await db.execute(select(TeachingWorkspace))).scalars().first()
+
+        # 1. Create a closed-only assessment in MANUAL release mode
+        closed_assessment = Assessment(
+            title="Closed Only MCQ Quiz",
+            created_by_id=lecturer.id,
+            teaching_workspace_id=workspace.id,
+            course_id=workspace.course_id,
+            academic_year="2026",
+            assessment_type=AssessmentType.FORMATIVE,
+            status=AssessmentStatus.PUBLISHED,
+            result_release_mode=ResultReleaseMode.MANUAL,
+            total_marks=20.0,
+            passing_marks=10.0,
+        )
+        db.add(closed_assessment)
+        await db.flush()
+
+        # Add 2 MCQ questions
+        q1 = Question(
+            created_by_id=lecturer.id,
+            course_id=workspace.course_id,
+            question_type=QuestionType.MCQ,
+            content="What is 2+2?",
+            marks=10.0,
+        )
+        q2 = Question(
+            created_by_id=lecturer.id,
+            course_id=workspace.course_id,
+            question_type=QuestionType.TRUE_FALSE,
+            content="Python is dynamically typed.",
+            marks=10.0,
+        )
+        db.add_all([q1, q2])
+        await db.flush()
+
+        aq1 = AssessmentQuestion(assessment_id=closed_assessment.id, question_id=q1.id, order_index=1, score=10.0)
+        aq2 = AssessmentQuestion(assessment_id=closed_assessment.id, question_id=q2.id, order_index=2, score=10.0)
+        db.add_all([aq1, aq2])
+        await db.flush()
+
+        # Student attempt
+        attempt = AssessmentAttempt(
+            assessment_id=closed_assessment.id,
+            student_id=student.id,
+            class_section_id=data["section"].id,
+            attempt_number=1,
+            status=AttemptStatus.SUBMITTED,
+            grading_mode=GradingMode.AUTO,
+            submitted_at=datetime.now(UTC),
+        )
+        db.add(attempt)
+        await db.flush()
+
+        r1 = StudentResponse(attempt_id=attempt.id, question_id=q1.id, student_id=student.id, answer_text="4", submitted_at=datetime.now(UTC))
+        r2 = StudentResponse(attempt_id=attempt.id, question_id=q2.id, student_id=student.id, answer_text="True", submitted_at=datetime.now(UTC))
+        db.add_all([r1, r2])
+        await db.flush()
+
+        g1 = SubmissionGrade(
+            attempt_id=attempt.id, response_id=r1.id, question_id=q1.id, student_id=student.id,
+            assessment_id=closed_assessment.id, score=10.0, max_score=10.0, grading_mode=GradingMode.AUTO,
+            is_final=True, created_by_id=lecturer.id, is_current=True,
+        )
+        g2 = SubmissionGrade(
+            attempt_id=attempt.id, response_id=r2.id, question_id=q2.id, student_id=student.id,
+            assessment_id=closed_assessment.id, score=10.0, max_score=10.0, grading_mode=GradingMode.AUTO,
+            is_final=True, created_by_id=lecturer.id, is_current=True,
+        )
+        db.add_all([g1, g2])
+        await db.commit()
+
+        # Calculate result via API
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+        calc_res = await client.post(f"/api/v1/results/calculate/{attempt.id}", headers=headers)
+        assert calc_res.status_code == 200
+
+        # Verify that AssessmentResult is automatically released!
+        stmt = select(AssessmentResult).where(AssessmentResult.attempt_id == attempt.id)
+        res_row = (await db.execute(stmt)).scalar_one()
+        assert res_row.total_score == 20.0
+        assert res_row.is_released is True

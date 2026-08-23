@@ -671,6 +671,7 @@ class GradingRepository:
                 "response_id": row.response_id,
                 "student_name": student_name,
                 "score": row.score,
+                "max_score": row.max_score,
                 "ai_suggested_score": row.ai_suggested_score,
                 "deviation": deviation,
                 "risk_score": row.integrity_risk_score or 0.0
@@ -725,6 +726,12 @@ class GradingRepository:
             raise NotFoundError(
                 f"Grade not found: {old_grade_id}",
                 code="GRADE_NOT_FOUND",
+            )
+
+        if old_grade.max_score is not None and (new_score < 0 or new_score > old_grade.max_score):
+            raise ValidationError(
+                f"Score {new_score} is out of range [0, {old_grade.max_score}]",
+                code="SCORE_OUT_OF_RANGE",
             )
 
         # 2. Mark old as superseded

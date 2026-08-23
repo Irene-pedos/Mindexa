@@ -111,6 +111,16 @@ class TestGroupGradingFlow:
         )
         db.add(gm); await db.flush()
 
+        from app.db.models.academic import StudentEnrollment
+        from app.db.enums import EnrollmentStatus
+        enr = StudentEnrollment(
+            student_id=student.id,
+            course_id=course.id,
+            class_section_id=cs.id,
+            enrollment_status=EnrollmentStatus.ACTIVE,
+        )
+        db.add(enr); await db.flush()
+
         submission = GroupSubmission(
             assessment_id=assessment.id, 
             group_id=group.id, 
@@ -252,6 +262,42 @@ class TestGroupGradingFlow:
         assert bd["score"] == 18.5
         assert bd["feedback"] == "Great explanation of Isolation and Durability."
         assert bd["question_text"] == "Discuss the role of ACID properties."
+
+    async def test_lecturer_grades_group_question_score_out_of_range_rejected(self, client: AsyncClient, db, make_auth_headers):
+        """Verify that scoring a group question with a score exceeding max marks or negative is rejected."""
+        from app.db.models.question import Question, AssessmentQuestion
+        from app.db.enums import QuestionType
+
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        # Create a question with 10 marks linked to assessment
+        q = Question(
+            content="Explain CAP theorem.",
+            question_type=QuestionType.ESSAY,
+            marks=10,
+            created_by_id=lecturer.id,
+        )
+        db.add(q); await db.flush()
+        aq = AssessmentQuestion(assessment_id=assessment.id, question_id=q.id, order_index=0)
+        db.add(aq); await db.commit()
+
+        headers = make_auth_headers(user_id=str(lecturer.id), role=UserRole.LECTURER)
+
+        # 1. Score exceeding question marks (50 > 10)
+        res_high = await client.put(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/grade",
+            json={"score": 50.0, "feedback": "Too high", "is_final": True},
+            headers=headers,
+        )
+        assert res_high.status_code in (400, 422)
+
+        # 2. Negative score
+        res_neg = await client.put(
+            f"/api/v1/group-work/submissions/{submission.id}/questions/{q.id}/grade",
+            json={"score": -5.0, "feedback": "Negative", "is_final": True},
+            headers=headers,
+        )
+        assert res_neg.status_code in (400, 422)
 
     async def test_lecturer_triggers_ai_review_for_group_question(self, client: AsyncClient, db, make_auth_headers, monkeypatch):
         """Verify that a lecturer can trigger AI review on an open-ended group question."""
@@ -589,6 +635,67 @@ class TestGroupGradingFlow:
         assert data["ai_grade_score"] == 8.5
         assert len(captured_guidance) == 1
         assert "Award partial credit for atomicity definition." in captured_guidance[0]
+
+    async def test_student_assessment_list_shows_group_work_status_correctly(self, client: AsyncClient, db, make_auth_headers):
+        """Verify that GET /assessments for a student correctly resolves group work lifecycle status."""
+        from sqlalchemy import select
+        assessment, group, submission, lecturer = await self._setup_data(db)
+
+        # Get group member (student)
+        stmt = select(StudentGroupMember).where(StudentGroupMember.group_id == group.id)
+        member = (await db.execute(stmt)).scalars().first()
+        assert member is not None
+        student_headers = make_auth_headers(user_id=str(member.student_id), role=UserRole.STUDENT)
+
+        # 1. Initially submission is DRAFT -> maps to IN_PROGRESS student status
+        submission.status = GroupSubmissionStatus.DRAFT
+        await db.commit()
+
+        res1 = await client.get("/api/v1/assessments", headers=student_headers)
+        assert res1.status_code == 200
+        items1 = res1.json()["items"]
+        item1 = next((a for a in items1 if a["id"] == str(assessment.id)), None)
+        assert item1 is not None
+        assert item1["student_status"] == "IN_PROGRESS"
+
+        # 2. Submission is SUBMITTED
+        submission.status = GroupSubmissionStatus.SUBMITTED
+        await db.commit()
+
+        res2 = await client.get("/api/v1/assessments", headers=student_headers)
+        assert res2.status_code == 200
+        items2 = res2.json()["items"]
+        item2 = next((a for a in items2 if a["id"] == str(assessment.id)), None)
+        assert item2 is not None
+        assert item2["student_status"] == "SUBMITTED"
+
+        # 3. Submission is GRADED
+        submission.status = GroupSubmissionStatus.GRADED
+        await db.commit()
+
+        # Create derived result for the member
+        from app.db.repositories.result_repo import ResultRepository
+        result_repo = ResultRepository(db)
+        derived_res, _ = await result_repo.create_or_update_derived_group_result(
+            assessment_id=assessment.id,
+            student_id=member.student_id,
+            group_submission_id=submission.id,
+            total_score=88.0,
+            max_score=100.0,
+            percentage=88.0,
+            letter_grade="A",
+            is_passing=True,
+            is_released=True,
+        )
+        await db.commit()
+
+        res3 = await client.get("/api/v1/assessments", headers=student_headers)
+        assert res3.status_code == 200
+        items3 = res3.json()["items"]
+        item3 = next((a for a in items3 if a["id"] == str(assessment.id)), None)
+        assert item3 is not None
+        assert item3["student_status"] == "GRADED"
+        assert item3["student_attempt_id"] == str(derived_res.id)
 
 
 

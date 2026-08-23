@@ -19,8 +19,12 @@ export default function StudentLayout({
   const router = useRouter();
   const pathname = usePathname();
 
-  // Hide sidebar and header if actively taking an assessment
+  // Hide sidebar and header if actively taking an assessment or viewing study reader
   const isTakingAssessment = pathname.includes("/assessments/") && pathname.endsWith("/take");
+  const isReader =
+    pathname.includes("/materials/") ||
+    (pathname.includes("/student/resources/") && pathname.endsWith("/read"));
+  const isImmersive = isTakingAssessment || isReader;
 
   useEffect(() => {
     if (loading || isInitializing) return;
@@ -88,13 +92,13 @@ export default function StudentLayout({
 
   return (
     <SidebarProvider>
-      {!isTakingAssessment && <StudentSidebar />}
+      {!isImmersive && <StudentSidebar />}
       <SidebarInset>
-        {!isTakingAssessment && <SiteHeader />}
+        {!isImmersive && <SiteHeader />}
         <main className={cn(
           "flex-1 bg-muted/30 min-h-[calc(100vh-3.5rem)]",
-          !isTakingAssessment && "p-6",
-          isTakingAssessment && "p-0 bg-background min-h-screen"
+          !isImmersive && "p-6",
+          isImmersive && "p-0 bg-background min-h-screen"
         )}>
           {children}
         </main>

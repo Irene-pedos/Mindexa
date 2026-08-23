@@ -41,14 +41,20 @@ class StudySupportAgent(BaseAgent):
         thinking_mode: bool = False,
         deep_search_mode: bool = False,
         log_to_global_history: bool = True,
+        is_in_assessment: bool = False,
+        attempt_id: Optional[uuid.UUID] = None,
+        question_id: Optional[uuid.UUID] = None,
+        selected_text: Optional[str] = None,
+        current_page: Optional[int] = None,
     ) -> StudySupportAgentResponse:
 
         self.rag_service = RAGService(db)
 
         # Step 1: RAG retrieval with dynamic top_k, multi-resource, and workspace scoping
         top_k_count = 16 if deep_search_mode else 5
+        rag_query = f"{question} {selected_text}" if selected_text else question
         rag_result = await self.rag_service.retrieve_context(
-            question=question,
+            question=rag_query,
             student_id=student_id,
             selected_resource_id=selected_resource_id,
             selected_resource_ids=selected_resource_ids,
@@ -56,23 +62,35 @@ class StudySupportAgent(BaseAgent):
             top_k=top_k_count,
         )
 
-        # Step 2: Build system prompt with thinking_mode directive
-        system_prompt = self._build_system_prompt(has_context=not rag_result.fallback_used, thinking_mode=thinking_mode)
+        # Step 2: Build system prompt with thinking_mode and assessment Socratic directives
+        system_prompt = self._build_system_prompt(
+            has_context=not rag_result.fallback_used,
+            thinking_mode=thinking_mode,
+            is_in_assessment=is_in_assessment,
+        )
 
-        # Step 3: Build user prompt with context injection
+        # Step 3: Build user prompt with context injection and selected text
         user_prompt = self._build_user_prompt(
             question=question,
             context=rag_result.context_string,
             fallback=rag_result.fallback_used,
+            selected_text=selected_text,
+            current_page=current_page,
         )
 
-        # Step 4: Call LLM with dynamic budget and reasoning controls
+        # Step 4: Call LLM with dynamic budget, reasoning controls, and assessment action type
         llm_response = await self._call_llm(
-            system_prompt, user_prompt, conversation_history, student_id, thinking_mode=thinking_mode
+            system_prompt,
+            user_prompt,
+            conversation_history,
+            student_id,
+            thinking_mode=thinking_mode,
+            is_in_assessment=is_in_assessment,
+            attempt_id=attempt_id,
         )
 
-        # Step 5: Audit log (skipped for guided-lesson calls to avoid leaking into global tutor history)
-        if log_to_global_history:
+        # Step 5: Audit log (skipped for guided-lesson and in-assessment calls to avoid leaking into global tutor history)
+        if log_to_global_history and not is_in_assessment:
             await self._log_session(
                 student_id=student_id,
                 question=question,
@@ -88,16 +106,21 @@ class StudySupportAgent(BaseAgent):
             fallback_used=rag_result.fallback_used,
         )
 
-    def _build_system_prompt(self, has_context: bool, thinking_mode: bool = False) -> str:
+    def _build_system_prompt(
+        self,
+        has_context: bool,
+        thinking_mode: bool = False,
+        is_in_assessment: bool = False,
+    ) -> str:
         if has_context:
             base_prompt = (
                 "You are Mindexa's AI Study Tutor. Answer the student's question using the provided course material context.\n\n"
                 "RESPONSE FORMATTING INSTRUCTIONS:\n"
-                "1. DIRECT ANSWER FIRST: Begin immediately with a direct, clear, and concise answer to the student's question. Do not start with introductory filler or preambles like 'According to the provided course material context...' or 'Based on page X...'.\n"
-                "2. VISUAL & STRUCTURAL CLARITY: Use clean Markdown formatting with section headings (e.g. ### Key Concepts), concise paragraphs, bold key terms (**term**), and bullet points so the response is fast to read.\n"
-                "3. NO INLINE CITATION CLUTTER: Do NOT insert raw text markers, bracketed references, or file citations like '[Source: ...]', '[Page X]', or '[FRONT-END...pdf]' into your response body text. Structured source citations will be automatically attached to your response by the system UI below your answer.\n"
-                "4. SCOPE BOUNDARIES: If the context only partially answers the question, answer what you can from the context first, then explain what is missing.\n"
-                "5. ACADEMIC INTEGRITY: Never reveal exam answers, question bank keys, or materials from unassigned courses."
+                "1. DIRECT ANSWER FIRST: Begin immediately with a clear and concise explanation to the student's question. Do not start with introductory filler like 'According to the provided course material context...'.\n"
+                "2. VISUAL & STRUCTURAL CLARITY: Use clean Markdown formatting with section headings (e.g. ### Key Concepts), concise paragraphs, bold key terms (**term**), and bullet points.\n"
+                "3. NO INLINE CITATION CLUTTER: Do NOT insert raw text markers or bracketed references like '[Source: ...]' into your response body text. Structured citations are attached automatically.\n"
+                "4. SCOPE BOUNDARIES: If the context only partially answers the question, explain what can be answered from notes first, then provide academic concepts.\n"
+                "5. ACADEMIC INTEGRITY: Never reveal exam answer keys or materials from unassigned courses."
             )
         else:
             base_prompt = (
@@ -109,6 +132,15 @@ class StudySupportAgent(BaseAgent):
                 "4. NO CITATIONS: Do not invent or cite any file sources since this response relies on general knowledge."
             )
 
+        if is_in_assessment:
+            base_prompt += (
+                "\n\n[IN-ASSESSMENT SOCRATIC TUTOR MODE ACTIVE]:\n"
+                "- The student is currently taking a live homework assessment.\n"
+                "- Explain relevant underlying concepts, mathematical principles, definitions, and problem-solving frameworks.\n"
+                "- NEVER produce the final, direct, or numeric answer to the specific problem the student is trying to solve.\n"
+                "- Guide the student Socratically so they can independently deduce the solution."
+            )
+
         if thinking_mode:
             base_prompt += (
                 "\n\n[DEEP REASONING MODE ACTIVE]: Perform thorough, step-by-step analytical reasoning "
@@ -118,21 +150,37 @@ class StudySupportAgent(BaseAgent):
 
         return base_prompt
 
-    def _build_user_prompt(self, question: str, context: str, fallback: bool) -> str:
+    def _build_user_prompt(
+        self,
+        question: str,
+        context: str,
+        fallback: bool,
+        selected_text: Optional[str] = None,
+        current_page: Optional[int] = None,
+    ) -> str:
+        prompt_parts = [f"Student Question:\n{question}\n"]
+
+        if selected_text:
+            page_info = f" (Page {current_page})" if current_page else ""
+            prompt_parts.append(
+                f"[STUDENT HIGHLIGHTED EXCERPT{page_info}]:\n\"\"\"\n{selected_text}\n\"\"\"\n"
+            )
+
         if not fallback:
-            return (
-                f"Student Question:\n{question}\n\n"
+            prompt_parts.append(
                 f"Retrieved Course Material Context:\n{context}\n\n"
-                "Instructions: Answer the student's question directly and concisely using the context above. "
-                "Use clean Markdown styling (### headings, bold terms, bullet points). "
+                "Instructions: Answer the student's question directly and concisely. "
+                + ("If an excerpt was highlighted above, address that excerpt first, then explain the concept and reference the surrounding page context. " if selected_text else "")
+                + "Use clean Markdown styling (### headings, bold terms, bullet points). "
                 "Do NOT inline raw [Source: ...] or page number brackets inside your answer body text."
             )
         else:
-            return (
-                f"Student Question:\n{question}\n\n"
+            prompt_parts.append(
                 "No course materials were found. Remember to start your response with: "
                 "'**General Knowledge:** This response is not based on your provided course material context.'"
             )
+
+        return "\n".join(prompt_parts)
 
     async def _call_llm(
         self,
@@ -141,6 +189,8 @@ class StudySupportAgent(BaseAgent):
         history: List[Dict[str, Any]],
         student_id: uuid.UUID,
         thinking_mode: bool = False,
+        is_in_assessment: bool = False,
+        attempt_id: Optional[uuid.UUID] = None,
     ) -> str:
         messages = [AIMessage(role="system", content=system_prompt)]
 
@@ -165,11 +215,15 @@ class StudySupportAgent(BaseAgent):
             max_tokens=max_tokens_budget,
         )
 
+        action_type = AIActionType.ASSESSMENT_AI_SUPPORT if is_in_assessment else AIActionType.STUDY_SUPPORT
+
         response = await self.gateway.complete(
             request,
-            action_type=AIActionType.STUDY_SUPPORT,
+            action_type=action_type,
             actor_id=student_id,
             actor_role="student",
+            subject_entity_id=attempt_id,
+            subject_entity_type="assessment_attempt" if is_in_assessment else None,
         )
         return response.content
 

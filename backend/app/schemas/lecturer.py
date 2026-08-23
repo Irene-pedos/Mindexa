@@ -4,9 +4,9 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
+from app.db.enums import AssessmentStatus, AssessmentType, LanguageEnum
 from pydantic import BaseModel
 
-from app.db.enums import AssessmentType, AssessmentStatus
 
 class DashboardMetric(BaseModel):
     """A metric value with trend comparison."""
@@ -70,6 +70,8 @@ class WorkspaceListItem(BaseModel):
     lecturer_name: str
     institution_name: str
     class_name: str
+    language: LanguageEnum = LanguageEnum.EN
+    banner_image_url: Optional[str] = None
 
 class WorkspaceSectionResponse(BaseModel):
     id: uuid.UUID
@@ -92,6 +94,13 @@ class WorkspaceCreate(BaseModel):
     teaching_assignment_id: uuid.UUID
     title: Optional[str] = None # Defaults to "{Course} ({Section})"
     description: Optional[str] = None
+
+class WorkspaceUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    banner_image_url: Optional[str] = None
+    status: Optional[str] = None
+    language: Optional[LanguageEnum] = None
 
 class LecturerCourseRosterItem(BaseModel):
     id: uuid.UUID

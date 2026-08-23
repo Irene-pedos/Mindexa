@@ -113,6 +113,10 @@ import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import {
+  StudentAnswerCanvas,
+  SpeedGraderStudentAnswerCanvas,
+} from "@/components/mindexa/grading/student-answer-canvas";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -180,162 +184,6 @@ function formatTimeSpent(attempt?: any, submission?: any): string {
     return `${attempt.duration_minutes}m`;
   }
   return "Standard session";
-}
-
-function CaseStudyStudentAnswer({
-  question,
-  submission,
-  maxMarks = 10,
-}: {
-  question: any;
-  submission: any;
-  maxMarks?: number;
-}) {
-  const subAny = submission as any;
-  const rawAns =
-    submission?.answer_text ??
-    subAny?.student_answer ??
-    (typeof subAny?.submitted_content === "string"
-      ? subAny?.submitted_content
-      : subAny?.submitted_content?.text ?? subAny?.submitted_content) ??
-    (typeof submission === "string" ? submission : "");
-
-  const parsed = safeJson(rawAns);
-  const answerMap: Record<string, unknown> =
-    parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
-
-  const opts = question?.options || [];
-  const prompts =
-    opts.length > 0
-      ? opts
-      : Object.keys(answerMap).map((id, index) => ({
-          id,
-          text: `Sub-question ${index + 1}`,
-          marks:
-            Math.round(
-              ((question?.marks || maxMarks || 10) /
-                (Object.keys(answerMap).length || 1)) *
-                10,
-            ) / 10,
-        }));
-
-  const totalSubMarks = prompts.reduce(
-    (sum: number, p: any) =>
-      sum +
-      (p.marks !== undefined && p.marks !== null
-        ? Number(p.marks)
-        : p.match_key !== undefined && p.match_key !== null
-          ? Number(p.match_key)
-          : p.match_value !== undefined && p.match_value !== null
-            ? Number(p.match_value)
-            : 0),
-    0,
-  );
-  const promptCount = prompts.length || 1;
-  const questionTotalMarks = question?.marks || maxMarks || 10;
-  const rawAnsStr = typeof rawAns === "string" ? rawAns : "";
-
-  if (prompts.length === 0 && (!rawAnsStr || rawAnsStr === "{}")) {
-    return (
-      <span className="italic text-muted-foreground/60 font-sans font-normal text-xs">
-        No case study sub-questions or response recorded.
-      </span>
-    );
-  }
-
-  return (
-    <div className="space-y-3 font-sans">
-      <div className="flex items-center justify-between">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Sub-Questions & Student Responses ({prompts.length} Sub-Questions)
-        </p>
-      </div>
-
-      <div className="space-y-3">
-        {prompts.map((prompt: any, index: number) => {
-          const subMark =
-            prompt.marks !== undefined && prompt.marks > 0
-              ? prompt.marks
-              : prompt.match_key !== undefined && prompt.match_key !== null
-                ? prompt.match_key
-                : prompt.match_value !== undefined &&
-                    prompt.match_value !== null
-                  ? prompt.match_value
-                  : totalSubMarks > 0
-                    ? prompt.marks
-                    : Math.round((questionTotalMarks / promptCount) * 10) / 10;
-
-          let subAnswerVal =
-            answerMap[prompt.id] ??
-            answerMap[String(prompt.id)] ??
-            answerMap[index] ??
-            answerMap[String(index)];
-
-          if (subAnswerVal === undefined) {
-            if (rawAnsStr && !rawAnsStr.trim().startsWith("{") && index === 0) {
-              subAnswerVal = rawAnsStr;
-            } else if (
-              Object.keys(answerMap).length > 0 &&
-              Object.values(answerMap)[index] !== undefined
-            ) {
-              subAnswerVal = Object.values(answerMap)[index];
-            }
-          }
-
-          const promptText =
-            prompt.text ||
-            prompt.option_text ||
-            prompt.content ||
-            `Sub-question ${index + 1}`;
-
-          return (
-            <div
-              key={prompt.id || index}
-              className="rounded-xl border border-border/60 bg-muted/10 p-3.5 space-y-2.5"
-            >
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <span className="text-[11px] font-semibold text-primary flex items-center gap-1.5">
-                  <span className="size-4 rounded-full bg-primary/10 text-primary flex items-center justify-center text-[10px] font-mono font-medium">
-                    {index + 1}
-                  </span>
-                  Sub-question {index + 1}
-                </span>
-                <Badge
-                  variant="outline"
-                  className="text-[10px] font-medium px-2 py-0 border-primary/30 text-primary bg-primary/5 font-mono"
-                >
-                  {subMark} {Number(subMark) === 1 ? "Mark" : "Marks"}
-                </Badge>
-              </div>
-
-              <div className="text-xs font-medium text-foreground leading-relaxed">
-                {renderRichMathText(promptText)}
-              </div>
-
-              <div className="p-3 rounded-lg bg-card border border-border/50 text-xs">
-                <span className="text-[10px] font-semibold text-muted-foreground block mb-1.5">
-                  Submitted Answer
-                </span>
-                {subAnswerVal !== undefined &&
-                subAnswerVal !== null &&
-                String(subAnswerVal).trim() !== "" ? (
-                  <div className="text-xs sm:text-sm leading-relaxed text-foreground whitespace-pre-wrap font-sans font-normal">
-                    {renderRichMathText(String(subAnswerVal))}
-                  </div>
-                ) : (
-                  <span className="italic text-muted-foreground/60 text-xs">
-                    No response recorded for this sub-question.
-                  </span>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function ManualOnlyLanguageBanner({
@@ -428,324 +276,6 @@ function CollapsibleDrawerSection({
           {children}
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * Robust Student Answer Renderer with LaTeX KaTeX and TableContextViewer support.
- */
-function SpeedGraderStudentAnswerCanvas({
-  currentQuestion,
-  currentSubmission,
-  maxMarks,
-}: {
-  currentQuestion: any;
-  currentSubmission: any;
-  maxMarks: number;
-}) {
-  if (!currentSubmission || (currentSubmission as any).is_skipped) {
-    return (
-      <div className="p-4 rounded-xl border border-dashed border-border/60 bg-muted/5 text-center text-xs text-muted-foreground italic">
-        No response recorded for this question node.
-      </div>
-    );
-  }
-
-  const subAny = currentSubmission as any;
-  const answerContent = subAny.answer_content || {};
-
-  const subType = (currentSubmission.answer_type || "").toUpperCase();
-  const qType = normalizeQuestionType(
-    currentQuestion?.type || currentQuestion?.question_type || "",
-  );
-
-  // Check structured table response
-  const tableData = (() => {
-    if (subAny.table_data) return subAny.table_data;
-    if (subAny.answer_table) return subAny.answer_table;
-    if (answerContent.table_data) return answerContent.table_data;
-    if (answerContent.answer_table) return answerContent.answer_table;
-    const text = currentSubmission.answer_text || (typeof answerContent === "string" ? answerContent : answerContent.text);
-    if (
-      typeof text === "string" &&
-      (text.trim().startsWith("{") || text.trim().startsWith("["))
-    ) {
-      try {
-        const parsed = JSON.parse(text);
-        if (
-          parsed &&
-          (parsed.headers || parsed.rows || Array.isArray(parsed))
-        ) {
-          return parsed;
-        }
-      } catch {}
-    }
-    return null;
-  })();
-
-  if (tableData) {
-    return (
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-primary">
-          <TableIcon className="size-3.5" />
-          <span>Structured Response Table</span>
-        </div>
-        <TableContextViewer data={tableData} />
-      </div>
-    );
-  }
-
-  // Ordering questions
-  const isOrdering =
-    subType === "ORDERED_LIST" ||
-    qType === "ordering" ||
-    qType === "ordered_list" ||
-    qType === "orderedlist";
-  if (isOrdering) {
-    const orderedIds: string[] =
-      subAny.ordered_option_ids ||
-      answerContent.ordered_option_ids ||
-      (Array.isArray(currentSubmission.answer_text)
-        ? currentSubmission.answer_text
-        : Array.isArray(answerContent.text)
-          ? answerContent.text
-          : []);
-    if (!orderedIds || orderedIds.length === 0) {
-      return (
-        <span className="italic text-muted-foreground/60 text-xs">
-          No ordering sequence submitted.
-        </span>
-      );
-    }
-    const opts = (currentQuestion as any)?.options || [];
-    const expectedOpts = [...opts].sort(
-      (a: any, b: any) => (a.order_index ?? 0) - (b.order_index ?? 0),
-    );
-    return (
-      <div className="space-y-2">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-          Student Submitted Sequence
-        </p>
-        {orderedIds.map((val: string, idx: number) => {
-          const opt = opts.find(
-            (o: any) => o.id === val || o.text === val || o.content === val,
-          );
-          const label = opt ? opt.content || opt.text || opt.option_text : val;
-          const expected = expectedOpts[idx];
-          const isCorrect =
-            expected &&
-            (expected.id === val ||
-              (expected.content || expected.text) === label);
-
-          return (
-            <div
-              key={val || idx}
-              className={cn(
-                "p-2.5 rounded-xl border flex items-center justify-between text-xs font-sans transition-colors",
-                isCorrect
-                  ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-950 dark:text-emerald-200"
-                  : "bg-amber-500/5 border-amber-500/20 text-amber-950 dark:text-amber-200",
-              )}
-            >
-              <div className="flex items-center gap-2.5 font-medium">
-                <span className="size-5 rounded-full bg-background border flex items-center justify-center text-[10px] font-mono font-medium shrink-0">
-                  {idx + 1}
-                </span>
-                <span>{renderRichMathText(label)}</span>
-              </div>
-              {expected && (
-                <span className="text-[10px] font-mono font-medium">
-                  {isCorrect ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      ✓ Correct
-                    </span>
-                  ) : (
-                    <span className="text-amber-600 dark:text-amber-400">
-                      Expected: {expected.content || expected.text}
-                    </span>
-                  )}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
-  // Matching pairs
-  const isMatching =
-    subType === "MATCH_PAIRS" || qType === "matching" || qType === "match_pairs";
-  if (isMatching) {
-    const pairs = subAny.match_pairs_json || answerContent.match_pairs_json || {};
-    const keys = Object.keys(pairs);
-    if (keys.length === 0) {
-      return (
-        <span className="italic text-muted-foreground/60 text-xs">
-          No matches submitted.
-        </span>
-      );
-    }
-    return (
-      <div className="space-y-2 text-xs">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-          Submitted Matches
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {keys.map((k) => (
-            <div
-              key={k}
-              className="p-2.5 rounded-xl border bg-muted/20 flex items-center justify-between"
-            >
-              <span className="font-medium text-foreground">
-                {renderRichMathText(k)}
-              </span>
-              <span className="text-primary font-medium">
-                → {renderRichMathText(String(pairs[k]))}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Fill in blanks
-  const isFillBlanks =
-    subType === "FILL_BLANKS" ||
-    qType === "fillblank" ||
-    qType === "fillblanks" ||
-    qType === "fill_blank";
-  if (isFillBlanks) {
-    const blanks = subAny.fill_blank_answers || answerContent.fill_blank_answers || {};
-    const keys = Object.keys(blanks);
-    if (keys.length === 0) {
-      return (
-        <span className="italic text-muted-foreground/60 text-xs">
-          No fill-blank answers recorded.
-        </span>
-      );
-    }
-    return (
-      <div className="space-y-2 text-xs">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-          Submitted Blanks
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {keys.map((k) => (
-            <div
-              key={k}
-              className="p-2.5 rounded-xl border bg-muted/20 flex items-center justify-between"
-            >
-              <span className="font-medium text-muted-foreground">
-                Blank {k}
-              </span>
-              <span className="font-mono font-medium text-foreground">
-                {renderRichMathText(String(blanks[k]))}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  // Multiple choice
-  const isMcq =
-    subType === "SINGLE_OPTION" ||
-    subType === "MULTI_OPTION" ||
-    qType === "mcq" ||
-    qType === "singleoption" ||
-    qType === "multiplechoice" ||
-    qType === "multiple_choice" ||
-    qType === "multiselect" ||
-    qType === "checkbox";
-  if (isMcq) {
-    let selected: string[] = subAny.selected_option_ids || answerContent.selected_option_ids || [];
-    if (selected.length === 0) {
-      if (answerContent.selected_option_id) selected = [answerContent.selected_option_id];
-      else if (subAny.selected_option_id) selected = [subAny.selected_option_id];
-    }
-    const opts = (currentQuestion as any)?.options || [];
-    if (selected.length === 0) {
-      return (
-        <span className="italic text-muted-foreground/60 text-xs">
-          No option chosen.
-        </span>
-      );
-    }
-    return (
-      <div className="space-y-2 text-xs">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-          Selected Option(s)
-        </p>
-        <div className="space-y-1.5">
-          {selected.map((oid: string) => {
-            const opt = opts.find((o: any) => o.id === oid);
-            return (
-              <div
-                key={oid}
-                className={cn(
-                  "p-2.5 rounded-xl border flex items-center justify-between font-medium",
-                  opt?.is_correct
-                    ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-950 dark:text-emerald-200"
-                    : "bg-card border-border/60",
-                )}
-              >
-                <span>
-                  {renderRichMathText(
-                    opt ? opt.content || opt.text || opt.option_text : oid,
-                  )}
-                </span>
-                {opt?.is_correct && (
-                  <span className="text-[10px] font-mono font-medium text-emerald-600 dark:text-emerald-400">
-                    ✓ Correct
-                  </span>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    );
-  }
-
-  // Case Study
-  const isCaseStudy =
-    subType === "CASE_STUDY" ||
-    qType === "casestudy" ||
-    qType === "case_study";
-  if (isCaseStudy) {
-    return (
-      <CaseStudyStudentAnswer
-        question={currentQuestion}
-        submission={currentSubmission}
-        maxMarks={maxMarks}
-      />
-    );
-  }
-
-  // Text / Essay / Computational responses
-  const textVal =
-    currentSubmission.answer_text ||
-    (typeof answerContent === "string" ? answerContent : answerContent.text) ||
-    (typeof subAny.submitted_content === "string"
-      ? subAny.submitted_content
-      : subAny.submitted_content?.text) ||
-    subAny.student_answer;
-
-  if (!textVal || String(textVal).trim() === "") {
-    return (
-      <span className="italic text-muted-foreground/60 font-sans font-normal text-xs">
-        No response recorded for this question node.
-      </span>
-    );
-  }
-
-  return (
-    <div className="text-xs sm:text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap font-normal">
-      {renderRichMathText(String(textVal))}
     </div>
   );
 }
@@ -861,6 +391,7 @@ function LecturerGradingQueueContent() {
   >(null);
   const [loadingGroupWorkspace, setLoadingGroupWorkspace] = useState(false);
   const [gradingGroup, setGradingGroup] = useState(false);
+  const [releasingGroupResult, setReleasingGroupResult] = useState(false);
   const [groupScore, setGroupScore] = useState("");
   const [groupFeedback, setGroupFeedback] = useState("");
   const [groupGraderActiveQuestionIndex, setGroupGraderActiveQuestionIndex] =
@@ -1830,6 +1361,38 @@ function LecturerGradingQueueContent() {
       toast.error(msg);
     } finally {
       setGradingGroup(false);
+    }
+  };
+
+  const handleReleaseGroupResult = async () => {
+    if (!selectedGroupSubmission) return;
+    const submissionId = selectedGroupSubmission.id;
+    const assessmentId =
+      selectedAssessment?.id || selectedGroupSubmission.assessment_id;
+    if (!submissionId || !assessmentId) return;
+
+    try {
+      setReleasingGroupResult(true);
+      await groupWorkApi.releaseResult(assessmentId, submissionId);
+      toast.success("Group result released to members successfully");
+      setSelectedGroupSubmission((prev: any) =>
+        prev
+          ? {
+              ...prev,
+              is_released: true,
+              result_released_at: new Date().toISOString(),
+            }
+          : null,
+      );
+      if (selectedAssessment) {
+        fetchGroupQueue(selectedAssessment.id, selectedClass?.class_id);
+      }
+    } catch (err: unknown) {
+      const msg =
+        err instanceof Error ? err.message : "Failed to release group result";
+      toast.error(msg);
+    } finally {
+      setReleasingGroupResult(false);
     }
   };
 
@@ -3328,12 +2891,16 @@ function LecturerGradingQueueContent() {
                     variant="outline"
                     className={cn(
                       "text-[9px] font-medium px-1.5 py-0",
-                      selectedGroupSubmission.status === "GRADED"
+                      selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at
+                        ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
+                        : selectedGroupSubmission.status === "GRADED"
                         ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                         : "bg-amber-500/10 text-amber-600 border-amber-500/20",
                     )}
                   >
-                    {selectedGroupSubmission.status || "SUBMITTED"}
+                    {selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at
+                      ? "RELEASED"
+                      : selectedGroupSubmission.status || "SUBMITTED"}
                   </Badge>
                 </h1>
                 <p className="text-xs text-muted-foreground mt-0.5 font-normal truncate">
@@ -3347,6 +2914,32 @@ function LecturerGradingQueueContent() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+              {/* Release Result Button (visible when GRADED and not yet released) */}
+              {selectedGroupSubmission.status === "GRADED" && !(selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at) && (
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={handleReleaseGroupResult}
+                  disabled={releasingGroupResult}
+                  className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5"
+                  title="Release graded result to all group members"
+                >
+                  {releasingGroupResult ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Send className="size-3.5" />
+                  )}
+                  <span>Release Result</span>
+                </Button>
+              )}
+
+              {(selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at) && (
+                <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-medium">
+                  <CheckCircle2 className="size-3 text-blue-500" />
+                  <span>Released</span>
+                </div>
+              )}
+
               {/* Autosave Status Indicator */}
               {autosaveStatus === "saving" ? (
                 <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 rounded-xl text-xs font-medium animate-pulse">

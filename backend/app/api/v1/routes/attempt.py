@@ -34,6 +34,9 @@ from app.schemas.attempt import (AttemptDetailResponse, AttemptListResponse,
 from app.services.attempt_service import AttemptService
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
+import structlog
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/attempts", tags=["Attempts"])
 
@@ -71,6 +74,51 @@ async def start_attempt(
         access_password=body.access_password,
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
+    )
+
+    now = datetime.now(UTC)
+    seconds_remaining = 0
+    if attempt.expires_at:
+        seconds_remaining = max(0, int((attempt.expires_at - now).total_seconds()))
+
+    return AttemptStartResponse(
+        id=attempt.id,
+        assessment_id=attempt.assessment_id,
+        attempt_number=attempt.attempt_number,
+        status=attempt.status,
+        started_at=attempt.started_at or now,
+        expires_at=attempt.expires_at or now,
+        access_token=attempt.access_token or uuid.uuid4(),
+        seconds_remaining=seconds_remaining,
+    )
+
+
+# ── PAUSE ATTEMPT ─────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/{attempt_id}/pause",
+    response_model=AttemptStartResponse,
+    summary="Pause an active attempt",
+)
+async def pause_attempt(
+    attempt_id: uuid.UUID,
+    body: dict,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptStartResponse:
+    """
+    Pause an active IN_PROGRESS attempt. Requires access_token for verification.
+    """
+    access_token = body.get("access_token")
+    if not access_token:
+        raise AuthorizationError("access_token is required", code="TOKEN_MISSING")
+
+    service = AttemptService(db)
+    attempt = await service.pause_attempt(
+        attempt_id=attempt_id,
+        student_id=current_user.id,
+        access_token=uuid.UUID(str(access_token)),
     )
 
     now = datetime.now(UTC)
@@ -160,10 +208,18 @@ async def submit_attempt(
         student_id=current_user.id,
         access_token=body.access_token,
     )
+    await db.commit()
 
     # Dispatch background grading
-    from app.workers.tasks.grading import trigger_grading_for_attempt
-    trigger_grading_for_attempt.delay(str(attempt.id))
+    try:
+        from app.workers.tasks.grading import trigger_grading_for_attempt
+        trigger_grading_for_attempt.delay(str(attempt.id))
+    except Exception as e:
+        logger.warning(
+            "Could not enqueue Celery grading task for attempt %s: %s",
+            str(attempt.id),
+            str(e),
+        )
 
     return AttemptDetailResponse.model_validate(attempt)
 

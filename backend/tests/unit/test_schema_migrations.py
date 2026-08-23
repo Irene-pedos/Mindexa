@@ -48,6 +48,53 @@ def test_post_release_correction_migration_exists():
     assert '"post_release_corrected_at"' in source
 
 
+def test_add_paused_at_to_attempt_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260819_1230_add_paused_at_to_attempt.py"
+    )
+    assert migration_path.exists(), "Add paused_at migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision = "20260819_1230_add_paused_at"' in source
+    assert 'down_revision = "20260817_1300_post_release"' in source
+    assert '"paused_at"' in source
+
+
+def test_add_workspace_banner_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260820_0030_add_workspace_banner_image.py"
+    )
+    assert migration_path.exists(), "Workspace banner migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision = "20260820_0030_workspace_banner"' in source
+    assert 'down_revision = "20260819_1230_add_paused_at"' in source
+    assert '"banner_image_url"' in source
+
+
+def test_add_study_reader_capture_tables_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260823_1045_add_study_reader_capture_tables.py"
+    )
+    assert migration_path.exists(), "Study reader capture migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision = "20260823_1045_study_reader"' in source
+    assert 'down_revision = "20260820_0030_workspace_banner"' in source
+    assert '"student_reading_progress"' in source
+    assert '"student_material_annotation"' in source
+    assert '"student_material_key_point"' in source
+
+
 def test_migration_chain_integrity():
     """Verify that every migration has a valid down_revision and there is exactly one head."""
     versions_dir = Path(__file__).resolve().parents[1] / ".." / "alembic" / "versions"
@@ -84,4 +131,4 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260817_1300_post_release"
+    assert heads[0] == "20260823_1045_study_reader"
