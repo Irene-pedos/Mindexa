@@ -2,10 +2,7 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  AnnotationColor,
-  StudentAnnotation,
-} from "./types";
+import { AnnotationColor, StudentAnnotation } from "./types";
 import {
   Popover,
   PopoverContent,
@@ -21,7 +18,10 @@ interface HighlightLayerProps {
   annotations: StudentAnnotation[];
   pageWidth: number;
   pageHeight: number;
-  onUpdateAnnotation: (id: string, updates: { color?: AnnotationColor; note_text?: string }) => void;
+  onUpdateAnnotation: (
+    id: string,
+    updates: { color?: AnnotationColor; note_text?: string },
+  ) => void;
   onDeleteAnnotation: (id: string) => void;
 }
 
@@ -63,10 +63,14 @@ export function HighlightLayer({
   onUpdateAnnotation,
   onDeleteAnnotation,
 }: HighlightLayerProps) {
-  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(
+    null,
+  );
   const [editingNote, setEditingNote] = useState<string>("");
 
-  const pageAnnotations = annotations.filter((a) => a.page_number === pageNumber);
+  const pageAnnotations = annotations.filter(
+    (a) => a.page_number === pageNumber,
+  );
 
   if (pageAnnotations.length === 0) return null;
 
@@ -100,7 +104,7 @@ export function HighlightLayer({
                     "absolute pointer-events-auto cursor-pointer rounded-xs transition-colors mix-blend-multiply dark:mix-blend-screen",
                     colorConfig.bg,
                     colorConfig.border,
-                    "hover:opacity-90"
+                    "hover:opacity-90",
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -125,7 +129,11 @@ export function HighlightLayer({
                       }}
                     >
                       <PopoverTrigger asChild>
-                        <div className="size-full" />
+                        <button
+                          type="button"
+                          aria-label={`Open ${colorConfig.label.toLowerCase()} highlight note`}
+                          className="size-full cursor-pointer bg-transparent"
+                        />
                       </PopoverTrigger>
                       <PopoverContent
                         className="w-72 p-3 bg-card/95 backdrop-blur-md shadow-2xl border border-border/70 rounded-xl space-y-3"
@@ -146,21 +154,28 @@ export function HighlightLayer({
                             Highlight
                           </span>
                           <div className="flex items-center gap-1.5">
-                            {(Object.keys(COLOR_MAP) as AnnotationColor[]).map((c) => (
-                              <button
-                                key={c}
-                                type="button"
-                                onClick={() => onUpdateAnnotation(ann.id, { color: c })}
-                                className={cn(
-                                  "size-5 rounded-full flex items-center justify-center transition-transform",
-                                  COLOR_MAP[c].dot,
-                                  ann.color === c && "ring-2 ring-foreground scale-110"
-                                )}
-                                title={COLOR_MAP[c].label}
-                              >
-                                {ann.color === c && <Check className="size-3 text-black" />}
-                              </button>
-                            ))}
+                            {(Object.keys(COLOR_MAP) as AnnotationColor[]).map(
+                              (c) => (
+                                <button
+                                  key={c}
+                                  type="button"
+                                  onClick={() =>
+                                    onUpdateAnnotation(ann.id, { color: c })
+                                  }
+                                  className={cn(
+                                    "size-5 rounded-full flex items-center justify-center transition-transform",
+                                    COLOR_MAP[c].dot,
+                                    ann.color === c &&
+                                      "ring-2 ring-foreground scale-110",
+                                  )}
+                                  title={COLOR_MAP[c].label}
+                                >
+                                  {ann.color === c && (
+                                    <Check className="size-3 text-black" />
+                                  )}
+                                </button>
+                              ),
+                            )}
                           </div>
                         </div>
 
@@ -205,7 +220,9 @@ export function HighlightLayer({
                               size="sm"
                               className="h-7 text-xs font-semibold rounded-lg"
                               onClick={() => {
-                                onUpdateAnnotation(ann.id, { note_text: editingNote.trim() });
+                                onUpdateAnnotation(ann.id, {
+                                  note_text: editingNote.trim(),
+                                });
                                 setActiveAnnotationId(null);
                               }}
                             >

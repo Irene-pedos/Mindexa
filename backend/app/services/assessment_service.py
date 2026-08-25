@@ -838,11 +838,11 @@ class AssessmentService:
 
         # Capture student enrollment snapshot
         try:
-            from app.db.models.assessment import AssessmentTargetSection
+            from app.db.enums import EnrollmentStatus
             from app.db.models.academic import StudentEnrollment
+            from app.db.models.assessment import AssessmentTargetSection
             from app.db.models.auth import User, UserProfile
             from sqlalchemy import select
-            from app.db.enums import EnrollmentStatus
 
             if assessment.audience_type == "selected" and assessment.target_student_ids:
                 stmt = (
@@ -865,13 +865,14 @@ class AssessmentService:
                     AssessmentTargetSection.is_deleted == False
                 )
                 t_sec_ids = (await self.db.execute(t_sec_stmt)).scalars().all()
-                
+
                 if not t_sec_ids and assessment.teaching_workspace_id:
-                    from app.db.repositories.workspace_repo import WorkspaceRepository
+                    from app.db.repositories.workspace_repo import \
+                        WorkspaceRepository
                     w_repo = WorkspaceRepository(self.db)
                     resolved_sections = await w_repo.resolve_workspace_sections(assessment.teaching_workspace_id)
                     t_sec_ids = [s.id for s in resolved_sections]
-                
+
                 if t_sec_ids:
                     stmt = (
                         select(
@@ -1485,6 +1486,7 @@ class AssessmentService:
         if profile_code:
             from app.db.repositories.integrity_repo import IntegrityRepository
             integrity_repo = IntegrityRepository(self.db)
+            await integrity_repo.ensure_default_profiles()
             profile = await integrity_repo.get_profile_by_code(profile_code)
             if profile:
                 integrity_profile_id = profile.id
@@ -1505,7 +1507,6 @@ class AssessmentService:
             "ai_assistance_allowed": data.rules.aiAllowed,
             "is_open_book": data.rules.openBook,
             "integrity_monitoring_enabled": data.rules.integrityMonitoring if data.rules.integrityMonitoring is not None else True,
-            "integrity_profile_id": integrity_profile_id,
             "allow_resume": is_resume_allowed,
             "randomize_questions": data.rules.shuffleQuestions,
             "randomize_options": data.rules.shuffleOptions,
@@ -1515,6 +1516,8 @@ class AssessmentService:
             "audience_type": data.metadata.audience_type or "all",
             "target_student_ids": data.metadata.target_student_ids,
         }
+        if integrity_profile_id is not None:
+            security_fields["integrity_profile_id"] = integrity_profile_id
         await self._repo.update_fields(assessment.id, updated_by_id=current_user.id, **security_fields)
 
         # 3.1. Target Classes (Many-to-Many)
@@ -1706,7 +1709,7 @@ class AssessmentService:
                 existing_q.answer_table_template = ans_template
                 existing_q.is_deleted = False
                 existing_q.deleted_at = None
-                
+
                 await self._question_repo.delete_all_options(existing_q.id)
                 await self._question_repo.delete_all_blanks(existing_q.id)
                 new_q = existing_q
@@ -1882,8 +1885,10 @@ class AssessmentService:
 
         # 6. Save Groups from payload if provided
         if is_group and data.groups:
+            from app.schemas.group_work import (ManualGroupCreateRequest,
+                                                ManualGroupInput,
+                                                ManualGroupMemberInput)
             from app.services.group_work_service import GroupWorkService
-            from app.schemas.group_work import ManualGroupCreateRequest, ManualGroupInput, ManualGroupMemberInput
             group_svc = GroupWorkService(self.db)
             manual_request = ManualGroupCreateRequest(
                 groups=[

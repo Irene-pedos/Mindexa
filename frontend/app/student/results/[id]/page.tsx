@@ -84,7 +84,10 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
-import { TableContextViewer, StructuredTableData } from "@/components/mindexa/common/table-context-viewer";
+import {
+  TableContextViewer,
+  StructuredTableData,
+} from "@/components/mindexa/common/table-context-viewer";
 import { StudentAnswerCanvas } from "@/components/mindexa/grading/student-answer-canvas";
 import { cn } from "@/lib/utils";
 
@@ -192,7 +195,10 @@ const BLANK_SPLIT_REGEX = /(?:_{3,}|\[blank\]|\{\{blank\}\})/gi;
 function fmtDate(iso?: string | null, withTime = true) {
   if (!iso) return null;
   try {
-    return format(new Date(iso), withTime ? "MMM d, yyyy 'at' h:mm a" : "MMM d, yyyy");
+    return format(
+      new Date(iso),
+      withTime ? "MMM d, yyyy 'at' h:mm a" : "MMM d, yyyy",
+    );
   } catch {
     return null;
   }
@@ -210,7 +216,8 @@ function safeJson(value: unknown) {
 function answerValues(item: QuestionBreakdown): string[] {
   const parsed = safeJson(item.student_answer_json ?? item.student_answer);
   if (Array.isArray(parsed)) return parsed.map(String);
-  if (parsed && typeof parsed === "object") return Object.values(parsed).map(String);
+  if (parsed && typeof parsed === "object")
+    return Object.values(parsed).map(String);
   if (item.student_answer)
     return item.student_answer
       .split(",")
@@ -226,15 +233,26 @@ function feedbackBasisLabel(value?: string | null) {
   return "Lecturer Feedback";
 }
 
-function getAssessmentTypeLabel(rawType?: string | null, title?: string | null) {
+function getAssessmentTypeLabel(
+  rawType?: string | null,
+  title?: string | null,
+) {
   const raw = (rawType || "").toUpperCase();
   const t = (title || "").toUpperCase();
 
-  if (raw.includes("CAT") || t.includes("CAT")) return "Continuous Assessment Test (CAT)";
-  if (raw.includes("SUMMATIVE") || raw.includes("EXAM") || t.includes("EXAM") || t.includes("FINAL"))
+  if (raw.includes("CAT") || t.includes("CAT"))
+    return "Continuous Assessment Test (CAT)";
+  if (
+    raw.includes("SUMMATIVE") ||
+    raw.includes("EXAM") ||
+    t.includes("EXAM") ||
+    t.includes("FINAL")
+  )
     return "Summative Assessment (Exam)";
-  if (raw.includes("FORMATIVE") || t.includes("FORMATIVE")) return "Formative Assessment";
-  if (raw.includes("GROUP") || t.includes("GROUP")) return "Group Work Assessment";
+  if (raw.includes("FORMATIVE") || t.includes("FORMATIVE"))
+    return "Formative Assessment";
+  if (raw.includes("GROUP") || t.includes("GROUP"))
+    return "Group Work Assessment";
   if (raw.includes("QUIZ") || t.includes("QUIZ")) return "Quiz";
   if (raw.includes("PRACTICAL") || raw.includes("LAB") || t.includes("LAB"))
     return "Practical / Lab Assessment";
@@ -313,9 +331,11 @@ function ScoreBadge({ item }: { item: QuestionBreakdown }) {
   }
 
   const isFull = currentScore !== null && currentScore >= item.max_score;
-  const isPartial = currentScore !== null && currentScore > 0 && currentScore < item.max_score;
+  const isPartial =
+    currentScore !== null && currentScore > 0 && currentScore < item.max_score;
 
-  let tone = "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
+  let tone =
+    "border-emerald-200 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300";
   if (!isFull) {
     tone = isPartial
       ? "border-amber-200 bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
@@ -326,7 +346,7 @@ function ScoreBadge({ item }: { item: QuestionBreakdown }) {
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold font-mono",
-        tone
+        tone,
       )}
     >
       {isFull ? (
@@ -346,7 +366,9 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
   const isDeducted =
     currentScore === null || currentScore === undefined
       ? false
-      : currentScore < item.max_score || item.is_correct === false || Boolean(item.was_skipped);
+      : currentScore < item.max_score ||
+        item.is_correct === false ||
+        Boolean(item.was_skipped);
 
   if (!item.feedback && !isDeducted) return null;
 
@@ -356,14 +378,14 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
         "rounded-xl border p-3.5 space-y-2 print:border-slate-300 print:bg-white",
         isDeducted
           ? "border-amber-500/25 bg-amber-50/40 dark:bg-amber-950/20 text-amber-950 dark:text-amber-100"
-          : "border-primary/20 bg-primary/5 text-foreground"
+          : "border-primary/20 bg-primary/5 text-foreground",
       )}
     >
       <div className="flex items-center justify-between gap-2 border-b border-inherit/40 pb-1.5">
         <span
           className={cn(
             "inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider",
-            isDeducted ? "text-amber-800 dark:text-amber-300" : "text-primary"
+            isDeducted ? "text-amber-800 dark:text-amber-300" : "text-primary",
           )}
         >
           {isDeducted ? (
@@ -371,7 +393,9 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
           ) : (
             <Sparkles className="size-3.5 text-primary" />
           )}
-          {isDeducted ? "Performance Analysis & Improvement Guidance" : "Evaluation Feedback"}
+          {isDeducted
+            ? "Performance Analysis & Improvement Guidance"
+            : "Evaluation Feedback"}
         </span>
         <span className="rounded-full bg-background/80 px-2 py-0.5 text-[9px] font-bold uppercase border border-inherit/40">
           {feedbackBasisLabel(item.feedback_author_basis)}
@@ -384,12 +408,15 @@ function DiagnosticFeedbackBlock({ item }: { item: QuestionBreakdown }) {
         </div>
       ) : isDeducted && item.was_skipped ? (
         <p className="text-xs italic text-muted-foreground">
-          No response was submitted for this question (0/{item.max_score} marks). Review the question requirements and reference materials to master this topic.
+          No response was submitted for this question (0/{item.max_score}{" "}
+          marks). Review the question requirements and reference materials to
+          master this topic.
         </p>
       ) : isDeducted ? (
         <div className="text-xs space-y-1 text-muted-foreground font-medium">
           <p>
-            Marks deducted ({currentScore ?? 0} out of {item.max_score} marks awarded).
+            Marks deducted ({currentScore ?? 0} out of {item.max_score} marks
+            awarded).
           </p>
           {item.correct_answer && (
             <div className="text-emerald-700 dark:text-emerald-400 font-semibold flex items-start gap-1">
@@ -410,10 +437,33 @@ function QuestionCard({
   item: QuestionBreakdown;
   index: number;
 }) {
-  const hasReferenceTable =
-    !!(item.question_table_context || item.questionTableContext);
-  const requiresTable =
-    !!(item.requires_table_answer || item.requiresTableAnswer);
+  const hasReferenceTable = !!(
+    item.question_table_context || item.questionTableContext
+  );
+  const requiresTable = !!(
+    item.requires_table_answer || item.requiresTableAnswer
+  );
+  const parsedAnswer = safeJson(
+    item.student_answer_json ?? item.student_answer,
+  );
+  const answerObject =
+    parsedAnswer &&
+    typeof parsedAnswer === "object" &&
+    !Array.isArray(parsedAnswer)
+      ? (parsedAnswer as Record<string, any>)
+      : {};
+  const normalizedSubmission = {
+    ...item,
+    answer_content: answerObject,
+    selected_option_ids:
+      answerObject.selected_option_ids ??
+      (Array.isArray(parsedAnswer) ? parsedAnswer : undefined),
+    match_pairs_json: answerObject.match_pairs_json,
+    ordered_option_ids: answerObject.ordered_option_ids,
+    fill_blank_answers: answerObject.fill_blank_answers,
+    answer_text:
+      typeof parsedAnswer === "string" ? parsedAnswer : item.student_answer,
+  };
 
   return (
     <section className="rounded-2xl border border-border/70 bg-card text-card-foreground p-4 md:p-5 shadow-none print:break-inside-avoid print:bg-white space-y-3.5">
@@ -457,7 +507,8 @@ function QuestionCard({
       {hasReferenceTable && (
         <div className="space-y-1.5 p-3 rounded-xl border border-border bg-muted/10">
           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-            <TableIcon className="size-3 text-primary" /> Question Stem Reference Table
+            <TableIcon className="size-3 text-primary" /> Question Stem
+            Reference Table
           </div>
           <TableContextViewer
             data={item.question_table_context || item.questionTableContext}
@@ -480,7 +531,7 @@ function QuestionCard({
       {/* Unified Student Answer Response Renderer */}
       <StudentAnswerCanvas
         currentQuestion={item}
-        currentSubmission={item}
+        currentSubmission={normalizedSubmission}
         maxMarks={item.max_score}
         showCorrectAnswers={true}
       />
@@ -498,15 +549,23 @@ function QuestionCard({
   );
 }
 
-function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] }) {
+function ScoreBreakdownCard({
+  breakdowns,
+}: {
+  breakdowns: QuestionBreakdown[];
+}) {
   const groups = useMemo(() => {
     const map = new Map<string, QuestionBreakdown[]>();
     for (const item of breakdowns) {
-      const key = item.section_title || getQuestionTypeLabel(item.question_type);
+      const key =
+        item.section_title || getQuestionTypeLabel(item.question_type);
       map.set(key, [...(map.get(key) || []), item]);
     }
     return Array.from(map.entries()).map(([name, items]) => {
-      const score = items.reduce((sum, item) => sum + (item.awarded_score ?? item.score ?? 0), 0);
+      const score = items.reduce(
+        (sum, item) => sum + (item.awarded_score ?? item.score ?? 0),
+        0,
+      );
       const total = items.reduce((sum, item) => sum + (item.max_score ?? 0), 0);
       return {
         name,
@@ -529,7 +588,9 @@ function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] })
         {groups.map((group) => (
           <div key={group.name} className="space-y-1.5">
             <div className="flex justify-between text-xs font-medium">
-              <span className="font-semibold text-foreground">{group.name}</span>
+              <span className="font-semibold text-foreground">
+                {group.name}
+              </span>
               <span className="tabular-nums font-mono text-muted-foreground">
                 {group.score} / {group.total} Marks ({group.pct}%)
               </span>
@@ -538,7 +599,7 @@ function ScoreBreakdownCard({ breakdowns }: { breakdowns: QuestionBreakdown[] })
               <div
                 className={cn(
                   "h-full rounded-full transition-all duration-300",
-                  group.pct >= 50 ? "bg-emerald-600" : "bg-rose-500"
+                  group.pct >= 50 ? "bg-emerald-600" : "bg-rose-500",
                 )}
                 style={{ width: `${group.pct}%` }}
               />
@@ -559,10 +620,10 @@ function SubmittedQuestionCard({
   sub: any;
   index: number;
 }) {
-  const hasReferenceTable =
-    !!(q.question_table_context || q.questionTableContext);
-  const requiresTable =
-    !!(q.requires_table_answer || q.requiresTableAnswer);
+  const hasReferenceTable = !!(
+    q.question_table_context || q.questionTableContext
+  );
+  const requiresTable = !!(q.requires_table_answer || q.requiresTableAnswer);
   const questionText = q.text || q.content || "";
 
   return (
@@ -570,7 +631,9 @@ function SubmittedQuestionCard({
       <div className="flex items-start justify-between gap-3 border-b border-border/40 pb-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <p className="text-xs font-bold text-foreground">Question {index + 1}</p>
+            <p className="text-xs font-bold text-foreground">
+              Question {index + 1}
+            </p>
             {requiresTable && (
               <Badge
                 variant="outline"
@@ -581,7 +644,8 @@ function SubmittedQuestionCard({
             )}
           </div>
           <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mt-0.5">
-            {getQuestionTypeLabel(q.type || q.question_type)} • {q.marks} {q.marks === 1 ? "mark" : "marks"}
+            {getQuestionTypeLabel(q.type || q.question_type)} • {q.marks}{" "}
+            {q.marks === 1 ? "mark" : "marks"}
           </p>
         </div>
         <span className="rounded-full bg-muted px-2.5 py-0.5 text-[10px] font-bold uppercase text-muted-foreground border">
@@ -598,7 +662,8 @@ function SubmittedQuestionCard({
       {hasReferenceTable && (
         <div className="space-y-1.5 p-3 rounded-xl border border-border bg-muted/10">
           <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-            <TableIcon className="size-3 text-primary" /> Question Stem Reference Table
+            <TableIcon className="size-3 text-primary" /> Question Stem
+            Reference Table
           </div>
           <TableContextViewer
             data={q.question_table_context || q.questionTableContext}
@@ -644,7 +709,9 @@ export default function ResultDetailPage() {
           setAttempt(attemptData);
           if (attemptData?.assessment_id) {
             const [assessmentData, submissionsData] = await Promise.all([
-              assessmentApi.getAssessmentById(attemptData.assessment_id).catch(() => null),
+              assessmentApi
+                .getAssessmentById(attemptData.assessment_id)
+                .catch(() => null),
               submissionApi.getSubmissionsForAttempt(attemptId).catch(() => ({
                 submissions: [],
               })),
@@ -665,7 +732,9 @@ export default function ResultDetailPage() {
   const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (reviewNotes.trim().length < 10) {
-      toast.error("Please provide at least 10 characters detailing your review request.");
+      toast.error(
+        "Please provide at least 10 characters detailing your review request.",
+      );
       return;
     }
 
@@ -674,7 +743,7 @@ export default function ResultDetailPage() {
       // Simulate backend review dispatch / ticket logging
       await new Promise((resolve) => setTimeout(resolve, 800));
       toast.success(
-        "Your result review request has been logged and forwarded to the course faculty."
+        "Your result review request has been logged and forwarded to the course faculty.",
       );
       setReviewDialogOpen(false);
       setReviewNotes("");
@@ -721,7 +790,8 @@ export default function ResultDetailPage() {
           </Badge>
           <h1 className="text-xl font-bold text-foreground">{title}</h1>
           <p className="text-xs text-muted-foreground font-medium">
-            Submitted: {fmtDate(attempt.submitted_at || attempt.started_at, true)} •{" "}
+            Submitted:{" "}
+            {fmtDate(attempt.submitted_at || attempt.started_at, true)} •{" "}
             {attempt.questions?.length || 0} questions
           </p>
         </section>
@@ -784,7 +854,9 @@ export default function ResultDetailPage() {
           <Clock className="size-6" />
         </div>
         <div className="space-y-1">
-          <h2 className="text-sm font-bold text-foreground">Result Not Available</h2>
+          <h2 className="text-sm font-bold text-foreground">
+            Result Not Available
+          </h2>
           <p className="text-xs text-muted-foreground">
             This attempt record could not be found or has not been released.
           </p>
@@ -797,7 +869,7 @@ export default function ResultDetailPage() {
   const title = result.assessment_title || "Official Assessment Result";
   const assessmentTypeLabel = getAssessmentTypeLabel(
     result.assessment_type,
-    result.assessment_title
+    result.assessment_title,
   );
 
   return (
@@ -873,7 +945,9 @@ export default function ResultDetailPage() {
             size="sm"
             onClick={() => {
               if (result.is_group_result) {
-                toast.info("Group work appeals must be initiated collaboratively via the Group Workspace.");
+                toast.info(
+                  "Group work appeals must be initiated collaboratively via the Group Workspace.",
+                );
                 router.push(`/student/group-work/${result.assessment_id}`);
                 return;
               }
@@ -901,7 +975,9 @@ export default function ResultDetailPage() {
         <section className="flex items-start gap-3 rounded-2xl border border-rose-300 bg-rose-50 dark:bg-rose-950/30 p-4">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-rose-600" />
           <p className="text-xs font-semibold text-rose-900 dark:text-rose-200 leading-relaxed">
-            Provisional Result Notice: This score is currently undergoing routine institutional audit. Final certified records will be updated upon audit completion.
+            Provisional Result Notice: This score is currently undergoing
+            routine institutional audit. Final certified records will be updated
+            upon audit completion.
           </p>
         </section>
       )}
@@ -987,10 +1063,23 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <School className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">College:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                College:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.college_name || result.school_name || result.institution_name || "Institutional Faculty"}>
-              {result.college_name || result.school_name || result.institution_name || "Faculty / College"}
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={
+                result.college_name ||
+                result.school_name ||
+                result.institution_name ||
+                "Institutional Faculty"
+              }
+            >
+              {result.college_name ||
+                result.school_name ||
+                result.institution_name ||
+                "Faculty / College"}
             </p>
           </div>
 
@@ -998,9 +1087,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Building2 className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Department:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Department:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.department_name || "General Department"}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={result.department_name || "General Department"}
+            >
               {result.department_name || "General Department"}
             </p>
           </div>
@@ -1009,9 +1103,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Layers className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Option:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Option:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.option_name || "Degree Program"}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={result.option_name || "Degree Program"}
+            >
               {result.option_name || "Degree Program"}
             </p>
           </div>
@@ -1020,9 +1119,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <GraduationCap className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Academic Level:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Academic Level:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.academic_level || "Undergraduate Program"}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={result.academic_level || "Undergraduate Program"}
+            >
               {result.academic_level || "Undergraduate Program"}
             </p>
           </div>
@@ -1031,9 +1135,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Users className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Class / Cohort:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Class / Cohort:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.class_name || "Standard Section"}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={result.class_name || "Standard Section"}
+            >
               {result.class_name || "Standard Class Section"}
             </p>
           </div>
@@ -1042,9 +1151,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Calendar className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Academic Year:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Academic Year:
+              </span>
             </div>
-            <p className="text-xs font-semibold text-foreground truncate" title={result.academic_year || "Current Academic Session"}>
+            <p
+              className="text-xs font-semibold text-foreground truncate"
+              title={result.academic_year || "Current Academic Session"}
+            >
               {result.academic_year || "Current Session"}
             </p>
           </div>
@@ -1053,10 +1167,17 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Calendar className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Assessment Date:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Assessment Date:
+              </span>
             </div>
             <p className="text-xs font-semibold text-foreground truncate">
-              {fmtDate(result.window_start || result.submitted_at || result.calculated_at, false) || "Scheduled"}
+              {fmtDate(
+                result.window_start ||
+                  result.submitted_at ||
+                  result.calculated_at,
+                false,
+              ) || "Scheduled"}
             </p>
           </div>
 
@@ -1064,10 +1185,14 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Timer className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Duration / Time:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Duration / Time:
+              </span>
             </div>
             <p className="text-xs font-semibold text-foreground truncate">
-              {result.duration_minutes ? `${result.duration_minutes} Minutes` : "Standard Duration"}
+              {result.duration_minutes
+                ? `${result.duration_minutes} Minutes`
+                : "Standard Duration"}
             </p>
           </div>
 
@@ -1075,10 +1200,13 @@ export default function ResultDetailPage() {
           <div className="space-y-1">
             <div className="flex items-center gap-1.5 text-muted-foreground">
               <Clock className="size-3 text-primary shrink-0" />
-              <span className="text-[9px] font-bold uppercase tracking-wider">Completed At:</span>
+              <span className="text-[9px] font-bold uppercase tracking-wider">
+                Completed At:
+              </span>
             </div>
             <p className="text-xs font-semibold text-foreground truncate">
-              {fmtDate(result.submitted_at || result.calculated_at, true) || "Recorded"}
+              {fmtDate(result.submitted_at || result.calculated_at, true) ||
+                "Recorded"}
             </p>
           </div>
         </div>
@@ -1101,14 +1229,21 @@ export default function ResultDetailPage() {
             Cumulative Percentage:{" "}
             <span className="text-foreground font-bold">{pct}%</span>
             {result.letter_grade && (
-              <span> • Grade Classification: <span className="font-bold text-primary">{result.letter_grade}</span></span>
+              <span>
+                {" "}
+                • Grade Classification:{" "}
+                <span className="font-bold text-primary">
+                  {result.letter_grade}
+                </span>
+              </span>
             )}
           </p>
 
           <div className="pt-2 flex flex-wrap items-center justify-center sm:justify-start gap-2">
             {result.is_passing ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-0.5 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                <CheckCircle2 className="size-3.5" /> Satisfactory Assessment Pass
+                <CheckCircle2 className="size-3.5" /> Satisfactory Assessment
+                Pass
               </span>
             ) : (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-500/30 bg-rose-500/10 px-3 py-0.5 text-xs font-bold text-rose-700 dark:text-rose-300">
@@ -1117,7 +1252,8 @@ export default function ResultDetailPage() {
             )}
             {result.is_post_release_corrected && (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-3 py-0.5 text-xs font-bold text-indigo-700 dark:text-indigo-300">
-                <ShieldCheck className="size-3.5" /> Official Faculty Moderation Adjustment
+                <ShieldCheck className="size-3.5" /> Official Faculty Moderation
+                Adjustment
               </span>
             )}
           </div>
@@ -1129,7 +1265,8 @@ export default function ResultDetailPage() {
             <span>Grading Completed</span>
           </div>
           <p className="text-[11px]">
-            {result.graded_question_count} of {result.total_question_count} items graded
+            {result.graded_question_count} of {result.total_question_count}{" "}
+            items graded
           </p>
         </div>
       </section>
@@ -1144,20 +1281,30 @@ export default function ResultDetailPage() {
               </div>
               <div>
                 <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-bold text-foreground">Collaborative Group Assessment</h2>
-                  <Badge variant="outline" className="text-[10px] font-bold border-primary/30 text-primary bg-primary/5">
+                  <h2 className="text-sm font-bold text-foreground">
+                    Collaborative Group Assessment
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-bold border-primary/30 text-primary bg-primary/5"
+                  >
                     Team Result
                   </Badge>
                 </div>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  Team Name: <span className="font-semibold text-foreground">{result.group_name || "Assigned Group"}</span>
+                  Team Name:{" "}
+                  <span className="font-semibold text-foreground">
+                    {result.group_name || "Assigned Group"}
+                  </span>
                 </p>
               </div>
             </div>
             <Button
               size="sm"
               variant="default"
-              onClick={() => router.push(`/student/group-work/${result.assessment_id}`)}
+              onClick={() =>
+                router.push(`/student/group-work/${result.assessment_id}`)
+              }
               className="h-8 gap-1.5 text-xs rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground font-semibold"
             >
               <ExternalLink className="size-3.5" />
@@ -1180,7 +1327,14 @@ export default function ResultDetailPage() {
           <div className="flex items-start gap-2.5 text-xs text-muted-foreground bg-muted/40 rounded-xl p-3.5 border border-border/50">
             <Info className="size-4 text-primary shrink-0 mt-0.5" />
             <p className="leading-relaxed">
-              Individual student grades for group assessments are derived directly from the team submission. Detailed collaborative answers, member contributions, peer reviews, and group-wide grade appeals are accessed within the <span className="font-semibold text-foreground">Group Workspace</span>.
+              Individual student grades for group assessments are derived
+              directly from the team submission. Detailed collaborative answers,
+              member contributions, peer reviews, and group-wide grade appeals
+              are accessed within the{" "}
+              <span className="font-semibold text-foreground">
+                Group Workspace
+              </span>
+              .
             </p>
           </div>
         </section>
@@ -1197,10 +1351,12 @@ export default function ResultDetailPage() {
           <div className="flex items-center justify-between border-b border-border/40 pb-2">
             <div>
               <h2 className="text-base font-bold text-foreground flex items-center gap-2">
-                <FileText className="size-4 text-primary" /> Itemized Question Review & Diagnostics
+                <FileText className="size-4 text-primary" /> Itemized Question
+                Review & Diagnostics
               </h2>
               <p className="text-xs text-muted-foreground">
-                Item evaluation, answer validation, and actionable revision feedback.
+                Item evaluation, answer validation, and actionable revision
+                feedback.
               </p>
             </div>
             <Badge
@@ -1222,10 +1378,14 @@ export default function ResultDetailPage() {
       {/* Institutional Note & Footer */}
       <section className="rounded-2xl border border-border/70 bg-card text-card-foreground p-4 text-xs text-muted-foreground print:bg-white space-y-1.5">
         <div className="flex items-center gap-1.5 font-bold text-foreground">
-          <Award className="size-3.5 text-primary" /> Official Transcript Notice & Institutional Policy
+          <Award className="size-3.5 text-primary" /> Official Transcript Notice
+          & Institutional Policy
         </div>
         <p className="leading-relaxed">
-          This verified result slip was generated via Mindexa for institutional academic record-keeping. Formal grade inquiries and recalculation appeals are handled in accordance with the institution&apos;s assessment policy.
+          This verified result slip was generated via Mindexa for institutional
+          academic record-keeping. Formal grade inquiries and recalculation
+          appeals are handled in accordance with the institution&apos;s
+          assessment policy.
         </p>
       </section>
 
@@ -1234,11 +1394,14 @@ export default function ResultDetailPage() {
         <DialogContent className="max-w-md rounded-2xl border border-border bg-card text-card-foreground">
           <DialogHeader>
             <DialogTitle className="text-base font-bold flex items-center gap-2">
-              <MessageCircle className="size-4 text-primary" /> Request Mark Review / Appeal
+              <MessageCircle className="size-4 text-primary" /> Request Mark
+              Review / Appeal
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Submit a formal assessment inquiry for &quot;
-              <span className="font-semibold text-foreground">{title}</span>&quot; (Current Score: {result.total_score}/{result.max_score} Marks).
+              <span className="font-semibold text-foreground">{title}</span>
+              &quot; (Current Score: {result.total_score}/{result.max_score}{" "}
+              Marks).
             </DialogDescription>
           </DialogHeader>
 
@@ -1259,14 +1422,17 @@ export default function ResultDetailPage() {
                   <SelectItem value="technical">
                     Technical Submission Discrepancy
                   </SelectItem>
-                  <SelectItem value="other">Other Academic Clarification</SelectItem>
+                  <SelectItem value="other">
+                    Other Academic Clarification
+                  </SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">
-                Reason & Detailed Justification <span className="text-destructive">*</span>
+                Reason & Detailed Justification{" "}
+                <span className="text-destructive">*</span>
               </Label>
               <Textarea
                 placeholder="Explain the reason for your review request and specify relevant question numbers..."
@@ -1276,7 +1442,8 @@ export default function ResultDetailPage() {
                 required
               />
               <p className="text-[10px] text-muted-foreground">
-                Minimum 10 characters required. Your request will be forwarded to the course lecturer.
+                Minimum 10 characters required. Your request will be forwarded
+                to the course lecturer.
               </p>
             </div>
 

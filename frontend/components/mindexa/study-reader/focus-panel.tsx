@@ -1,14 +1,11 @@
 // frontend/components/mindexa/study-reader/focus-panel.tsx
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React from "react";
 import {
   FocusResponse,
-  KeyPointConfidence,
   ReaderSource,
-  StudentKeyPoint,
 } from "./types";
-import { studyReaderApi } from "@/lib/api/study-reader";
 import {
   Flame,
   Target,
@@ -25,60 +22,36 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 interface FocusPanelProps {
   source: ReaderSource;
   currentPage: number;
-  onSelectPage: (page: number) => void;
-  onUpdateKeyPoint: (id: string, updates: { confidence?: KeyPointConfidence }) => void;
+  focusData: FocusResponse | null;
+  loading: boolean;
+  refreshing: boolean;
+  onRefresh: () => void;
+  onSelectPage: (
+    page: number,
+    focusInfo?: { title: string; reason?: string; quote?: string },
+  ) => void;
+  onMarkReviewed: (kpId: string) => Promise<void>;
   onOpenPageCheck: (pageNumber: number) => void;
 }
 
 export function FocusPanel({
   source,
   currentPage,
+  focusData,
+  loading,
+  refreshing,
+  onRefresh,
   onSelectPage,
-  onUpdateKeyPoint,
+  onMarkReviewed,
   onOpenPageCheck,
 }: FocusPanelProps) {
-  const [focusData, setFocusData] = useState<FocusResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-
-  const loadFocus = useCallback(async (isSilent = false) => {
-    try {
-      if (!isSilent) setLoading(true);
-      else setRefreshing(true);
-      const data = await studyReaderApi.getFocus(source.kind, source.id);
-      setFocusData(data);
-    } catch {
-      // Graceful fallback
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [source.kind, source.id]);
-
-  useEffect(() => {
-    loadFocus();
-  }, [loadFocus]);
-
-  const handleMarkReviewed = async (kpId: string) => {
-    onUpdateKeyPoint(kpId, { confidence: "got_it" });
-    toast.success("Marked as understood! Next review scheduled.");
-    setFocusData((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        spaced_reviews: prev.spaced_reviews.filter((k) => k.id !== kpId),
-      };
-    });
-  };
-
   return (
-    <div className="flex flex-col h-full select-none">
+    <div className="flex flex-col h-full min-h-0 select-none">
       {/* Top Header */}
       <div className="p-3 border-b border-border/40 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -93,7 +66,7 @@ export function FocusPanel({
             variant="ghost"
             size="icon"
             className="size-7 rounded-lg text-muted-foreground hover:text-foreground"
-            onClick={() => loadFocus(true)}
+            onClick={onRefresh}
             disabled={refreshing}
             title="Refresh weakness analysis"
           >
@@ -112,7 +85,7 @@ export function FocusPanel({
         </div>
       </div>
 
-      <ScrollArea className="flex-1 p-3">
+      <ScrollArea className="flex-1 min-h-0 p-3">
         {loading ? (
           <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
             <Flame className="size-8 text-rose-500 animate-pulse" />
@@ -150,7 +123,12 @@ export function FocusPanel({
                   {focusData.focus_next.map((fn, idx) => (
                     <div
                       key={idx}
-                      onClick={() => onSelectPage(fn.start_page)}
+                      onClick={() =>
+                        onSelectPage(fn.start_page, {
+                          title: fn.title,
+                          reason: fn.reason,
+                        })
+                      }
                       className={cn(
                         "p-3 rounded-xl border bg-card/70 hover:bg-card transition-all cursor-pointer group shadow-xs space-y-2",
                         fn.heat_level === "high"
@@ -208,7 +186,13 @@ export function FocusPanel({
                   {focusData.spaced_reviews.map((kp) => (
                     <div
                       key={kp.id}
-                      className="p-2.5 rounded-xl border border-border/50 bg-card/60 hover:bg-card transition-colors space-y-2 shadow-2xs"
+                      className="p-2.5 rounded-xl border border-border/50 bg-card/60 hover:bg-card transition-colors space-y-2 shadow-2xs cursor-pointer"
+                      onClick={() =>
+                        onSelectPage(kp.page_number, {
+                          title: kp.title,
+                          quote: kp.quote || undefined,
+                        })
+                      }
                     >
                       <div className="flex items-start justify-between gap-2">
                         <span className="text-xs font-semibold text-foreground">
@@ -217,7 +201,13 @@ export function FocusPanel({
 
                         <button
                           type="button"
-                          onClick={() => onSelectPage(kp.page_number)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectPage(kp.page_number, {
+                              title: kp.title,
+                              quote: kp.quote || undefined,
+                            });
+                          }}
                           className="text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary transition-colors shrink-0"
                           title={`Jump to Page ${kp.page_number}`}
                         >
@@ -248,7 +238,7 @@ export function FocusPanel({
                           variant="ghost"
                           size="sm"
                           className="h-6 text-[11px] px-2 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10 rounded-md gap-1"
-                          onClick={() => handleMarkReviewed(kp.id)}
+                          onClick={() => onMarkReviewed(kp.id)}
                         >
                           <Check className="size-3" />
                           <span>Got it now</span>

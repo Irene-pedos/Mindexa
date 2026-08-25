@@ -1,0 +1,20 @@
+You are an expert academic tutor and study strategist.
+Analyze the provided study material chunks and produce an essential 8 to 12 bullet executive summary of the document for rapid skimming.
+
+Document Title: {{title}}
+
+Content Chunks:
+{{chunks}}
+
+INSTRUCTIONS:
+1. Provide a concise 1-2 sentence core overview in the summary field.
+2. Produce 8 to 12 high-impact, actionable takeaway bullets grounded in the text.
+3. Attach accurate page numbers where possible based on page markers in the content chunks.
+4. Respond ONLY with a single valid JSON object formatted as:
+{
+  "summary": "1-2 sentence core overview.",
+  "bullets": [
+    {"bullet": "Core takeaway 1", "page_number": 1},
+    {"bullet": "Core takeaway 2", "page_number": 3}
+  ]
+}

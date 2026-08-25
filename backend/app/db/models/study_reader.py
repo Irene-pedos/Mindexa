@@ -10,13 +10,13 @@ Data models for the Study Reader workspace:
 import uuid
 from datetime import datetime
 from typing import Any, List, Optional
-from sqlalchemy import Column, ForeignKey, UniqueConstraint, String, Integer, Float, Text, DateTime, Index
-from sqlalchemy.dialects.postgresql import UUID, JSONB
-from sqlmodel import Field, Relationship
 
 from app.db.base import BaseModel
 from app.db.mixins import composite_index
-
+from sqlalchemy import (Boolean, Column, DateTime, Float, ForeignKey, Index,
+                        Integer, String, Text, UniqueConstraint)
+from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlmodel import Field, Relationship
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STUDENT READING PROGRESS
@@ -58,7 +58,27 @@ class StudentReadingProgress(BaseModel, table=True):
 
     last_page: int = Field(default=1, nullable=False)
     last_scale: float = Field(default=100.0, nullable=False)
-    page_count_seen: int = Field(default=1, nullable=False)
+    rotation: int = Field(default=0, sa_column=Column(Integer, nullable=False, server_default="0"))
+    zoom_mode: str = Field(
+        default="fit-width",
+        sa_column=Column(String(30), nullable=False, server_default="fit-width"),
+        description="fit-width | fit-page | custom",
+    )
+    two_page_view: bool = Field(
+        default=False,
+        sa_column=Column(Boolean, nullable=False, server_default="false"),
+        description="Whether dual page layout is active",
+    )
+    furthest_page_reached: int = Field(
+        default=1,
+        sa_column=Column(Integer, nullable=False, server_default="1"),
+        description="Highest page number navigated to by student (high water mark)",
+    )
+    page_count_seen: int = Field(
+        default=1,
+        nullable=False,
+        description="Legacy alias for furthest_page_reached",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +116,7 @@ class StudentMaterialAnnotation(BaseModel, table=True):
     )
 
     page_number: int = Field(nullable=False, description="1-based page number")
-    
+
     color: str = Field(
         sa_column=Column(String(30), nullable=False, default="key_idea"),
         description="key_idea | definition | example | confused",
@@ -122,7 +142,7 @@ class StudentMaterialAnnotation(BaseModel, table=True):
     # Relationships
     key_points: List["StudentMaterialKeyPoint"] = Relationship(
         back_populates="annotation",
-        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={"cascade": "save-update, merge"},
     )
 
 

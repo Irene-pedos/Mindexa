@@ -22,16 +22,17 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
-from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus, StudentGroupStatus
+from app.core.exceptions import (AuthorizationError, ConflictError,
+                                 NotFoundError, ValidationError)
+from app.db.enums import (AssessmentStatus, AssessmentType, AttemptStatus,
+                          StudentGroupStatus)
 from app.db.models.attempt import AssessmentAttempt
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.auth import UserRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.submission_repo import SubmissionRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _utcnow() -> datetime:
@@ -97,9 +98,9 @@ class AttemptService:
                     code="STUDENT_NOT_TARGETED",
                 )
         elif assessment.audience_type == "sections":
+            from app.db.enums import EnrollmentStatus
             from app.db.models.academic import StudentEnrollment
             from app.db.models.assessment import AssessmentTargetSection
-            from app.db.enums import EnrollmentStatus
             from sqlalchemy import select
 
             # First check that at least one target section is configured.
@@ -289,6 +290,7 @@ class AttemptService:
 
         if effective_deadline and now >= effective_deadline:
             await self._auto_submit(attempt)
+            await self.db.commit()
             raise ValidationError(
                 "Assessment deadline has passed. Your attempt has been automatically finalized.",
                 code="ASSESSMENT_WINDOW_CLOSED",
@@ -304,7 +306,7 @@ class AttemptService:
         attempt.paused_at = now
 
         # Append audit log for state-changing pause action
-        await self._append_submit_logs(attempt_id, change_type="pause")
+        await self._append_submit_logs(attempt_id, change_type="pause", audit_payload={"submitted": False})
         return attempt
 
     # -----------------------------------------------------------------------
@@ -359,8 +361,17 @@ class AttemptService:
                     code="RESUME_DISABLED",
                 )
 
-        # Check window still open
         now = _utcnow()
+        paused_at = attempt.paused_at
+        if paused_at and attempt.expires_at:
+            paused_duration = max(timedelta(0), now - paused_at)
+            attempt.expires_at += paused_duration
+            if attempt.assessment and attempt.assessment.window_end and not attempt.assessment.late_submission_allowed:
+                grace = timedelta(minutes=attempt.assessment.grace_period_minutes or 0)
+                attempt.expires_at = min(attempt.expires_at, attempt.assessment.window_end + grace)
+            await self.attempt_repo.update_fields(attempt_id, expires_at=attempt.expires_at)
+
+        # Check window still open
         effective_deadline = attempt.expires_at
         if attempt.assessment and attempt.assessment.window_end:
             grace = timedelta(minutes=attempt.assessment.grace_period_minutes or 0)
@@ -374,6 +385,7 @@ class AttemptService:
         if effective_deadline and now >= effective_deadline:
             # Auto-submit instead
             await self._auto_submit(attempt)
+            await self.db.commit()
             raise ValidationError(
                 "Assessment window closed while paused. Your attempt has been automatically submitted.",
                 code="ASSESSMENT_WINDOW_CLOSED",
@@ -392,7 +404,7 @@ class AttemptService:
         attempt.access_token = new_token
 
         # Append audit log for state-changing resume action
-        await self._append_submit_logs(attempt_id, change_type="resume")
+        await self._append_submit_logs(attempt_id, change_type="resume", audit_payload={"submitted": False})
         return attempt
 
     # -----------------------------------------------------------------------
@@ -430,16 +442,17 @@ class AttemptService:
         now = _utcnow()
         await self.attempt_repo.set_status(attempt_id, AttemptStatus.SUBMITTED)
         await self.submission_repo.finalize_all(attempt_id)
-        await self._append_submit_logs(attempt_id, change_type="submit")
-        
+        await self._append_submit_logs(attempt_id, change_type="submit", audit_payload={"submitted": True})
+
         # Automatic grading and result calculations are dispatched asynchronously via Celery in the route handler.
 
         # 4. Trigger Notifications
         try:
-            from app.db.repositories.notification_repo import NotificationRepository
             from app.db.enums import NotificationType
+            from app.db.repositories.notification_repo import \
+                NotificationRepository
             notif_repo = NotificationRepository(self.db)
-            
+
             # Notify Student
             await notif_repo.create(
                 recipient_id=student_id,
@@ -450,7 +463,7 @@ class AttemptService:
                 reference_type="attempt",
                 action_url=f"/student/assessments/{attempt.assessment_id}/results"
             )
-            
+
             # Notify Lecturer (if assessment has an owner)
             if attempt.assessment and attempt.assessment.created_by_id:
                 await notif_repo.create(
@@ -495,7 +508,7 @@ class AttemptService:
         """Internal: auto-submit one expired attempt."""
         await self.attempt_repo.set_status(attempt.id, AttemptStatus.AUTO_SUBMITTED)
         await self.submission_repo.finalize_all(attempt.id)
-        await self._append_submit_logs(attempt.id, change_type="auto_submit")
+        await self._append_submit_logs(attempt.id, change_type="auto_submit", audit_payload={"submitted": True})
 
     # -----------------------------------------------------------------------
     # TRACK ACTIVITY
@@ -568,7 +581,7 @@ class AttemptService:
         Compute attempt expiration timestamp factoring in extra time accommodations.
 
         adjusted_duration_minutes = duration_minutes * (1 + extra_time_percent / 100).
-        
+
         expires_at = min(window_end, now + adjusted_duration_minutes).
         If allow_accommodation_past_window_end is True on assessment, duration is not capped by window_end.
         If duration_minutes is None, expires_at = window_end.
@@ -593,7 +606,12 @@ class AttemptService:
             candidates.append(now + timedelta(hours=24))
         return min(candidates)
 
-    async def _append_submit_logs(self, attempt_id: uuid.UUID, change_type: str) -> None:
+    async def _append_submit_logs(
+        self,
+        attempt_id: uuid.UUID,
+        change_type: str,
+        audit_payload: dict,
+    ) -> None:
         """Append a log entry for every finalised response (audit trail)."""
         responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
         for response in responses:
@@ -603,5 +621,5 @@ class AttemptService:
                 question_id=response.question_id,
                 change_type=change_type,
                 previous_value=None,
-                new_value={"submitted": True},
+                new_value=audit_payload,
             )

@@ -35,8 +35,14 @@ export function resolveCanonicalQuestionType(
   typeStr?: string | null,
   answerTypeStr?: string | null,
 ): CanonicalQuestionType {
-  const norm = (typeStr || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
-  const normSub = (answerTypeStr || "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const norm = (typeStr || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+  const normSub = (answerTypeStr || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
 
   // Priority 1: Question Type
   switch (norm) {
@@ -132,7 +138,12 @@ export function StudentAnswerCanvas({
 
   if (isSkipped) {
     return (
-      <div className={cn("p-4 rounded-xl border border-dashed border-border/60 bg-muted/5 text-center text-xs text-muted-foreground italic", className)}>
+      <div
+        className={cn(
+          "p-4 rounded-xl border border-dashed border-border/60 bg-muted/5 text-center text-xs text-muted-foreground italic",
+          className,
+        )}
+      >
         No response recorded for this question node.
       </div>
     );
@@ -158,7 +169,9 @@ export function StudentAnswerCanvas({
     if (answerContent.answer_table) return answerContent.answer_table;
     const text =
       sub.answer_text ||
-      (typeof answerContent === "string" ? answerContent : answerContent.text) ||
+      (typeof answerContent === "string"
+        ? answerContent
+        : answerContent.text) ||
       sub.student_answer;
     if (
       typeof text === "string" &&
@@ -168,7 +181,9 @@ export function StudentAnswerCanvas({
         const parsed = JSON.parse(text);
         if (
           parsed &&
-          (parsed.headers || parsed.rows || Array.isArray(parsed))
+          !Array.isArray(parsed) &&
+          typeof parsed === "object" &&
+          (parsed.headers || parsed.rows)
         ) {
           return parsed;
         }
@@ -303,14 +318,24 @@ export function StudentAnswerCanvas({
 
   if (!textVal || String(textVal).trim() === "") {
     return (
-      <span className={cn("italic text-muted-foreground/60 font-sans font-normal text-xs", className)}>
+      <span
+        className={cn(
+          "italic text-muted-foreground/60 font-sans font-normal text-xs",
+          className,
+        )}
+      >
         No response recorded for this question node.
       </span>
     );
   }
 
   return (
-    <div className={cn("text-xs sm:text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap font-normal", className)}>
+    <div
+      className={cn(
+        "text-xs sm:text-sm leading-relaxed text-foreground/90 whitespace-pre-wrap font-normal",
+        className,
+      )}
+    >
       {renderRichMathText(String(textVal))}
     </div>
   );
@@ -335,9 +360,15 @@ function McqTrueFalseRenderer({
 }) {
   // Extract student selected option IDs across both individual and group data models
   let selected: string[] = [];
-  if (Array.isArray(submission.selected_option_ids) && submission.selected_option_ids.length > 0) {
+  if (
+    Array.isArray(submission.selected_option_ids) &&
+    submission.selected_option_ids.length > 0
+  ) {
     selected = submission.selected_option_ids.map(String);
-  } else if (Array.isArray(answerContent.selected_option_ids) && answerContent.selected_option_ids.length > 0) {
+  } else if (
+    Array.isArray(answerContent.selected_option_ids) &&
+    answerContent.selected_option_ids.length > 0
+  ) {
     selected = answerContent.selected_option_ids.map(String);
   } else if (answerContent.selected_option_id) {
     selected = [String(answerContent.selected_option_id)];
@@ -352,10 +383,16 @@ function McqTrueFalseRenderer({
   // Resolve options list
   let opts: any[] = question.options || [];
   if (isTrueFalse && opts.length === 0) {
-    const isTrueExpected = String(question.correct_answer || "").toLowerCase() === "true";
+    const isTrueExpected =
+      String(question.correct_answer || "").toLowerCase() === "true";
     opts = [
       { id: "true", text: "True", content: "True", is_correct: isTrueExpected },
-      { id: "false", text: "False", content: "False", is_correct: !isTrueExpected },
+      {
+        id: "false",
+        text: "False",
+        content: "False",
+        is_correct: !isTrueExpected,
+      },
     ];
   }
 
@@ -450,7 +487,10 @@ function MatchingRenderer({
     submission.match_pairs_json ||
     answerContent.match_pairs_json ||
     (() => {
-      const raw = submission.answer_text || answerContent.text || submission.student_answer;
+      const raw =
+        submission.answer_text ||
+        answerContent.text ||
+        submission.student_answer;
       if (typeof raw === "string" && raw.trim().startsWith("{")) {
         try {
           return JSON.parse(raw);
@@ -479,7 +519,8 @@ function MatchingRenderer({
         </p>
         <div className="space-y-2">
           {options.map((option) => {
-            const promptText = option.content || option.text || option.option_text || option.id;
+            const promptText =
+              option.content || option.text || option.option_text || option.id;
             const chosen =
               pairs[option.id] ??
               pairs[promptText] ??
@@ -488,7 +529,8 @@ function MatchingRenderer({
             const expected = option.match_value || option.option_text_right;
             const isMatchCorrect =
               expected &&
-              String(chosen).trim().toLowerCase() === String(expected).trim().toLowerCase();
+              String(chosen).trim().toLowerCase() ===
+                String(expected).trim().toLowerCase();
 
             return (
               <div
@@ -583,7 +625,10 @@ function OrderingRenderer({
     submission.ordered_option_ids ||
     answerContent.ordered_option_ids ||
     (() => {
-      const raw = submission.answer_text || answerContent.text || submission.student_answer;
+      const raw =
+        submission.answer_text ||
+        answerContent.text ||
+        submission.student_answer;
       if (Array.isArray(raw)) return raw.map(String);
       if (typeof raw === "string") {
         if (raw.trim().startsWith("[")) {
@@ -592,7 +637,10 @@ function OrderingRenderer({
             if (Array.isArray(p)) return p.map(String);
           } catch {}
         }
-        return raw.split(",").map((s) => s.trim()).filter(Boolean);
+        return raw
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
       }
       return [];
     })();
@@ -620,13 +668,19 @@ function OrderingRenderer({
           const opt = opts.find(
             (o: any) =>
               String(o.id) === val ||
-              (o.text && o.text.trim().toLowerCase() === val.trim().toLowerCase()) ||
-              (o.content && o.content.trim().toLowerCase() === val.trim().toLowerCase()) ||
-              (o.option_text && o.option_text.trim().toLowerCase() === val.trim().toLowerCase()),
+              (o.text &&
+                o.text.trim().toLowerCase() === val.trim().toLowerCase()) ||
+              (o.content &&
+                o.content.trim().toLowerCase() === val.trim().toLowerCase()) ||
+              (o.option_text &&
+                o.option_text.trim().toLowerCase() ===
+                  val.trim().toLowerCase()),
           );
           const label = opt ? opt.content || opt.text || opt.option_text : val;
           const expected = expectedOpts[idx];
-          const expectedText = expected ? expected.content || expected.text || expected.option_text : "";
+          const expectedText = expected
+            ? expected.content || expected.text || expected.option_text
+            : "";
           const isCorrect =
             expected &&
             (String(expected.id) === val ||
@@ -686,7 +740,10 @@ function FillBlankRenderer({
     submission.fill_blank_answers ||
     answerContent.fill_blank_answers ||
     (() => {
-      const raw = submission.answer_text || answerContent.text || submission.student_answer;
+      const raw =
+        submission.answer_text ||
+        answerContent.text ||
+        submission.student_answer;
       if (typeof raw === "string" && raw.trim().startsWith("{")) {
         try {
           return JSON.parse(raw);
@@ -715,9 +772,7 @@ function FillBlankRenderer({
             key={k}
             className="p-2.5 rounded-xl border bg-muted/20 flex items-center justify-between"
           >
-            <span className="font-medium text-muted-foreground">
-              Blank {k}
-            </span>
+            <span className="font-medium text-muted-foreground">Blank {k}</span>
             <span className="font-mono font-medium text-foreground">
               {renderRichMathText(String(blanks[k]))}
             </span>
@@ -748,7 +803,11 @@ function CaseStudyRenderer({
     submission.student_answer;
 
   const answerMap = useMemo<Record<string, string>>(() => {
-    if (typeof answerContent === "object" && answerContent !== null && Object.keys(answerContent).length > 0) {
+    if (
+      typeof answerContent === "object" &&
+      answerContent !== null &&
+      Object.keys(answerContent).length > 0
+    ) {
       return answerContent;
     }
     if (typeof rawAnsStr === "string" && rawAnsStr.trim().startsWith("{")) {
@@ -802,7 +861,12 @@ function CaseStudyRenderer({
             answerMap[String(index)];
 
           if (subAnswerVal === undefined) {
-            if (rawAnsStr && typeof rawAnsStr === "string" && !rawAnsStr.trim().startsWith("{") && index === 0) {
+            if (
+              rawAnsStr &&
+              typeof rawAnsStr === "string" &&
+              !rawAnsStr.trim().startsWith("{") &&
+              index === 0
+            ) {
               subAnswerVal = rawAnsStr;
             } else if (
               Object.keys(answerMap).length > 0 &&

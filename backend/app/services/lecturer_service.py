@@ -426,7 +426,7 @@ class LecturerService:
             update_data["updated_by_id"] = lecturer_id
             for field, value in update_data.items():
                 setattr(workspace, field, value)
-            await self.db.flush()
+            await self.db.commit()
             await self.db.refresh(workspace)
         return workspace
 

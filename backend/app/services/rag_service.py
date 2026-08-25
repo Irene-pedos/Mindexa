@@ -394,11 +394,191 @@ class RAGService:
             citations=citations if not fallback_used else [],
             chunk_ids_used=chunk_ids if not fallback_used else [],
             retrieval_score=avg_similarity,
-            fallback_used=fallback_used
+            fallback_used=fallback_used,
         )
 
-    async def _embed_question(self, question: str, student_id: Optional[uuid.UUID] = None) -> List[float]:
-        """Generate embedding for query text via audited AIGateway."""
+    async def retrieve_context_batch(
+        self,
+        questions: List[str],
+        student_id: uuid.UUID,
+        selected_resource_id: uuid.UUID | None = None,
+        selected_resource_ids: list[uuid.UUID] | None = None,
+        teaching_workspace_id: uuid.UUID | None = None,
+        top_k: int = None,
+    ) -> List[RAGRetrievalResult]:
+        """
+        Batch RAG retrieval pipeline for multiple questions.
+        Generates embeddings in a single audited batch call, avoids session concurrency issues,
+        and performs vector searches with precomputed allowed resources.
+        """
+        if not questions:
+            return []
+
+        top_k = top_k or settings.RAG_TOP_K
+        logger.info(
+            "Batch RAG retrieval started",
+            student_id=str(student_id),
+            questions_count=len(questions),
+            selected_resource_id=str(selected_resource_id) if selected_resource_id else None,
+            teaching_workspace_id=str(teaching_workspace_id) if teaching_workspace_id else None,
+        )
+
+        empty_result = RAGRetrievalResult(
+            context_string="",
+            citations=[],
+            chunk_ids_used=[],
+            retrieval_score=0.0,
+            fallback_used=True,
+        )
+
+        # 1. Batch generate embeddings for all questions in one audited call
+        try:
+            query_embeddings = await self._embed_questions(questions, student_id=student_id)
+            logger.info("Batch query embeddings generated", count=len(query_embeddings))
+        except Exception as exc:
+            logger.warning(
+                "Batch RAG: query embeddings unavailable, using general AI knowledge fallback",
+                error=str(exc),
+            )
+            return [empty_result for _ in questions]
+
+        # 2. Get allowed academic_resource_ids (optionally workspace-scoped) - resolved once
+        allowed_resource_ids = await self._get_allowed_resource_ids(
+            student_id, teaching_workspace_id=teaching_workspace_id
+        )
+
+        # Combine single resource ID into list
+        resource_id_list: list[uuid.UUID] = []
+        if selected_resource_id:
+            resource_id_list.append(selected_resource_id)
+        if selected_resource_ids:
+            for rid in selected_resource_ids:
+                if rid not in resource_id_list:
+                    resource_id_list.append(rid)
+
+        if resource_id_list:
+            resolved_ids = set()
+            for rid in resource_id_list:
+                stmt_own = select(StudentResource.academic_resource_id).where(
+                    and_(
+                        StudentResource.id == rid,
+                        StudentResource.student_id == student_id,
+                        StudentResource.is_deleted == False,
+                    )
+                )
+                res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
+
+                if not res_id:
+                    stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
+                        and_(
+                            LecturerMaterial.id == rid,
+                            LecturerMaterial.is_student_visible == True,
+                            LecturerMaterial.is_deleted == False,
+                        )
+                    )
+                    res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
+
+                if res_id and res_id in allowed_resource_ids:
+                    resolved_ids.add(res_id)
+
+            allowed_resource_ids = list(resolved_ids)
+
+        if not allowed_resource_ids:
+            logger.warning(
+                "No allowed resources found for student in batch retrieval — falling back",
+                student_id=str(student_id),
+            )
+            return [empty_result for _ in questions]
+
+        # 3. Query pgvector for each embedding sequentially using the precomputed allowed_resource_ids
+        results: List[RAGRetrievalResult] = []
+        stmt = (
+            text("""
+                SELECT rc.id, rc.content, rc.chunk_index, rc.metadata_json, rc.resource_id,
+                       ar.title as resource_name,
+                       (1 - (rc.embedding <=> CAST(:query_embedding AS vector))) as similarity
+                FROM resource_chunks rc
+                JOIN academic_resources ar ON rc.resource_id = ar.id
+                WHERE rc.resource_id = ANY(:allowed_ids)
+                  AND rc.embedding IS NOT NULL
+                ORDER BY rc.embedding <=> CAST(:query_embedding AS vector)
+                LIMIT :top_k
+            """)
+            .bindparams(
+                bindparam("allowed_ids", type_=ARRAY(PG_UUID()))
+            )
+        )
+        typed_allowed_ids = [
+            rid if isinstance(rid, uuid.UUID) else uuid.UUID(str(rid))
+            for rid in allowed_resource_ids
+        ]
+
+        for query_embedding in query_embeddings:
+            embedding_literal = "[" + ",".join(str(v) for v in query_embedding) + "]"
+            try:
+                db_res = await self.db.execute(
+                    stmt,
+                    {
+                        "query_embedding": embedding_literal,
+                        "allowed_ids": typed_allowed_ids,
+                        "top_k": top_k,
+                    },
+                )
+                rows = db_res.fetchall()
+            except Exception as exc:
+                logger.warning("Vector search query failed during batch retrieval", error=str(exc))
+                results.append(empty_result)
+                continue
+
+            chunks = []
+            citations = []
+            chunk_ids = []
+            total_similarity = 0.0
+
+            for row in rows:
+                chunk_id, content, chunk_index, metadata, res_id, res_name, similarity = row
+                chunks.append({
+                    "content": content,
+                    "resource_name": res_name,
+                    "metadata": metadata,
+                })
+                chunk_ids.append(chunk_id)
+                total_similarity += similarity
+
+                citations.append(
+                    SourceCitation(
+                        resource_name=res_name,
+                        resource_id=res_id,
+                        page_number=metadata.get("page") if metadata else None,
+                        chunk_index=chunk_index,
+                        excerpt=content[:120],
+                    )
+                )
+
+            avg_similarity = total_similarity / len(rows) if rows else 0.0
+            fallback_used = avg_similarity < settings.RAG_SIMILARITY_THRESHOLD or not rows
+
+            context_string = self._build_context_string(chunks) if not fallback_used else ""
+            results.append(
+                RAGRetrievalResult(
+                    context_string=context_string,
+                    citations=citations if not fallback_used else [],
+                    chunk_ids_used=chunk_ids if not fallback_used else [],
+                    retrieval_score=avg_similarity,
+                    fallback_used=fallback_used,
+                )
+            )
+
+        return results
+
+    async def _embed_questions(
+        self,
+        questions: List[str],
+        student_id: Optional[uuid.UUID] = None,
+    ) -> List[List[float]]:
+        """Generate embeddings for batch query texts via audited AIGateway."""
+        if not questions:
+            return []
         try:
             from app.core.ai.gateway import AIGateway
             from app.core.ai.provider_factory import (get_ai_providers,
@@ -406,15 +586,19 @@ class RAGService:
             from app.core.ai.providers import AIEmbeddingRequest
 
             gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
-            req = AIEmbeddingRequest(input=question)
+            summary = (
+                f"RAG query embedding: {questions[0][:50]}"
+                if len(questions) == 1
+                else f"RAG batch query embedding: {len(questions)} items"
+            )
+            req = AIEmbeddingRequest(input=questions)
             res = await gateway.embed(
                 req,
                 actor_id=student_id,
                 actor_role="student" if student_id else None,
-                prompt_summary=f"RAG query embedding: {question[:50]}",
+                prompt_summary=summary,
             )
-            vec = res.embeddings[0]
-            return self._fit_dimension(vec)
+            return [self._fit_dimension(vec) for vec in res.embeddings]
         except Exception as exc:
             logger.warning("AIGateway embedding failed for RAG query, attempting direct fallback", error=str(exc))
 
@@ -423,35 +607,45 @@ class RAGService:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.jina_api_key}"
+            "Authorization": f"Bearer {self.jina_api_key}",
         }
         url = f"{self.jina_base_url}/embeddings"
         jina_dim = min(settings.PGVECTOR_DIMENSION, 1024)
         target_dim = settings.PGVECTOR_DIMENSION
         payload = {
             "model": self.embedding_model,
-            "task": "retrieval.query",
+            "task": "retrieval.query" if len(questions) == 1 else "retrieval.passage",
             "dimensions": jina_dim,
-            "input": [question]
+            "input": questions,
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 if response.status_code != 200:
                     logger.error("Jina embedding failed", status=response.status_code, text=response.text)
                     raise Exception(f"Jina embedding request failed with status {response.status_code}")
 
                 data = response.json()
-                emb = data["data"][0]["embedding"]
-                if len(emb) < target_dim:
-                    emb = emb + [0.0] * (target_dim - len(emb))
-                elif len(emb) > target_dim:
-                    emb = emb[:target_dim]
-                return emb
+                results: List[List[float]] = []
+                for item in data.get("data", []):
+                    emb = item["embedding"]
+                    if len(emb) < target_dim:
+                        emb = emb + [0.0] * (target_dim - len(emb))
+                    elif len(emb) > target_dim:
+                        emb = emb[:target_dim]
+                    results.append(emb)
+                return results
         except Exception as e:
             logger.warning("Jina embedding error", error=str(e))
             raise e
+
+    async def _embed_question(self, question: str, student_id: Optional[uuid.UUID] = None) -> List[float]:
+        """Generate embedding for single query text via audited AIGateway."""
+        embeddings = await self._embed_questions([question], student_id=student_id)
+        if not embeddings:
+            raise Exception("Failed to generate query embedding")
+        return embeddings[0]
 
     async def _get_allowed_resource_ids(
         self, student_id: uuid.UUID, teaching_workspace_id: Optional[uuid.UUID] = None

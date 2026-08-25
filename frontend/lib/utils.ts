@@ -1,8 +1,8 @@
-import { clsx, type ClassValue } from "clsx"
-import { twMerge } from "tailwind-merge"
+import { clsx, type ClassValue } from "clsx";
+import { twMerge } from "tailwind-merge";
 
 export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
+  return twMerge(clsx(inputs));
 }
 
 /**
@@ -11,7 +11,7 @@ export function cn(...inputs: ClassValue[]) {
  * Because both "Practice" mode and "Formative" mode map to the `FORMATIVE`
  * backend enum, we rely on additional context flags to distinguish them:
  *   - `integrity_monitoring_enabled === false` → Practice
- *   - `is_supervised === false && allow_resume === true` → Practice
+ *   - when integrity monitoring is unavailable, `is_supervised === false && allow_resume === true` → Practice
  *   Otherwise → "Formative"
  *
  * For all other types, we just prettify the enum string.
@@ -29,7 +29,11 @@ export function formatAssessmentType(
 
   if (t === "FORMATIVE") {
     // Practice = FORMATIVE with integrity monitoring explicitly disabled
-    const isPractice = opts?.integrity_monitoring_enabled === false;
+    const isPractice =
+      opts?.integrity_monitoring_enabled === false ||
+      (opts?.integrity_monitoring_enabled == null &&
+        opts?.is_supervised === false &&
+        opts?.allow_resume === true);
     return isPractice ? "Practice" : "Formative";
   }
 
@@ -41,5 +45,11 @@ export function formatAssessmentType(
     REASSESSMENT: "Reassessment",
   };
 
-  return LABELS[t] ?? t.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  return (
+    LABELS[t] ??
+    t
+      .replace(/_/g, " ")
+      .toLowerCase()
+      .replace(/\b\w/g, (c) => c.toUpperCase())
+  );
 }

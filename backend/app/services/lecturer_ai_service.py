@@ -57,12 +57,47 @@ class LecturerAIService:
             context={"workspace_id": str(workspace.id)},
         )
 
-        # 2. Build Gateway
+        from app.db.enums import AIActionType
+        from app.core.ai.meta_identity import (
+            _META_IDENTITY_PATTERN,
+            LECTURER_META_IDENTITY_DEFLECTION,
+        )
+
+        # 2. Deterministic meta / identity question pre-filter (audit without calling LLM)
+        if _META_IDENTITY_PATTERN.search(body.question):
+            chat_provider = get_ai_provider()
+            embed_provider = get_embedding_provider()
+            gateway = AIGateway(self.db, chat_provider, embed_provider)
+            await gateway.log_action(
+                action_type=AIActionType.STUDY_SUPPORT,
+                actor_id=current_user.id,
+                actor_role="lecturer",
+                subject_entity_type="teaching_workspace",
+                subject_entity_id=body.workspace_id,
+                prompt_summary=f"Meta-identity deflection: {body.question[:100]}",
+                prompt_version="v1",
+                raw_output={
+                    "category": "META_IDENTITY",
+                    "deflected": True,
+                    "question": body.question,
+                },
+            )
+            return LecturerSupportResponse(
+                answer=LECTURER_META_IDENTITY_DEFLECTION,
+                citations=[],
+                fallback_used=False,
+                selected_sources=[],
+                mode=body.mode,
+                model="deterministic_evaluator",
+                provider="deterministic_rule_engine",
+            )
+
+        # 3. Build Gateway
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
         gateway = AIGateway(self.db, chat_provider, embed_provider)
 
-        # 3. Call Agent
+        # 4. Call Agent
         agent = LecturerSupportAgent(gateway)
         output = await agent.answer(
             question=body.question,

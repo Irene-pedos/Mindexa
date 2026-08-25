@@ -130,4 +130,32 @@ async def test_embed_question_fits_pgvector_dimension():
         assert len(vec) == settings.PGVECTOR_DIMENSION
         mock_embed.assert_awaited_once()
         called_args, called_kwargs = mock_embed.call_args
-        assert called_args and called_args[0].input == "Sample query string"
+        assert called_args and called_args[0].input == ["Sample query string"]
+
+
+@pytest.mark.asyncio
+async def test_rag_service_retrieve_context_batch_success():
+    db = AsyncMock()
+    service = RAGService(db)
+    service._embed_questions = AsyncMock(return_value=[[0.1] * 1536, [0.2] * 1536])
+    service._get_allowed_resource_ids = AsyncMock(return_value=[uuid.uuid4()])
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        (uuid.uuid4(), "Chunk content.", 1, {"page": 3}, uuid.uuid4(), "Course Guide", 0.94)
+    ]
+    db.execute.return_value = mock_result
+
+    student_id = uuid.uuid4()
+    questions = ["Question 1", "Question 2"]
+    results = await service.retrieve_context_batch(questions, student_id)
+
+    assert len(results) == 2
+    assert isinstance(results[0], RAGRetrievalResult)
+    assert "Chunk content." in results[0].context_string
+    assert not results[0].fallback_used
+    assert len(results[0].citations) == 1
+    assert results[0].citations[0].page_number == 3
+    service._embed_questions.assert_called_once_with(questions, student_id=student_id)
+    assert db.execute.call_count == 2
+

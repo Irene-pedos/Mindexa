@@ -9,19 +9,14 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update, and_, or_, exists, not_
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.db.enums import IntegrityFlagStatus, SupervisionSessionStatus
-from app.db.models.integrity import (
-    IntegrityEvent,
-    IntegrityFlag,
-    IntegrityWarning,
-    SupervisionSession,
-)
-from app.db.models.auth import User, UserProfile
+from app.db.enums import (AttemptStatus, IntegrityFlagStatus,
+                          SupervisionSessionStatus)
 from app.db.models.attempt import AssessmentAttempt
-from app.db.enums import AttemptStatus
+from app.db.models.auth import User, UserProfile
+from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
+                                     IntegrityWarning, SupervisionSession)
+from sqlalchemy import and_, exists, func, not_, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 def _utcnow() -> datetime:
@@ -112,13 +107,13 @@ class IntegrityRepository:
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        
+
         events = []
         for row in result.all():
             event = row[0]
             first_name = row[1] or ""
             last_name = row[2] or ""
-            
+
             # Determine severity based on event type
             severity = "low"
             risk_score = 10
@@ -309,8 +304,8 @@ class IntegrityRepository:
         page: int = 1,
         page_size: int = 50,
     ) -> tuple[list[dict], int]:
-        from app.db.models.auth import User, UserProfile
         from app.db.models.assessment import Assessment
+        from app.db.models.auth import User, UserProfile
 
         filters = [
             IntegrityFlag.is_deleted == False,  # noqa: E712
@@ -578,7 +573,7 @@ class IntegrityRepository:
     async def ensure_default_profiles(self) -> None:
         """Seed initial default profiles if not present."""
         from app.db.models.integrity import IntegrityProfile
-        
+
         defaults = [
             {
                 "code": "PRACTICE",
@@ -652,15 +647,20 @@ class IntegrityRepository:
         ]
 
         for d in defaults:
-            existing = await self.get_profile_by_code(d["code"])
+            result = await self.db.execute(
+                select(IntegrityProfile).where(
+                    IntegrityProfile.code == d["code"],
+                    IntegrityProfile.is_deleted == False,  # noqa: E712
+                )
+            )
+            existing = result.scalar_one_or_none()
             if not existing:
                 p = IntegrityProfile(**d)
                 self.db.add(p)
             else:
-                # Ensure copy and paste rules are synced to Tolerated + WARNING_LOG
                 updated_rules = dict(existing.rules_json or {})
-                updated_rules["copy"] = {"category": "Tolerated", "action": "WARNING_LOG"}
-                updated_rules["paste"] = {"category": "Tolerated", "action": "WARNING_LOG"}
+                updated_rules["copy"] = d["rules_json"]["copy"]
+                updated_rules["paste"] = d["rules_json"]["paste"]
                 existing.rules_json = updated_rules
         await self.db.flush()
 

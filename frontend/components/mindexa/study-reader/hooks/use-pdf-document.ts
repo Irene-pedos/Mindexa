@@ -6,9 +6,9 @@ import { pdfjs } from "react-pdf";
 import { ReaderSource, PdfOutlineItem, SearchMatch } from "../types";
 import { studentApi } from "@/lib/api/student";
 
-// Configure PDF.js worker
+// Configure PDF.js worker using self-hosted static asset
 if (typeof window !== "undefined" && !pdfjs.GlobalWorkerOptions.workerSrc) {
-  pdfjs.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
+  pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 }
 
 interface UsePdfDocumentReturn {
@@ -30,6 +30,7 @@ interface UsePdfDocumentReturn {
   nextMatch: () => number | null; // returns target pageNumber
   prevMatch: () => number | null; // returns target pageNumber
   goToMatch: (index: number) => number | null; // returns target pageNumber
+  reloadFile: () => void;
 }
 
 export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
@@ -39,7 +40,8 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
   const [numPages, setNumPages] = useState<number>(0);
   const [pdfDoc, setPdfDoc] = useState<any | null>(null);
   const [outline, setOutline] = useState<PdfOutlineItem[]>([]);
-  
+  const [retryTrigger, setRetryTrigger] = useState<number>(0);
+
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
@@ -47,6 +49,10 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
   const [isSearching, setIsSearching] = useState(false);
 
   const activeSearchRef = useRef<number>(0);
+
+  const reloadFile = useCallback(() => {
+    setRetryTrigger((c) => c + 1);
+  }, []);
 
   // Fetch blob and generate object URL
   useEffect(() => {
@@ -63,11 +69,13 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
           source.extension?.toLowerCase().includes("pdf") ||
           source.mimeType === "application/pdf";
 
+        const extension =
+          typeof source.extension === "string"
+            ? source.extension.toLowerCase().replace(".", "")
+            : "";
         const isImage =
           source.mimeType?.startsWith("image/") ||
-          ["png", "jpg", "jpeg", "webp", "svg", "gif"].includes(
-            source.extension?.toLowerCase().replace(".", "")
-          );
+          ["png", "jpg", "jpeg", "webp", "svg", "gif"].includes(extension);
 
         if (!isPdf && !isImage) {
           setError("unsupported_type");
@@ -98,47 +106,47 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
         window.URL.revokeObjectURL(createdUrl);
       }
     };
-  }, [source.id, source.kind, source.extension, source.mimeType]);
+  }, [source.id, source.kind, source.extension, source.mimeType, retryTrigger]);
 
-  // Recursively process PDF outline items and resolve target page numbers
+  // Concurrently process PDF outline items and resolve target page numbers in parallel
   const processOutlineItems = useCallback(
     async (rawItems: any[], doc: any): Promise<PdfOutlineItem[]> => {
-      const result: PdfOutlineItem[] = [];
+      if (!rawItems || rawItems.length === 0) return [];
 
-      for (const item of rawItems) {
-        let pageNumber: number | undefined;
+      return Promise.all(
+        rawItems.map(async (item): Promise<PdfOutlineItem> => {
+          let pageNumber: number | undefined;
 
-        try {
-          if (typeof item.dest === "string") {
-            const destArray = await doc.getDestination(item.dest);
-            if (destArray && destArray[0]) {
-              const pageIndex = await doc.getPageIndex(destArray[0]);
+          try {
+            if (typeof item.dest === "string") {
+              const destArray = await doc.getDestination(item.dest);
+              if (destArray && destArray[0]) {
+                const pageIndex = await doc.getPageIndex(destArray[0]);
+                pageNumber = pageIndex + 1;
+              }
+            } else if (Array.isArray(item.dest) && item.dest[0]) {
+              const pageIndex = await doc.getPageIndex(item.dest[0]);
               pageNumber = pageIndex + 1;
             }
-          } else if (Array.isArray(item.dest) && item.dest[0]) {
-            const pageIndex = await doc.getPageIndex(item.dest[0]);
-            pageNumber = pageIndex + 1;
+          } catch {
+            // If destination cannot be resolved, leave pageNumber undefined
           }
-        } catch {
-          // If destination cannot be resolved, leave pageNumber undefined
-        }
 
-        const processed: PdfOutlineItem = {
-          title: item.title || "Untitled Section",
-          pageNumber,
-          dest: item.dest,
-        };
+          let childItems: PdfOutlineItem[] | undefined;
+          if (item.items && item.items.length > 0) {
+            childItems = await processOutlineItems(item.items, doc);
+          }
 
-        if (item.items && item.items.length > 0) {
-          processed.items = await processOutlineItems(item.items, doc);
-        }
-
-        result.push(processed);
-      }
-
-      return result;
+          return {
+            title: item.title || "Untitled Section",
+            pageNumber,
+            dest: item.dest,
+            items: childItems,
+          };
+        }),
+      );
     },
-    []
+    [],
   );
 
   const onDocumentLoadSuccess = useCallback(
@@ -157,7 +165,7 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
         setOutline([]);
       }
     },
-    [processOutlineItems]
+    [processOutlineItems],
   );
 
   const onDocumentLoadError = useCallback((err: Error) => {
@@ -182,14 +190,22 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
 
       const matches: SearchMatch[] = [];
       const lowerQuery = trimmed.toLowerCase();
+      const MAX_MATCHES = 200;
 
       try {
         for (let pageNum = 1; pageNum <= pdfDoc.numPages; pageNum++) {
           if (activeSearchRef.current !== searchId) return; // Stale search
+          if (matches.length >= MAX_MATCHES) break; // Soft cap on search matches
+
+          // Yield to browser main thread every 8 pages on large documents
+          if (pageNum % 8 === 0) {
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            if (activeSearchRef.current !== searchId) return;
+          }
 
           const page = await pdfDoc.getPage(pageNum);
           const textContent = await page.getTextContent();
-          
+
           const fullPageText = textContent.items
             .map((item: any) => item.str || "")
             .join(" ");
@@ -199,14 +215,22 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
           let matchIndexOnPage = 0;
 
           while ((pos = lowerPageText.indexOf(lowerQuery, pos)) !== -1) {
+            if (matches.length >= MAX_MATCHES) break;
+
             const snippetStart = Math.max(0, pos - 35);
-            const snippetEnd = Math.min(fullPageText.length, pos + lowerQuery.length + 35);
+            const snippetEnd = Math.min(
+              fullPageText.length,
+              pos + lowerQuery.length + 35,
+            );
             const snippet = fullPageText.substring(snippetStart, snippetEnd);
 
             matches.push({
               pageNumber: pageNum,
               matchIndex: matches.length,
-              snippet: (snippetStart > 0 ? "…" : "") + snippet + (snippetEnd < fullPageText.length ? "…" : ""),
+              snippet:
+                (snippetStart > 0 ? "…" : "") +
+                snippet +
+                (snippetEnd < fullPageText.length ? "…" : ""),
               text: fullPageText.substring(pos, pos + lowerQuery.length),
             });
 
@@ -227,7 +251,7 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
         }
       }
     },
-    [pdfDoc]
+    [pdfDoc],
   );
 
   const clearSearch = useCallback(() => {
@@ -246,7 +270,8 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
 
   const prevMatch = useCallback((): number | null => {
     if (searchMatches.length === 0) return null;
-    const prevIdx = (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
+    const prevIdx =
+      (currentMatchIndex - 1 + searchMatches.length) % searchMatches.length;
     setCurrentMatchIndex(prevIdx);
     return searchMatches[prevIdx].pageNumber;
   }, [searchMatches, currentMatchIndex]);
@@ -257,7 +282,7 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
       setCurrentMatchIndex(index);
       return searchMatches[index].pageNumber;
     },
-    [searchMatches]
+    [searchMatches],
   );
 
   return {
@@ -279,5 +304,6 @@ export function usePdfDocument(source: ReaderSource): UsePdfDocumentReturn {
     nextMatch,
     prevMatch,
     goToMatch,
+    reloadFile,
   };
 }

@@ -94,13 +94,18 @@ class LecturerSupportAgent(BaseAgent):
                 "the question, clearly state what was found in the context first, and then supplement "
                 "with general academic knowledge, labeling the general knowledge clearly. Never claim to "
                 "have read or accessed a course file unless retrieved chunks from that file were actually "
-                "provided in the context."
+                "provided in the context. If the user asks something entirely unrelated to academic, "
+                "pedagogical, or coursework topics (not identity questions — those are handled separately), "
+                "briefly and kindly redirect them to teaching, rubric, and course design topics."
             )
         else:
             return (
                 "You are the Mindexa Lecturer AI Assistant. No relevant course materials were found in the "
                 "retrieved context. Answer the lecturer's query using general academic knowledge only, and "
-                "clearly state at the beginning that your answer is not based on specific course materials."
+                "clearly state at the beginning that your answer is not based on specific course materials. "
+                "If the user asks something entirely unrelated to academic, pedagogical, or coursework topics "
+                "(not identity questions — those are handled separately), briefly and kindly redirect them to "
+                "teaching, rubric, and course design topics."
             )
 
     def _build_user_prompt(self, question: str, context: str, fallback: bool) -> str:

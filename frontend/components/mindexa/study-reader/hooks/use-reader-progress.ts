@@ -1,8 +1,9 @@
 // frontend/components/mindexa/study-reader/hooks/use-reader-progress.ts
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { ReaderProgress, ReaderSourceKind, ZoomMode } from "../types";
+import { studyReaderApi } from "@/lib/api/study-reader";
 
 const STORAGE_PREFIX = "mindexa:reader:";
 
@@ -10,7 +11,10 @@ function getStorageKey(kind: ReaderSourceKind, id: string): string {
   return `${STORAGE_PREFIX}${kind}:${id}`;
 }
 
-export function getStoredProgress(kind: ReaderSourceKind, id: string): ReaderProgress | null {
+export function getStoredProgress(
+  kind: ReaderSourceKind,
+  id: string,
+): ReaderProgress | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(getStorageKey(kind, id));
@@ -33,7 +37,7 @@ export function getStoredProgress(kind: ReaderSourceKind, id: string): ReaderPro
 export function saveStoredProgress(
   kind: ReaderSourceKind,
   id: string,
-  updates: Partial<ReaderProgress>
+  updates: Partial<ReaderProgress>,
 ): void {
   if (typeof window === "undefined") return;
   try {
@@ -68,50 +72,132 @@ export function clearStoredProgress(kind: ReaderSourceKind, id: string): void {
   }
 }
 
-export function useReaderProgress(kind: ReaderSourceKind, id: string) {
-  const currentKey = `${kind}:${id}`;
+export function useReaderProgress(
+  kind: ReaderSourceKind,
+  id: string,
+  initialPageParam?: number | null,
+) {
+  const currentKey = `${kind}:${id}:${initialPageParam || "default"}`;
   const [prevKey, setPrevKey] = useState(currentKey);
+  const [isLoaded, setIsLoaded] = useState<boolean>(false);
   const [progress, setProgress] = useState<ReaderProgress>(() => {
+    const stored = getStoredProgress(kind, id);
+    const resolvedPage =
+      typeof initialPageParam === "number" && initialPageParam >= 1
+        ? initialPageParam
+        : stored?.page || 1;
+
     return (
-      getStoredProgress(kind, id) || {
-        page: 1,
-        numPages: 1,
-        zoom: 100,
-        zoomMode: "fit-width",
-        rotation: 0,
-        twoPageView: false,
-        lastReadAt: new Date().toISOString(),
-      }
+      stored
+        ? { ...stored, page: resolvedPage }
+        : {
+            page: resolvedPage,
+            numPages: 1,
+            zoom: 100,
+            zoomMode: "fit-width",
+            rotation: 0,
+            twoPageView: false,
+            lastReadAt: new Date().toISOString(),
+          }
     );
   });
 
   // Adjust state during render if kind or id changes (React recommended pattern)
   if (prevKey !== currentKey) {
     setPrevKey(currentKey);
+    setIsLoaded(false);
+    const stored = getStoredProgress(kind, id);
+    const resolvedPage =
+      typeof initialPageParam === "number" && initialPageParam >= 1
+        ? initialPageParam
+        : stored?.page || 1;
+
     setProgress(
-      getStoredProgress(kind, id) || {
-        page: 1,
-        numPages: 1,
-        zoom: 100,
-        zoomMode: "fit-width",
-        rotation: 0,
-        twoPageView: false,
-        lastReadAt: new Date().toISOString(),
-      }
+      stored
+        ? { ...stored, page: resolvedPage }
+        : {
+            page: resolvedPage,
+            numPages: 1,
+            zoom: 100,
+            zoomMode: "fit-width",
+            rotation: 0,
+            twoPageView: false,
+            lastReadAt: new Date().toISOString(),
+          },
     );
   }
 
-  const isLoaded = true;
+  // Fetch remote progress from server on mount for cross-device continuity
+  useEffect(() => {
+    let mounted = true;
+    studyReaderApi
+      .getProgress(kind, id)
+      .then((remote: any) => {
+        if (mounted && remote) {
+          setProgress((prev) => {
+            const resolvedPage =
+              typeof initialPageParam === "number" && initialPageParam >= 1
+                ? initialPageParam
+                : typeof remote.last_page === "number"
+                  ? Math.max(1, remote.last_page)
+                  : prev.page;
+            const serverZoom =
+              typeof remote.last_scale === "number"
+                ? remote.last_scale
+                : prev.zoom;
+            const serverRotation =
+              typeof remote.rotation === "number"
+                ? remote.rotation
+                : prev.rotation;
+            const serverZoomMode =
+              (remote.zoom_mode as ZoomMode) || prev.zoomMode;
+            const serverTwoPage =
+              remote.two_page_view !== undefined
+                ? Boolean(remote.two_page_view)
+                : prev.twoPageView;
+
+            const reconciled: ReaderProgress = {
+              ...prev,
+              page: resolvedPage,
+              zoom: serverZoom,
+              zoomMode: serverZoomMode,
+              rotation: serverRotation,
+              twoPageView: serverTwoPage,
+              lastReadAt: remote.updated_at || new Date().toISOString(),
+            };
+
+            saveStoredProgress(kind, id, reconciled);
+            return reconciled;
+          });
+        }
+      })
+      .catch(() => {
+        // Fallback gracefully to localStorage state if offline or network error
+      })
+      .finally(() => {
+        if (mounted) {
+          setIsLoaded(true);
+        }
+      });
+
+    return () => {
+      mounted = false;
+    };
+  }, [kind, id, initialPageParam]);
 
   const updateProgress = useCallback(
     (updates: Partial<ReaderProgress>) => {
       setProgress((prev) => {
-        const next = { ...prev, ...updates, lastReadAt: new Date().toISOString() };
+        const next = {
+          ...prev,
+          ...updates,
+          lastReadAt: new Date().toISOString(),
+        };
         saveStoredProgress(kind, id, next);
         return next;
       });
     },
-    [kind, id]
+    [kind, id],
   );
 
   const clear = useCallback(() => {
@@ -134,3 +220,4 @@ export function useReaderProgress(kind: ReaderSourceKind, id: string) {
     isLoaded,
   };
 }
+

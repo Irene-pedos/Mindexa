@@ -659,10 +659,10 @@ function QuestionCard({
   const [showMediaUpload, setShowMediaUpload] = useState(!!question.imageUrl);
   const [isUploading, setIsUploading] = useState(false);
   const [showTableStemEditor, setShowTableStemEditor] = useState(
-    !!(question.question_table_context || question.questionTableContext)
+    !!(question.question_table_context || question.questionTableContext),
   );
   const [showTableAnswerEditor, setShowTableAnswerEditor] = useState(
-    !!(question.requires_table_answer || question.requiresTableAnswer)
+    !!(question.requires_table_answer || question.requiresTableAnswer),
   );
   const [mathDialogOpen, setMathDialogOpen] = useState(false);
   const [mathTargetField, setMathTargetField] = useState<{
@@ -672,7 +672,7 @@ function QuestionCard({
 
   const openMathEditor = (
     field: "text" | "solutionSteps" | "caseStudyContext" | "option",
-    optionIndex?: number
+    optionIndex?: number,
   ) => {
     setMathTargetField({ field, optionIndex });
     setMathDialogOpen(true);
@@ -862,10 +862,18 @@ function QuestionCard({
                   "h-8 w-8 transition-colors",
                   question.savedToBank
                     ? "text-emerald-500 hover:text-emerald-500 cursor-not-allowed bg-emerald-50"
-                    : "text-primary hover:bg-primary/5"
+                    : "text-primary hover:bg-primary/5",
                 )}
-                title={question.savedToBank ? "Already saved to Bank" : "Save to Bank"}
-                aria-label={question.savedToBank ? "Already saved to Bank" : "Save to Bank"}
+                title={
+                  question.savedToBank
+                    ? "Already saved to Bank"
+                    : "Save to Bank"
+                }
+                aria-label={
+                  question.savedToBank
+                    ? "Already saved to Bank"
+                    : "Save to Bank"
+                }
               >
                 {question.savedToBank ? (
                   <CheckCircle2 className="size-4 text-emerald-500" />
@@ -908,7 +916,8 @@ function QuestionCard({
               onChange={(e) => onUpdate({ text: e.target.value })}
               className="min-h-25 text-base"
             />
-            {(question.type === "fillblank" || (question.type as string) === "fill_blank") && (
+            {(question.type === "fillblank" ||
+              (question.type as string) === "fill_blank") && (
               <div className="space-y-1 mt-1">
                 <p className="text-[11px] text-primary font-medium">
                   Tip: Use <strong>[blank]</strong> to indicate where students
@@ -967,7 +976,8 @@ function QuestionCard({
                   }}
                   className="h-7 px-2.5 text-[11px]"
                 >
-                  {question.question_table_context || question.questionTableContext
+                  {question.question_table_context ||
+                  question.questionTableContext
                     ? "Edit Reference Table"
                     : "+ Add Reference Table"}
                 </Button>
@@ -1008,7 +1018,8 @@ function QuestionCard({
                     }}
                     className="h-7 px-2.5 text-[11px]"
                   >
-                    {question.requires_table_answer || question.requiresTableAnswer
+                    {question.requires_table_answer ||
+                    question.requiresTableAnswer
                       ? "✓ Requires Table Answer"
                       : "Require Table Answer"}
                   </Button>
@@ -1019,13 +1030,18 @@ function QuestionCard({
             {showTableStemEditor && (
               <div className="mt-3 p-3 bg-background border rounded-lg space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-muted-foreground">Question Stem Reference Table</span>
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Question Stem Reference Table
+                  </span>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => {
-                      onUpdate({ question_table_context: undefined, questionTableContext: undefined });
+                      onUpdate({
+                        question_table_context: undefined,
+                        questionTableContext: undefined,
+                      });
                       setShowTableStemEditor(false);
                     }}
                     className="h-6 text-[10px] text-destructive hover:bg-destructive/10"
@@ -1034,21 +1050,41 @@ function QuestionCard({
                   </Button>
                 </div>
                 <TableEditor
-                  initialData={question.question_table_context || question.questionTableContext}
-                  onChange={(data) => onUpdate({ question_table_context: data, questionTableContext: data })}
+                  initialData={
+                    question.question_table_context ||
+                    question.questionTableContext
+                  }
+                  onChange={(data) =>
+                    onUpdate({
+                      question_table_context: data,
+                      questionTableContext: data,
+                    })
+                  }
                 />
               </div>
             )}
 
-            {showTableAnswerEditor && (question.requires_table_answer || question.requiresTableAnswer) && (
-              <div className="mt-3 p-3 bg-background border rounded-lg space-y-2">
-                <span className="text-xs font-semibold text-muted-foreground">Student Answer Table Template Grid</span>
-                <TableEditor
-                  initialData={question.answer_table_template || question.answerTableTemplate}
-                  onChange={(data) => onUpdate({ answer_table_template: data, answerTableTemplate: data })}
-                />
-              </div>
-            )}
+            {showTableAnswerEditor &&
+              (question.requires_table_answer ||
+                question.requiresTableAnswer) && (
+                <div className="mt-3 p-3 bg-background border rounded-lg space-y-2">
+                  <span className="text-xs font-semibold text-muted-foreground">
+                    Student Answer Table Template Grid
+                  </span>
+                  <TableEditor
+                    initialData={
+                      question.answer_table_template ||
+                      question.answerTableTemplate
+                    }
+                    onChange={(data) =>
+                      onUpdate({
+                        answer_table_template: data,
+                        answerTableTemplate: data,
+                      })
+                    }
+                  />
+                </div>
+              )}
           </div>
 
           {showMediaUpload && (
@@ -1470,7 +1506,8 @@ function QuestionCard({
           />
         )}
 
-        {(question.type === "fillblank" || (question.type as string) === "fill_blank") && (
+        {(question.type === "fillblank" ||
+          (question.type as string) === "fill_blank") && (
           <div className="space-y-6 pl-4 border-l-2 border-muted">
             <div className="space-y-4">
               <Label className="text-sm font-semibold flex items-center gap-2">
@@ -1521,7 +1558,8 @@ function QuestionCard({
                         className="flex-1 h-9"
                         placeholder={`Correct answer for [blank] #${oIdx + 1}`}
                       />
-                      {question.options.filter((o) => o.is_correct).length > 1 && (
+                      {question.options.filter((o) => o.is_correct).length >
+                        1 && (
                         <Button
                           variant="ghost"
                           size="icon"
@@ -1835,24 +1873,34 @@ function ReviewQuestionCard({
                 </em>
               )}
             </div>
-            {(question.question_table_context || question.questionTableContext) && (
+            {(question.question_table_context ||
+              question.questionTableContext) && (
               <div className="mt-3 p-3 bg-background border rounded-xl space-y-1.5">
                 <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <TableIcon className="size-3.5 text-primary" /> Question Stem Reference Table
+                  <TableIcon className="size-3.5 text-primary" /> Question Stem
+                  Reference Table
                 </div>
                 <TableContextViewer
-                  data={question.question_table_context || question.questionTableContext}
+                  data={
+                    question.question_table_context ||
+                    question.questionTableContext
+                  }
                 />
               </div>
             )}
             {(question.requires_table_answer || question.requiresTableAnswer) &&
-              (question.answer_table_template || question.answerTableTemplate) && (
+              (question.answer_table_template ||
+                question.answerTableTemplate) && (
                 <div className="mt-3 p-3 bg-muted/20 border border-dashed rounded-xl space-y-1.5">
                   <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                    <TableIcon className="size-3.5 text-primary" /> Expected Student Answer Table Template Grid
+                    <TableIcon className="size-3.5 text-primary" /> Expected
+                    Student Answer Table Template Grid
                   </div>
                   <TableContextViewer
-                    data={question.answer_table_template || question.answerTableTemplate}
+                    data={
+                      question.answer_table_template ||
+                      question.answerTableTemplate
+                    }
                   />
                 </div>
               )}
@@ -1888,7 +1936,8 @@ function ReviewQuestionCard({
             <Badge variant="outline" className="h-5 text-[10px] font-medium">
               {question.marks} Marks
             </Badge>
-            {(question.requires_table_answer || question.requiresTableAnswer) && (
+            {(question.requires_table_answer ||
+              question.requiresTableAnswer) && (
               <Badge
                 variant="outline"
                 className="h-5 text-[10px] bg-primary/5 text-primary border-primary/20 gap-1 font-semibold"
@@ -1936,7 +1985,9 @@ function ReviewQuestionCard({
                     key={i}
                     className="flex items-center gap-4 bg-muted/10 p-2 px-3 rounded-md border border-dashed text-xs"
                   >
-                    <div className="font-medium flex-1">{renderRichMathText(opt.option_text)}</div>
+                    <div className="font-medium flex-1">
+                      {renderRichMathText(opt.option_text)}
+                    </div>
                     <ChevronRight className="size-3 text-primary shrink-0" />
                     <div className="font-bold text-primary flex-1">
                       {renderRichMathText(opt.option_text_right || "")}
@@ -1985,11 +2036,9 @@ function ReviewQuestionCard({
                 <span className="block text-[10px] font-bold uppercase tracking-wider text-primary not-italic mb-1">
                   Grading Key
                 </span>
-                {question.options[0]?.option_text ? (
-                  renderRichMathText(question.options[0].option_text)
-                ) : (
-                  "No grading rubric provided."
-                )}
+                {question.options[0]?.option_text
+                  ? renderRichMathText(question.options[0].option_text)
+                  : "No grading rubric provided."}
               </div>
             )}
           </div>
@@ -2105,8 +2154,10 @@ const mapBackendToFrontendType = (type: string): QuestionType => {
   if (norm === "ordering") return "ordering";
   if (norm === "mcq") return "mcq";
   if (norm === "essay") return "essay";
-  
-  console.warn(`[mapBackendToFrontendType] Unknown backend question type: '${type}'. Falling back to 'shortanswer'.`);
+
+  console.warn(
+    `[mapBackendToFrontendType] Unknown backend question type: '${type}'. Falling back to 'shortanswer'.`,
+  );
   return "shortanswer";
 };
 
@@ -2227,9 +2278,7 @@ const mapCandidateToQuestion = (
     ];
   } else if (qType === "casestudy") {
     caseStudyContext =
-      candidate.case_study_context ||
-      candidate.caseStudyContext ||
-      text;
+      candidate.case_study_context || candidate.caseStudyContext || text;
     const shortText =
       "Analyze the following case scenario and answer the sub-questions below.";
     const computedMarks = mappedOptions.reduce(
@@ -2313,8 +2362,12 @@ export default function NewAssessmentBuilder() {
     "ASSISTANT",
   );
   const [studentSearch, setStudentSearch] = useState("");
-  const [selectedGroupFilter, setSelectedGroupFilter] = useState<Record<string, string>>({});
-  const [step5ViewMode, setStep5ViewMode] = useState<"standard" | "per_group">("standard");
+  const [selectedGroupFilter, setSelectedGroupFilter] = useState<
+    Record<string, string>
+  >({});
+  const [step5ViewMode, setStep5ViewMode] = useState<"standard" | "per_group">(
+    "standard",
+  );
   const [isWorkspaceDetailOpen, setIsWorkspaceDetailOpen] = useState(false);
 
   const filteredRoster = useMemo(() => {
@@ -2347,7 +2400,9 @@ export default function NewAssessmentBuilder() {
   });
   const [aiReviewDrawerOpen, setAiReviewDrawerOpen] = useState(false);
   const [aiCandidates, setAiCandidates] = useState<any[]>([]);
-  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(
+    null,
+  );
   const [aiTargetSectionId, setAiTargetSectionId] = useState<string>("all");
   const [aiBatchId, setAiBatchId] = useState<string | null>(null);
   const [aiFailedSectionIds, setAiFailedSectionIds] = useState<string[]>([]);
@@ -2359,7 +2414,7 @@ export default function NewAssessmentBuilder() {
       const currentId = draftIdRef.current || "new";
       const key = `aiGenerationConfig_${currentId}_${targetSectionId}`;
       let saved = sessionStorage.getItem(key);
-      
+
       // Migrate temp config to the saved draft ID once available
       if (!saved && draftIdRef.current) {
         const tempKey = `aiGenerationConfig_new_${targetSectionId}`;
@@ -2460,7 +2515,10 @@ export default function NewAssessmentBuilder() {
     question_distribution_mode: "SHARED" as "SHARED" | "PER_GROUP",
     require_all_member_approval: true,
     require_all_member_participation: true,
-    submission_mode: "SINGLE_LEADER" as "SINGLE_LEADER" | "ALL_MEMBERS" | "MAJORITY_VOTE",
+    submission_mode: "SINGLE_LEADER" as
+      | "SINGLE_LEADER"
+      | "ALL_MEMBERS"
+      | "MAJORITY_VOTE",
     peer_evaluation_enabled: false,
     peer_evaluation_deadline: "" as any,
     peer_evaluation_weight_percent: "" as any,
@@ -2654,7 +2712,12 @@ export default function NewAssessmentBuilder() {
   useEffect(() => {
     async function fetchGroups() {
       const assessmentId = draftIdRef.current;
-      if (!assessmentId || !selectedWorkspaceDetail || !metadata.is_group_assessment) return;
+      if (
+        !assessmentId ||
+        !selectedWorkspaceDetail ||
+        !metadata.is_group_assessment
+      )
+        return;
       try {
         const roster = selectedWorkspaceDetail.roster || [];
         const fetched = await groupWorkApi.getGroups(assessmentId);
@@ -2663,19 +2726,23 @@ export default function NewAssessmentBuilder() {
           name: sg.name,
           members: (sg.members || []).map((m: any) => {
             const memberStudentId = m.id || m.student_id;
-            const studentInfo = roster.find((r: any) => (r.id || r.student_id) === memberStudentId);
+            const studentInfo = roster.find(
+              (r: any) => (r.id || r.student_id) === memberStudentId,
+            );
             return {
               id: memberStudentId,
               name: m.name || studentInfo?.name || "Student",
               email: studentInfo?.email || "",
-              is_leader: !!m.is_leader
+              is_leader: !!m.is_leader,
             };
-          })
+          }),
         }));
         setGroups(mappedGroups);
       } catch (err: any) {
         if (err.message?.includes("is not configured as group work")) {
-          console.log("Assessment draft not yet configured as group work on the backend.");
+          console.log(
+            "Assessment draft not yet configured as group work on the backend.",
+          );
         } else {
           console.warn("Failed to load existing groups:", err);
         }
@@ -2743,6 +2810,11 @@ export default function NewAssessmentBuilder() {
                 if (type === "GROUP_WORK") return "Groupwork";
                 if (type === "CAT") return "CAT";
                 if (!type) return "CAT";
+                if (type === "FORMATIVE") {
+                  return data.integrity_monitoring_enabled === false
+                    ? "Practice"
+                    : "Formative";
+                }
                 const normalized =
                   type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
                 const validModes = [
@@ -2810,12 +2882,16 @@ export default function NewAssessmentBuilder() {
               submission_mode: data.submission_mode || "SINGLE_LEADER",
               peer_evaluation_enabled: data.peer_evaluation_enabled || false,
               peer_evaluation_deadline: data.peer_evaluation_deadline || "",
-              peer_evaluation_weight_percent: data.peer_evaluation_weight_percent || "",
-              individual_weighting_enabled: data.individual_weighting_enabled || false,
+              peer_evaluation_weight_percent:
+                data.peer_evaluation_weight_percent || "",
+              individual_weighting_enabled:
+                data.individual_weighting_enabled || false,
               appeal_window_days: data.appeal_window_days || 7,
               audience_type: data.audience_type || "all",
               target_student_ids: data.target_student_ids || [],
-              target_section_ids: (data.target_sections || []).map((ts: any) => ts.class_section_id || ts.id),
+              target_section_ids: (data.target_sections || []).map(
+                (ts: any) => ts.class_section_id || ts.id,
+              ),
             });
 
             const initialTotal = data.total_marks || 0;
@@ -3146,7 +3222,9 @@ export default function NewAssessmentBuilder() {
           ...prev,
           aiAllowed: prev.supervised ? false : prev.aiAllowed,
           browserRestricted: prev.supervised ? prev.browserRestricted : false,
-          integrityMonitoring: prev.supervised ? prev.integrityMonitoring : false,
+          integrityMonitoring: prev.supervised
+            ? prev.integrityMonitoring
+            : false,
           shuffleQuestions: false,
           shuffleOptions: false,
           attempts: 1,
@@ -3419,8 +3497,14 @@ export default function NewAssessmentBuilder() {
             const tagged = generatedQuestions.map((q) => {
               let secId = q.target_section_id || (q as any)._sectionId;
               if (!secId) {
-                secId = targetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : targetSectionId;
-                console.warn("Ingested candidate question has no section ID. Falling back to:", secId);
+                secId =
+                  targetSectionId === "all"
+                    ? blueprintRef.current[0]?.id || ""
+                    : targetSectionId;
+                console.warn(
+                  "Ingested candidate question has no section ID. Falling back to:",
+                  secId,
+                );
               }
               return {
                 ...q,
@@ -3574,9 +3658,7 @@ export default function NewAssessmentBuilder() {
 
             if (targetSectionId === "all") {
               const generatedSectionIds = new Set(
-                validCandidatesList
-                  .map((q) => q._sectionId)
-                  .filter(Boolean),
+                validCandidatesList.map((q) => q._sectionId).filter(Boolean),
               );
               const failedIds = blueprint
                 .map((s) => s.id)
@@ -3614,7 +3696,7 @@ export default function NewAssessmentBuilder() {
           if (status === 401 || status === 403 || status === 404) {
             setAiGenerating(false);
             toast.error(
-              `AI question generation stopped: ${err.message || "Authentication or resource error"}`
+              `AI question generation stopped: ${err.message || "Authentication or resource error"}`,
             );
             return;
           }
@@ -3871,9 +3953,17 @@ export default function NewAssessmentBuilder() {
       const activeId = draftIdRef.current;
       let targetSecId = (candidate as any)._sectionId;
       if (!targetSecId) {
-        targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
-        console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
-        toast.warning("Associated candidate question with first section due to missing target section ID.");
+        targetSecId =
+          aiTargetSectionId === "all"
+            ? blueprintRef.current[0]?.id || ""
+            : aiTargetSectionId;
+        console.warn(
+          "Orphaned AI candidate question had no section ID. Falling back to section ID:",
+          targetSecId,
+        );
+        toast.warning(
+          "Associated candidate question with first section due to missing target section ID.",
+        );
       }
 
       // Calculate marks per question using questionsRef.current to avoid stale closures
@@ -3986,9 +4076,17 @@ export default function NewAssessmentBuilder() {
       const activeId = draftIdRef.current;
       let targetSecId = (candidate as any)._sectionId;
       if (!targetSecId) {
-        targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
-        console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
-        toast.warning("Associated candidate question with first section due to missing target section ID.");
+        targetSecId =
+          aiTargetSectionId === "all"
+            ? blueprintRef.current[0]?.id || ""
+            : aiTargetSectionId;
+        console.warn(
+          "Orphaned AI candidate question had no section ID. Falling back to section ID:",
+          targetSecId,
+        );
+        toast.warning(
+          "Associated candidate question with first section due to missing target section ID.",
+        );
       }
 
       // Calculate marks per question using questionsRef.current to avoid stale closures
@@ -4093,11 +4191,21 @@ export default function NewAssessmentBuilder() {
       const candidatesWithMarks = aiCandidates.map((c) => {
         let targetSecId = (c as any)._sectionId;
         if (!targetSecId) {
-          targetSecId = aiTargetSectionId === "all" ? (blueprintRef.current[0]?.id || "") : aiTargetSectionId;
-          console.warn("Orphaned AI candidate question had no section ID. Falling back to section ID:", targetSecId);
-          toast.warning("Associated candidate question with first section due to missing target section ID.");
+          targetSecId =
+            aiTargetSectionId === "all"
+              ? blueprintRef.current[0]?.id || ""
+              : aiTargetSectionId;
+          console.warn(
+            "Orphaned AI candidate question had no section ID. Falling back to section ID:",
+            targetSecId,
+          );
+          toast.warning(
+            "Associated candidate question with first section due to missing target section ID.",
+          );
         }
-        const sectionObj = blueprintRef.current.find((s) => s.id === targetSecId);
+        const sectionObj = blueprintRef.current.find(
+          (s) => s.id === targetSecId,
+        );
         let marksPerQuestion = 2;
         if (sectionObj) {
           const sectionQuestions = simulatedQuestionsForMarks.filter(
@@ -4181,7 +4289,11 @@ export default function NewAssessmentBuilder() {
               newQ.savedToBank = true;
             }
             simulatedQuestions.push(newQ);
-            successfulCandidates.push({ candidate, targetSecId, marksPerQuestion });
+            successfulCandidates.push({
+              candidate,
+              targetSecId,
+              marksPerQuestion,
+            });
           }
         },
       );
@@ -4189,10 +4301,13 @@ export default function NewAssessmentBuilder() {
       finalQuestionsList = simulatedQuestions;
       setQuestions(simulatedQuestions);
       questionsRef.current = simulatedQuestions;
-      
+
       setAiCandidates((prev) =>
-        prev.filter((c) =>
-          !successfulCandidates.some((success) => success.candidate.id === c.id),
+        prev.filter(
+          (c) =>
+            !successfulCandidates.some(
+              (success) => success.candidate.id === c.id,
+            ),
         ),
       );
 
@@ -4207,7 +4322,7 @@ export default function NewAssessmentBuilder() {
           `${successfulCandidates.length} candidate question(s) accepted!`,
         );
       }
-      
+
       if (rejectedResults.length > 0) {
         const errorMsgs = rejectedResults
           .map((r) => r.reason?.message || "Unknown error")
@@ -4216,12 +4331,12 @@ export default function NewAssessmentBuilder() {
         if (saveToBank) {
           toast.warning(
             `Failed to save/add ${rejectedResults.length} question(s) to the Question Bank or assessment. Details: ${errorMsgs}`,
-            { duration: 8000 }
+            { duration: 8000 },
           );
         } else {
           toast.error(
             `Failed to add ${rejectedResults.length} question(s). Details: ${errorMsgs}`,
-            { duration: 8000 }
+            { duration: 8000 },
           );
         }
       }
@@ -4275,18 +4390,26 @@ export default function NewAssessmentBuilder() {
     // Validation for choices/options based on question type
     if (["mcq", "truefalse", "matching", "ordering"].includes(q.type)) {
       if (!q.options || q.options.length < 2) {
-        toast.error("Questions of this type must have at least 2 options before saving to bank.");
+        toast.error(
+          "Questions of this type must have at least 2 options before saving to bank.",
+        );
         return;
       }
-      const hasEmptyOption = q.options.some((opt) => !opt.option_text || !opt.option_text.trim());
+      const hasEmptyOption = q.options.some(
+        (opt) => !opt.option_text || !opt.option_text.trim(),
+      );
       if (hasEmptyOption) {
-        toast.error("All options must have non-empty text before saving to bank.");
+        toast.error(
+          "All options must have non-empty text before saving to bank.",
+        );
         return;
       }
-      
+
       // Specifically for MCQ, check that at least one option is correct
       if (q.type === "mcq" && !q.options.some((opt) => opt.is_correct)) {
-        toast.error("MCQ question must have at least one correct option selected before saving to bank.");
+        toast.error(
+          "MCQ question must have at least one correct option selected before saving to bank.",
+        );
         return;
       }
     }
@@ -4304,16 +4427,19 @@ export default function NewAssessmentBuilder() {
           is_correct: opt.is_correct,
           order_index: opt.order_index,
         })),
-        topic: blueprintRef.current.find((s) => s.id === q.sectionId)?.topics || "",
+        topic:
+          blueprintRef.current.find((s) => s.id === q.sectionId)?.topics || "",
       });
 
       // Update question state with savedToBank = true
       setQuestions((prev) =>
-        prev.map((item) => (item.id === q.id ? { ...item, savedToBank: true } : item))
+        prev.map((item) =>
+          item.id === q.id ? { ...item, savedToBank: true } : item,
+        ),
       );
       // Update ref as well
       questionsRef.current = questionsRef.current.map((item) =>
-        item.id === q.id ? { ...item, savedToBank: true } : item
+        item.id === q.id ? { ...item, savedToBank: true } : item,
       );
 
       toast.success("Question saved to bank successfully");
@@ -4510,15 +4636,16 @@ export default function NewAssessmentBuilder() {
             : draftStep !== undefined
               ? draftStep
               : activeStepRef.current,
-        groups: activeMetadata.mode === "Groupwork"
-          ? groups.map((g) => ({
-              name: g.name,
-              members: g.members.map((mem) => ({
-                student_id: mem.student_id || mem.id,
-                is_leader: !!mem.is_leader
+        groups:
+          activeMetadata.mode === "Groupwork"
+            ? groups.map((g) => ({
+                name: g.name,
+                members: g.members.map((mem) => ({
+                  student_id: mem.student_id || mem.id,
+                  is_leader: !!mem.is_leader,
+                })),
               }))
-            }))
-          : undefined,
+            : undefined,
         metadata: {
           title: activeMetadata.title || "Untitled Assessment",
           description: activeMetadata.description || "",
@@ -4560,7 +4687,12 @@ export default function NewAssessmentBuilder() {
           groupFormation: (() => {
             const fm = activeMetadata.group_formation_mode;
             if (fm === "self_enrol") return "SELF_ENROL";
-            if (fm === "random" || fm === "similar_performance" || fm === "diverse_performance") return "AUTO_BALANCED";
+            if (
+              fm === "random" ||
+              fm === "similar_performance" ||
+              fm === "diverse_performance"
+            )
+              return "AUTO_BALANCED";
             return "LECTURER_ASSIGNED";
           })(),
           groupAssignmentMode:
@@ -4571,14 +4703,20 @@ export default function NewAssessmentBuilder() {
             ? parseInt(activeMetadata.appeal_window_days as any)
             : 0,
           submissionMode: activeMetadata.submission_mode || "SINGLE_LEADER",
-          peerEvaluationEnabled: activeMetadata.peer_evaluation_enabled || false,
-          peerEvaluationDeadline: (activeMetadata.peer_evaluation_enabled && activeMetadata.peer_evaluation_deadline)
-            ? new Date(activeMetadata.peer_evaluation_deadline).toISOString()
-            : null,
-          peerEvaluationWeightPercent: (activeMetadata.peer_evaluation_enabled && activeMetadata.peer_evaluation_weight_percent)
-            ? parseInt(activeMetadata.peer_evaluation_weight_percent as any)
-            : null,
-          individualWeightingEnabled: activeMetadata.individual_weighting_enabled || false,
+          peerEvaluationEnabled:
+            activeMetadata.peer_evaluation_enabled || false,
+          peerEvaluationDeadline:
+            activeMetadata.peer_evaluation_enabled &&
+            activeMetadata.peer_evaluation_deadline
+              ? new Date(activeMetadata.peer_evaluation_deadline).toISOString()
+              : null,
+          peerEvaluationWeightPercent:
+            activeMetadata.peer_evaluation_enabled &&
+            activeMetadata.peer_evaluation_weight_percent
+              ? parseInt(activeMetadata.peer_evaluation_weight_percent as any)
+              : null,
+          individualWeightingEnabled:
+            activeMetadata.individual_weighting_enabled || false,
           academic_year: activeMetadata.academic_year || undefined,
         },
         blueprint: blueprintRef.current.map((b) => ({
@@ -4643,9 +4781,13 @@ export default function NewAssessmentBuilder() {
             computationalType: q.computationalType,
             caseStudyContext: q.caseStudyContext,
             is_required: q.is_required,
-            question_table_context: q.question_table_context || q.questionTableContext,
-            requires_table_answer: !!(q.requires_table_answer || q.requiresTableAnswer),
-            answer_table_template: q.answer_table_template || q.answerTableTemplate,
+            question_table_context:
+              q.question_table_context || q.questionTableContext,
+            requires_table_answer: !!(
+              q.requires_table_answer || q.requiresTableAnswer
+            ),
+            answer_table_template:
+              q.answer_table_template || q.answerTableTemplate,
           };
         }),
         rules: {
@@ -4783,11 +4925,16 @@ export default function NewAssessmentBuilder() {
           }
         }
 
-        if (metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline) {
+        if (
+          metadata.peer_evaluation_enabled &&
+          metadata.peer_evaluation_deadline
+        ) {
           const deadline = new Date(metadata.peer_evaluation_deadline);
           const submissionDeadline = getGroupSubmissionDeadline(metadata);
           if (submissionDeadline && deadline <= submissionDeadline) {
-            toast.error("Peer evaluation deadline must be after the group submission deadline.");
+            toast.error(
+              "Peer evaluation deadline must be after the group submission deadline.",
+            );
             return false;
           }
         }
@@ -4884,7 +5031,15 @@ export default function NewAssessmentBuilder() {
 
       return true;
     },
-    [activeStep, blueprint, currentMarks, metadata, windowDuration, questions, getGroupSubmissionDeadline],
+    [
+      activeStep,
+      blueprint,
+      currentMarks,
+      metadata,
+      windowDuration,
+      questions,
+      getGroupSubmissionDeadline,
+    ],
   );
 
   const syncDraftResponse = useCallback((res: any) => {
@@ -4979,12 +5134,10 @@ export default function NewAssessmentBuilder() {
             aq.question.question_table_context ||
             aq.question.questionTableContext,
           requires_table_answer: !!(
-            aq.question.requires_table_answer ||
-            aq.question.requiresTableAnswer
+            aq.question.requires_table_answer || aq.question.requiresTableAnswer
           ),
           requiresTableAnswer: !!(
-            aq.question.requires_table_answer ||
-            aq.question.requiresTableAnswer
+            aq.question.requires_table_answer || aq.question.requiresTableAnswer
           ),
           answer_table_template:
             aq.question.answer_table_template ||
@@ -5073,7 +5226,9 @@ export default function NewAssessmentBuilder() {
       if (targetStep === activeStep) return;
 
       if (aiGenerating) {
-        toast.warning("AI is currently generating questions. Please wait until generation completes.");
+        toast.warning(
+          "AI is currently generating questions. Please wait until generation completes.",
+        );
         return;
       }
 
@@ -5416,7 +5571,10 @@ export default function NewAssessmentBuilder() {
                         const updated = {
                           ...metadata,
                           teaching_workspace_id: v,
-                          course_id: selectedWorkspaceDetail?.id === v ? selectedWorkspaceDetail.course_id || v : v,
+                          course_id:
+                            selectedWorkspaceDetail?.id === v
+                              ? selectedWorkspaceDetail.course_id || v
+                              : v,
                         };
                         setMetadata(updated);
                         loadWorkspaceDetail(v);
@@ -5477,9 +5635,11 @@ export default function NewAssessmentBuilder() {
                         const isGroup = v === "Groupwork";
                         const isHomework = v === "Homework";
                         const isPractice = v === "Practice";
-                        const isStrict = v === "CAT" || v === "Summative" || v === "Formative";
+                        const isStrict =
+                          v === "CAT" || v === "Summative" || v === "Formative";
 
-                        let updatedSelectedInstructions = metadata.selectedInstructions;
+                        let updatedSelectedInstructions =
+                          metadata.selectedInstructions;
                         let updatedRules = { ...rules };
 
                         if (isHomework) {
@@ -5513,6 +5673,7 @@ export default function NewAssessmentBuilder() {
                             shuffleOptions: false,
                           };
                         } else if (isGroup) {
+                          updatedSelectedInstructions = [];
                           updatedRules = {
                             ...updatedRules,
                             supervised: false,
@@ -5690,7 +5851,10 @@ export default function NewAssessmentBuilder() {
                   </div>
                   <div className="space-y-2">
                     <Label htmlFor="endTime">
-                      {metadata.mode === "Groupwork" ? "Group Submission Deadline" : "End Time"} <span className="text-red-500">*</span>
+                      {metadata.mode === "Groupwork"
+                        ? "Group Submission Deadline"
+                        : "End Time"}{" "}
+                      <span className="text-red-500">*</span>
                     </Label>
                     <Input
                       type="time"
@@ -5760,7 +5924,8 @@ export default function NewAssessmentBuilder() {
               <Card className="shadow-none border mt-6 animate-in fade-in slide-in-from-top-2 duration-200">
                 <CardHeader className="py-4 border-b">
                   <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                    <Users className="size-4 text-primary" /> Compact Group Work Settings
+                    <Users className="size-4 text-primary" /> Compact Group Work
+                    Settings
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-5 space-y-6">
@@ -5791,7 +5956,10 @@ export default function NewAssessmentBuilder() {
                           const updated = {
                             ...metadata,
                             group_formation_mode: val,
-                            group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                            group_assignment_mode:
+                              val === "self_enrol"
+                                ? ("MANUAL" as const)
+                                : ("AUTOMATIC" as const),
                           };
                           setMetadata(updated);
                           runAutosave(1, updated);
@@ -5802,14 +5970,22 @@ export default function NewAssessmentBuilder() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="random">Random Split</SelectItem>
-                          <SelectItem value="similar_performance">Similar Academic Performance</SelectItem>
-                          <SelectItem value="diverse_performance">Diverse Academic Performance</SelectItem>
-                          <SelectItem value="self_enrol">Self Enrollment</SelectItem>
+                          <SelectItem value="similar_performance">
+                            Similar Academic Performance
+                          </SelectItem>
+                          <SelectItem value="diverse_performance">
+                            Diverse Academic Performance
+                          </SelectItem>
+                          <SelectItem value="self_enrol">
+                            Self Enrollment
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="assignment-mode-st1">Assignment Mode</Label>
+                      <Label htmlFor="assignment-mode-st1">
+                        Assignment Mode
+                      </Label>
                       <Select
                         value={metadata.group_assignment_mode || "AUTOMATIC"}
                         onValueChange={(val) => {
@@ -5834,7 +6010,9 @@ export default function NewAssessmentBuilder() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed">
                     <div className="space-y-2">
-                      <Label htmlFor="submission-mode-st1">Submission Mode</Label>
+                      <Label htmlFor="submission-mode-st1">
+                        Submission Mode
+                      </Label>
                       <Select
                         value={metadata.submission_mode || "SINGLE_LEADER"}
                         onValueChange={(val) => {
@@ -5850,20 +6028,30 @@ export default function NewAssessmentBuilder() {
                           <SelectValue placeholder="Select submission mode..." />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="SINGLE_LEADER">Single Leader Submits on Behalf of Group</SelectItem>
-                          <SelectItem value="ALL_MEMBERS">All Members Submit Individually (Aggregated)</SelectItem>
-                          <SelectItem value="MAJORITY_VOTE">Majority Vote (Multiple submissions, consensus needed)</SelectItem>
+                          <SelectItem value="SINGLE_LEADER">
+                            Single Leader Submits on Behalf of Group
+                          </SelectItem>
+                          <SelectItem value="ALL_MEMBERS">
+                            All Members Submit Individually (Aggregated)
+                          </SelectItem>
+                          <SelectItem value="MAJORITY_VOTE">
+                            Majority Vote (Multiple submissions, consensus
+                            needed)
+                          </SelectItem>
                         </SelectContent>
                       </Select>
                       <p className="text-[10px] text-muted-foreground">
-                        Defines which team member can trigger the group submission workflow.
+                        Defines which team member can trigger the group
+                        submission workflow.
                       </p>
                     </div>
                     <div className="flex flex-col justify-center space-y-4 pt-5 border-t">
                       <div className="flex items-center space-x-2">
                         <Switch
                           id="indiv-weighting-st1"
-                          checked={metadata.individual_weighting_enabled || false}
+                          checked={
+                            metadata.individual_weighting_enabled || false
+                          }
                           onCheckedChange={(checked) => {
                             const updated = {
                               ...metadata,
@@ -5874,9 +6062,15 @@ export default function NewAssessmentBuilder() {
                           }}
                         />
                         <div className="space-y-0.5">
-                          <Label htmlFor="indiv-weighting-st1" className="cursor-pointer">Enable Individual Contribution Weighting</Label>
+                          <Label
+                            htmlFor="indiv-weighting-st1"
+                            className="cursor-pointer"
+                          >
+                            Enable Individual Contribution Weighting
+                          </Label>
                           <p className="text-[10px] text-muted-foreground">
-                            Adjust final student marks by an individual contribution factor.
+                            Adjust final student marks by an individual
+                            contribution factor.
                           </p>
                         </div>
                       </div>
@@ -5895,9 +6089,15 @@ export default function NewAssessmentBuilder() {
                           }}
                         />
                         <div className="space-y-0.5">
-                          <Label htmlFor="peer-eval-st1" className="cursor-pointer">Enable Intra-Group Peer Evaluation</Label>
+                          <Label
+                            htmlFor="peer-eval-st1"
+                            className="cursor-pointer"
+                          >
+                            Enable Intra-Group Peer Evaluation
+                          </Label>
                           <p className="text-[10px] text-muted-foreground">
-                            Allow group members to grade each other&apos;s performance.
+                            Allow group members to grade each other&apos;s
+                            performance.
                           </p>
                         </div>
                       </div>
@@ -5907,7 +6107,9 @@ export default function NewAssessmentBuilder() {
                   {metadata.peer_evaluation_enabled && (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-4 border-t border-dashed animate-in fade-in slide-in-from-top-2 duration-200">
                       <div className="space-y-2">
-                        <Label htmlFor="peer-eval-weight-st1">Peer Score Weight (%)</Label>
+                        <Label htmlFor="peer-eval-weight-st1">
+                          Peer Score Weight (%)
+                        </Label>
                         <Input
                           id="peer-eval-weight-st1"
                           type="number"
@@ -5916,7 +6118,10 @@ export default function NewAssessmentBuilder() {
                           placeholder="e.g. 20"
                           value={metadata.peer_evaluation_weight_percent || ""}
                           onChange={(e) => {
-                            const val = e.target.value === "" ? "" : parseInt(e.target.value) || 0;
+                            const val =
+                              e.target.value === ""
+                                ? ""
+                                : parseInt(e.target.value) || 0;
                             const updated = {
                               ...metadata,
                               peer_evaluation_weight_percent: val as any,
@@ -5926,23 +6131,32 @@ export default function NewAssessmentBuilder() {
                           }}
                         />
                         <p className="text-[10px] text-muted-foreground">
-                          Percentage of final mark determined by the average peer rating.
+                          Percentage of final mark determined by the average
+                          peer rating.
                         </p>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="peer-eval-deadline-st1">Peer Evaluation Deadline</Label>
+                        <Label htmlFor="peer-eval-deadline-st1">
+                          Peer Evaluation Deadline
+                        </Label>
                         <Input
                           id="peer-eval-deadline-st1"
                           type="datetime-local"
                           value={metadata.peer_evaluation_deadline || ""}
-                           onChange={(e) => {
+                          onChange={(e) => {
                             const val = e.target.value;
                             if (val) {
                               const deadline = new Date(val);
-                              const submissionDeadline = getGroupSubmissionDeadline(metadata);
-                              if (submissionDeadline && deadline <= submissionDeadline) {
-                                toast.error("Peer evaluation deadline must be after the group submission deadline.");
+                              const submissionDeadline =
+                                getGroupSubmissionDeadline(metadata);
+                              if (
+                                submissionDeadline &&
+                                deadline <= submissionDeadline
+                              ) {
+                                toast.error(
+                                  "Peer evaluation deadline must be after the group submission deadline.",
+                                );
                                 return;
                               }
                             }
@@ -5955,7 +6169,8 @@ export default function NewAssessmentBuilder() {
                           }}
                         />
                         <p className="text-[10px] text-muted-foreground text-destructive font-medium">
-                          Note: The peer review deadline is separate and must occur AFTER the general group submission deadline.
+                          Note: The peer review deadline is separate and must
+                          occur AFTER the general group submission deadline.
                         </p>
                       </div>
                     </div>
@@ -5993,10 +6208,16 @@ export default function NewAssessmentBuilder() {
                       <div className="rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-950/20 dark:border-emerald-800 p-3.5 flex items-start gap-3">
                         <Info className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
-                          <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">Homework Assessment — Open Resource & AI Assisted Mode</p>
+                          <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-300">
+                            Homework Assessment — Open Resource & AI Assisted
+                            Mode
+                          </p>
                           <p className="text-[11px] text-emerald-700 dark:text-emerald-400 leading-relaxed">
-                            Proctoring, Safe Browser lockdown, and strict integrity checks are disabled by default for homework coursework.
-                            Students have full access to AI assistance and course learning materials, and can pause/resume their attempt before the deadline.
+                            Proctoring, Safe Browser lockdown, and strict
+                            integrity checks are disabled by default for
+                            homework coursework. Students have full access to AI
+                            assistance and course learning materials, and can
+                            pause/resume their attempt before the deadline.
                           </p>
                         </div>
                       </div>
@@ -6005,9 +6226,15 @@ export default function NewAssessmentBuilder() {
                       <div className="rounded-lg border border-blue-200 bg-blue-50 dark:bg-blue-950/20 dark:border-blue-800 p-3.5 flex items-start gap-3">
                         <Info className="size-4 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
-                          <p className="text-xs font-semibold text-blue-800 dark:text-blue-300">Practice Assessment — Low-Stakes Self-Assessment Mode</p>
+                          <p className="text-xs font-semibold text-blue-800 dark:text-blue-300">
+                            Practice Assessment — Low-Stakes Self-Assessment
+                            Mode
+                          </p>
                           <p className="text-[11px] text-blue-700 dark:text-blue-400 leading-relaxed">
-                            Proctoring, Safe Browser lockdown, and integrity violation monitoring are disabled. Students can freely reference materials, use AI assistance, and practice without any penalties.
+                            Proctoring, Safe Browser lockdown, and integrity
+                            violation monitoring are disabled. Students can
+                            freely reference materials, use AI assistance, and
+                            practice without any penalties.
                           </p>
                         </div>
                       </div>
@@ -6016,10 +6243,17 @@ export default function NewAssessmentBuilder() {
                       <div className="rounded-lg border border-amber-200 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800 p-3.5 flex items-start gap-3">
                         <Info className="size-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                         <div className="space-y-0.5">
-                          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">Group Work Assessment — Security rules relaxed by default</p>
+                          <p className="text-xs font-semibold text-amber-800 dark:text-amber-300">
+                            Group Work Assessment — Security rules relaxed by
+                            default
+                          </p>
                           <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-relaxed">
-                            Safe Browser, Integrity Monitoring, and question shuffling have been disabled as group work is typically a take-home deliverable.
-                            Review and adjust these settings if your delivery context requires stricter controls (e.g. an in-class group presentation).
+                            Safe Browser, Integrity Monitoring, and question
+                            shuffling have been disabled as group work is
+                            typically a take-home deliverable. Review and adjust
+                            these settings if your delivery context requires
+                            stricter controls (e.g. an in-class group
+                            presentation).
                           </p>
                         </div>
                       </div>
@@ -6089,10 +6323,13 @@ export default function NewAssessmentBuilder() {
                         Institutional Integrity Profile
                       </Label>
                       <p className="text-[11px] text-muted-foreground">
-                        Select central institution policy profile for this assessment:
+                        Select central institution policy profile for this
+                        assessment:
                       </p>
                       <Select
-                        value={rules.integrityProfileCode || "SECURE_ASSESSMENT"}
+                        value={
+                          rules.integrityProfileCode || "SECURE_ASSESSMENT"
+                        }
                         onValueChange={(code) => {
                           const isAllowResume = code !== "SECURE_ASSESSMENT";
                           setRules({
@@ -6108,7 +6345,8 @@ export default function NewAssessmentBuilder() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="SECURE_ASSESSMENT">
-                            Secure Assessment Profile (CAT/Formative/Summative) — Resume Disabled
+                            Secure Assessment Profile (CAT/Formative/Summative)
+                            — Resume Disabled
                           </SelectItem>
                           <SelectItem value="HOMEWORK">
                             Homework Profile — Resume Enabled (Warning + Log)
@@ -6121,16 +6359,21 @@ export default function NewAssessmentBuilder() {
                       <div className="p-3 rounded-lg border bg-muted/20 text-[11px] space-y-1">
                         <div className="flex items-center justify-between font-bold text-foreground">
                           <span>Applied Security Rules:</span>
-                          <Badge variant="outline" className="text-[9px] font-mono">
-                            {rules.integrityProfileCode === "SECURE_ASSESSMENT" ? "Strict Lock-Down" : "Flexible Policy"}
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] font-mono"
+                          >
+                            {rules.integrityProfileCode === "SECURE_ASSESSMENT"
+                              ? "Strict Lock-Down"
+                              : "Flexible Policy"}
                           </Badge>
                         </div>
                         <p className="text-muted-foreground leading-relaxed">
                           {rules.integrityProfileCode === "SECURE_ASSESSMENT"
                             ? "Tab switches, minimize, and full-screen exits trigger Warning → Auto-Submit. Refresh, exit, and multiple sessions trigger immediate Auto-Submit. Student Resume is DISABLED."
                             : rules.integrityProfileCode === "HOMEWORK"
-                            ? "Tab switches and blur events generate Warnings & Audit Logs. Student Resume is ALLOWED."
-                            : "Low strictness for practice. Warnings displayed without immediate penalty. Student Resume is ALLOWED."}
+                              ? "Tab switches and blur events generate Warnings & Audit Logs. Student Resume is ALLOWED."
+                              : "Low strictness for practice. Warnings displayed without immediate penalty. Student Resume is ALLOWED."}
                         </p>
                       </div>
                     </div>
@@ -6141,50 +6384,50 @@ export default function NewAssessmentBuilder() {
                       </Label>
                       <div className="space-y-4">
                         {metadata.mode !== "Groupwork" && (
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5">
-                            <Label
-                              htmlFor="shuffleQuestions"
-                              className="text-sm cursor-pointer"
-                            >
-                              Randomize Questions
-                            </Label>
-                            <p className="text-[10px] text-muted-foreground">
-                              Shuffle order per student
-                            </p>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-0.5">
+                              <Label
+                                htmlFor="shuffleQuestions"
+                                className="text-sm cursor-pointer"
+                              >
+                                Randomize Questions
+                              </Label>
+                              <p className="text-[10px] text-muted-foreground">
+                                Shuffle order per student
+                              </p>
+                            </div>
+                            <Switch
+                              id="shuffleQuestions"
+                              checked={rules.shuffleQuestions}
+                              onCheckedChange={(v) => {
+                                setRules({ ...rules, shuffleQuestions: v });
+                                triggerDebouncedAutosave(2);
+                              }}
+                            />
                           </div>
-                          <Switch
-                            id="shuffleQuestions"
-                            checked={rules.shuffleQuestions}
-                            onCheckedChange={(v) => {
-                              setRules({ ...rules, shuffleQuestions: v });
-                              triggerDebouncedAutosave(2);
-                            }}
-                          />
-                        </div>
                         )}
                         {metadata.mode !== "Groupwork" && (
-                        <div className="flex items-start justify-between gap-4">
-                          <div className="space-y-0.5">
-                            <Label
-                              htmlFor="shuffleOptions"
-                              className="text-sm cursor-pointer"
-                            >
-                              Randomize Options
-                            </Label>
-                            <p className="text-[10px] text-muted-foreground">
-                              Shuffle MCQ options
-                            </p>
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="space-y-0.5">
+                              <Label
+                                htmlFor="shuffleOptions"
+                                className="text-sm cursor-pointer"
+                              >
+                                Randomize Options
+                              </Label>
+                              <p className="text-[10px] text-muted-foreground">
+                                Shuffle MCQ options
+                              </p>
+                            </div>
+                            <Switch
+                              id="shuffleOptions"
+                              checked={rules.shuffleOptions}
+                              onCheckedChange={(v) => {
+                                setRules({ ...rules, shuffleOptions: v });
+                                triggerDebouncedAutosave(2);
+                              }}
+                            />
                           </div>
-                          <Switch
-                            id="shuffleOptions"
-                            checked={rules.shuffleOptions}
-                            onCheckedChange={(v) => {
-                              setRules({ ...rules, shuffleOptions: v });
-                              triggerDebouncedAutosave(2);
-                            }}
-                          />
-                        </div>
                         )}
                         <div className="flex items-start justify-between gap-4">
                           <div className="space-y-0.5">
@@ -6301,8 +6544,6 @@ export default function NewAssessmentBuilder() {
                     </div>
                   </CardContent>
                 </Card>
-
-
               </div>
 
               <div className="space-y-6">
@@ -6444,7 +6685,10 @@ export default function NewAssessmentBuilder() {
                               const updated = {
                                 ...metadata,
                                 group_formation_mode: val,
-                                group_assignment_mode: val === "self_enrol" ? ("MANUAL" as const) : ("AUTOMATIC" as const)
+                                group_assignment_mode:
+                                  val === "self_enrol"
+                                    ? ("MANUAL" as const)
+                                    : ("AUTOMATIC" as const),
                               };
                               setMetadata(updated);
                               triggerDebouncedAutosave(3, updated);
@@ -6744,7 +6988,8 @@ export default function NewAssessmentBuilder() {
                           </span>
                         </div>
                         <p className="text-xs text-muted-foreground mt-2 leading-relaxed">
-                          Restrict this assessment to specific classes/sections (e.g. Section A or Section B).
+                          Restrict this assessment to specific classes/sections
+                          (e.g. Section A or Section B).
                         </p>
                       </Label>
                     </div>
@@ -6906,45 +7151,61 @@ export default function NewAssessmentBuilder() {
                         </Label>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                        {(selectedWorkspaceDetail?.sections || []).map((sec: any) => {
-                          const isChecked = metadata.target_section_ids?.includes(sec.id);
-                          return (
-                            <div
-                              key={sec.id}
-                              className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/10 transition-colors"
-                            >
-                              <Checkbox
-                                id={`section-${sec.id}`}
-                                checked={isChecked}
-                                onCheckedChange={(checked) => {
-                                  const updatedIds = checked
-                                    ? [...(metadata.target_section_ids || []), sec.id]
-                                    : (metadata.target_section_ids || []).filter((id) => id !== sec.id);
-                                  const updated = {
-                                    ...metadata,
-                                    target_section_ids: updatedIds,
-                                  };
-                                  setMetadata(updated);
-                                  triggerDebouncedAutosave(3, updated);
-                                }}
-                              />
-                              <label htmlFor={`section-${sec.id}`} className="flex-1 cursor-pointer">
-                                <p className="text-xs font-semibold text-foreground leading-none">
-                                  Section {sec.name}
-                                </p>
-                                {sec.class_group_name && (
-                                  <p className="text-[10px] text-muted-foreground mt-1">
-                                    {sec.class_group_name}
+                        {(selectedWorkspaceDetail?.sections || []).map(
+                          (sec: any) => {
+                            const isChecked =
+                              metadata.target_section_ids?.includes(sec.id);
+                            return (
+                              <div
+                                key={sec.id}
+                                className="flex items-center gap-3 p-3 border rounded-xl hover:bg-muted/10 transition-colors"
+                              >
+                                <Checkbox
+                                  id={`section-${sec.id}`}
+                                  checked={isChecked}
+                                  onCheckedChange={(checked) => {
+                                    const updatedIds = checked
+                                      ? [
+                                          ...(metadata.target_section_ids ||
+                                            []),
+                                          sec.id,
+                                        ]
+                                      : (
+                                          metadata.target_section_ids || []
+                                        ).filter((id) => id !== sec.id);
+                                    const updated = {
+                                      ...metadata,
+                                      target_section_ids: updatedIds,
+                                    };
+                                    setMetadata(updated);
+                                    triggerDebouncedAutosave(3, updated);
+                                  }}
+                                />
+                                <label
+                                  htmlFor={`section-${sec.id}`}
+                                  className="flex-1 cursor-pointer"
+                                >
+                                  <p className="text-xs font-semibold text-foreground leading-none">
+                                    Section {sec.name}
                                   </p>
-                                )}
-                              </label>
-                              <Badge variant="secondary" className="text-[10px]">
-                                {sec.student_count} Students
-                              </Badge>
-                            </div>
-                          );
-                        })}
-                        {(!selectedWorkspaceDetail?.sections || selectedWorkspaceDetail.sections.length === 0) && (
+                                  {sec.class_group_name && (
+                                    <p className="text-[10px] text-muted-foreground mt-1">
+                                      {sec.class_group_name}
+                                    </p>
+                                  )}
+                                </label>
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[10px]"
+                                >
+                                  {sec.student_count} Students
+                                </Badge>
+                              </div>
+                            );
+                          },
+                        )}
+                        {(!selectedWorkspaceDetail?.sections ||
+                          selectedWorkspaceDetail.sections.length === 0) && (
                           <p className="text-xs text-muted-foreground italic col-span-2 text-center py-6">
                             No sections found for this workspace.
                           </p>
@@ -7012,9 +7273,12 @@ export default function NewAssessmentBuilder() {
 
                     const defaults = {
                       topic: allTopics || metadata.title || "",
-                      question_type: allTypes.length > 1 ? "mixed" : allTypes[0] || "mcq",
-                      difficulty: (blueprint[0]?.difficulty?.toLowerCase() || "medium") as any,
-                      bloom_level: (blueprint[0]?.bloomLevel || "understand") as any,
+                      question_type:
+                        allTypes.length > 1 ? "mixed" : allTypes[0] || "mcq",
+                      difficulty: (blueprint[0]?.difficulty?.toLowerCase() ||
+                        "medium") as any,
+                      bloom_level: (blueprint[0]?.bloomLevel ||
+                        "understand") as any,
                       count: totalQuestions,
                       additional_context: blueprint
                         .map((s) => s.aiPromptHint?.trim())
@@ -7035,11 +7299,13 @@ export default function NewAssessmentBuilder() {
                 >
                   {aiGenerating ? (
                     <>
-                      <LoaderCircleIcon className="mr-2 size-4 animate-spin text-primary" /> Generating...
+                      <LoaderCircleIcon className="mr-2 size-4 animate-spin text-primary" />{" "}
+                      Generating...
                     </>
                   ) : (
                     <>
-                      <Sparkles className="mr-2 size-4 text-primary" /> Generate All with AI
+                      <Sparkles className="mr-2 size-4 text-primary" /> Generate
+                      All with AI
                     </>
                   )}
                 </Button>
@@ -7117,10 +7383,12 @@ export default function NewAssessmentBuilder() {
                               ? sec.difficulty.toLowerCase()
                               : "medium") as any,
                             count: parseInt(sec.questions as any) || 3,
-                            bloom_level: (sec.bloomLevel || "understand") as any,
+                            bloom_level: (sec.bloomLevel ||
+                              "understand") as any,
                             additional_context: sec.aiPromptHint?.trim() || "",
                             easyPercent: sec.difficultyDistribution?.easy ?? 30,
-                            mediumPercent: sec.difficultyDistribution?.medium ?? 40,
+                            mediumPercent:
+                              sec.difficultyDistribution?.medium ?? 40,
                             hardPercent: sec.difficultyDistribution?.hard ?? 30,
                           };
                           setAiTargetSectionId(realSectionId);
@@ -7132,11 +7400,13 @@ export default function NewAssessmentBuilder() {
                       >
                         {aiGenerating && aiTargetSectionId === sec.id ? (
                           <>
-                            <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" /> Generating...
+                            <LoaderCircleIcon className="mr-1.5 size-3.5 animate-spin" />{" "}
+                            Generating...
                           </>
                         ) : (
                           <>
-                            <Sparkles className="mr-1.5 size-3.5" /> Generate with AI
+                            <Sparkles className="mr-1.5 size-3.5" /> Generate
+                            with AI
                           </>
                         )}
                       </Button>
@@ -7267,7 +7537,9 @@ export default function NewAssessmentBuilder() {
                             htmlFor={`per-group-${sec.id}`}
                             className="cursor-pointer font-bold text-xs flex items-center gap-1.5"
                           >
-                            <Users className="size-3.5 text-primary" /> Per-Group Question Set (different questions per group)
+                            <Users className="size-3.5 text-primary" />{" "}
+                            Per-Group Question Set (different questions per
+                            group)
                           </Label>
                         </div>
                       )}
@@ -7283,15 +7555,14 @@ export default function NewAssessmentBuilder() {
                           <Select
                             value={sec.difficulty}
                             onValueChange={(val) => {
-                              updateSection(
-                                sec.id,
-                                "difficulty",
-                                val as any,
-                              );
+                              updateSection(sec.id, "difficulty", val as any);
                               triggerDebouncedAutosave(4);
                             }}
                           >
-                            <SelectTrigger id={`difficulty-${sec.id}`} className="w-full h-9 text-xs">
+                            <SelectTrigger
+                              id={`difficulty-${sec.id}`}
+                              className="w-full h-9 text-xs"
+                            >
                               <SelectValue placeholder="Select difficulty" />
                             </SelectTrigger>
                             <SelectContent>
@@ -7311,23 +7582,28 @@ export default function NewAssessmentBuilder() {
                           <Select
                             value={sec.bloomLevel || "understand"}
                             onValueChange={(val) => {
-                              updateSection(
-                                sec.id,
-                                "bloomLevel",
-                                val as any,
-                              );
+                              updateSection(sec.id, "bloomLevel", val as any);
                               triggerDebouncedAutosave(4);
                             }}
                           >
-                            <SelectTrigger id={`bloom-${sec.id}`} className="w-full h-9 text-xs">
+                            <SelectTrigger
+                              id={`bloom-${sec.id}`}
+                              className="w-full h-9 text-xs"
+                            >
                               <SelectValue placeholder="Select Bloom's Level" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="remember">Remembering</SelectItem>
-                              <SelectItem value="understand">Understanding</SelectItem>
+                              <SelectItem value="remember">
+                                Remembering
+                              </SelectItem>
+                              <SelectItem value="understand">
+                                Understanding
+                              </SelectItem>
                               <SelectItem value="apply">Applying</SelectItem>
                               <SelectItem value="analyze">Analyzing</SelectItem>
-                              <SelectItem value="evaluate">Evaluating</SelectItem>
+                              <SelectItem value="evaluate">
+                                Evaluating
+                              </SelectItem>
                               <SelectItem value="create">Creating</SelectItem>
                             </SelectContent>
                           </Select>
@@ -7519,16 +7795,31 @@ export default function NewAssessmentBuilder() {
 
             {metadata.question_distribution_mode === "PER_GROUP" && (
               <div className="flex justify-center border-b pb-4">
-                <Tabs value={step5ViewMode} onValueChange={(val: any) => setStep5ViewMode(val)} className="w-full max-w-md">
+                <Tabs
+                  value={step5ViewMode}
+                  onValueChange={(val: any) => setStep5ViewMode(val)}
+                  className="w-full max-w-md"
+                >
                   <TabsList className="grid w-full grid-cols-2">
-                    <TabsTrigger value="standard" className="text-xs font-semibold">Standard Section View</TabsTrigger>
-                    <TabsTrigger value="per_group" className="text-xs font-semibold">Per-Group Assignment Board</TabsTrigger>
+                    <TabsTrigger
+                      value="standard"
+                      className="text-xs font-semibold"
+                    >
+                      Standard Section View
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="per_group"
+                      className="text-xs font-semibold"
+                    >
+                      Per-Group Assignment Board
+                    </TabsTrigger>
                   </TabsList>
                 </Tabs>
               </div>
             )}
 
-            {metadata.question_distribution_mode === "PER_GROUP" && step5ViewMode === "per_group" ? (
+            {metadata.question_distribution_mode === "PER_GROUP" &&
+            step5ViewMode === "per_group" ? (
               <GroupQuestionEditor
                 groups={groups.map((g) => ({
                   id: g.id,
@@ -7551,11 +7842,16 @@ export default function NewAssessmentBuilder() {
                     {blueprint.map((sec, idx) => {
                       const isPerGroupSection = sec.per_group !== false;
                       const groupQuestions = questions.filter(
-                        (q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === groupId)
+                        (q) =>
+                          q.sectionId === sec.id &&
+                          (!isPerGroupSection || q.groupId === groupId),
                       );
 
                       return (
-                        <div key={sec.id} className="space-y-4 border p-4 rounded-xl bg-muted/5">
+                        <div
+                          key={sec.id}
+                          className="space-y-4 border p-4 rounded-xl bg-muted/5"
+                        >
                           <div className="flex justify-between items-center bg-muted/10 p-3 rounded-lg border">
                             <div className="flex items-center gap-3">
                               <Badge className="bg-muted text-foreground uppercase border font-semibold">
@@ -7572,7 +7868,11 @@ export default function NewAssessmentBuilder() {
                             </div>
                             <div className="text-right">
                               <span className="text-xs font-bold block">
-                                {groupQuestions.reduce((s, q) => s + q.marks, 0)} / {sec.marks} Marks
+                                {groupQuestions.reduce(
+                                  (s, q) => s + q.marks,
+                                  0,
+                                )}{" "}
+                                / {sec.marks} Marks
                               </span>
                             </div>
                           </div>
@@ -7608,7 +7908,10 @@ export default function NewAssessmentBuilder() {
                                 variant="outline"
                                 className="flex-1 h-14 border border-dashed flex flex-col gap-0.5 justify-center"
                                 onClick={() => {
-                                  addQuestion(sec.id, isPerGroupSection ? groupId : undefined);
+                                  addQuestion(
+                                    sec.id,
+                                    isPerGroupSection ? groupId : undefined,
+                                  );
                                 }}
                               >
                                 <Plus className="size-4 text-primary" />
@@ -7619,7 +7922,11 @@ export default function NewAssessmentBuilder() {
                               <QuestionBankSelector
                                 selectedIds={questions.map((q) => q.id)}
                                 onSelect={(q) => {
-                                  handleBankSelect(q, sec.id, isPerGroupSection ? groupId : undefined);
+                                  handleBankSelect(
+                                    q,
+                                    sec.id,
+                                    isPerGroupSection ? groupId : undefined,
+                                  );
                                 }}
                               />
                             </div>
@@ -7632,125 +7939,159 @@ export default function NewAssessmentBuilder() {
               />
             ) : (
               <div className="space-y-8">
-              {blueprint.map((sec, idx) => {
-                const isPerGroupSection = metadata.question_distribution_mode === "PER_GROUP" && sec.per_group !== false;
-                const currentGroupId = selectedGroupFilter[sec.id] || (groups[0]?.id || "");
+                {blueprint.map((sec, idx) => {
+                  const isPerGroupSection =
+                    metadata.question_distribution_mode === "PER_GROUP" &&
+                    sec.per_group !== false;
+                  const currentGroupId =
+                    selectedGroupFilter[sec.id] || groups[0]?.id || "";
 
-                return (
-                  <div key={sec.id} className="space-y-4">
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-lg border">
-                      <div className="flex items-center gap-3">
-                        <Badge className="px-2.5 h-6 text-xs bg-muted text-foreground hover:bg-muted shadow-none uppercase border font-semibold">
-                          Section {idx + 1}
-                        </Badge>
-                        <div className="min-w-0">
-                          <span className="text-sm font-semibold block truncate">
-                            {sec.section} – {sec.topics || "General Topics"}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground uppercase font-bold">
-                            {sec.marks} Marks Target
-                          </span>
+                  return (
+                    <div key={sec.id} className="space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-muted/20 p-3 rounded-lg border">
+                        <div className="flex items-center gap-3">
+                          <Badge className="px-2.5 h-6 text-xs bg-muted text-foreground hover:bg-muted shadow-none uppercase border font-semibold">
+                            Section {idx + 1}
+                          </Badge>
+                          <div className="min-w-0">
+                            <span className="text-sm font-semibold block truncate">
+                              {sec.section} – {sec.topics || "General Topics"}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground uppercase font-bold">
+                              {sec.marks} Marks Target
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-4">
+                          {isPerGroupSection && groups.length > 0 && (
+                            <div className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-md border shadow-sm">
+                              <Label
+                                htmlFor={`group-select-${sec.id}`}
+                                className="text-xs font-semibold text-muted-foreground whitespace-nowrap"
+                              >
+                                Target Group:
+                              </Label>
+                              <Select
+                                value={currentGroupId}
+                                onValueChange={(val) => {
+                                  setSelectedGroupFilter((prev) => ({
+                                    ...prev,
+                                    [sec.id]: val,
+                                  }));
+                                }}
+                              >
+                                <SelectTrigger
+                                  id={`group-select-${sec.id}`}
+                                  className="h-8 text-xs font-bold w-40"
+                                >
+                                  <SelectValue placeholder="Select group..." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {groups.map((g) => (
+                                    <SelectItem key={g.id} value={g.id}>
+                                      {g.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
+
+                          <div className="text-right">
+                            <span className="text-xs font-bold block">
+                              {questions
+                                .filter(
+                                  (q) =>
+                                    q.sectionId === sec.id &&
+                                    (!isPerGroupSection ||
+                                      q.groupId === currentGroupId),
+                                )
+                                .reduce((s, q) => s + q.marks, 0)}{" "}
+                              / {sec.marks} Marks
+                            </span>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-4">
-                        {isPerGroupSection && groups.length > 0 && (
-                          <div className="flex items-center gap-2 bg-background p-1.5 px-3 rounded-md border shadow-sm">
-                            <Label htmlFor={`group-select-${sec.id}`} className="text-xs font-semibold text-muted-foreground whitespace-nowrap">
-                              Target Group:
-                            </Label>
-                            <Select
-                              value={currentGroupId}
-                              onValueChange={(val) => {
-                                setSelectedGroupFilter((prev) => ({ ...prev, [sec.id]: val }));
-                              }}
-                            >
-                              <SelectTrigger id={`group-select-${sec.id}`} className="h-8 text-xs font-bold w-40">
-                                <SelectValue placeholder="Select group..." />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {groups.map((g) => (
-                                  <SelectItem key={g.id} value={g.id}>
-                                    {g.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                      <div className="space-y-4">
+                        {isPerGroupSection && groups.length === 0 ? (
+                          <div className="p-8 border border-dashed rounded-lg text-center text-xs text-muted-foreground">
+                            No groups found. Please form groups in Step 3 first
+                            to manage questions for this section.
                           </div>
+                        ) : (
+                          questions
+                            .filter(
+                              (q) =>
+                                q.sectionId === sec.id &&
+                                (!isPerGroupSection ||
+                                  q.groupId === currentGroupId),
+                            )
+                            .map((q, qIdx) => (
+                              <QuestionCard
+                                key={q.id}
+                                question={q}
+                                index={qIdx}
+                                allowedTypes={sec.allowedTypes}
+                                onUpdate={(u) => {
+                                  updateQuestion(q.id, u);
+                                }}
+                                onDelete={() => {
+                                  removeQuestion(q.id);
+                                }}
+                                onSaveToBank={() => handleSaveToBank(q)}
+                                onUpdateOption={(oi, u) => {
+                                  updateOption(q.id, oi, u);
+                                }}
+                                onAddOption={() => {
+                                  addOption(q.id);
+                                }}
+                                onRemoveOption={(oi) => {
+                                  removeOption(q.id, oi);
+                                }}
+                              />
+                            ))
                         )}
 
-                        <div className="text-right">
-                          <span className="text-xs font-bold block">
-                            {questions
-                              .filter((q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === currentGroupId))
-                              .reduce((s, q) => s + q.marks, 0)}{" "}
-                            / {sec.marks} Marks
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-                      {isPerGroupSection && groups.length === 0 ? (
-                        <div className="p-8 border border-dashed rounded-lg text-center text-xs text-muted-foreground">
-                          No groups found. Please form groups in Step 3 first to manage questions for this section.
-                        </div>
-                      ) : (
-                        questions
-                          .filter((q) => q.sectionId === sec.id && (!isPerGroupSection || q.groupId === currentGroupId))
-                          .map((q, qIdx) => (
-                            <QuestionCard
-                              key={q.id}
-                              question={q}
-                              index={qIdx}
-                              allowedTypes={sec.allowedTypes}
-                              onUpdate={(u) => {
-                                updateQuestion(q.id, u);
+                        {(!isPerGroupSection || groups.length > 0) && (
+                          <div className="flex gap-4">
+                            <Button
+                              variant="outline"
+                              className="flex-1 h-14 border border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-0.5 justify-center"
+                              onClick={() => {
+                                addQuestion(
+                                  sec.id,
+                                  isPerGroupSection
+                                    ? currentGroupId
+                                    : undefined,
+                                );
                               }}
-                              onDelete={() => {
-                                removeQuestion(q.id);
-                              }}
-                              onSaveToBank={() => handleSaveToBank(q)}
-                              onUpdateOption={(oi, u) => {
-                                updateOption(q.id, oi, u);
-                              }}
-                              onAddOption={() => {
-                                addOption(q.id);
-                              }}
-                              onRemoveOption={(oi) => {
-                                removeOption(q.id, oi);
+                            >
+                              <Plus className="size-4 text-primary" />
+                              <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
+                                Add Manually
+                              </span>
+                            </Button>
+                            <QuestionBankSelector
+                              selectedIds={questions.map((q) => q.id)}
+                              onSelect={(q) => {
+                                handleBankSelect(
+                                  q,
+                                  sec.id,
+                                  isPerGroupSection
+                                    ? currentGroupId
+                                    : undefined,
+                                );
                               }}
                             />
-                          ))
-                      )}
-
-                      {(!isPerGroupSection || groups.length > 0) && (
-                        <div className="flex gap-4">
-                          <Button
-                            variant="outline"
-                            className="flex-1 h-14 border border-dashed hover:border-primary/50 hover:bg-primary/5 transition-all flex flex-col gap-0.5 justify-center"
-                            onClick={() => {
-                              addQuestion(sec.id, isPerGroupSection ? currentGroupId : undefined);
-                            }}
-                          >
-                            <Plus className="size-4 text-primary" />
-                            <span className="font-bold uppercase text-[9px] tracking-wider text-muted-foreground">
-                              Add Manually
-                            </span>
-                          </Button>
-                          <QuestionBankSelector
-                            selectedIds={questions.map((q) => q.id)}
-                            onSelect={(q) => {
-                              handleBankSelect(q, sec.id, isPerGroupSection ? currentGroupId : undefined);
-                            }}
-                          />
-                        </div>
-                      )}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
             )}
 
             <div className="flex justify-between mt-8 pt-6 border-t">
@@ -7770,12 +8111,16 @@ export default function NewAssessmentBuilder() {
       case 6: {
         const isGroupMode = metadata.mode === "Groupwork";
         const isControlled =
-          ["CAT", "Summative", "Formative", "Final Exam"].includes(metadata.mode) ||
+          ["CAT", "Summative", "Formative", "Final Exam"].includes(
+            metadata.mode,
+          ) ||
           (isGroupMode && rules.supervised);
 
         // Group work assignment stats for the summary card
         const assignedStudentIds = new Set(
-          groups.flatMap((g) => g.members?.map((m: any) => m.id || m.student_id) ?? [])
+          groups.flatMap(
+            (g) => g.members?.map((m: any) => m.id || m.student_id) ?? [],
+          ),
         );
         const totalRoster = selectedWorkspaceDetail?.roster?.length ?? 0;
         const assignedCount = assignedStudentIds.size;
@@ -7812,7 +8157,8 @@ export default function NewAssessmentBuilder() {
                   {metadata.durationMinutes}m)
                 </span>
                 <span className="flex items-center gap-1">
-                  <Users className="size-3.5" /> {metadata.mode === "Groupwork" ? "Group Work" : metadata.mode}
+                  <Users className="size-3.5" />{" "}
+                  {metadata.mode === "Groupwork" ? "Group Work" : metadata.mode}
                 </span>
               </div>
             </div>
@@ -7826,7 +8172,8 @@ export default function NewAssessmentBuilder() {
                   <Card className="shadow-none border">
                     <CardHeader className="py-4 border-b">
                       <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                        <Users className="size-4 text-primary" /> Group Configuration Summary
+                        <Users className="size-4 text-primary" /> Group
+                        Configuration Summary
                       </CardTitle>
                     </CardHeader>
                     <CardContent className="p-5 space-y-4">
@@ -7834,8 +8181,10 @@ export default function NewAssessmentBuilder() {
                         <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
                           <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
                           <p className="text-xs text-destructive font-semibold">
-                            {unassignedCount} student{unassignedCount !== 1 ? "s are" : " is"} not assigned to any group.
-                            All students must be assigned before publishing.
+                            {unassignedCount} student
+                            {unassignedCount !== 1 ? "s are" : " is"} not
+                            assigned to any group. All students must be assigned
+                            before publishing.
                           </p>
                         </div>
                       )}
@@ -7843,52 +8192,92 @@ export default function NewAssessmentBuilder() {
                         <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 flex items-start gap-2.5">
                           <AlertTriangle className="size-4 text-destructive shrink-0 mt-0.5" />
                           <p className="text-xs text-destructive font-semibold">
-                            No groups have been formed. Please complete Step 3 (Group Formation) before publishing.
+                            No groups have been formed. Please complete Step 3
+                            (Group Formation) before publishing.
                           </p>
                         </div>
                       )}
                       <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-xs">
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Groups Formed</p>
-                          <p className={`text-xl font-bold ${groups.length > 0 ? "text-emerald-600" : "text-destructive"}`}>
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Groups Formed
+                          </p>
+                          <p
+                            className={`text-xl font-bold ${groups.length > 0 ? "text-emerald-600" : "text-destructive"}`}
+                          >
                             {groups.length}
                           </p>
                         </div>
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Students Assigned</p>
-                          <p className={`text-xl font-bold ${unassignedCount === 0 ? "text-emerald-600" : "text-amber-600"}`}>
-                            {assignedCount} <span className="text-sm text-muted-foreground font-normal">/ {totalRoster}</span>
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Students Assigned
+                          </p>
+                          <p
+                            className={`text-xl font-bold ${unassignedCount === 0 ? "text-emerald-600" : "text-amber-600"}`}
+                          >
+                            {assignedCount}{" "}
+                            <span className="text-sm text-muted-foreground font-normal">
+                              / {totalRoster}
+                            </span>
                           </p>
                         </div>
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Formation Mode</p>
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Formation Mode
+                          </p>
                           <p className="text-sm font-semibold capitalize">
-                            {metadata.group_formation_mode?.replace(/_/g, " ") || "Not set"}
+                            {metadata.group_formation_mode?.replace(
+                              /_/g,
+                              " ",
+                            ) || "Not set"}
                           </p>
                         </div>
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Submission Mode</p>
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Submission Mode
+                          </p>
                           <p className="text-sm font-semibold">
-                            {metadata.submission_mode === "SINGLE_LEADER" ? "Single Leader" :
-                              metadata.submission_mode === "ALL_MEMBERS" ? "All Members" :
-                              metadata.submission_mode === "MAJORITY_VOTE" ? "Majority Vote" : "Single Leader"}
+                            {metadata.submission_mode === "SINGLE_LEADER"
+                              ? "Single Leader"
+                              : metadata.submission_mode === "ALL_MEMBERS"
+                                ? "All Members"
+                                : metadata.submission_mode === "MAJORITY_VOTE"
+                                  ? "Majority Vote"
+                                  : "Single Leader"}
                           </p>
                         </div>
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Peer Evaluation</p>
-                          <p className={`text-sm font-semibold ${metadata.peer_evaluation_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
-                            {metadata.peer_evaluation_enabled ? "Enabled" : "Disabled"}
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Peer Evaluation
                           </p>
-                          {metadata.peer_evaluation_enabled && metadata.peer_evaluation_deadline && (
-                            <p className="text-[10px] text-muted-foreground">
-                              Deadline: {format(new Date(metadata.peer_evaluation_deadline), "PPP")}
-                            </p>
-                          )}
+                          <p
+                            className={`text-sm font-semibold ${metadata.peer_evaluation_enabled ? "text-emerald-600" : "text-muted-foreground"}`}
+                          >
+                            {metadata.peer_evaluation_enabled
+                              ? "Enabled"
+                              : "Disabled"}
+                          </p>
+                          {metadata.peer_evaluation_enabled &&
+                            metadata.peer_evaluation_deadline && (
+                              <p className="text-[10px] text-muted-foreground">
+                                Deadline:{" "}
+                                {format(
+                                  new Date(metadata.peer_evaluation_deadline),
+                                  "PPP",
+                                )}
+                              </p>
+                            )}
                         </div>
                         <div className="space-y-1 border rounded-lg p-3 bg-muted/10">
-                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">Indiv. Weighting</p>
-                          <p className={`text-sm font-semibold ${metadata.individual_weighting_enabled ? "text-emerald-600" : "text-muted-foreground"}`}>
-                            {metadata.individual_weighting_enabled ? "Enabled" : "Disabled"}
+                          <p className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground">
+                            Indiv. Weighting
+                          </p>
+                          <p
+                            className={`text-sm font-semibold ${metadata.individual_weighting_enabled ? "text-emerald-600" : "text-muted-foreground"}`}
+                          >
+                            {metadata.individual_weighting_enabled
+                              ? "Enabled"
+                              : "Disabled"}
                           </p>
                         </div>
                       </div>
@@ -8101,8 +8490,11 @@ export default function NewAssessmentBuilder() {
                       <div className="text-xs text-muted-foreground bg-muted/20 border p-3 rounded-lg flex items-center gap-2">
                         <Info className="size-4 text-primary" />
                         <span>
-                          This is a low-risk assessment ({metadata.mode === "Groupwork" ? "Group Work" : metadata.mode}). No
-                          supervisor configuration is required.
+                          This is a low-risk assessment (
+                          {metadata.mode === "Groupwork"
+                            ? "Group Work"
+                            : metadata.mode}
+                          ). No supervisor configuration is required.
                         </span>
                       </div>
                     )}
@@ -8329,15 +8721,14 @@ export default function NewAssessmentBuilder() {
                                 <X className="size-3.5 text-destructive" />
                               )}
                               <span>
-                                All students assigned ({assignedCount}/{totalRoster})
+                                All students assigned ({assignedCount}/
+                                {totalRoster})
                               </span>
                             </div>
                           </>
                         )}
                       </div>
                     </div>
-
-
 
                     <div className="pt-4 border-t space-y-3">
                       <div className="flex items-start gap-2.5">
@@ -8384,7 +8775,10 @@ export default function NewAssessmentBuilder() {
   };
 
   return (
-    <div data-tour="lecturer-create" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div
+      data-tour="lecturer-create"
+      className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200"
+    >
       {/* Header */}
       <div className="flex items-center justify-between border-b pb-2">
         <div>
@@ -8421,7 +8815,10 @@ export default function NewAssessmentBuilder() {
             <Save className="mr-1.5 size-3.5" />
             {isSavingDraft ? "Saving..." : "Save Draft"}
           </Button>
-          <Badge variant="outline" className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-zinc-100 border text-zinc-500">
+          <Badge
+            variant="outline"
+            className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-zinc-100 border text-zinc-500"
+          >
             Step {activeStep} / 6
           </Badge>
         </div>
@@ -8580,7 +8977,9 @@ export default function NewAssessmentBuilder() {
                     {stepNum}
                   </span>
                   <span className="font-semibold text-foreground">
-                    {stepNum === 3 && metadata.mode === "Groupwork" ? "Group Formation" : s.title}
+                    {stepNum === 3 && metadata.mode === "Groupwork"
+                      ? "Group Formation"
+                      : s.title}
                   </span>
                 </div>
                 <ChevronDown
@@ -8617,7 +9016,9 @@ export default function NewAssessmentBuilder() {
                       {stepNum}
                     </StepperIndicator>
                     <StepperTitle className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground data-[state=active]:text-foreground">
-                      {stepNum === 3 && metadata.mode === "Groupwork" ? "Group Formation" : s.title}
+                      {stepNum === 3 && metadata.mode === "Groupwork"
+                        ? "Group Formation"
+                        : s.title}
                     </StepperTitle>
                   </StepperTrigger>
                 </StepperItem>
@@ -8659,11 +9060,14 @@ export default function NewAssessmentBuilder() {
                       variant="outline"
                       className="text-[10px] font-semibold border-primary/30 text-primary bg-primary/5"
                     >
-                      {aiTargetSectionId === "all" ? "Full Assessment Mode" : "Section-Targeted Mode"}
+                      {aiTargetSectionId === "all"
+                        ? "Full Assessment Mode"
+                        : "Section-Targeted Mode"}
                     </Badge>
                   </div>
                   <SheetDescription className="text-xs text-muted-foreground line-clamp-1 sm:line-clamp-none">
-                    Configure curriculum grounding, taxonomy targets, and question parameters for AI generation.
+                    Configure curriculum grounding, taxonomy targets, and
+                    question parameters for AI generation.
                   </SheetDescription>
                 </div>
               </div>
@@ -8706,9 +9110,12 @@ export default function NewAssessmentBuilder() {
                     ...prev,
                     topic: allTopics || metadata.title || "",
                     count: totalQuestions,
-                    question_type: allTypes.length > 1 ? "mixed" : allTypes[0] || "mcq",
-                    difficulty: (blueprint[0]?.difficulty?.toLowerCase() || "medium") as any,
-                    bloom_level: (blueprint[0]?.bloomLevel || "understand") as any,
+                    question_type:
+                      allTypes.length > 1 ? "mixed" : allTypes[0] || "mcq",
+                    difficulty: (blueprint[0]?.difficulty?.toLowerCase() ||
+                      "medium") as any,
+                    bloom_level: (blueprint[0]?.bloomLevel ||
+                      "understand") as any,
                     additional_context: blueprint
                       .map((s) => s.aiPromptHint?.trim())
                       .filter(Boolean)
@@ -8764,7 +9171,8 @@ export default function NewAssessmentBuilder() {
             {/* Context Card */}
             <div className="rounded-xl border border-border/70 bg-card p-4 space-y-3 shadow-xs">
               <div className="flex items-center gap-2 text-xs font-bold text-foreground">
-                <Sparkles className="size-3.5 text-primary" /> Assessment Context & Blueprint Overview
+                <Sparkles className="size-3.5 text-primary" /> Assessment
+                Context & Blueprint Overview
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
                 <div className="p-3 rounded-lg bg-muted/20 border border-border/50">
@@ -8794,7 +9202,9 @@ export default function NewAssessmentBuilder() {
                     Assessment Format
                   </span>
                   <span className="font-semibold text-foreground truncate block mt-0.5">
-                    {(metadata.mode === "Groupwork" ? "Group Work Assessment" : metadata.mode) || "Standard Assessment"}
+                    {(metadata.mode === "Groupwork"
+                      ? "Group Work Assessment"
+                      : metadata.mode) || "Standard Assessment"}
                   </span>
                 </div>
               </div>
@@ -8806,10 +9216,15 @@ export default function NewAssessmentBuilder() {
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                      <Layers className="size-3.5 text-primary" /> Section Distribution Plan
+                      <Layers className="size-3.5 text-primary" /> Section
+                      Distribution Plan
                     </Label>
                     <Badge variant="outline" className="text-[10px] font-mono">
-                      {blueprint.reduce((acc, s) => acc + (s.questions || 0), 0)} Total Questions Required
+                      {blueprint.reduce(
+                        (acc, s) => acc + (s.questions || 0),
+                        0,
+                      )}{" "}
+                      Total Questions Required
                     </Badge>
                   </div>
 
@@ -8822,11 +9237,13 @@ export default function NewAssessmentBuilder() {
                         <div className="space-y-1">
                           <div className="flex items-center gap-2">
                             <span className="font-bold text-xs text-foreground">
-                              Section {idx + 1}: {sec.section || `Section ${idx + 1}`}
+                              Section {idx + 1}:{" "}
+                              {sec.section || `Section ${idx + 1}`}
                             </span>
                           </div>
                           <p className="text-xs text-muted-foreground truncate max-w-md">
-                            {sec.topics || "Topics derived from syllabus & uploaded materials"}
+                            {sec.topics ||
+                              "Topics derived from syllabus & uploaded materials"}
                           </p>
                         </div>
                         <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 text-xs font-medium border-t sm:border-t-0 pt-2 sm:pt-0">
@@ -8834,10 +9251,16 @@ export default function NewAssessmentBuilder() {
                             {sec.questions || 0} Qs • {sec.marks || 0} Marks
                           </div>
                           <div className="flex items-center gap-1.5">
-                            <Badge variant="secondary" className="text-[9px] uppercase px-2 py-0 font-semibold">
+                            <Badge
+                              variant="secondary"
+                              className="text-[9px] uppercase px-2 py-0 font-semibold"
+                            >
                               {sec.difficulty || "Medium"}
                             </Badge>
-                            <Badge variant="outline" className="text-[9px] uppercase px-2 py-0 font-semibold">
+                            <Badge
+                              variant="outline"
+                              className="text-[9px] uppercase px-2 py-0 font-semibold"
+                            >
                               {sec.bloomLevel || "Understand"}
                             </Badge>
                           </div>
@@ -8851,7 +9274,9 @@ export default function NewAssessmentBuilder() {
               <div className="space-y-5">
                 {/* Active Section Info Card */}
                 {(() => {
-                  const activeSec = blueprint.find((b) => b.id === aiTargetSectionId);
+                  const activeSec = blueprint.find(
+                    (b) => b.id === aiTargetSectionId,
+                  );
                   if (!activeSec) return null;
                   const estMarksPerQ =
                     Math.round(
@@ -8873,13 +9298,22 @@ export default function NewAssessmentBuilder() {
                           </div>
                         </div>
                         <div className="flex items-center gap-2 font-mono">
-                          <Badge variant="outline" className="text-[10px] font-bold">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] font-bold"
+                          >
                             {activeSec.questions || 0} Questions
                           </Badge>
-                          <Badge variant="secondary" className="text-[10px] font-bold">
+                          <Badge
+                            variant="secondary"
+                            className="text-[10px] font-bold"
+                          >
                             {activeSec.marks || 0} Marks Total
                           </Badge>
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground hidden sm:inline-flex">
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] text-muted-foreground hidden sm:inline-flex"
+                          >
                             ~{estMarksPerQ} M/Q
                           </Badge>
                         </div>
@@ -8888,13 +9322,24 @@ export default function NewAssessmentBuilder() {
                       {/* Blueprint Topic Domain preview */}
                       <div className="pt-2 border-t border-border/40 text-[11px] flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-muted-foreground">
                         <div>
-                          <span className="font-semibold text-foreground">Topic Domain: </span>
-                          <span className="italic">{activeSec.topics || "No topic coverage defined in blueprint"}</span>
+                          <span className="font-semibold text-foreground">
+                            Topic Domain:{" "}
+                          </span>
+                          <span className="italic">
+                            {activeSec.topics ||
+                              "No topic coverage defined in blueprint"}
+                          </span>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className="font-semibold text-foreground">Formats: </span>
-                          <Badge variant="outline" className="text-[9px] uppercase px-1.5 py-0 font-mono">
-                            {activeSec.allowedTypes && activeSec.allowedTypes.length > 0
+                          <span className="font-semibold text-foreground">
+                            Formats:{" "}
+                          </span>
+                          <Badge
+                            variant="outline"
+                            className="text-[9px] uppercase px-1.5 py-0 font-mono"
+                          >
+                            {activeSec.allowedTypes &&
+                            activeSec.allowedTypes.length > 0
                               ? activeSec.allowedTypes.join(", ")
                               : "MCQ"}
                           </Badge>
@@ -8908,10 +9353,13 @@ export default function NewAssessmentBuilder() {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
-                      <BookOpen className="size-3.5 text-primary" /> Subject / Topic to Focus <span className="text-destructive">*</span>
+                      <BookOpen className="size-3.5 text-primary" /> Subject /
+                      Topic to Focus <span className="text-destructive">*</span>
                     </Label>
                     {(() => {
-                      const activeSec = blueprint.find((b) => b.id === aiTargetSectionId);
+                      const activeSec = blueprint.find(
+                        (b) => b.id === aiTargetSectionId,
+                      );
                       return activeSec && activeSec.topics ? (
                         <button
                           type="button"
@@ -8924,10 +9372,13 @@ export default function NewAssessmentBuilder() {
                           }}
                           className="text-[10px] text-primary hover:underline cursor-pointer flex items-center gap-1"
                         >
-                          <RotateCcw className="size-2.5" /> Reset to Blueprint Topic
+                          <RotateCcw className="size-2.5" /> Reset to Blueprint
+                          Topic
                         </button>
                       ) : (
-                        <span className="text-[10px] text-muted-foreground">Autofilled from Blueprint</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          Autofilled from Blueprint
+                        </span>
                       );
                     })()}
                   </div>
@@ -8943,7 +9394,9 @@ export default function NewAssessmentBuilder() {
                     className="h-10 text-xs bg-background rounded-xl border-border/70 font-medium"
                   />
                   <p className="text-[10px] text-muted-foreground">
-                    Automatically populated from your blueprint section&apos;s Topic Domain Coverage. You can refine or expand it if needed.
+                    Automatically populated from your blueprint section&apos;s
+                    Topic Domain Coverage. You can refine or expand it if
+                    needed.
                   </p>
                 </div>
 
@@ -8951,7 +9404,8 @@ export default function NewAssessmentBuilder() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div className="space-y-2">
                     <Label className="text-xs font-semibold flex items-center gap-1.5">
-                      <Sliders className="size-3.5 text-primary" /> Question Format
+                      <Sliders className="size-3.5 text-primary" /> Question
+                      Format
                     </Label>
                     <Select
                       value={aiGenerationConfig.question_type}
@@ -9004,7 +9458,11 @@ export default function NewAssessmentBuilder() {
                             ];
                           }
                           return visibleTypes.map((t) => (
-                            <SelectItem key={t.value} value={t.value} className="text-xs">
+                            <SelectItem
+                              key={t.value}
+                              value={t.value}
+                              className="text-xs"
+                            >
                               {t.label}
                             </SelectItem>
                           ));
@@ -9036,7 +9494,9 @@ export default function NewAssessmentBuilder() {
                 {/* Row 2: Difficulty & Bloom Level */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold">Difficulty Level</Label>
+                    <Label className="text-xs font-semibold">
+                      Difficulty Level
+                    </Label>
                     <Select
                       value={aiGenerationConfig.difficulty}
                       onValueChange={(v: any) =>
@@ -9050,15 +9510,23 @@ export default function NewAssessmentBuilder() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl text-xs">
-                        <SelectItem value="easy" className="text-xs">Easy (Fundamental recall)</SelectItem>
-                        <SelectItem value="medium" className="text-xs">Medium (Application & logic)</SelectItem>
-                        <SelectItem value="hard" className="text-xs">Hard (Synthesis & deep analysis)</SelectItem>
+                        <SelectItem value="easy" className="text-xs">
+                          Easy (Fundamental recall)
+                        </SelectItem>
+                        <SelectItem value="medium" className="text-xs">
+                          Medium (Application & logic)
+                        </SelectItem>
+                        <SelectItem value="hard" className="text-xs">
+                          Hard (Synthesis & deep analysis)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
 
                   <div className="space-y-2">
-                    <Label className="text-xs font-semibold">{"Bloom's Taxonomy Level"}</Label>
+                    <Label className="text-xs font-semibold">
+                      {"Bloom's Taxonomy Level"}
+                    </Label>
                     <Select
                       value={aiGenerationConfig.bloom_level}
                       onValueChange={(v: any) =>
@@ -9072,12 +9540,24 @@ export default function NewAssessmentBuilder() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent className="rounded-xl text-xs">
-                        <SelectItem value="remember" className="text-xs">Remember (Knowledge recall)</SelectItem>
-                        <SelectItem value="understand" className="text-xs">Understand (Comprehension)</SelectItem>
-                        <SelectItem value="apply" className="text-xs">Apply (Execution & practice)</SelectItem>
-                        <SelectItem value="analyze" className="text-xs">Analyze (Deconstruction & logic)</SelectItem>
-                        <SelectItem value="evaluate" className="text-xs">Evaluate (Critique & judgment)</SelectItem>
-                        <SelectItem value="create" className="text-xs">Create (Formulate & synthesize)</SelectItem>
+                        <SelectItem value="remember" className="text-xs">
+                          Remember (Knowledge recall)
+                        </SelectItem>
+                        <SelectItem value="understand" className="text-xs">
+                          Understand (Comprehension)
+                        </SelectItem>
+                        <SelectItem value="apply" className="text-xs">
+                          Apply (Execution & practice)
+                        </SelectItem>
+                        <SelectItem value="analyze" className="text-xs">
+                          Analyze (Deconstruction & logic)
+                        </SelectItem>
+                        <SelectItem value="evaluate" className="text-xs">
+                          Evaluate (Critique & judgment)
+                        </SelectItem>
+                        <SelectItem value="create" className="text-xs">
+                          Create (Formulate & synthesize)
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -9089,9 +9569,12 @@ export default function NewAssessmentBuilder() {
             <div className="space-y-3 pt-3 border-t border-border/40">
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-semibold flex items-center gap-1.5">
-                  <Wand2 className="size-3.5 text-primary" /> Additional Guidance & Custom Prompt
+                  <Wand2 className="size-3.5 text-primary" /> Additional
+                  Guidance & Custom Prompt
                 </Label>
-                <span className="text-[10px] text-muted-foreground">Optional</span>
+                <span className="text-[10px] text-muted-foreground">
+                  Optional
+                </span>
               </div>
               <Textarea
                 placeholder="Specify extra instructions, edge cases, formulas, code syntax guidelines, or real-world dataset requirements..."
@@ -9122,7 +9605,8 @@ export default function NewAssessmentBuilder() {
                       key={chip}
                       type="button"
                       onClick={() => {
-                        const currentText = aiGenerationConfig.additional_context || "";
+                        const currentText =
+                          aiGenerationConfig.additional_context || "";
                         if (!currentText.includes(chip)) {
                           const newText = currentText
                             ? `${currentText.trim()} ${chip}.`
@@ -9146,7 +9630,12 @@ export default function NewAssessmentBuilder() {
             <div className="p-3.5 sm:p-4 rounded-xl bg-muted/20 border border-border/70 text-xs flex gap-3 items-start">
               <Info className="size-4 text-primary shrink-0 mt-0.5" />
               <div className="leading-relaxed text-xs text-muted-foreground">
-                <strong className="font-semibold text-foreground">Curriculum Balancing:</strong> The AI question generation agent will draft questions matching each section&apos;s specified format, difficulty levels, and Bloom&apos;s Taxonomy targets with source citations.
+                <strong className="font-semibold text-foreground">
+                  Curriculum Balancing:
+                </strong>{" "}
+                The AI question generation agent will draft questions matching
+                each section&apos;s specified format, difficulty levels, and
+                Bloom&apos;s Taxonomy targets with source citations.
               </div>
             </div>
           </div>
@@ -9155,9 +9644,15 @@ export default function NewAssessmentBuilder() {
           <div className="p-4 border-t border-border/40 bg-background shrink-0 flex items-center justify-between gap-3">
             <div className="text-xs text-muted-foreground font-medium hidden sm:block">
               {aiTargetSectionId === "all" ? (
-                <span>Scope: <strong>All {blueprint.length} Sections</strong> ({blueprint.reduce((a, b) => a + (b.questions || 0), 0)} Questions)</span>
+                <span>
+                  Scope: <strong>All {blueprint.length} Sections</strong> (
+                  {blueprint.reduce((a, b) => a + (b.questions || 0), 0)}{" "}
+                  Questions)
+                </span>
               ) : (
-                <span>Scope: <strong>{aiGenerationConfig.count}</strong> Question(s)</span>
+                <span>
+                  Scope: <strong>{aiGenerationConfig.count}</strong> Question(s)
+                </span>
               )}
             </div>
             <div className="flex items-center gap-2 ml-auto">
@@ -9226,11 +9721,13 @@ export default function NewAssessmentBuilder() {
                       variant="outline"
                       className="text-[10px] font-semibold bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20"
                     >
-                      {aiCandidates.length} Candidate{aiCandidates.length === 1 ? "" : "s"} Pending
+                      {aiCandidates.length} Candidate
+                      {aiCandidates.length === 1 ? "" : "s"} Pending
                     </Badge>
                   </div>
                   <SheetDescription className="text-xs text-muted-foreground line-clamp-1 sm:line-clamp-none">
-                    Review generated candidate drafts against syllabus materials. Accept, refine, or discard each question.
+                    Review generated candidate drafts against syllabus
+                    materials. Accept, refine, or discard each question.
                   </SheetDescription>
                 </div>
               </div>
@@ -9281,7 +9778,10 @@ export default function NewAssessmentBuilder() {
                   {blueprint
                     .filter((s) => aiFailedSectionIds.includes(s.id))
                     .map((s, idx, arr) => (
-                      <span key={s.id} className="font-semibold text-foreground">
+                      <span
+                        key={s.id}
+                        className="font-semibold text-foreground"
+                      >
                         {s.section}
                         {idx < arr.length - 1 ? ", " : ""}
                       </span>
@@ -9323,7 +9823,8 @@ export default function NewAssessmentBuilder() {
                     All candidate questions reviewed!
                   </p>
                   <p className="text-xs text-muted-foreground max-w-sm">
-                    Accepted questions have been attached to your assessment blueprint and are ready for publishing.
+                    Accepted questions have been attached to your assessment
+                    blueprint and are ready for publishing.
                   </p>
                 </div>
                 <Button
@@ -9349,11 +9850,16 @@ export default function NewAssessmentBuilder() {
                         groups[secId].push(c);
                       });
 
-                      const activeSelectedId = selectedCandidateId || aiCandidates[0]?.id;
+                      const activeSelectedId =
+                        selectedCandidateId || aiCandidates[0]?.id;
 
                       return Object.entries(groups).map(([secId, items]) => {
-                        const sectionObj = blueprint.find((s) => s.id === secId);
-                        const sectionTitle = sectionObj ? sectionObj.section : "General Section";
+                        const sectionObj = blueprint.find(
+                          (s) => s.id === secId,
+                        );
+                        const sectionTitle = sectionObj
+                          ? sectionObj.section
+                          : "General Section";
                         return (
                           <div key={secId} className="space-y-3">
                             <div className="flex items-center justify-between border-b border-border/40 pb-1.5 bg-background/95 sticky top-0 z-10 backdrop-blur-xs pt-1">
@@ -9363,7 +9869,10 @@ export default function NewAssessmentBuilder() {
                                   {sectionTitle}
                                 </h4>
                               </div>
-                              <Badge variant="outline" className="text-[9px] font-mono">
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] font-mono"
+                              >
                                 {items.length} Pending
                               </Badge>
                             </div>
@@ -9374,7 +9883,9 @@ export default function NewAssessmentBuilder() {
                                 return (
                                   <div
                                     key={cand.id}
-                                    onClick={() => setSelectedCandidateId(cand.id)}
+                                    onClick={() =>
+                                      setSelectedCandidateId(cand.id)
+                                    }
                                     className={cn(
                                       "p-3.5 rounded-xl border text-xs space-y-2.5 cursor-pointer transition-all",
                                       isSelected
@@ -9384,10 +9895,16 @@ export default function NewAssessmentBuilder() {
                                   >
                                     <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-1.5 flex-wrap">
-                                        <Badge variant="outline" className="text-[9px] font-bold uppercase">
+                                        <Badge
+                                          variant="outline"
+                                          className="text-[9px] font-bold uppercase"
+                                        >
                                           {cand.question_type}
                                         </Badge>
-                                        <Badge variant="secondary" className="text-[9px] uppercase font-semibold">
+                                        <Badge
+                                          variant="secondary"
+                                          className="text-[9px] uppercase font-semibold"
+                                        >
                                           {cand.difficulty}
                                         </Badge>
                                       </div>
@@ -9423,7 +9940,9 @@ export default function NewAssessmentBuilder() {
                                     </p>
                                     <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-border/40">
                                       <span>{cand.marks || 5} marks</span>
-                                      <span className="capitalize">{cand.bloom_level || "Understand"}</span>
+                                      <span className="capitalize">
+                                        {cand.bloom_level || "Understand"}
+                                      </span>
                                     </div>
                                   </div>
                                 );
@@ -9438,14 +9957,20 @@ export default function NewAssessmentBuilder() {
                   {/* Right Column: Detailed Candidate Inspector & Editing Form */}
                   <div className="md:col-span-7 overflow-y-auto p-4 sm:p-6 bg-muted/5 space-y-4">
                     {(() => {
-                      const activeSelectedId = selectedCandidateId || aiCandidates[0]?.id;
-                      const activeCand = aiCandidates.find((c) => c.id === activeSelectedId) || aiCandidates[0];
+                      const activeSelectedId =
+                        selectedCandidateId || aiCandidates[0]?.id;
+                      const activeCand =
+                        aiCandidates.find((c) => c.id === activeSelectedId) ||
+                        aiCandidates[0];
 
                       if (!activeCand) {
                         return (
                           <div className="flex flex-col items-center justify-center h-full text-muted-foreground text-xs text-center p-6">
                             <Sparkles className="size-8 mb-2 opacity-40 text-primary" />
-                            <p>Select a candidate from the left list to inspect details</p>
+                            <p>
+                              Select a candidate from the left list to inspect
+                              details
+                            </p>
                           </div>
                         );
                       }
@@ -9460,8 +9985,12 @@ export default function NewAssessmentBuilder() {
                                 Candidate Inspector
                               </span>
                               <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
-                                {activeCand.question_type.toUpperCase()} Question
-                                <Badge variant="outline" className="text-[10px]">
+                                {activeCand.question_type.toUpperCase()}{" "}
+                                Question
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px]"
+                                >
                                   {activeCand.marks || 5} Marks
                                 </Badge>
                               </h4>
@@ -9473,25 +10002,34 @@ export default function NewAssessmentBuilder() {
                                   size="sm"
                                   onClick={() => {
                                     setEditingCandidateId(activeCand.id);
-                                    setEditingText(activeCand.parsed_question_text);
-                                    setEditingExplanation(activeCand.parsed_explanation || "");
+                                    setEditingText(
+                                      activeCand.parsed_question_text,
+                                    );
+                                    setEditingExplanation(
+                                      activeCand.parsed_explanation || "",
+                                    );
                                     setEditingOptions(
                                       JSON.parse(
                                         JSON.stringify(
-                                          activeCand.options || activeCand._options || [],
+                                          activeCand.options ||
+                                            activeCand._options ||
+                                            [],
                                         ),
                                       ),
                                     );
                                   }}
                                   className="h-8 text-xs font-semibold text-foreground bg-background hover:bg-muted/40 border-border/60 gap-1.5 px-3 rounded-xl"
                                 >
-                                  <FileText className="size-3.5 text-primary" /> Edit Question
+                                  <FileText className="size-3.5 text-primary" />{" "}
+                                  Edit Question
                                 </Button>
                               )}
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => handleAcceptCandidate(activeCand.id)}
+                                onClick={() =>
+                                  handleAcceptCandidate(activeCand.id)
+                                }
                                 disabled={isReviewApplying}
                                 className="h-8 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 border-emerald-300 dark:border-emerald-800 gap-1.5 px-3 rounded-xl"
                               >
@@ -9509,7 +10047,9 @@ export default function NewAssessmentBuilder() {
                                 </Label>
                                 <Textarea
                                   value={editingText}
-                                  onChange={(e) => setEditingText(e.target.value)}
+                                  onChange={(e) =>
+                                    setEditingText(e.target.value)
+                                  }
                                   className="min-h-24 text-xs bg-background rounded-xl border-border/70"
                                 />
                               </div>
@@ -9519,7 +10059,9 @@ export default function NewAssessmentBuilder() {
                                 </Label>
                                 <Textarea
                                   value={editingExplanation}
-                                  onChange={(e) => setEditingExplanation(e.target.value)}
+                                  onChange={(e) =>
+                                    setEditingExplanation(e.target.value)
+                                  }
                                   className="min-h-16 text-xs bg-background rounded-xl border-border/70"
                                 />
                               </div>
@@ -9531,27 +10073,47 @@ export default function NewAssessmentBuilder() {
                                   </Label>
                                   <div className="space-y-2">
                                     {editingOptions.map((opt, oIdx) => {
-                                      const qType = mapBackendToFrontendType(activeCand.question_type);
+                                      const qType = mapBackendToFrontendType(
+                                        activeCand.question_type,
+                                      );
                                       return (
-                                        <div key={oIdx} className="flex gap-2 items-center">
+                                        <div
+                                          key={oIdx}
+                                          className="flex gap-2 items-center"
+                                        >
                                           {qType === "matching" ? (
                                             <>
                                               <Input
                                                 value={opt.option_text || ""}
                                                 onChange={(e) => {
-                                                  const newOpts = [...editingOptions];
-                                                  newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  newOpts[oIdx] = {
+                                                    ...newOpts[oIdx],
+                                                    option_text: e.target.value,
+                                                  };
                                                   setEditingOptions(newOpts);
                                                 }}
                                                 placeholder="Premise (Left)..."
                                                 className="h-9 text-xs flex-1 bg-background rounded-lg border-border/70"
                                               />
-                                              <span className="text-xs text-muted-foreground font-bold">➔</span>
+                                              <span className="text-xs text-muted-foreground font-bold">
+                                                ➔
+                                              </span>
                                               <Input
-                                                value={opt.option_text_right || ""}
+                                                value={
+                                                  opt.option_text_right || ""
+                                                }
                                                 onChange={(e) => {
-                                                  const newOpts = [...editingOptions];
-                                                  newOpts[oIdx] = { ...newOpts[oIdx], option_text_right: e.target.value };
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  newOpts[oIdx] = {
+                                                    ...newOpts[oIdx],
+                                                    option_text_right:
+                                                      e.target.value,
+                                                  };
                                                   setEditingOptions(newOpts);
                                                 }}
                                                 placeholder="Response (Right)..."
@@ -9563,8 +10125,13 @@ export default function NewAssessmentBuilder() {
                                               <Input
                                                 value={opt.option_text || ""}
                                                 onChange={(e) => {
-                                                  const newOpts = [...editingOptions];
-                                                  newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  newOpts[oIdx] = {
+                                                    ...newOpts[oIdx],
+                                                    option_text: e.target.value,
+                                                  };
                                                   setEditingOptions(newOpts);
                                                 }}
                                                 placeholder="Sub-question prompt..."
@@ -9572,10 +10139,20 @@ export default function NewAssessmentBuilder() {
                                               />
                                               <Input
                                                 type="number"
-                                                value={opt.match_key !== undefined && opt.match_key !== null ? opt.match_key : "5"}
+                                                value={
+                                                  opt.match_key !== undefined &&
+                                                  opt.match_key !== null
+                                                    ? opt.match_key
+                                                    : "5"
+                                                }
                                                 onChange={(e) => {
-                                                  const newOpts = [...editingOptions];
-                                                  newOpts[oIdx] = { ...newOpts[oIdx], match_key: e.target.value };
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  newOpts[oIdx] = {
+                                                    ...newOpts[oIdx],
+                                                    match_key: e.target.value,
+                                                  };
                                                   setEditingOptions(newOpts);
                                                 }}
                                                 placeholder="Marks"
@@ -9587,17 +10164,27 @@ export default function NewAssessmentBuilder() {
                                               <Checkbox
                                                 checked={opt.is_correct}
                                                 onCheckedChange={(checked) => {
-                                                  const newOpts = [...editingOptions];
-                                                  if (qType === "truefalse" || qType === "mcq") {
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  if (
+                                                    qType === "truefalse" ||
+                                                    qType === "mcq"
+                                                  ) {
                                                     if (checked) {
-                                                      newOpts.forEach((o, idx) => {
-                                                        o.is_correct = idx === oIdx;
-                                                      });
+                                                      newOpts.forEach(
+                                                        (o, idx) => {
+                                                          o.is_correct =
+                                                            idx === oIdx;
+                                                        },
+                                                      );
                                                     } else {
-                                                      newOpts[oIdx].is_correct = false;
+                                                      newOpts[oIdx].is_correct =
+                                                        false;
                                                     }
                                                   } else {
-                                                    newOpts[oIdx].is_correct = !!checked;
+                                                    newOpts[oIdx].is_correct =
+                                                      !!checked;
                                                   }
                                                   setEditingOptions(newOpts);
                                                 }}
@@ -9605,8 +10192,13 @@ export default function NewAssessmentBuilder() {
                                               <Input
                                                 value={opt.option_text || ""}
                                                 onChange={(e) => {
-                                                  const newOpts = [...editingOptions];
-                                                  newOpts[oIdx] = { ...newOpts[oIdx], option_text: e.target.value };
+                                                  const newOpts = [
+                                                    ...editingOptions,
+                                                  ];
+                                                  newOpts[oIdx] = {
+                                                    ...newOpts[oIdx],
+                                                    option_text: e.target.value,
+                                                  };
                                                   setEditingOptions(newOpts);
                                                 }}
                                                 placeholder="Option text..."
@@ -9632,7 +10224,9 @@ export default function NewAssessmentBuilder() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  onClick={() => handleSaveEditedCandidate(activeCand.id)}
+                                  onClick={() =>
+                                    handleSaveEditedCandidate(activeCand.id)
+                                  }
                                   disabled={isReviewApplying}
                                   className="text-xs h-8.5 font-semibold bg-emerald-600 text-white hover:bg-emerald-700 rounded-xl"
                                 >
@@ -9653,7 +10247,10 @@ export default function NewAssessmentBuilder() {
 
                               {/* Options breakdown */}
                               {(() => {
-                                const opts = activeCand.options || activeCand._options || [];
+                                const opts =
+                                  activeCand.options ||
+                                  activeCand._options ||
+                                  [];
                                 return (
                                   opts.length > 0 && (
                                     <div className="space-y-2">
@@ -9672,8 +10269,13 @@ export default function NewAssessmentBuilder() {
                                             )}
                                           >
                                             <span>
-                                              {opt.option_text || opt.text || opt.content || ""}
-                                              {opt.option_text_right ? ` ➔ ${opt.option_text_right}` : ""}
+                                              {opt.option_text ||
+                                                opt.text ||
+                                                opt.content ||
+                                                ""}
+                                              {opt.option_text_right
+                                                ? ` ➔ ${opt.option_text_right}`
+                                                : ""}
                                             </span>
                                             {opt.is_correct && (
                                               <Badge className="bg-emerald-600 text-white hover:bg-emerald-600 size-5 p-0 flex items-center justify-center rounded-full shrink-0">
@@ -9719,7 +10321,9 @@ export default function NewAssessmentBuilder() {
 
                     return Object.entries(groups).map(([secId, items]) => {
                       const sectionObj = blueprint.find((s) => s.id === secId);
-                      const sectionTitle = sectionObj ? sectionObj.section : "General Section";
+                      const sectionTitle = sectionObj
+                        ? sectionObj.section
+                        : "General Section";
                       return (
                         <div key={secId} className="space-y-3">
                           <div className="flex items-center justify-between border-b border-border/40 pb-1.5 pt-1">
@@ -9729,7 +10333,10 @@ export default function NewAssessmentBuilder() {
                                 {sectionTitle}
                               </h4>
                             </div>
-                            <Badge variant="outline" className="text-[10px] font-mono">
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] font-mono"
+                            >
                               {items.length} Qs
                             </Badge>
                           </div>
@@ -9742,10 +10349,16 @@ export default function NewAssessmentBuilder() {
                               >
                                 <div className="flex items-center justify-between gap-2 flex-wrap">
                                   <div className="flex items-center gap-1.5 flex-wrap">
-                                    <Badge variant="outline" className="text-[9px] font-bold uppercase">
+                                    <Badge
+                                      variant="outline"
+                                      className="text-[9px] font-bold uppercase"
+                                    >
                                       {cand.question_type}
                                     </Badge>
-                                    <Badge variant="secondary" className="text-[9px] uppercase font-semibold">
+                                    <Badge
+                                      variant="secondary"
+                                      className="text-[9px] uppercase font-semibold"
+                                    >
                                       {cand.difficulty}
                                     </Badge>
                                   </div>
@@ -9753,7 +10366,9 @@ export default function NewAssessmentBuilder() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => handleAcceptCandidate(cand.id)}
+                                      onClick={() =>
+                                        handleAcceptCandidate(cand.id)
+                                      }
                                       disabled={isReviewApplying}
                                       className="h-7 text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-800 px-2.5 rounded-lg"
                                     >
@@ -9762,7 +10377,9 @@ export default function NewAssessmentBuilder() {
                                     <Button
                                       variant="outline"
                                       size="sm"
-                                      onClick={() => handleRejectCandidate(cand.id)}
+                                      onClick={() =>
+                                        handleRejectCandidate(cand.id)
+                                      }
                                       disabled={isReviewApplying}
                                       className="h-7 text-xs font-medium text-destructive border-destructive/30 px-2 rounded-lg"
                                     >
@@ -9832,7 +10449,8 @@ export default function NewAssessmentBuilder() {
                     onClick={() => setShowAcceptAllConfirm(true)}
                     className="text-xs h-9 rounded-xl bg-emerald-600 text-white hover:bg-emerald-700 font-semibold shadow-none gap-1.5"
                   >
-                    <Check className="size-3.5" /> Accept All ({aiCandidates.length})
+                    <Check className="size-3.5" /> Accept All (
+                    {aiCandidates.length})
                   </Button>
                 </>
               )}
@@ -9841,12 +10459,16 @@ export default function NewAssessmentBuilder() {
         </SheetContent>
       </Sheet>
 
-      <AlertDialog open={showAcceptAllConfirm} onOpenChange={setShowAcceptAllConfirm}>
+      <AlertDialog
+        open={showAcceptAllConfirm}
+        onOpenChange={setShowAcceptAllConfirm}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Accept All Questions</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to accept and add all generated questions to this assessment?
+              Are you sure you want to accept and add all generated questions to
+              this assessment?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

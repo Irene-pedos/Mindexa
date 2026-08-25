@@ -87,14 +87,26 @@ export const studyReaderApi = {
   saveProgress: async (
     kind: ReaderSourceKind,
     id: string,
-    data: { last_page: number; last_scale?: number; page_count_seen?: number }
+    data: {
+      last_page: number;
+      last_scale?: number;
+      rotation?: number;
+      zoom_mode?: string;
+      two_page_view?: boolean;
+      furthest_page_reached?: number;
+      page_count_seen?: number;
+    }
   ) => {
     return apiClient(`/student/reader/${kind}/${id}/progress`, {
       method: "PUT",
       body: JSON.stringify({
         last_page: data.last_page,
         last_scale: data.last_scale ?? 100.0,
-        page_count_seen: data.page_count_seen ?? 1,
+        rotation: data.rotation ?? 0,
+        zoom_mode: data.zoom_mode ?? "fit-width",
+        two_page_view: Boolean(data.two_page_view),
+        furthest_page_reached: data.furthest_page_reached ?? data.page_count_seen ?? data.last_page,
+        page_count_seen: data.page_count_seen ?? data.furthest_page_reached ?? data.last_page,
       }),
     });
   },

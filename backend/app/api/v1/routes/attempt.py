@@ -21,6 +21,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
+import structlog
 from app.core.exceptions import AuthorizationError, NotFoundError
 from app.db.enums import AttemptStatus, UserRole
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -34,7 +35,6 @@ from app.schemas.attempt import (AttemptDetailResponse, AttemptListResponse,
 from app.services.attempt_service import AttemptService
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
 
 logger = structlog.get_logger(__name__)
 
@@ -113,12 +113,16 @@ async def pause_attempt(
     access_token = body.get("access_token")
     if not access_token:
         raise AuthorizationError("access_token is required", code="TOKEN_MISSING")
+    try:
+        access_token_uuid = uuid.UUID(str(access_token))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise AuthorizationError("access_token is invalid", code="TOKEN_MISSING") from exc
 
     service = AttemptService(db)
     attempt = await service.pause_attempt(
         attempt_id=attempt_id,
         student_id=current_user.id,
-        access_token=uuid.UUID(str(access_token)),
+        access_token=access_token_uuid,
     )
 
     now = datetime.now(UTC)

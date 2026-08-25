@@ -10,56 +10,52 @@ Service layer for the Study Reader revision workspace:
 - Quick document skim (bullets with page references)
 """
 
+import asyncio
 import json
+import logging
+import time
 import uuid
-from typing import Any, List, Optional
-from sqlalchemy import select, and_, or_, desc, asc
-from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import UTC, datetime
+from typing import Any, ClassVar, List, Optional
 
+from app.agents.study_reader_agent import StudyReaderAgent
 from app.core.ai.gateway import AIGateway
-from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+from app.core.ai.provider_factory import (get_ai_provider,
+                                          get_embedding_provider)
 from app.core.ai.providers import AICompletionRequest, AIMessage
-from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
+from app.core.exceptions import (AuthorizationError, NotFoundError,
+                                 ValidationError)
 from app.db.enums import AIActionType
-from app.db.models.resource import (
-    LecturerMaterial,
-    LecturerMaterialChunk,
-    StudentResource,
-    StudentResourceChunk,
-)
+from app.db.models.resource import (LecturerMaterial, LecturerMaterialChunk,
+                                    StudentResource, StudentResourceChunk)
 from app.db.repositories.study_reader_repo import StudyReaderRepository
-from app.schemas.study_reader import (
-    AnnotationCreate,
-    AnnotationResponse,
-    AnnotationUpdate,
-    ExamLensResponse,
-    FocusNextRecommendation,
-    FocusResponse,
-    KeyPointCreate,
-    KeyPointResponse,
-    KeyPointUpdate,
-    PageCheckFeedbackItem,
-    PageCheckQuestion,
-    PageCheckRequest,
-    PageCheckResponse,
-    PageCheckSubmitRequest,
-    PageCheckSubmitResponse,
-    PageHeatItem,
-    ReaderMetadataResponse,
-    ReadingProgressResponse,
-    ReadingProgressUpdate,
-    RevisionSheetExportResponse,
-    SkimBullet,
-    SkimResponse,
-    WeakQuestionContext,
-)
+from app.schemas.study_reader import (AnnotationCreate, AnnotationResponse,
+                                      AnnotationUpdate, ExamLensResponse,
+                                      FocusNextRecommendation, FocusResponse,
+                                      KeyPointCreate, KeyPointResponse,
+                                      KeyPointUpdate, PageCheckFeedbackItem,
+                                      PageCheckQuestion, PageCheckRequest,
+                                      PageCheckResponse,
+                                      PageCheckSubmitRequest,
+                                      PageCheckSubmitResponse, PageHeatItem,
+                                      ReaderMetadataResponse,
+                                      ReadingProgressResponse,
+                                      ReadingProgressUpdate,
+                                      RevisionSheetExportResponse, SkimBullet,
+                                      SkimResponse, WeakQuestionContext)
 from app.services.student_service import StudentService
+from sqlalchemy import and_, asc, desc, or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class StudyReaderService:
+    _page_check_cache: ClassVar[dict[tuple[uuid.UUID, str, uuid.UUID, int], tuple[float, list[PageCheckQuestion]]]] = {}
+    _focus_cache: ClassVar[dict[tuple[uuid.UUID, str, uuid.UUID], tuple[float, FocusResponse]]] = {}
+
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = StudyReaderRepository(db)
+        self.logger = logging.getLogger(__name__)
 
     # ── Authorization & Metadata ─────────────────────────────────────────────
 
@@ -91,6 +87,20 @@ class StudyReaderService:
             if not workspace:
                 raise AuthorizationError("You are not enrolled in this course workspace")
 
+            # Check if there is a newer current version in this workspace
+            latest_mat_id = None
+            if not getattr(mat, "is_current", True):
+                stmt_latest = select(LecturerMaterial.id).where(
+                    and_(
+                        LecturerMaterial.teaching_workspace_id == mat.teaching_workspace_id,
+                        LecturerMaterial.original_filename == mat.original_filename,
+                        LecturerMaterial.is_current == True,
+                        LecturerMaterial.is_deleted == False,
+                    )
+                )
+                res_latest = await self.db.execute(stmt_latest)
+                latest_mat_id = res_latest.scalar_one_or_none()
+
             title = mat.display_name or mat.original_filename
             return title, {
                 "id": mat.id,
@@ -103,6 +113,9 @@ class StudyReaderService:
                 "workspace_id": mat.teaching_workspace_id,
                 "course_code": workspace.code if hasattr(workspace, "code") else None,
                 "course_title": workspace.title if hasattr(workspace, "title") else None,
+                "version": getattr(mat, "version", 1),
+                "is_current": getattr(mat, "is_current", True),
+                "latest_material_id": latest_mat_id,
             }
 
         elif kind == "student_resource":
@@ -132,6 +145,9 @@ class StudyReaderService:
                 "workspace_id": None,
                 "course_code": None,
                 "course_title": None,
+                "version": 1,
+                "is_current": True,
+                "latest_material_id": None,
             }
 
         else:
@@ -188,10 +204,18 @@ class StudyReaderService:
     # ── Annotations ──────────────────────────────────────────────────────────
 
     async def list_annotations(
-        self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
+        self,
+        student_id: uuid.UUID,
+        kind: str,
+        source_id: uuid.UUID,
+        page_number: Optional[int] = None,
+        limit: int = 500,
+        offset: int = 0,
     ) -> List[AnnotationResponse]:
         await self.assert_access(student_id, kind, source_id)
-        annotations = await self.repo.list_annotations(student_id, kind, source_id)
+        annotations = await self.repo.list_annotations(
+            student_id, kind, source_id, page_number=page_number, limit=limit, offset=offset
+        )
         return [
             AnnotationResponse(
                 id=a.id,
@@ -270,10 +294,19 @@ class StudyReaderService:
     # ── Key Points ───────────────────────────────────────────────────────────
 
     async def list_key_points(
-        self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
+        self,
+        student_id: uuid.UUID,
+        kind: str,
+        source_id: uuid.UUID,
+        page_number: Optional[int] = None,
+        tag: Optional[str] = None,
+        limit: int = 500,
+        offset: int = 0,
     ) -> List[KeyPointResponse]:
         await self.assert_access(student_id, kind, source_id)
-        key_points = await self.repo.list_key_points(student_id, kind, source_id)
+        key_points = await self.repo.list_key_points(
+            student_id, kind, source_id, page_number=page_number, tag=tag, limit=limit, offset=offset
+        )
         return [
             KeyPointResponse(
                 id=kp.id,
@@ -286,6 +319,7 @@ class StudyReaderService:
                 tag=kp.tag,
                 confidence=kp.confidence,
                 annotation_id=kp.annotation_id,
+                next_review_at=kp.next_review_at,
                 created_at=kp.created_at,
                 updated_at=kp.updated_at,
             )
@@ -314,6 +348,7 @@ class StudyReaderService:
             tag=kp.tag,
             confidence=kp.confidence,
             annotation_id=kp.annotation_id,
+            next_review_at=kp.next_review_at,
             created_at=kp.created_at,
             updated_at=kp.updated_at,
         )
@@ -340,6 +375,7 @@ class StudyReaderService:
             tag=kp.tag,
             confidence=kp.confidence,
             annotation_id=kp.annotation_id,
+            next_review_at=kp.next_review_at,
             created_at=kp.created_at,
             updated_at=kp.updated_at,
         )
@@ -364,7 +400,7 @@ class StudyReaderService:
         # Generate structured markdown summary
         md_lines = [
             f"# Revision Sheet: {title}",
-            f"*Generated by Mindexa Study Workspace on {uuid.uuid4().hex[:6]}*",
+            f"*Generated by Mindexa Study Workspace on {datetime.now(UTC).isoformat()}*",
             "",
             "## 📌 Key Concepts & Takeaways",
         ]
@@ -407,12 +443,42 @@ class StudyReaderService:
             markdown=markdown,
         )
 
+    # ── Language Policy Enforcement ──────────────────────────────────────────
+
+    async def _assert_language_allowed_for_source(
+        self,
+        kind: str,
+        source_id: uuid.UUID,
+        action: str,
+        extra_context: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """
+        Enforces institutional AI language policy for study reader operations (skim, page-check, etc.).
+        """
+        if kind == "lecturer_material":
+            from app.core.ai.language_policy import assert_ai_allowed
+            from app.db.models.academic import TeachingWorkspace
+
+            stmt = (
+                select(TeachingWorkspace.language, LecturerMaterial.teaching_workspace_id)
+                .join(TeachingWorkspace, LecturerMaterial.teaching_workspace_id == TeachingWorkspace.id)
+                .where(LecturerMaterial.id == source_id)
+            )
+            res = await self.db.execute(stmt)
+            row = res.first()
+            if row and row[0]:
+                ctx = {"material_id": str(source_id), "workspace_id": str(row[1])}
+                if extra_context:
+                    ctx.update(extra_context)
+                assert_ai_allowed(row[0], action=action, context=ctx)
+
     # ── Document Skim ────────────────────────────────────────────────────────
 
     async def skim_document(
         self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
     ) -> SkimResponse:
         title, _ = await self.assert_access(student_id, kind, source_id)
+        await self._assert_language_allowed_for_source(kind, source_id, action="study_reader_skim")
 
         # Fetch existing chunks to generate skim without re-reading entire raw PDF
         chunks_text = []
@@ -444,66 +510,15 @@ class StudyReaderService:
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
         gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudyReaderAgent(gateway)
 
-        system_prompt = (
-            "You are an expert academic tutor. Analyze the provided study material chunks and produce an essential "
-            "8 to 12 bullet executive summary of the document for rapid skimming. "
-            "Respond ONLY with a single valid JSON object formatted as:\n"
-            "{\n"
-            '  "summary": "1-2 sentence core overview.",\n'
-            '  "bullets": [\n'
-            '    {"bullet": "Core takeaway 1", "page_number": 1},\n'
-            '    {"bullet": "Core takeaway 2", "page_number": 3}\n'
-            "  ]\n"
-            "}"
+        return await agent.skim(
+            title=title,
+            chunks_text=chunks_text,
+            student_id=student_id,
+            source_id=source_id,
+            source_kind=kind,
         )
-
-        request = AICompletionRequest(
-            messages=[
-                AIMessage(role="system", content=system_prompt),
-                AIMessage(role="user", content=f"Document: {title}\n\nContent Chunks:\n{combined_context}"),
-            ],
-            temperature=0.2,
-            max_tokens=1500,
-        )
-
-        llm_response = await gateway.complete(
-            request,
-            action_type=AIActionType.STUDY_SUPPORT,
-            actor_id=student_id,
-            actor_role="student",
-        )
-
-        # Parse JSON
-        try:
-            content_str = llm_response.content.strip()
-            if content_str.startswith("```"):
-                content_str = content_str.split("```")[1]
-                if content_str.startswith("json"):
-                    content_str = content_str[4:]
-                content_str = content_str.strip()
-            parsed = json.loads(content_str)
-            bullets = [
-                SkimBullet(
-                    bullet=b.get("bullet", ""),
-                    page_number=b.get("page_number"),
-                )
-                for b in parsed.get("bullets", [])
-            ]
-            return SkimResponse(
-                title=title,
-                summary=parsed.get("summary", "Document overview."),
-                bullets=bullets,
-            )
-        except Exception:
-            return SkimResponse(
-                title=title,
-                summary=f"Overview for {title}.",
-                bullets=[
-                    SkimBullet(bullet="Review introduction and foundational concepts.", page_number=1),
-                    SkimBullet(bullet="Examine primary formulas and process workflows.", page_number=2),
-                ],
-            )
 
     # ── Phase 3: Focus & Weakness Engine ─────────────────────────────────────
 
@@ -511,16 +526,17 @@ class StudyReaderService:
         self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
     ) -> FocusResponse:
         title, meta = await self.assert_access(student_id, kind, source_id)
+        cache_key = (student_id, kind, source_id)
+        cached = self._focus_cache.get(cache_key)
+        if cached and cached[0] > time.monotonic():
+            return cached[1]
 
         from app.db.models.assessment import Assessment
         from app.db.models.question import Question
         from app.db.models.result import AssessmentResult, ResultBreakdown
-        from app.schemas.study_reader import (
-            FocusNextRecommendation,
-            FocusResponse,
-            PageHeatItem,
-            WeakQuestionContext,
-        )
+        from app.schemas.study_reader import (FocusNextRecommendation,
+                                              FocusResponse, PageHeatItem,
+                                              WeakQuestionContext)
         from app.services.rag_service import RAGService
 
         page_heat_map: dict[int, float] = {}
@@ -560,7 +576,7 @@ class StudyReaderService:
                             and_(
                                 ResultBreakdown.score.is_not(None),
                                 ResultBreakdown.max_score > 0,
-                                (ResultBreakdown.score / ResultBreakdown.max_score) < 0.7,
+                                ResultBreakdown.score < ResultBreakdown.max_score * 0.7,
                             ),
                             ResultBreakdown.is_correct == False,
                             ResultBreakdown.was_skipped == True,
@@ -570,17 +586,31 @@ class StudyReaderService:
             )
             res = await self.db.execute(stmt)
             weak_rows = res.all()
+            weak_rows.sort(
+                key=lambda r: (
+                    float(r.score) / float(r.max_score)
+                    if r.score is not None and r.max_score > 0
+                    else 1.0,
+                    str(r.question_id),
+                )
+            )
+            unique_rows = {}
+            for row in weak_rows:
+                unique_rows.setdefault(row.question_id, row)
+            weak_rows = list(unique_rows.values())[:20]
 
             if weak_rows:
                 rag_service = RAGService(self.db)
-                for r in weak_rows:
+                questions = [row.question_content for row in weak_rows]
+                retrieval_results = await rag_service.retrieve_context_batch(
+                    questions=questions,
+                    student_id=student_id,
+                    selected_resource_id=source_id,
+                    top_k=4,
+                )
+
+                for r, retrieval in zip(weak_rows, retrieval_results):
                     try:
-                        retrieval = await rag_service.retrieve_context(
-                            question=r.question_content,
-                            student_id=student_id,
-                            selected_resource_id=source_id,
-                            top_k=4,
-                        )
                         if not retrieval.fallback_used and retrieval.citations:
                             for cit in retrieval.citations:
                                 page_num = cit.page_number or 1
@@ -603,8 +633,8 @@ class StudyReaderService:
                                     similarity=retrieval.retrieval_score or 0.0,
                                 )
                                 page_weak_questions.setdefault(page_num, []).append(q_ctx)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        self.logger.warning("Failed to process focus context: %s", exc)
 
         # 2. Merge Phase 2 key points and annotations on these pages
         key_points = await self.repo.list_key_points(student_id, kind, source_id)
@@ -702,7 +732,7 @@ class StudyReaderService:
             for k in due_kps
         ]
 
-        return FocusResponse(
+        response = FocusResponse(
             exam_mapping=exam_mapping,
             source_kind=kind,
             source_id=source_id,
@@ -711,20 +741,63 @@ class StudyReaderService:
             spaced_reviews=spaced_reviews,
             total_weak_points=len(high_heat_pages),
         )
+        self._focus_cache[cache_key] = (time.monotonic() + 10.0, response)
+        return response
 
     # ── Page-Check Quiz ──────────────────────────────────────────────────────
 
-    async def generate_page_check(
-        self,
-        student_id: uuid.UUID,
-        kind: str,
-        source_id: uuid.UUID,
-        page_number: int,
-        selected_text: Optional[str] = None,
-    ) -> PageCheckResponse:
-        title, _ = await self.assert_access(student_id, kind, source_id)
+    async def extract_exact_page_text(
+        self, kind: str, source_id: uuid.UUID, page_number: int
+    ) -> str:
+        """
+        Extracts raw grounded page text directly from the underlying PDF document
+        using PyMuPDF (fitz), cached in Redis by (source_id, page_number) for fast, reliable page-scoped AI grounding.
+        Falls back to exact-matching page chunks if PDF extraction fails.
+        """
+        from app.core.cache import cache
 
-        # Retrieve chunk text for this page
+        cache_key = f"{source_id}:{page_number}"
+        try:
+            cached_text = await cache.get("study_page_text", cache_key)
+            if cached_text and isinstance(cached_text, str) and cached_text.strip():
+                return cached_text.strip()
+        except Exception:
+            pass
+
+        import os
+        import fitz
+        from app.core.config import settings
+
+        file_path = None
+        if kind == "lecturer_material":
+            stmt = select(LecturerMaterial.file_path).where(LecturerMaterial.id == source_id)
+            res = await self.db.execute(stmt)
+            file_path = res.scalar_one_or_none()
+        else:
+            stmt = select(StudentResource.file_path).where(StudentResource.id == source_id)
+            res = await self.db.execute(stmt)
+            file_path = res.scalar_one_or_none()
+
+        if file_path:
+            abs_path = file_path if os.path.isabs(file_path) else os.path.join(settings.UPLOAD_DIR, file_path)
+            if os.path.exists(abs_path) and abs_path.lower().endswith(".pdf"):
+                try:
+                    doc = fitz.open(abs_path)
+                    if 0 <= page_number - 1 < len(doc):
+                        page = doc.load_page(page_number - 1)
+                        extracted = page.get_text().strip()
+                        doc.close()
+                        if extracted:
+                            try:
+                                await cache.set("study_page_text", cache_key, extracted, ttl=86400)
+                            except Exception:
+                                pass
+                            return extracted
+                    doc.close()
+                except Exception as exc:
+                    self.logger.warning("PyMuPDF page extraction error for %s (p.%s): %s", source_id, page_number, exc)
+
+        # Fallback to chunk text with STRICT page matching (only pull chunks specifically tagged with this page_number)
         chunks_text = []
         if kind == "lecturer_material":
             stmt = (
@@ -732,13 +805,11 @@ class StudyReaderService:
                 .where(
                     and_(
                         LecturerMaterialChunk.lecturer_material_id == source_id,
-                        or_(
-                            LecturerMaterialChunk.source_page == page_number,
-                            LecturerMaterialChunk.source_page.is_(None),
-                        ),
+                        LecturerMaterialChunk.source_page == page_number,
                     )
                 )
-                .limit(6)
+                .order_by(LecturerMaterialChunk.chunk_index.asc())
+                .limit(8)
             )
             res = await self.db.execute(stmt)
             for c in res.scalars().all():
@@ -749,92 +820,72 @@ class StudyReaderService:
                 .where(
                     and_(
                         StudentResourceChunk.student_resource_id == source_id,
-                        or_(
-                            StudentResourceChunk.source_page == page_number,
-                            StudentResourceChunk.source_page.is_(None),
-                        ),
+                        StudentResourceChunk.source_page == page_number,
                     )
                 )
-                .limit(6)
+                .order_by(StudentResourceChunk.chunk_index.asc())
+                .limit(8)
             )
             res = await self.db.execute(stmt)
             for c in res.scalars().all():
                 chunks_text.append(c.content)
 
-        page_context = "\n\n".join(chunks_text) if chunks_text else f"Page {page_number} of {title}"
+        combined_fallback = "\n\n".join(chunks_text).strip()
+        if combined_fallback:
+            try:
+                await cache.set("study_page_text", cache_key, combined_fallback, ttl=86400)
+            except Exception:
+                pass
+        return combined_fallback
+
+    async def generate_page_check(
+        self,
+        student_id: uuid.UUID,
+        kind: str,
+        source_id: uuid.UUID,
+        page_number: int,
+        selected_text: Optional[str] = None,
+    ) -> PageCheckResponse:
+        if page_number < 1 or page_number > 5000:
+            raise ValidationError("Invalid page number. Page number must be between 1 and 5000.")
+
+        title, _ = await self.assert_access(student_id, kind, source_id)
+        await self._assert_language_allowed_for_source(
+            kind, source_id, action="study_reader_page_check", extra_context={"page_number": page_number}
+        )
+
+        # Retrieve exact page text grounded in PyMuPDF with chunk fallback
+        page_context = await self.extract_exact_page_text(kind, source_id, page_number)
+        if not page_context.strip():
+            page_context = f"Page {page_number} of {title}"
+
+        # Guard against excessively large excerpt or page context
         if selected_text:
-            page_context = f"[FOCUS EXCERPT]:\n{selected_text}\n\n[PAGE CONTEXT]:\n{page_context}"
+            safe_selected = selected_text[:4000]
+            page_context = f"[FOCUS EXCERPT]:\n{safe_selected}\n\n[PAGE CONTEXT]:\n{page_context[:12000]}"
+        else:
+            page_context = page_context[:15000]
 
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
         gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudyReaderAgent(gateway)
 
-        system_prompt = (
-            "You are an academic assessor creating a quick active recall quiz. "
-            "Generate exactly 2 or 3 multiple choice questions grounded strictly in the provided page context. "
-            "Each question MUST have 4 clear distinct options and an explanation of the correct answer. "
-            "Respond ONLY with a JSON object in this exact schema:\n"
-            "{\n"
-            '  "questions": [\n'
-            '    {\n'
-            '      "id": "q1",\n'
-            '      "question": "Question stem here?",\n'
-            '      "options": ["Option A", "Option B", "Option C", "Option D"],\n'
-            '      "correct_option_index": 0,\n'
-            '      "explanation": "Why option A is correct."\n'
-            '    }\n'
-            "  ]\n"
-            "}"
+        response = await agent.generate_page_check(
+            title=title,
+            page_number=page_number,
+            page_context=page_context,
+            student_id=student_id,
+            source_id=source_id,
+            source_kind=kind,
+            selected_text=selected_text,
         )
 
-        request = AICompletionRequest(
-            messages=[
-                AIMessage(role="system", content=system_prompt),
-                AIMessage(role="user", content=f"Document: {title} (Page {page_number})\n\nContent:\n{page_context}"),
-            ],
-            temperature=0.3,
-            max_tokens=1500,
+        self._page_check_cache[(student_id, kind, source_id, page_number)] = (
+            time.monotonic() + 300.0,
+            response.questions,
         )
-
-        llm_resp = await gateway.complete(
-            request,
-            action_type=AIActionType.STUDY_SUPPORT,
-            actor_id=student_id,
-            actor_role="student",
-        )
-
-        try:
-            content_str = llm_resp.content.strip()
-            if content_str.startswith("```"):
-                content_str = content_str.split("```")[1]
-                if content_str.startswith("json"):
-                    content_str = content_str[4:]
-                content_str = content_str.strip()
-            parsed = json.loads(content_str)
-            questions = [
-                PageCheckQuestion(
-                    id=q.get("id", f"q{idx}"),
-                    question=q.get("question", "Recall question"),
-                    options=q.get("options", ["Option 1", "Option 2", "Option 3", "Option 4"]),
-                    correct_option_index=int(q.get("correct_option_index", 0)),
-                    explanation=q.get("explanation", "Correct based on course text."),
-                )
-                for idx, q in enumerate(parsed.get("questions", []))
-            ]
-            return PageCheckResponse(page_number=page_number, questions=questions)
-        except Exception:
-            return PageCheckResponse(
-                page_number=page_number,
-                questions=[
-                    PageCheckQuestion(
-                        id="q1",
-                        question=f"What is the primary principle discussed on page {page_number}?",
-                        options=["Core definition & properties", "Historical backdrop only", "Unrelated tangent", "Summary notes"],
-                        correct_option_index=0,
-                        explanation="Page content focuses on primary core definitions and formulas.",
-                    )
-                ],
-            )
+        return response
 
     async def submit_page_check(
         self,
@@ -845,16 +896,26 @@ class StudyReaderService:
     ) -> PageCheckSubmitResponse:
         title, _ = await self.assert_access(student_id, kind, source_id)
 
-        from datetime import datetime, UTC, timedelta
-        from app.schemas.study_reader import PageCheckFeedbackItem, PageCheckSubmitResponse
+        from datetime import timedelta
 
+        from app.schemas.study_reader import (PageCheckFeedbackItem,
+                                              PageCheckSubmitResponse)
+
+        cached = self._page_check_cache.get((student_id, kind, source_id, req.page_number))
+        if not cached or cached[0] <= time.monotonic():
+            raise ValidationError("Page check has expired. Generate a new page check.", code="PAGE_CHECK_NOT_FOUND")
+        questions_by_id = {question.id: question for question in cached[1]}
         score = 0
         max_score = len(req.answers)
         feedback_list: list[PageCheckFeedbackItem] = []
 
         for a in req.answers:
-            # We treat answer matching against the submission
-            is_correct = a.selected_option_index == 0 # Default comparison basis if not passed in state
+            question = questions_by_id.get(a.question_id)
+            if question is None:
+                raise ValidationError("Question is not part of this page check.", code="QUESTION_NOT_IN_PAGE_CHECK")
+            if a.selected_option_index >= len(question.options):
+                raise ValidationError("Selected option is out of range.", code="OPTION_INDEX_OUT_OF_RANGE")
+            is_correct = a.selected_option_index == question.correct_option_index
             if is_correct:
                 score += 1
             feedback_list.append(
@@ -862,8 +923,8 @@ class StudyReaderService:
                     question_id=a.question_id,
                     is_correct=is_correct,
                     selected_option_index=a.selected_option_index,
-                    correct_option_index=0,
-                    explanation="Review foundational principles on this page.",
+                    correct_option_index=question.correct_option_index,
+                    explanation=question.explanation,
                 )
             )
 
@@ -924,3 +985,15 @@ class StudyReaderService:
             assessment_title=assessment_title,
             pages=filtered_pages,
         )
+
+    # ── Orphan Cleanup ───────────────────────────────────────────────────────
+
+    async def cleanup_orphans(self) -> dict[str, int]:
+        """
+        Scans for study reader progress, annotations, and key points pointing to deleted/missing
+        resources, soft-deletes them, and returns an audit count.
+        """
+        stats = await self.repo.cleanup_orphans()
+        await self.db.commit()
+        return stats
+

@@ -348,22 +348,27 @@ export default function LecturerWorkspaceDetail() {
             {workspace.banner_image_url ? (
               <div
                 className="h-full w-full bg-cover bg-center transition-transform duration-500 group-hover:scale-105"
-                style={{ backgroundImage: `url(${workspace.banner_image_url})` }}
+                style={{
+                  backgroundImage: `url(${workspace.banner_image_url})`,
+                }}
               />
             ) : (
               <div className="h-full w-full bg-gradient-to-br from-primary/10 via-primary/5 to-zinc-50 flex flex-col items-center justify-center text-primary/30 gap-1.5">
                 <BookOpen className="size-8" />
-                <span className="text-[10px] font-medium tracking-wider uppercase">No Banner Image</span>
+                <span className="text-[10px] font-medium tracking-wider uppercase">
+                  No Banner Image
+                </span>
               </div>
             )}
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100">
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
               <Button
                 variant="secondary"
                 size="sm"
                 onClick={() => setBannerDialogOpen(true)}
                 className="h-7 text-xs font-semibold rounded-lg bg-white/90 text-zinc-900 shadow-sm border border-black/10 hover:bg-white"
               >
-                <Edit2 className="size-3 mr-1.5" /> {workspace.banner_image_url ? 'Change Banner' : 'Upload Banner'}
+                <Edit2 className="size-3 mr-1.5" />{" "}
+                {workspace.banner_image_url ? "Change Banner" : "Upload Banner"}
               </Button>
             </div>
           </div>
@@ -441,7 +446,8 @@ export default function LecturerWorkspaceDetail() {
             <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 pt-3 px-3.5 border-b border-zinc-100 bg-zinc-50/50">
               <div className="space-y-0.5">
                 <CardTitle className="text-xs font-bold flex items-center gap-1.5 uppercase text-zinc-700 tracking-wider">
-                  <Layers className="size-4 text-primary shrink-0" /> Student Cohort
+                  <Layers className="size-4 text-primary shrink-0" /> Student
+                  Cohort
                 </CardTitle>
                 <CardDescription className="text-[10px] font-medium text-muted-foreground">
                   Directory of students synchronized with this workspace.
@@ -592,7 +598,9 @@ export default function LecturerWorkspaceDetail() {
                   <option value="SYLLABUS">Syllabus</option>
                   <option value="ASSIGNMENT_SPECS">Assignment Specs</option>
                   <option value="RUBRIC">Rubric</option>
-                  <option value="REFERENCE_MATERIALS">Reference Materials</option>
+                  <option value="REFERENCE_MATERIALS">
+                    Reference Materials
+                  </option>
                 </select>
                 <div className="flex items-center justify-between w-full">
                   <label className="flex items-center gap-1.5 text-[10px] font-bold text-zinc-500 cursor-pointer">
@@ -686,16 +694,23 @@ export default function LecturerWorkspaceDetail() {
                             MB
                             {!m.is_student_visible && " · Hidden"}
                             {" · "}
-                            <span className={
-                              m.processing_status === "PROCESSED" ? "text-emerald-600 font-bold" :
-                              m.processing_status === "FAILED" ? "text-red-500 font-bold" :
-                              "text-blue-500 font-bold animate-pulse"
-                            }>
+                            <span
+                              className={
+                                m.processing_status === "PROCESSED"
+                                  ? "text-emerald-600 font-bold"
+                                  : m.processing_status === "FAILED"
+                                    ? "text-red-500 font-bold"
+                                    : "text-blue-500 font-bold animate-pulse"
+                              }
+                            >
                               {m.processing_status || "PENDING"}
                             </span>
                           </AttachmentDescription>
                         </AttachmentContent>
-                        <AttachmentActions onClick={(e) => e.stopPropagation()} className="ml-1 shrink-0">
+                        <AttachmentActions
+                          onClick={(e) => e.stopPropagation()}
+                          className="ml-1 shrink-0"
+                        >
                           <AttachmentAction
                             aria-label="Remove material"
                             className="size-5 hover:bg-red-50 rounded"
@@ -726,12 +741,14 @@ export default function LecturerWorkspaceDetail() {
             </DialogTitle>
           </DialogHeader>
           <div className="p-4 space-y-4">
-            <div
+            <label
+              htmlFor="banner-upload"
+              tabIndex={0}
               className={cn(
                 "relative flex flex-col items-center justify-center p-6 border-2 border-dashed rounded-xl transition-colors text-center cursor-pointer overflow-hidden group",
                 isDragging
                   ? "border-primary bg-primary/5"
-                  : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 hover:border-zinc-300"
+                  : "border-zinc-200 bg-zinc-50 hover:bg-zinc-100 hover:border-zinc-300",
               )}
               onDragOver={(e) => {
                 e.preventDefault();
@@ -748,7 +765,12 @@ export default function LecturerWorkspaceDetail() {
                   setBannerPreview(URL.createObjectURL(file));
                 }
               }}
-              onClick={() => document.getElementById("banner-upload")?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  document.getElementById("banner-upload")?.click();
+                }
+              }}
             >
               <input
                 id="banner-upload"
@@ -757,11 +779,11 @@ export default function LecturerWorkspaceDetail() {
                 className="hidden"
                 onChange={handleBannerFileChange}
               />
-              
+
               {bannerPreview ? (
-                <div 
-                  className="absolute inset-0 bg-cover bg-center opacity-40 group-hover:opacity-30 transition-opacity" 
-                  style={{ backgroundImage: `url(${bannerPreview})` }} 
+                <div
+                  className="absolute inset-0 bg-cover bg-center opacity-40 group-hover:opacity-30 transition-opacity"
+                  style={{ backgroundImage: `url(${bannerPreview})` }}
                 />
               ) : null}
 
@@ -776,19 +798,24 @@ export default function LecturerWorkspaceDetail() {
                   SVG, PNG, JPG or GIF (max 5MB)
                 </p>
               </div>
-            </div>
+            </label>
 
             <div className="relative">
               <div className="absolute inset-0 flex items-center">
                 <span className="w-full border-t border-zinc-200" />
               </div>
               <div className="relative flex justify-center text-[9px] font-bold uppercase tracking-wider">
-                <span className="bg-white px-2 text-zinc-400">Or use a link</span>
+                <span className="bg-white px-2 text-zinc-400">
+                  Or use a link
+                </span>
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="bannerUrl" className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
+              <Label
+                htmlFor="bannerUrl"
+                className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider"
+              >
                 Image URL
               </Label>
               <Input
@@ -799,10 +826,12 @@ export default function LecturerWorkspaceDetail() {
                 onChange={handleUrlChange}
               />
             </div>
-            
+
             {bannerPreview && (
               <div className="space-y-1.5 pt-2 border-t border-zinc-100">
-                <Label className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider">Preview</Label>
+                <Label className="text-[10px] font-bold text-zinc-600 uppercase tracking-wider">
+                  Preview
+                </Label>
                 <div
                   className="h-28 rounded-xl bg-cover bg-center border border-zinc-200 shadow-inner"
                   style={{ backgroundImage: `url(${bannerPreview})` }}
@@ -826,7 +855,11 @@ export default function LecturerWorkspaceDetail() {
               onClick={handleUpdateBanner}
               disabled={updatingBanner}
             >
-              {updatingBanner ? <Loader2 className="size-3.5 animate-spin" /> : "Save Banner"}
+              {updatingBanner ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                "Save Banner"
+              )}
             </Button>
           </div>
         </DialogContent>
@@ -850,26 +883,43 @@ export default function LecturerWorkspaceDetail() {
               <div className="space-y-4">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3.5 rounded-xl border border-zinc-150 bg-zinc-50/50 text-xs">
                   <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">Student ID</span>
-                    <span className="font-semibold text-zinc-700">{record.student_id}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      Student ID
+                    </span>
+                    <span className="font-semibold text-zinc-700">
+                      {record.student_id}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">Email Address</span>
-                    <span className="font-semibold text-zinc-700 truncate block">{record.email}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      Email Address
+                    </span>
+                    <span className="font-semibold text-zinc-700 truncate block">
+                      {record.email}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">Enrolled Date</span>
-                    <span className="font-semibold text-zinc-700">{format(new Date(record.enrolled_at), "MMM d, yyyy")}</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      Enrolled Date
+                    </span>
+                    <span className="font-semibold text-zinc-700">
+                      {format(new Date(record.enrolled_at), "MMM d, yyyy")}
+                    </span>
                   </div>
                   <div>
-                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">Overall Progress</span>
-                    <span className="text-sm font-bold text-emerald-600 tabular-nums">{record.overall_progress}%</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block">
+                      Overall Progress
+                    </span>
+                    <span className="text-sm font-bold text-emerald-600 tabular-nums">
+                      {record.overall_progress}%
+                    </span>
                   </div>
                 </div>
 
                 <div className="space-y-2">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-zinc-500 flex items-center gap-1.5">
-                    <Activity className="size-4 text-zinc-400" /> Assessment History
+                    <Activity className="size-4 text-zinc-400" /> Assessment
+                    History
                   </h3>
                   <div className="rounded-xl border divide-y overflow-hidden max-h-60 overflow-y-auto">
                     {record.attempts.length === 0 ? (
@@ -896,7 +946,9 @@ export default function LecturerWorkspaceDetail() {
                                   : "Pending Submission"}
                               </span>
                               <span>•</span>
-                              <span className="font-semibold">{att.status}</span>
+                              <span className="font-semibold">
+                                {att.status}
+                              </span>
                             </div>
                           </div>
                           <div className="text-right shrink-0">
@@ -927,7 +979,12 @@ export default function LecturerWorkspaceDetail() {
             >
               Close
             </Button>
-            <Button size="sm" className="h-8 text-[10px] font-bold uppercase text-white bg-primary hover:bg-primary/95">Export Report</Button>
+            <Button
+              size="sm"
+              className="h-8 text-[10px] font-bold uppercase text-white bg-primary hover:bg-primary/95"
+            >
+              Export Report
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -981,14 +1038,18 @@ export default function LecturerWorkspaceDetail() {
       >
         <AlertDialogContent className="rounded-xl bg-white border">
           <AlertDialogHeader>
-            <AlertDialogTitle className="text-sm font-bold text-zinc-800">Delete Material</AlertDialogTitle>
+            <AlertDialogTitle className="text-sm font-bold text-zinc-800">
+              Delete Material
+            </AlertDialogTitle>
             <AlertDialogDescription className="text-xs text-zinc-500 leading-normal font-medium">
-              Are you sure you want to delete this course handout? This action cannot
-              be undone.
+              Are you sure you want to delete this course handout? This action
+              cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-8 text-[10px] font-bold uppercase rounded-lg">Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="h-8 text-[10px] font-bold uppercase rounded-lg">
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 text-white hover:bg-red-700 h-8 text-[10px] font-bold uppercase rounded-lg"
               onClick={confirmDeleteMaterial}

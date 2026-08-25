@@ -59,7 +59,7 @@ async def test_pause_attempt_success():
 @pytest.mark.asyncio
 async def test_pause_attempt_auto_submits_if_window_expired():
     """Attempting to pause after deadline forces auto-submit and raises ValidationError."""
-    db = MagicMock()
+    db = AsyncMock()
     service = AttemptService(db)
 
     student_id = uuid.uuid4()
@@ -100,7 +100,7 @@ async def test_pause_attempt_auto_submits_if_window_expired():
 @pytest.mark.asyncio
 async def test_resume_attempt_success():
     """A student can resume a PAUSED homework attempt."""
-    db = MagicMock()
+    db = AsyncMock()
     service = AttemptService(db)
 
     student_id = uuid.uuid4()
@@ -119,6 +119,7 @@ async def test_resume_attempt_success():
     mock_attempt.student_id = student_id
     mock_attempt.access_token = access_token
     mock_attempt.status = AttemptStatus.PAUSED
+    mock_attempt.paused_at = datetime.now(timezone.utc) - timedelta(minutes=10)
     mock_attempt.assessment = mock_assessment
     mock_attempt.expires_at = datetime.now(timezone.utc) + timedelta(hours=2)
 

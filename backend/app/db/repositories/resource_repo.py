@@ -66,22 +66,64 @@ class ResourceRepository(BaseRepository[LecturerMaterial]):
         """Fetch a single material by ID."""
         return await self.get_by_id(material_id)
 
-    async def mark_superseded(self, workspace_id: uuid.UUID, original_filename: str) -> None:
-        """Mark old versions of a file as not current within a workspace."""
-        from sqlalchemy import update
-
+    async def get_latest_material_by_filename(
+        self, workspace_id: uuid.UUID, original_filename: str
+    ) -> Optional[LecturerMaterial]:
+        """Fetch the most recent material matching a filename in a workspace."""
         stmt = (
-            update(LecturerMaterial)
+            select(LecturerMaterial)
             .where(
                 and_(
                     LecturerMaterial.teaching_workspace_id == workspace_id,
                     LecturerMaterial.original_filename == original_filename,
-                    LecturerMaterial.is_current == True,
+                    LecturerMaterial.is_deleted == False,
                 )
             )
-            .values(is_current=False)
+            .order_by(LecturerMaterial.version.desc(), LecturerMaterial.created_at.desc())
+            .limit(1)
         )
-        await self.db.execute(stmt)
+        result = await self.db.execute(stmt)
+        return result.scalars().first()
+
+    async def get_superseded_material_ids(
+        self, workspace_id: uuid.UUID, original_filename: str
+    ) -> List[uuid.UUID]:
+        """Get IDs of all existing versions of a file in a workspace."""
+        stmt = select(LecturerMaterial.id).where(
+            and_(
+                LecturerMaterial.teaching_workspace_id == workspace_id,
+                LecturerMaterial.original_filename == original_filename,
+                LecturerMaterial.is_deleted == False,
+            )
+        )
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def mark_superseded(
+        self, workspace_id: uuid.UUID, original_filename: str
+    ) -> List[uuid.UUID]:
+        """Mark old versions of a file as not current within a workspace and return their IDs."""
+        from sqlalchemy import update
+
+        stmt_select = select(LecturerMaterial.id).where(
+            and_(
+                LecturerMaterial.teaching_workspace_id == workspace_id,
+                LecturerMaterial.original_filename == original_filename,
+                LecturerMaterial.is_current == True,
+            )
+        )
+        res = await self.db.execute(stmt_select)
+        superseded_ids = list(res.scalars().all())
+
+        if superseded_ids:
+            stmt = (
+                update(LecturerMaterial)
+                .where(LecturerMaterial.id.in_(superseded_ids))
+                .values(is_current=False)
+            )
+            await self.db.execute(stmt)
+
+        return superseded_ids
 
     # ── Student Resources ────────────────────────────────────────────────────
 

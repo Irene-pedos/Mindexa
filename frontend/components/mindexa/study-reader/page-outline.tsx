@@ -98,7 +98,7 @@ export function PageOutline({ outline, numPages, currentPage, onSelectPage }: Pa
   const hasOutline = outline.length > 0;
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full min-h-0">
       <div className="p-3 border-b border-border/40 flex items-center justify-between">
         <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
           {hasOutline ? (
@@ -118,7 +118,7 @@ export function PageOutline({ outline, numPages, currentPage, onSelectPage }: Pa
         </span>
       </div>
 
-      <ScrollArea className="flex-1 p-2">
+      <ScrollArea className="flex-1 min-h-0 p-2">
         {hasOutline ? (
           <div className="space-y-0.5 pb-4">
             {outline.map((item, idx) => (
@@ -131,8 +131,8 @@ export function PageOutline({ outline, numPages, currentPage, onSelectPage }: Pa
               />
             ))}
           </div>
-        ) : (
-          /* Fallback page grid/list */
+        ) : numPages <= 30 ? (
+          /* Fallback page grid for short documents (<= 30 pages) */
           <div className="grid grid-cols-2 gap-2 p-1 pb-4">
             {Array.from({ length: numPages || 1 }, (_, i) => i + 1).map((pageNum) => {
               const isCurrent = pageNum === currentPage;
@@ -154,6 +154,24 @@ export function PageOutline({ outline, numPages, currentPage, onSelectPage }: Pa
                 </Button>
               );
             })}
+          </div>
+        ) : (
+          /* Notice for longer documents (> 30 pages) with no embedded outline */
+          <div className="py-12 px-4 text-center space-y-3">
+            <div className="size-10 rounded-full bg-muted/60 mx-auto flex items-center justify-center border border-border/50 text-muted-foreground">
+              <Bookmark className="size-5" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-semibold text-foreground">No Embedded Outline</h4>
+              <p className="text-[11px] text-muted-foreground leading-relaxed max-w-[240px] mx-auto">
+                This document does not contain an embedded table of contents.
+              </p>
+            </div>
+            <div className="pt-2">
+              <p className="text-[10px] text-muted-foreground/90 bg-muted/40 p-2.5 rounded-lg border border-border/40 max-w-[250px] mx-auto">
+                Use the page input in the top bar or document search (<kbd className="font-mono font-semibold">Ctrl+F</kbd>) to navigate all {numPages} pages.
+              </p>
+            </div>
           </div>
         )}
       </ScrollArea>

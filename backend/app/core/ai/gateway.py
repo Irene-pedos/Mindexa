@@ -319,26 +319,38 @@ class AIGateway:
     ) -> AIEmbeddingResponse:
         # Allow at least 4 retries for rate limit errors
         max_retries = max(4, settings.AI_MAX_RETRIES)
-        
+        errors: list[str] = []
+
         for provider in self.embedding_providers:
             self.active_embedding_provider = provider
             attempt = 0
             while True:
                 try:
                     return await provider.embed(request)
-                except RateLimitError:
+                except RateLimitError as exc:
                     if attempt >= max_retries:
-                        break
+                        errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")
+                        break  # Fallback to next provider
                     attempt += 1
-                    # Exponential backoff
-                    sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
-                    import random
-                    sleep_time += random.uniform(0.0, 0.5)
+                    # Prefer the provider's own Retry-After value; fall back to exponential back-off
+                    if exc.retry_after is not None:
+                        sleep_time = exc.retry_after + 0.25
+                    else:
+                        import random
+                        sleep_time = settings.AI_RETRY_BACKOFF_SECONDS * (2 ** attempt)
+                        sleep_time += random.uniform(0.0, 0.5)
+                    # Never wait more than 30 seconds per attempt
+                    sleep_time = min(sleep_time, 30.0)
                     await sleep(sleep_time)
-                except ServiceUnavailableError:
-                    break
+                except ServiceUnavailableError as exc:
+                    errors.append(f"{provider.name}: {exc}")
+                    break  # Fallback to next provider immediately
+                except Exception as exc:
+                    errors.append(f"{provider.name}: {type(exc).__name__} ({exc})")
+                    break  # Fallback to next provider immediately
 
-        raise ServiceUnavailableError("All configured embedding providers failed.")
+        errors_summary = " | ".join(errors) if errors else "No active embedding provider responded."
+        raise ServiceUnavailableError(f"All configured embedding providers failed. Details: {errors_summary}")
 
     async def log_action(
         self,

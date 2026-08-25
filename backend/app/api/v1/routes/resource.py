@@ -133,6 +133,11 @@ async def download_material(
         workspace = await student_svc.get_workspace_detail(current_user.id, material.teaching_workspace_id)
         if not workspace:
             raise AuthorizationError("You are not enrolled in this teaching workspace")
+    elif current_user.role == UserRole.LECTURER:
+        from app.db.models.academic import TeachingWorkspace
+        ws = await db.get(TeachingWorkspace, material.teaching_workspace_id)
+        if ws and ws.institution_id != current_user.institution_id:
+            raise AuthorizationError("You do not have permission to access materials outside your institution")
 
     # In a real app, we'd use a cloud storage URL, but for local we return the file from disk
     absolute_path = os.path.join(settings.UPLOAD_DIR, material.file_path)

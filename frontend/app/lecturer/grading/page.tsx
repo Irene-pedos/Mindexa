@@ -198,10 +198,10 @@ function ManualOnlyLanguageBanner({
         <span>Institutional Policy: Manual Grading Required</span>
       </div>
       <p className="text-xs leading-relaxed text-amber-800/90 dark:text-amber-300/90 font-normal">
-        Automated AI grading, score suggestions, and feedback drafts are disabled
-        for <strong>{language}</strong> academic content under institutional
-        safety policy. All evaluations for this assessment must be performed
-        manually.
+        Automated AI grading, score suggestions, and feedback drafts are
+        disabled for <strong>{language}</strong> academic content under
+        institutional safety policy. All evaluations for this assessment must be
+        performed manually.
       </p>
     </div>
   );
@@ -526,24 +526,19 @@ function LecturerGradingQueueContent() {
     }
   }, []);
 
-  const fetchClasses = useCallback(
-    async (assessmentId: string) => {
-      try {
-        setLoading(true);
-        const res = await gradingApi.getAssessmentClassStats(assessmentId);
-        const items = Array.isArray(res)
-          ? res
-          : res?.classes || res?.items || [];
-        setClassStats(items);
-      } catch {
-        toast.error("Failed to load class sections statistics");
-        setClassStats([]);
-      } finally {
-        setLoading(false);
-      }
-    },
-    [],
-  );
+  const fetchClasses = useCallback(async (assessmentId: string) => {
+    try {
+      setLoading(true);
+      const res = await gradingApi.getAssessmentClassStats(assessmentId);
+      const items = Array.isArray(res) ? res : res?.classes || res?.items || [];
+      setClassStats(items);
+    } catch {
+      toast.error("Failed to load class sections statistics");
+      setClassStats([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
   const fetchQueue = useCallback(
     async (assessmentId: string, classId?: string, page: number = 1) => {
@@ -576,7 +571,8 @@ function LecturerGradingQueueContent() {
         }));
         setData(mappedItems);
         setCurrentPage(page);
-        const totalCount = res?.total !== undefined ? res.total : mappedItems.length;
+        const totalCount =
+          res?.total !== undefined ? res.total : mappedItems.length;
         setTotal(totalCount);
         setHasMore(page * PAGE_SIZE < totalCount);
       } catch {
@@ -596,7 +592,9 @@ function LecturerGradingQueueContent() {
         const params: any = { assessment_id: assessmentId };
         if (classId) params.class_id = classId;
         const res = await gradingApi.getGroupGradingQueue(params);
-        const rawItems = Array.isArray(res) ? res : res?.items || res?.groups || [];
+        const rawItems = Array.isArray(res)
+          ? res
+          : res?.items || res?.groups || [];
         const mapped = (rawItems || []).map((item: any) => ({
           ...item,
           total_marks:
@@ -621,7 +619,9 @@ function LecturerGradingQueueContent() {
       try {
         setReleaseQueueLoading(true);
         const res = await resultApi.getReleaseQueue(assessmentId, classId);
-        const rawItems = Array.isArray(res) ? res : res?.items || res?.results || [];
+        const rawItems = Array.isArray(res)
+          ? res
+          : res?.items || res?.results || [];
         setReleaseQueue(rawItems);
         setReleaseQueueClassFullyGraded(Boolean(res?.class_fully_graded));
         if (res?.max_attempts) setMaxAttempts(res.max_attempts);
@@ -657,8 +657,7 @@ function LecturerGradingQueueContent() {
     fetchWorkspaces();
   }, [fetchWorkspaces]);
 
-  const activeQuestionId =
-    activeAttempt?.questions?.[activeQuestionIndex]?.id;
+  const activeQuestionId = activeAttempt?.questions?.[activeQuestionIndex]?.id;
   const activeSubmission = activeSubmissions.find(
     (s) => s.question_id === activeQuestionId,
   );
@@ -767,7 +766,9 @@ function LecturerGradingQueueContent() {
       const attempt = await attemptApi.getAttempt(item.attempt_id);
       setActiveAttempt(attempt);
 
-      const subRes = await submissionApi.getSubmissionsForAttempt(item.attempt_id);
+      const subRes = await submissionApi.getSubmissionsForAttempt(
+        item.attempt_id,
+      );
       setActiveSubmissions(subRes.submissions || []);
 
       if (attempt.questions && attempt.questions.length > 0) {
@@ -805,19 +806,25 @@ function LecturerGradingQueueContent() {
       updateUrlParams({ attemptId: groupSubmission.id });
 
       // Fetch the full workspace (questions, answers, members, comments, activities)
-      const workspaceData: any = await gradingApi.getGroupSubmissionWorkspace(groupSubmission.id);
+      const workspaceData: any = await gradingApi.getGroupSubmissionWorkspace(
+        groupSubmission.id,
+      );
 
       const merged = {
         ...groupSubmission,
         ...workspaceData,
         id: groupSubmission.id,
         group_id: workspaceData?.group?.id || groupSubmission.group_id,
-        group_name: workspaceData?.group_name || workspaceData?.group?.name || groupSubmission.group_name,
+        group_name:
+          workspaceData?.group_name ||
+          workspaceData?.group?.name ||
+          groupSubmission.group_name,
         questions: workspaceData?.questions || [],
         answers: workspaceData?.answers || [],
         members: workspaceData?.members || groupSubmission.members || [],
         comments: workspaceData?.comments || [],
-        activities: workspaceData?.activities || workspaceData?.activity_log || [],
+        activities:
+          workspaceData?.activities || workspaceData?.activity_log || [],
         score: workspaceData?.total_score ?? groupSubmission.score,
         feedback: workspaceData?.feedback ?? groupSubmission.feedback,
       };
@@ -833,7 +840,8 @@ function LecturerGradingQueueContent() {
       setGroupGraderActiveQuestionIndex(0);
       setIsGroupEditing(false);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to load group workspace";
+      const msg =
+        err instanceof Error ? err.message : "Failed to load group workspace";
       toast.error(msg);
     } finally {
       setLoadingGroupWorkspace(false);
@@ -851,7 +859,8 @@ function LecturerGradingQueueContent() {
   // Poll group submission workspace when active answer is processing AI evaluation
   useEffect(() => {
     if (!selectedGroupSubmission?.id) return;
-    const activeQ = selectedGroupSubmission.questions?.[groupGraderActiveQuestionIndex];
+    const activeQ =
+      selectedGroupSubmission.questions?.[groupGraderActiveQuestionIndex];
     if (!activeQ) return;
     const activeAns = selectedGroupSubmission.answers?.find(
       (a: any) => a.question_id === activeQ.id,
@@ -916,7 +925,12 @@ function LecturerGradingQueueContent() {
   };
 
   const handleJumpToNextUngraded = () => {
-    if (!activeAttempt || !activeAttempt.questions || activeAttempt.questions.length === 0) return;
+    if (
+      !activeAttempt ||
+      !activeAttempt.questions ||
+      activeAttempt.questions.length === 0
+    )
+      return;
     const questions = activeAttempt.questions;
     const totalQ = questions.length;
 
@@ -1058,7 +1072,9 @@ function LecturerGradingQueueContent() {
 
       await gradingApi.saveGrade(activeSubmission.id, payload);
 
-      const subRes = await submissionApi.getSubmissionsForAttempt(activeAttempt.id);
+      const subRes = await submissionApi.getSubmissionsForAttempt(
+        activeAttempt.id,
+      );
       setActiveSubmissions(subRes.submissions || []);
 
       if (isFinal) {
@@ -1084,8 +1100,8 @@ function LecturerGradingQueueContent() {
       handleSelectQuestion(activeQuestionIndex + 1);
     } else {
       // Auto-advance to next student in queue
-      const currentIndex = groupedSubmissions.findIndex(
-        (group) => group.some((item) => item.attempt_id === activeAttempt.id),
+      const currentIndex = groupedSubmissions.findIndex((group) =>
+        group.some((item) => item.attempt_id === activeAttempt.id),
       );
       if (currentIndex !== -1 && currentIndex < groupedSubmissions.length - 1) {
         const nextGroup = groupedSubmissions[currentIndex + 1];
@@ -1095,7 +1111,9 @@ function LecturerGradingQueueContent() {
           handleOpenIndividualGrader(nextFirst);
         }
       } else {
-        toast.success("Reached the end of the submissions queue for this section!");
+        toast.success(
+          "Reached the end of the submissions queue for this section!",
+        );
         handleCloseIndividualWorkspace();
       }
     }
@@ -1160,7 +1178,11 @@ function LecturerGradingQueueContent() {
         }
       }, 1200);
     },
-    [selectedGroupSubmission, groupGraderActiveQuestionIndex, isGroupAiAccepted],
+    [
+      selectedGroupSubmission,
+      groupGraderActiveQuestionIndex,
+      isGroupAiAccepted,
+    ],
   );
 
   // Submit Grade for current Group Question
@@ -1219,9 +1241,7 @@ function LecturerGradingQueueContent() {
       setSelectedGroupSubmission((prev: any) => {
         if (!prev) return null;
         const answers = [...(prev.answers || [])];
-        const idx = answers.findIndex(
-          (a: any) => a.question_id === activeQ.id,
-        );
+        const idx = answers.findIndex((a: any) => a.question_id === activeQ.id);
         if (idx >= 0) answers[idx] = updatedAns;
         else answers.push(updatedAns);
 
@@ -1229,7 +1249,19 @@ function LecturerGradingQueueContent() {
           (sum: number, a: any) => sum + (parseFloat(a.score) || 0),
           0,
         );
-        return { ...prev, answers, total_score: total, score: total };
+        const allFinalized = prev.questions?.every((question: any) =>
+          question.id === activeQ.id
+            ? isFinal
+            : answers.find((answer: any) => answer.question_id === question.id)
+                ?.is_final,
+        );
+        return {
+          ...prev,
+          answers,
+          total_score: total,
+          score: total,
+          ...(allFinalized ? { status: "GRADED" } : {}),
+        };
       });
 
       if (isFinal) {
@@ -1278,9 +1310,7 @@ function LecturerGradingQueueContent() {
       setSelectedGroupSubmission((prev: any) => {
         if (!prev) return null;
         const answers = [...(prev.answers || [])];
-        const idx = answers.findIndex(
-          (a: any) => a.question_id === activeQ.id,
-        );
+        const idx = answers.findIndex((a: any) => a.question_id === activeQ.id);
         if (idx >= 0) answers[idx] = updatedAns;
         else answers.push(updatedAns);
         return { ...prev, answers };
@@ -1290,7 +1320,9 @@ function LecturerGradingQueueContent() {
         updatedAns.ai_grade_decision === "PROCESSING" ||
         updatedAns.ai_grade_decision === "PENDING"
       ) {
-        toast.info("AI evaluation queued. Review will update automatically once completed.");
+        toast.info(
+          "AI evaluation queued. Review will update automatically once completed.",
+        );
       } else {
         if (
           updatedAns.ai_grade_score !== undefined &&
@@ -1599,7 +1631,9 @@ function LecturerGradingQueueContent() {
       setSelectedStudent((prev) =>
         prev ? { ...prev, is_flagged: nextFlag } : null,
       );
-      toast.success(nextFlag ? "Attempt flagged for senior review" : "Attempt unflagged");
+      toast.success(
+        nextFlag ? "Attempt flagged for senior review" : "Attempt unflagged",
+      );
     } catch {
       toast.error("Failed to toggle integrity flag");
     }
@@ -1610,7 +1644,9 @@ function LecturerGradingQueueContent() {
     try {
       setIsSaving(true);
       await integrityApi.liftHold(activeAttempt.id);
-      toast.success("Security hold lifted. Result is now eligible for release.");
+      toast.success(
+        "Security hold lifted. Result is now eligible for release.",
+      );
       const updated = await attemptApi.getAttempt(activeAttempt.id);
       setActiveAttempt(updated);
       setShowIntegrityLiftDialog(false);
@@ -1660,8 +1696,12 @@ function LecturerGradingQueueContent() {
         const bFlagged = b.some((i) => i.is_flagged) ? 1 : 0;
         if (aFlagged !== bFlagged) return bFlagged - aFlagged;
 
-        const aRisk = Math.max(...a.map((i) => (i as any).integrity_risk_score || 0));
-        const bRisk = Math.max(...b.map((i) => (i as any).integrity_risk_score || 0));
+        const aRisk = Math.max(
+          ...a.map((i) => (i as any).integrity_risk_score || 0),
+        );
+        const bRisk = Math.max(
+          ...b.map((i) => (i as any).integrity_risk_score || 0),
+        );
         if ((aRisk >= 50 ? 1 : 0) !== (bRisk >= 50 ? 1 : 0)) {
           return (bRisk >= 50 ? 1 : 0) - (aRisk >= 50 ? 1 : 0);
         }
@@ -1688,27 +1728,41 @@ function LecturerGradingQueueContent() {
       }
 
       if (sortBy === "risk_desc") {
-        const aRisk = Math.max(...a.map((i) => (i as any).integrity_risk_score || 0));
-        const bRisk = Math.max(...b.map((i) => (i as any).integrity_risk_score || 0));
+        const aRisk = Math.max(
+          ...a.map((i) => (i as any).integrity_risk_score || 0),
+        );
+        const bRisk = Math.max(
+          ...b.map((i) => (i as any).integrity_risk_score || 0),
+        );
         return bRisk - aRisk;
       }
 
       if (sortBy === "date_asc") {
         return (
-          new Date(aFirst.submitted_at || (aFirst as any).created_at || 0).getTime() -
-          new Date(bFirst.submitted_at || (bFirst as any).created_at || 0).getTime()
+          new Date(
+            aFirst.submitted_at || (aFirst as any).created_at || 0,
+          ).getTime() -
+          new Date(
+            bFirst.submitted_at || (bFirst as any).created_at || 0,
+          ).getTime()
         );
       }
 
       if (sortBy === "date_desc") {
         return (
-          new Date(bFirst.submitted_at || (bFirst as any).created_at || 0).getTime() -
-          new Date(aFirst.submitted_at || (aFirst as any).created_at || 0).getTime()
+          new Date(
+            bFirst.submitted_at || (bFirst as any).created_at || 0,
+          ).getTime() -
+          new Date(
+            aFirst.submitted_at || (aFirst as any).created_at || 0,
+          ).getTime()
         );
       }
 
       if (sortBy === "name_asc") {
-        return (aFirst.student_name || "").localeCompare(bFirst.student_name || "");
+        return (aFirst.student_name || "").localeCompare(
+          bFirst.student_name || "",
+        );
       }
 
       return 0;
@@ -1785,7 +1839,9 @@ function LecturerGradingQueueContent() {
         }
       }
 
-      toast.success(`Successfully finalized AI evaluations across ${appliedCount} question(s)`);
+      toast.success(
+        `Successfully finalized AI evaluations across ${appliedCount} question(s)`,
+      );
       setShowBulkAiDialog(false);
       setSelectedAttemptIds([]);
       refreshClassContext();
@@ -1822,7 +1878,13 @@ function LecturerGradingQueueContent() {
   };
 
   const executeBulkRelease = async () => {
-    if (!selectedAssessment || !bulkReleaseAction || !bulkReleaseAction.attemptIds || bulkReleaseAction.attemptIds.length === 0) return;
+    if (
+      !selectedAssessment ||
+      !bulkReleaseAction ||
+      !bulkReleaseAction.attemptIds ||
+      bulkReleaseAction.attemptIds.length === 0
+    )
+      return;
     try {
       setIsReleasing(true);
       const res = await resultApi.releaseResults(
@@ -1831,7 +1893,9 @@ function LecturerGradingQueueContent() {
         selectedClass?.class_id,
       );
       const count =
-        res?.released_count ?? res?.published_count ?? bulkReleaseAction.attemptIds.length;
+        res?.released_count ??
+        res?.published_count ??
+        bulkReleaseAction.attemptIds.length;
       let msg = `Successfully published results for ${count} student(s)`;
       if (res?.held_count > 0) {
         msg += ` (${res.held_count} held due to integrity flags)`;
@@ -2003,9 +2067,15 @@ function LecturerGradingQueueContent() {
                   onClick={() => setIsLeftSidebarOpen(!isLeftSidebarOpen)}
                   className={cn(
                     "h-7 px-2 text-xs font-medium rounded-lg",
-                    isLeftSidebarOpen ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground",
+                    isLeftSidebarOpen
+                      ? "bg-card text-foreground shadow-2xs"
+                      : "text-muted-foreground",
                   )}
-                  title={isLeftSidebarOpen ? "Collapse Questions List (Alt+[)" : "Expand Questions List (Alt+[)"}
+                  title={
+                    isLeftSidebarOpen
+                      ? "Collapse Questions List (Alt+[)"
+                      : "Expand Questions List (Alt+[)"
+                  }
                 >
                   {isLeftSidebarOpen ? (
                     <PanelLeftClose className="size-3.5" />
@@ -2021,9 +2091,15 @@ function LecturerGradingQueueContent() {
                   onClick={() => setIsRightSidebarOpen(!isRightSidebarOpen)}
                   className={cn(
                     "h-7 px-2 text-xs font-medium rounded-lg",
-                    isRightSidebarOpen ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground",
+                    isRightSidebarOpen
+                      ? "bg-card text-foreground shadow-2xs"
+                      : "text-muted-foreground",
                   )}
-                  title={isRightSidebarOpen ? "Collapse AI & Review Panel (Alt+])" : "Expand AI & Review Panel (Alt+])"}
+                  title={
+                    isRightSidebarOpen
+                      ? "Collapse AI & Review Panel (Alt+])"
+                      : "Expand AI & Review Panel (Alt+])"
+                  }
                 >
                   {isRightSidebarOpen ? (
                     <PanelRightClose className="size-3.5" />
@@ -2056,7 +2132,9 @@ function LecturerGradingQueueContent() {
                   <Maximize2 className="size-3.5 text-muted-foreground" />
                 )}
                 <span className="hidden sm:inline">
-                  {!isLeftSidebarOpen && !isRightSidebarOpen ? "Exit Focus" : "Focus"}
+                  {!isLeftSidebarOpen && !isRightSidebarOpen
+                    ? "Exit Focus"
+                    : "Focus"}
                 </span>
               </Button>
 
@@ -2107,7 +2185,8 @@ function LecturerGradingQueueContent() {
                     title="Jump to Next Ungraded Question (Alt+U)"
                   >
                     <span className="flex items-center gap-1">
-                      <Sparkles className="size-3 text-amber-600" /> Next Ungraded
+                      <Sparkles className="size-3 text-amber-600" /> Next
+                      Ungraded
                     </span>
                     <kbd className="px-1 text-[9px] font-mono bg-background border rounded text-muted-foreground">
                       Alt+U
@@ -2444,7 +2523,8 @@ function LecturerGradingQueueContent() {
                           <span>Auto-Graded Question</span>
                         </div>
                         <p className="text-xs text-muted-foreground leading-relaxed font-normal">
-                          This question is scored automatically based on predefined deterministic rules.
+                          This question is scored automatically based on
+                          predefined deterministic rules.
                         </p>
                         <div className="p-3 bg-card border rounded-xl flex justify-between items-center text-xs">
                           <span className="font-medium text-muted-foreground">
@@ -2524,7 +2604,8 @@ function LecturerGradingQueueContent() {
                               className="min-h-[80px] text-xs rounded-lg w-full font-normal bg-background"
                             />
                             <span className="text-[10px] text-muted-foreground block italic">
-                              * This feedback will be shown to the student upon release.
+                              * This feedback will be shown to the student upon
+                              release.
                             </span>
                           </div>
 
@@ -2694,7 +2775,8 @@ function LecturerGradingQueueContent() {
                           AI Evaluation in Progress
                         </p>
                         <p className="text-[11px] text-muted-foreground leading-normal font-normal">
-                          AI is analyzing submission response and generating rubric draft.
+                          AI is analyzing submission response and generating
+                          rubric draft.
                         </p>
                       </div>
                     ) : (
@@ -2753,7 +2835,8 @@ function LecturerGradingQueueContent() {
                   </div>
                 ) : (
                   <div className="p-4 rounded-xl border border-dashed border-border/60 text-center text-xs text-muted-foreground italic leading-normal">
-                    No AI evaluation panel for deterministic auto-graded questions.
+                    No AI evaluation panel for deterministic auto-graded
+                    questions.
                   </div>
                 )}
 
@@ -2803,7 +2886,9 @@ function LecturerGradingQueueContent() {
                         <div className="flex gap-2">
                           <Lock className="size-4 shrink-0 mt-0.5" />
                           <div>
-                            <p className="font-semibold">Security Hold Active</p>
+                            <p className="font-semibold">
+                              Security Hold Active
+                            </p>
                             <p className="text-[11px] mt-0.5 leading-normal font-normal">
                               {activeAttempt.integrity_hold_reason ||
                                 "Placed on security hold."}
@@ -2817,7 +2902,8 @@ function LecturerGradingQueueContent() {
                           onClick={() => setShowIntegrityLiftDialog(true)}
                           disabled={isSaving}
                         >
-                          <Unlock className="size-3 mr-1.5" /> Lift Security Hold
+                          <Unlock className="size-3 mr-1.5" /> Lift Security
+                          Hold
                         </Button>
                       </div>
                     )}
@@ -2838,7 +2924,9 @@ function LecturerGradingQueueContent() {
                         onClick={handleToggleManualFlag}
                         disabled={isSaving}
                       >
-                        {selectedStudent?.is_flagged ? "Unflag" : "Flag Attempt"}
+                        {selectedStudent?.is_flagged
+                          ? "Unflag"
+                          : "Flag Attempt"}
                       </Button>
                     </div>
                   </div>
@@ -2891,14 +2979,16 @@ function LecturerGradingQueueContent() {
                     variant="outline"
                     className={cn(
                       "text-[9px] font-medium px-1.5 py-0",
-                      selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at
+                      selectedGroupSubmission.is_released ||
+                        selectedGroupSubmission.result_released_at
                         ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
                         : selectedGroupSubmission.status === "GRADED"
-                        ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                        : "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                          ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                          : "bg-amber-500/10 text-amber-600 border-amber-500/20",
                     )}
                   >
-                    {selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at
+                    {selectedGroupSubmission.is_released ||
+                    selectedGroupSubmission.result_released_at
                       ? "RELEASED"
                       : selectedGroupSubmission.status || "SUBMITTED"}
                   </Badge>
@@ -2906,34 +2996,46 @@ function LecturerGradingQueueContent() {
                 <p className="text-xs text-muted-foreground mt-0.5 font-normal truncate">
                   {selectedAssessment?.title} • Total Score:{" "}
                   <span className="font-mono font-semibold text-foreground">
-                    {selectedGroupSubmission.total_score ?? selectedGroupSubmission.score ?? 0}
+                    {selectedGroupSubmission.total_score ??
+                      selectedGroupSubmission.score ??
+                      0}
                   </span>{" "}
-                  / {selectedAssessment?.total_marks || selectedGroupSubmission.assessment?.total_marks || selectedGroupSubmission.max_score || DEFAULT_ASSESSMENT_TOTAL_MARKS} pts
+                  /{" "}
+                  {selectedAssessment?.total_marks ||
+                    selectedGroupSubmission.assessment?.total_marks ||
+                    selectedGroupSubmission.max_score ||
+                    DEFAULT_ASSESSMENT_TOTAL_MARKS}{" "}
+                  pts
                 </p>
               </div>
             </div>
 
             <div className="flex items-center gap-2 sm:gap-3 shrink-0">
               {/* Release Result Button (visible when GRADED and not yet released) */}
-              {selectedGroupSubmission.status === "GRADED" && !(selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at) && (
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={handleReleaseGroupResult}
-                  disabled={releasingGroupResult}
-                  className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5"
-                  title="Release graded result to all group members"
-                >
-                  {releasingGroupResult ? (
-                    <Loader2 className="size-3.5 animate-spin" />
-                  ) : (
-                    <Send className="size-3.5" />
-                  )}
-                  <span>Release Result</span>
-                </Button>
-              )}
+              {selectedGroupSubmission.status === "GRADED" &&
+                !(
+                  selectedGroupSubmission.is_released ||
+                  selectedGroupSubmission.result_released_at
+                ) && (
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleReleaseGroupResult}
+                    disabled={releasingGroupResult}
+                    className="h-8 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-semibold shadow-xs flex items-center gap-1.5"
+                    title="Release graded result to all group members"
+                  >
+                    {releasingGroupResult ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Send className="size-3.5" />
+                    )}
+                    <span>Release Result</span>
+                  </Button>
+                )}
 
-              {(selectedGroupSubmission.is_released || selectedGroupSubmission.result_released_at) && (
+              {(selectedGroupSubmission.is_released ||
+                selectedGroupSubmission.result_released_at) && (
                 <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 bg-blue-500/10 border border-blue-500/20 text-blue-600 dark:text-blue-400 rounded-xl text-xs font-medium">
                   <CheckCircle2 className="size-3 text-blue-500" />
                   <span>Released</span>
@@ -2969,12 +3071,20 @@ function LecturerGradingQueueContent() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsGroupLeftSidebarOpen(!isGroupLeftSidebarOpen)}
+                  onClick={() =>
+                    setIsGroupLeftSidebarOpen(!isGroupLeftSidebarOpen)
+                  }
                   className={cn(
                     "h-7 px-2 text-xs font-medium rounded-lg",
-                    isGroupLeftSidebarOpen ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground",
+                    isGroupLeftSidebarOpen
+                      ? "bg-card text-foreground shadow-2xs"
+                      : "text-muted-foreground",
                   )}
-                  title={isGroupLeftSidebarOpen ? "Collapse Navigation (Alt+[)" : "Expand Navigation (Alt+[)"}
+                  title={
+                    isGroupLeftSidebarOpen
+                      ? "Collapse Navigation (Alt+[)"
+                      : "Expand Navigation (Alt+[)"
+                  }
                 >
                   {isGroupLeftSidebarOpen ? (
                     <PanelLeftClose className="size-3.5" />
@@ -2987,12 +3097,20 @@ function LecturerGradingQueueContent() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsGroupRightSidebarOpen(!isGroupRightSidebarOpen)}
+                  onClick={() =>
+                    setIsGroupRightSidebarOpen(!isGroupRightSidebarOpen)
+                  }
                   className={cn(
                     "h-7 px-2 text-xs font-medium rounded-lg",
-                    isGroupRightSidebarOpen ? "bg-card text-foreground shadow-2xs" : "text-muted-foreground",
+                    isGroupRightSidebarOpen
+                      ? "bg-card text-foreground shadow-2xs"
+                      : "text-muted-foreground",
                   )}
-                  title={isGroupRightSidebarOpen ? "Collapse AI & Grading Panel (Alt+])" : "Expand AI & Grading Panel (Alt+])"}
+                  title={
+                    isGroupRightSidebarOpen
+                      ? "Collapse AI & Grading Panel (Alt+])"
+                      : "Expand AI & Grading Panel (Alt+])"
+                  }
                 >
                   {isGroupRightSidebarOpen ? (
                     <PanelRightClose className="size-3.5" />
@@ -3025,7 +3143,9 @@ function LecturerGradingQueueContent() {
                   <Maximize2 className="size-3.5 text-muted-foreground" />
                 )}
                 <span className="hidden sm:inline">
-                  {!isGroupLeftSidebarOpen && !isGroupRightSidebarOpen ? "Exit Focus" : "Focus"}
+                  {!isGroupLeftSidebarOpen && !isGroupRightSidebarOpen
+                    ? "Exit Focus"
+                    : "Focus"}
                 </span>
               </Button>
 
@@ -3063,7 +3183,8 @@ function LecturerGradingQueueContent() {
                           : "text-muted-foreground hover:text-foreground",
                       )}
                     >
-                      Questions ({selectedGroupSubmission.questions?.length || 0})
+                      Questions (
+                      {selectedGroupSubmission.questions?.length || 0})
                     </button>
                     <button
                       onClick={() => setActiveGroupTab("roster")}
@@ -3098,25 +3219,40 @@ function LecturerGradingQueueContent() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          const questions = selectedGroupSubmission.questions || [];
+                          const questions =
+                            selectedGroupSubmission.questions || [];
                           const answers = selectedGroupSubmission.answers || [];
-                          for (let i = groupGraderActiveQuestionIndex + 1; i < questions.length; i++) {
-                            const ans = answers.find((a: any) => a.question_id === questions[i].id);
+                          for (
+                            let i = groupGraderActiveQuestionIndex + 1;
+                            i < questions.length;
+                            i++
+                          ) {
+                            const ans = answers.find(
+                              (a: any) => a.question_id === questions[i].id,
+                            );
                             if (!ans || !ans.is_final) {
                               handleGroupQuestionSelect(i);
                               toast.info(`Jumped to Question ${i + 1}`);
                               return;
                             }
                           }
-                          for (let i = 0; i < groupGraderActiveQuestionIndex; i++) {
-                            const ans = answers.find((a: any) => a.question_id === questions[i].id);
+                          for (
+                            let i = 0;
+                            i < groupGraderActiveQuestionIndex;
+                            i++
+                          ) {
+                            const ans = answers.find(
+                              (a: any) => a.question_id === questions[i].id,
+                            );
                             if (!ans || !ans.is_final) {
                               handleGroupQuestionSelect(i);
                               toast.info(`Jumped to Question ${i + 1}`);
                               return;
                             }
                           }
-                          toast.success("All questions in this group submission are graded!");
+                          toast.success(
+                            "All questions in this group submission are graded!",
+                          );
                         }}
                         className="w-full h-7 text-[11px] font-medium rounded-lg border-border/60 bg-background hover:bg-muted/40 flex items-center justify-center gap-1.5"
                       >
@@ -3126,85 +3262,92 @@ function LecturerGradingQueueContent() {
                     </div>
 
                     <div className="flex-1 overflow-y-auto p-2 space-y-1.5">
-                      {(selectedGroupSubmission.questions || []).map((q: any, idx: number) => {
-                        const ans = selectedGroupSubmission.answers?.find(
-                          (a: any) => a.question_id === q.id,
-                        );
-                        const isCurrent = groupGraderActiveQuestionIndex === idx;
-                        const isAuto = Boolean(ans?.is_auto_graded);
-                        const isFinal = Boolean(ans?.is_final);
-                        const hasAi = Boolean(ans?.ai_grade_score !== undefined && ans?.ai_grade_score !== null);
-                        const qMarks = q.marks || DEFAULT_QUESTION_MAX_MARKS;
+                      {(selectedGroupSubmission.questions || []).map(
+                        (q: any, idx: number) => {
+                          const ans = selectedGroupSubmission.answers?.find(
+                            (a: any) => a.question_id === q.id,
+                          );
+                          const isCurrent =
+                            groupGraderActiveQuestionIndex === idx;
+                          const isAuto = Boolean(ans?.is_auto_graded);
+                          const isFinal = Boolean(ans?.is_final);
+                          const hasAi = Boolean(
+                            ans?.ai_grade_score !== undefined &&
+                            ans?.ai_grade_score !== null,
+                          );
+                          const qMarks = q.marks || DEFAULT_QUESTION_MAX_MARKS;
 
-                        return (
-                          <button
-                            key={q.id || idx}
-                            onClick={() => handleGroupQuestionSelect(idx)}
-                            className={cn(
-                              "w-full text-left p-2.5 rounded-xl border transition-all relative flex flex-col gap-1",
-                              isCurrent
-                                ? "border-primary/60 bg-primary/5 shadow-2xs"
-                                : "border-border/40 bg-card hover:bg-muted/30 text-foreground",
-                            )}
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
-                                <span>Q{idx + 1}</span>
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] font-mono px-1 py-0 uppercase tracking-tight text-muted-foreground"
-                                >
-                                  {q.question_type || q.type || "QUESTION"}
-                                </Badge>
-                              </span>
-                              <span className="font-mono text-[10px] text-muted-foreground">
-                                {qMarks} pts
-                              </span>
-                            </div>
-
-                            {/* Question snippet */}
-                            <p className="text-[11px] text-muted-foreground truncate leading-tight">
-                              {q.text || q.content || `Question ${idx + 1}`}
-                            </p>
-
-                            {/* Status tag */}
-                            <div className="flex items-center gap-1.5 pt-0.5">
-                              {isAuto ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-1 py-0"
-                                >
-                                  <CheckCircle2 className="size-2.5 mr-0.5" />
-                                  Auto: {ans.score ?? ans.auto_grade_score}/{qMarks}
-                                </Badge>
-                              ) : isFinal ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] bg-blue-500/10 text-blue-600 border-blue-500/20 px-1 py-0"
-                                >
-                                  <Check className="size-2.5 mr-0.5" />
-                                  Score: {ans.score}/{qMarks}
-                                </Badge>
-                              ) : hasAi ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] bg-purple-500/10 text-purple-600 border-purple-500/20 px-1 py-0"
-                                >
-                                  <Sparkles className="size-2.5 mr-0.5 text-purple-500" />
-                                  AI Sug: {ans.ai_grade_score}/{qMarks}
-                                </Badge>
-                              ) : (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/20 px-1 py-0"
-                                >
-                                  Pending
-                                </Badge>
+                          return (
+                            <button
+                              key={q.id || idx}
+                              onClick={() => handleGroupQuestionSelect(idx)}
+                              className={cn(
+                                "w-full text-left p-2.5 rounded-xl border transition-all relative flex flex-col gap-1",
+                                isCurrent
+                                  ? "border-primary/60 bg-primary/5 shadow-2xs"
+                                  : "border-border/40 bg-card hover:bg-muted/30 text-foreground",
                               )}
-                            </div>
-                          </button>
-                        );
-                      })}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="font-semibold text-xs text-foreground flex items-center gap-1.5">
+                                  <span>Q{idx + 1}</span>
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] font-mono px-1 py-0 uppercase tracking-tight text-muted-foreground"
+                                  >
+                                    {q.question_type || q.type || "QUESTION"}
+                                  </Badge>
+                                </span>
+                                <span className="font-mono text-[10px] text-muted-foreground">
+                                  {qMarks} pts
+                                </span>
+                              </div>
+
+                              {/* Question snippet */}
+                              <p className="text-[11px] text-muted-foreground truncate leading-tight">
+                                {q.text || q.content || `Question ${idx + 1}`}
+                              </p>
+
+                              {/* Status tag */}
+                              <div className="flex items-center gap-1.5 pt-0.5">
+                                {isAuto ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] bg-emerald-500/10 text-emerald-600 border-emerald-500/20 px-1 py-0"
+                                  >
+                                    <CheckCircle2 className="size-2.5 mr-0.5" />
+                                    Auto: {ans.score ?? ans.auto_grade_score}/
+                                    {qMarks}
+                                  </Badge>
+                                ) : isFinal ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] bg-blue-500/10 text-blue-600 border-blue-500/20 px-1 py-0"
+                                  >
+                                    <Check className="size-2.5 mr-0.5" />
+                                    Score: {ans.score}/{qMarks}
+                                  </Badge>
+                                ) : hasAi ? (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] bg-purple-500/10 text-purple-600 border-purple-500/20 px-1 py-0"
+                                  >
+                                    <Sparkles className="size-2.5 mr-0.5 text-purple-500" />
+                                    AI Sug: {ans.ai_grade_score}/{qMarks}
+                                  </Badge>
+                                ) : (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] bg-amber-500/10 text-amber-600 border-amber-500/20 px-1 py-0"
+                                  >
+                                    Pending
+                                  </Badge>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        },
+                      )}
                     </div>
                   </div>
                 )}
@@ -3268,26 +3411,31 @@ function LecturerGradingQueueContent() {
                         No activity records found.
                       </p>
                     )}
-                    {(selectedGroupSubmission.activities || []).map((act: any) => (
-                      <div
-                        key={act.id}
-                        className="p-2 rounded-xl border border-border/40 bg-card text-[11px] space-y-0.5"
-                      >
-                        <div className="flex items-center justify-between text-muted-foreground text-[10px]">
-                          <span className="font-medium text-foreground">
-                            {act.student_name}
-                          </span>
-                          <span className="font-mono">
-                            {act.created_at
-                              ? formatDistanceToNow(new Date(act.created_at), { addSuffix: true })
-                              : ""}
-                          </span>
+                    {(selectedGroupSubmission.activities || []).map(
+                      (act: any) => (
+                        <div
+                          key={act.id}
+                          className="p-2 rounded-xl border border-border/40 bg-card text-[11px] space-y-0.5"
+                        >
+                          <div className="flex items-center justify-between text-muted-foreground text-[10px]">
+                            <span className="font-medium text-foreground">
+                              {act.student_name}
+                            </span>
+                            <span className="font-mono">
+                              {act.created_at
+                                ? formatDistanceToNow(
+                                    new Date(act.created_at),
+                                    { addSuffix: true },
+                                  )
+                                : ""}
+                            </span>
+                          </div>
+                          <p className="text-muted-foreground text-[10px]">
+                            {act.activity_type}
+                          </p>
                         </div>
-                        <p className="text-muted-foreground text-[10px]">
-                          {act.activity_type}
-                        </p>
-                      </div>
-                    ))}
+                      ),
+                    )}
                   </div>
                 )}
               </div>
@@ -3311,7 +3459,11 @@ function LecturerGradingQueueContent() {
                   (ans: any) => ans.question_id === activeQ.id,
                 );
                 const maxMarks = activeQ.marks || DEFAULT_QUESTION_MAX_MARKS;
-                const rawType = (activeQ.question_type || activeQ.type || "").toUpperCase();
+                const rawType = (
+                  activeQ.question_type ||
+                  activeQ.type ||
+                  ""
+                ).toUpperCase();
                 const isAuto = Boolean(activeAns?.is_auto_graded);
                 const isFinal = Boolean(activeAns?.is_final);
 
@@ -3360,7 +3512,11 @@ function LecturerGradingQueueContent() {
                           variant="ghost"
                           size="sm"
                           disabled={groupGraderActiveQuestionIndex <= 0}
-                          onClick={() => handleGroupQuestionSelect(groupGraderActiveQuestionIndex - 1)}
+                          onClick={() =>
+                            handleGroupQuestionSelect(
+                              groupGraderActiveQuestionIndex - 1,
+                            )
+                          }
                           className="h-7 px-2 text-xs"
                         >
                           <ChevronLeft className="size-3.5 mr-0.5" /> Prev
@@ -3368,8 +3524,15 @@ function LecturerGradingQueueContent() {
                         <Button
                           variant="ghost"
                           size="sm"
-                          disabled={groupGraderActiveQuestionIndex >= (selectedGroupSubmission.questions?.length || 1) - 1}
-                          onClick={() => handleGroupQuestionSelect(groupGraderActiveQuestionIndex + 1)}
+                          disabled={
+                            groupGraderActiveQuestionIndex >=
+                            (selectedGroupSubmission.questions?.length || 1) - 1
+                          }
+                          onClick={() =>
+                            handleGroupQuestionSelect(
+                              groupGraderActiveQuestionIndex + 1,
+                            )
+                          }
                           className="h-7 px-2 text-xs"
                         >
                           Next <ChevronRight className="size-3.5 ml-0.5" />
@@ -3389,14 +3552,17 @@ function LecturerGradingQueueContent() {
                       </div>
 
                       {/* Case scenario context */}
-                      {(activeQ.case_study_context || (activeQ as any).caseStudyContext) && (
+                      {(activeQ.case_study_context ||
+                        (activeQ as any).caseStudyContext) && (
                         <div className="rounded-xl border border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/30 p-3.5 space-y-1 text-xs leading-relaxed">
                           <p className="text-[10px] font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                            <BookOpen className="size-3.5" /> Case Scenario Context
+                            <BookOpen className="size-3.5" /> Case Scenario
+                            Context
                           </p>
                           <div className="text-xs leading-relaxed text-amber-950 dark:text-amber-100 font-normal">
                             {renderRichMathText(
-                              activeQ.case_study_context || (activeQ as any).caseStudyContext,
+                              activeQ.case_study_context ||
+                                (activeQ as any).caseStudyContext,
                             )}
                           </div>
                         </div>
@@ -3415,11 +3581,14 @@ function LecturerGradingQueueContent() {
 
                       {/* Main Question Text */}
                       <div className="text-xs sm:text-sm leading-relaxed text-foreground whitespace-pre-wrap font-normal">
-                        {renderRichMathText(activeQ.text || activeQ.content || "")}
+                        {renderRichMathText(
+                          activeQ.text || activeQ.content || "",
+                        )}
                       </div>
 
                       {/* Table Context */}
-                      {(activeQ.question_table_context || (activeQ as any).questionTableContext) && (
+                      {(activeQ.question_table_context ||
+                        (activeQ as any).questionTableContext) && (
                         <div className="pt-2">
                           <TableContextViewer
                             data={
@@ -3435,7 +3604,8 @@ function LecturerGradingQueueContent() {
                     <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-2xs space-y-3">
                       <div className="flex items-center justify-between border-b border-border/30 pb-2">
                         <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                          <CheckCircle2 className="size-3.5" /> Team Submission Response
+                          <CheckCircle2 className="size-3.5" /> Team Submission
+                          Response
                         </span>
                         {activeAns?.last_modified_by_name && (
                           <span className="text-[11px] text-muted-foreground font-normal">
@@ -3457,100 +3627,108 @@ function LecturerGradingQueueContent() {
                     </div>
 
                     {/* Interactive Rubric Matrix (if configured) */}
-                    {activeQ.rubric && activeQ.rubric.criteria && activeQ.rubric.criteria.length > 0 && (
-                      <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-2xs space-y-3">
-                        <div className="flex items-center justify-between border-b border-border/30 pb-2">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
-                            <Scale className="size-3.5" /> Grading Rubric Matrix: {activeQ.rubric.title}
-                          </span>
-                        </div>
+                    {activeQ.rubric &&
+                      activeQ.rubric.criteria &&
+                      activeQ.rubric.criteria.length > 0 && (
+                        <div className="border border-border/50 bg-card rounded-2xl p-5 shadow-2xs space-y-3">
+                          <div className="flex items-center justify-between border-b border-border/30 pb-2">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                              <Scale className="size-3.5" /> Grading Rubric
+                              Matrix: {activeQ.rubric.title}
+                            </span>
+                          </div>
 
-                        <div className="space-y-3">
-                          {activeQ.rubric.criteria.map((crit: any) => {
-                            const selectedLvl = (groupRubricScores || []).find(
-                              (r: any) => r.criterion_id === crit.id,
-                            );
+                          <div className="space-y-3">
+                            {activeQ.rubric.criteria.map((crit: any) => {
+                              const selectedLvl = (
+                                groupRubricScores || []
+                              ).find((r: any) => r.criterion_id === crit.id);
 
-                            return (
-                              <div
-                                key={crit.id}
-                                className="p-3 rounded-xl border border-border/40 bg-muted/5 space-y-2 text-xs"
-                              >
-                                <div className="flex items-center justify-between font-medium">
-                                  <span>{crit.title || crit.name}</span>
-                                  <span className="text-muted-foreground font-mono text-[11px]">
-                                    Max: {crit.max_marks || crit.weight} pts
-                                  </span>
+                              return (
+                                <div
+                                  key={crit.id}
+                                  className="p-3 rounded-xl border border-border/40 bg-muted/5 space-y-2 text-xs"
+                                >
+                                  <div className="flex items-center justify-between font-medium">
+                                    <span>{crit.title || crit.name}</span>
+                                    <span className="text-muted-foreground font-mono text-[11px]">
+                                      Max: {crit.max_marks || crit.weight} pts
+                                    </span>
+                                  </div>
+                                  {crit.description && (
+                                    <p className="text-[11px] text-muted-foreground">
+                                      {crit.description}
+                                    </p>
+                                  )}
+
+                                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
+                                    {(crit.levels || []).map((lvl: any) => {
+                                      const isChosen =
+                                        selectedLvl?.level_id === lvl.id ||
+                                        selectedLvl?.score ===
+                                          (lvl.marks ?? lvl.score);
+
+                                      return (
+                                        <button
+                                          key={lvl.id}
+                                          type="button"
+                                          onClick={() => {
+                                            const nextRubrics = (
+                                              groupRubricScores || []
+                                            ).filter(
+                                              (r: any) =>
+                                                r.criterion_id !== crit.id,
+                                            );
+                                            nextRubrics.push({
+                                              criterion_id: crit.id,
+                                              level_id: lvl.id,
+                                              score: lvl.marks ?? lvl.score,
+                                              feedback: lvl.description,
+                                            });
+                                            setGroupRubricScores(nextRubrics);
+
+                                            // Calculate total score from rubrics
+                                            const sum = nextRubrics.reduce(
+                                              (s: number, r: any) =>
+                                                s + (r.score || 0),
+                                              0,
+                                            );
+                                            setGroupScore(String(sum));
+                                            setIsGroupEditing(true);
+                                            triggerDebouncedGroupAutosave(
+                                              String(sum),
+                                              groupFeedback,
+                                              nextRubrics,
+                                            );
+                                          }}
+                                          className={cn(
+                                            "p-2 rounded-lg border text-left text-xs transition-all",
+                                            isChosen
+                                              ? "border-primary bg-primary/10 text-primary font-medium shadow-2xs"
+                                              : "border-border/40 bg-card hover:bg-muted/30 text-foreground",
+                                          )}
+                                        >
+                                          <div className="font-semibold text-[11px] flex items-center justify-between">
+                                            <span>{lvl.title || lvl.name}</span>
+                                            <span className="font-mono font-medium">
+                                              {lvl.marks ?? lvl.score} pts
+                                            </span>
+                                          </div>
+                                          {lvl.description && (
+                                            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
+                                              {lvl.description}
+                                            </p>
+                                          )}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
-                                {crit.description && (
-                                  <p className="text-[11px] text-muted-foreground">
-                                    {crit.description}
-                                  </p>
-                                )}
-
-                                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                                  {(crit.levels || []).map((lvl: any) => {
-                                    const isChosen =
-                                      selectedLvl?.level_id === lvl.id ||
-                                      selectedLvl?.score === (lvl.marks ?? lvl.score);
-
-                                    return (
-                                      <button
-                                        key={lvl.id}
-                                        type="button"
-                                        onClick={() => {
-                                          const nextRubrics = (groupRubricScores || []).filter(
-                                            (r: any) => r.criterion_id !== crit.id,
-                                          );
-                                          nextRubrics.push({
-                                            criterion_id: crit.id,
-                                            level_id: lvl.id,
-                                            score: lvl.marks ?? lvl.score,
-                                            feedback: lvl.description,
-                                          });
-                                          setGroupRubricScores(nextRubrics);
-
-                                          // Calculate total score from rubrics
-                                          const sum = nextRubrics.reduce(
-                                            (s: number, r: any) => s + (r.score || 0),
-                                            0,
-                                          );
-                                          setGroupScore(String(sum));
-                                          setIsGroupEditing(true);
-                                          triggerDebouncedGroupAutosave(
-                                            String(sum),
-                                            groupFeedback,
-                                            nextRubrics,
-                                          );
-                                        }}
-                                        className={cn(
-                                          "p-2 rounded-lg border text-left text-xs transition-all",
-                                          isChosen
-                                            ? "border-primary bg-primary/10 text-primary font-medium shadow-2xs"
-                                            : "border-border/40 bg-card hover:bg-muted/30 text-foreground",
-                                        )}
-                                      >
-                                        <div className="font-semibold text-[11px] flex items-center justify-between">
-                                          <span>{lvl.title || lvl.name}</span>
-                                          <span className="font-mono font-medium">
-                                            {lvl.marks ?? lvl.score} pts
-                                          </span>
-                                        </div>
-                                        {lvl.description && (
-                                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-2">
-                                            {lvl.description}
-                                          </p>
-                                        )}
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    )}
+                      )}
                   </div>
                 );
               })()}
@@ -3572,13 +3750,13 @@ function LecturerGradingQueueContent() {
                   const isAuto = Boolean(activeAns?.is_auto_graded);
                   const isProcessing = Boolean(
                     isTriggeringAi ||
-                      activeAns?.ai_grade_decision === "PROCESSING" ||
-                      activeAns?.ai_grade_decision === "PENDING",
+                    activeAns?.ai_grade_decision === "PROCESSING" ||
+                    activeAns?.ai_grade_decision === "PENDING",
                   );
                   const hasAi = Boolean(
                     !isProcessing &&
-                      activeAns?.ai_grade_score !== undefined &&
-                      activeAns?.ai_grade_score !== null,
+                    activeAns?.ai_grade_score !== undefined &&
+                    activeAns?.ai_grade_score !== null,
                   );
                   const confidence = activeAns?.ai_grade_confidence ?? 0.85;
                   const confidencePct = Math.round(confidence * 100);
@@ -3660,7 +3838,9 @@ function LecturerGradingQueueContent() {
                           <p className="text-[11px] leading-relaxed">
                             Evaluated strictly against key choices. Score:{" "}
                             <span className="font-bold font-mono">
-                              {activeAns?.score ?? activeAns?.auto_grade_score ?? 0}
+                              {activeAns?.score ??
+                                activeAns?.auto_grade_score ??
+                                0}
                             </span>{" "}
                             / {maxMarks} pts.
                           </p>
@@ -3689,10 +3869,16 @@ function LecturerGradingQueueContent() {
                                     key={ratio}
                                     type="button"
                                     onClick={() => {
-                                      const val = String(Math.round(maxMarks * ratio * 10) / 10);
+                                      const val = String(
+                                        Math.round(maxMarks * ratio * 10) / 10,
+                                      );
                                       setGroupScore(val);
                                       setIsGroupEditing(true);
-                                      triggerDebouncedGroupAutosave(val, groupFeedback, groupRubricScores);
+                                      triggerDebouncedGroupAutosave(
+                                        val,
+                                        groupFeedback,
+                                        groupRubricScores,
+                                      );
                                     }}
                                     className="px-1.5 py-0.5 text-[9px] font-mono rounded border border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground"
                                   >
@@ -3712,7 +3898,11 @@ function LecturerGradingQueueContent() {
                               onChange={(e) => {
                                 setGroupScore(e.target.value);
                                 setIsGroupEditing(true);
-                                triggerDebouncedGroupAutosave(e.target.value, groupFeedback, groupRubricScores);
+                                triggerDebouncedGroupAutosave(
+                                  e.target.value,
+                                  groupFeedback,
+                                  groupRubricScores,
+                                );
                               }}
                               className="h-9 text-xs rounded-lg font-mono font-medium bg-background"
                             />
@@ -3733,7 +3923,11 @@ function LecturerGradingQueueContent() {
                               onChange={(e) => {
                                 setGroupFeedback(e.target.value);
                                 setIsGroupEditing(true);
-                                triggerDebouncedGroupAutosave(groupScore, e.target.value, groupRubricScores);
+                                triggerDebouncedGroupAutosave(
+                                  groupScore,
+                                  e.target.value,
+                                  groupRubricScores,
+                                );
                               }}
                               className="min-h-[85px] text-xs rounded-lg font-normal bg-background"
                             />
@@ -3742,7 +3936,12 @@ function LecturerGradingQueueContent() {
                           {/* Action Buttons */}
                           <div className="pt-2 border-t border-border/30 space-y-2">
                             <Button
-                              onClick={() => submitGroupQuestionGrade(true, isGroupAiAccepted)}
+                              onClick={() =>
+                                submitGroupQuestionGrade(
+                                  true,
+                                  isGroupAiAccepted,
+                                )
+                              }
                               disabled={gradingGroup}
                               className="w-full h-9 text-xs font-medium rounded-xl bg-primary hover:bg-primary/95 text-primary-foreground flex items-center justify-center gap-1.5 shadow-2xs"
                             >
@@ -3755,7 +3954,12 @@ function LecturerGradingQueueContent() {
                             </Button>
 
                             <Button
-                              onClick={() => submitGroupQuestionGrade(false, isGroupAiAccepted)}
+                              onClick={() =>
+                                submitGroupQuestionGrade(
+                                  false,
+                                  isGroupAiAccepted,
+                                )
+                              }
                               disabled={gradingGroup}
                               variant="outline"
                               className="w-full h-8 text-xs font-medium rounded-xl border border-border/60 hover:bg-muted/40 text-muted-foreground flex items-center justify-center gap-1.5"
@@ -3786,8 +3990,7 @@ function LecturerGradingQueueContent() {
                 Review & Grading Queue
                 {data.some(
                   (item) =>
-                    item.status === "PENDING" ||
-                    item.status === "AI_SUGGESTED",
+                    item.status === "PENDING" || item.status === "AI_SUGGESTED",
                 ) && (
                   <span className="relative flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
@@ -3809,7 +4012,8 @@ function LecturerGradingQueueContent() {
                 onClick={handleBackToWorkspaces}
                 className="hover:text-primary transition-colors flex items-center gap-1 font-medium"
               >
-                <School className="size-3.5 text-muted-foreground/70" /> Workspaces
+                <School className="size-3.5 text-muted-foreground/70" />{" "}
+                Workspaces
               </button>
 
               {selectedWorkspace && (
@@ -4164,13 +4368,20 @@ function LecturerGradingQueueContent() {
                                 >
                                   {m.student_name}
                                   {m.is_leader && (
-                                    <span className="ml-1 text-[8px] text-amber-500 font-semibold" title="Leader">★</span>
+                                    <span
+                                      className="ml-1 text-[8px] text-amber-500 font-semibold"
+                                      title="Leader"
+                                    >
+                                      ★
+                                    </span>
                                   )}
                                 </span>
                               ))}
                             </div>
                           ) : (
-                            <span className="text-muted-foreground/60 italic">No members assigned</span>
+                            <span className="text-muted-foreground/60 italic">
+                              No members assigned
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="py-2.5 text-center font-mono text-xs">
@@ -4253,7 +4464,8 @@ function LecturerGradingQueueContent() {
                       <div className="flex items-center gap-2">
                         <School className="size-4 text-primary" />
                         <span className="text-xs font-semibold text-foreground">
-                          {selectedAssessment.title} — Class Sections Performance
+                          {selectedAssessment.title} — Class Sections
+                          Performance
                         </span>
                         <Badge
                           variant="outline"
@@ -4339,47 +4551,49 @@ function LecturerGradingQueueContent() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(Array.isArray(classStats) ? classStats : []).map((c: ClassStatRecord) => (
-                      <TableRow
-                        onClick={() => handleSelectClass(c)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            handleSelectClass(c);
-                          }
-                        }}
-                        tabIndex={0}
-                        role="button"
-                        aria-label={`Select class section ${c.class_name}`}
-                        key={c.class_id}
-                        className="group hover:bg-primary/[0.02] focus-visible:bg-primary/[0.03] focus-visible:outline-none h-13 border-border/20 transition-colors cursor-pointer"
-                      >
-                        <TableCell className="px-6 py-2.5 font-medium text-xs text-foreground group-hover:text-primary">
-                          {c.class_name}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-foreground/80">
-                          {c.submitted_count} / {c.total_students}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-emerald-600">
-                          {c.reviewed_count}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-amber-600">
-                          {c.pending_review_count}
-                        </TableCell>
-                        <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-indigo-500">
-                          {c.released_count}
-                        </TableCell>
-                        <TableCell className="text-right pr-6 py-2.5">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 w-7 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                          >
-                            <ChevronRight className="size-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
+                    {(Array.isArray(classStats) ? classStats : []).map(
+                      (c: ClassStatRecord) => (
+                        <TableRow
+                          onClick={() => handleSelectClass(c)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleSelectClass(c);
+                            }
+                          }}
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`Select class section ${c.class_name}`}
+                          key={c.class_id}
+                          className="group hover:bg-primary/[0.02] focus-visible:bg-primary/[0.03] focus-visible:outline-none h-13 border-border/20 transition-colors cursor-pointer"
+                        >
+                          <TableCell className="px-6 py-2.5 font-medium text-xs text-foreground group-hover:text-primary">
+                            {c.class_name}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-foreground/80">
+                            {c.submitted_count} / {c.total_students}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-emerald-600">
+                            {c.reviewed_count}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-amber-600">
+                            {c.pending_review_count}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-center text-xs font-mono font-medium text-indigo-500">
+                            {c.released_count}
+                          </TableCell>
+                          <TableCell className="text-right pr-6 py-2.5">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 w-7 p-0 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                            >
+                              <ChevronRight className="size-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ),
+                    )}
                   </TableBody>
                 </Table>
               </div>
@@ -4414,7 +4628,8 @@ function LecturerGradingQueueContent() {
                     </div>
                     <p className="text-xs font-normal text-muted-foreground mt-0.5">
                       <strong className="text-foreground font-medium">
-                        {classAnalytics.graded}/{classAnalytics.submitted} graded
+                        {classAnalytics.graded}/{classAnalytics.submitted}{" "}
+                        graded
                       </strong>
                       {" · "}
                       <strong
@@ -4581,7 +4796,9 @@ function LecturerGradingQueueContent() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="all">All Submissions</SelectItem>
-                          <SelectItem value="PENDING">Awaiting Review</SelectItem>
+                          <SelectItem value="PENDING">
+                            Awaiting Review
+                          </SelectItem>
                           <SelectItem value="AI_SUGGESTED">
                             AI Suggestions Ready
                           </SelectItem>
@@ -4615,10 +4832,7 @@ function LecturerGradingQueueContent() {
                         </SelectContent>
                       </Select>
 
-                      <Select
-                        value={sortBy}
-                        onValueChange={handleSortByChange}
-                      >
+                      <Select value={sortBy} onValueChange={handleSortByChange}>
                         <SelectTrigger className="w-48 h-8 text-xs rounded-lg font-medium">
                           <span className="flex items-center gap-1.5 truncate">
                             <ArrowUpDown className="size-3 text-muted-foreground" />
@@ -4630,8 +4844,12 @@ function LecturerGradingQueueContent() {
                             Priority (Flagged & Oldest)
                           </SelectItem>
                           <SelectItem value="date_asc">Oldest First</SelectItem>
-                          <SelectItem value="date_desc">Newest First</SelectItem>
-                          <SelectItem value="risk_desc">Integrity Risk</SelectItem>
+                          <SelectItem value="date_desc">
+                            Newest First
+                          </SelectItem>
+                          <SelectItem value="risk_desc">
+                            Integrity Risk
+                          </SelectItem>
                           <SelectItem value="name_asc">
                             Student Name (A-Z)
                           </SelectItem>
@@ -4673,8 +4891,8 @@ function LecturerGradingQueueContent() {
                           onClick={() => handleBulkFlag(false)}
                           className="h-7 text-xs font-medium rounded-lg border-border/80 text-foreground hover:bg-muted/50 gap-1.5"
                         >
-                          <Check className="size-3 text-muted-foreground" /> Bulk
-                          Unflag
+                          <Check className="size-3 text-muted-foreground" />{" "}
+                          Bulk Unflag
                         </Button>
                         <Button
                           variant="outline"
@@ -4876,7 +5094,11 @@ function LecturerGradingQueueContent() {
                           <span className="font-mono text-foreground font-semibold">
                             {Math.min(currentPage * PAGE_SIZE, total)}
                           </span>{" "}
-                          of <span className="font-mono text-foreground font-semibold">{total}</span> total submissions
+                          of{" "}
+                          <span className="font-mono text-foreground font-semibold">
+                            {total}
+                          </span>{" "}
+                          total submissions
                         </div>
                         <div className="flex items-center gap-2">
                           <Button
@@ -4897,12 +5119,17 @@ function LecturerGradingQueueContent() {
                             <ChevronLeft className="size-3.5" /> Prev
                           </Button>
                           <span className="px-1.5 font-mono text-xs font-medium text-foreground">
-                            Page {currentPage} of {Math.max(1, Math.ceil(total / PAGE_SIZE))}
+                            Page {currentPage} of{" "}
+                            {Math.max(1, Math.ceil(total / PAGE_SIZE))}
                           </span>
                           <Button
                             variant="outline"
                             size="sm"
-                            disabled={!hasMore || currentPage >= Math.ceil(total / PAGE_SIZE) || loading}
+                            disabled={
+                              !hasMore ||
+                              currentPage >= Math.ceil(total / PAGE_SIZE) ||
+                              loading
+                            }
                             onClick={() => {
                               if (selectedAssessment) {
                                 fetchQueue(
@@ -4982,9 +5209,11 @@ function LecturerGradingQueueContent() {
                           const isReleased =
                             item.is_released || item.status === "RELEASED";
                           const isHold =
-                            item.integrity_hold || item.status === "INTEGRITY_HOLD";
+                            item.integrity_hold ||
+                            item.status === "INTEGRITY_HOLD";
                           const isReady =
-                            (item.can_release || item.status === "PENDING_RELEASE") &&
+                            (item.can_release ||
+                              item.status === "PENDING_RELEASE") &&
                             !isReleased &&
                             !isHold;
 
@@ -5019,19 +5248,20 @@ function LecturerGradingQueueContent() {
                                     isReleased
                                       ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
                                       : isHold
-                                      ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
-                                      : isReady
-                                      ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
-                                      : "bg-muted/50 text-muted-foreground border-border/40",
+                                        ? "bg-rose-500/10 text-rose-600 border-rose-500/20"
+                                        : isReady
+                                          ? "bg-amber-500/10 text-amber-600 border-amber-500/20"
+                                          : "bg-muted/50 text-muted-foreground border-border/40",
                                   )}
                                 >
                                   {isReleased
                                     ? "RELEASED"
                                     : isHold
-                                    ? "INTEGRITY HOLD"
-                                    : isReady
-                                    ? "PENDING RELEASE"
-                                    : item.status?.replace(/_/g, " ") || "INCOMPLETE"}
+                                      ? "INTEGRITY HOLD"
+                                      : isReady
+                                        ? "PENDING RELEASE"
+                                        : item.status?.replace(/_/g, " ") ||
+                                          "INCOMPLETE"}
                                 </Badge>
                               </TableCell>
                               <TableCell className="text-right pr-6 py-2.5">
@@ -5047,7 +5277,9 @@ function LecturerGradingQueueContent() {
                                           [item.attempt_id],
                                           selectedClass.class_id,
                                         );
-                                        toast.success("Result published successfully");
+                                        toast.success(
+                                          "Result published successfully",
+                                        );
                                         refreshClassContext();
                                       } catch {
                                         toast.error("Failed to publish result");
@@ -5060,12 +5292,14 @@ function LecturerGradingQueueContent() {
                                 )}
                                 {isReleased && (
                                   <span className="text-xs text-emerald-600 font-medium inline-flex items-center gap-1">
-                                    <CheckCircle2 className="size-3 text-emerald-500" /> Published
+                                    <CheckCircle2 className="size-3 text-emerald-500" />{" "}
+                                    Published
                                   </span>
                                 )}
                                 {isHold && (
                                   <span className="text-xs text-rose-500 font-medium inline-flex items-center gap-1">
-                                    <ShieldAlert className="size-3 text-rose-500" /> Hold Active
+                                    <ShieldAlert className="size-3 text-rose-500" />{" "}
+                                    Hold Active
                                   </span>
                                 )}
                                 {!isReady && !isReleased && !isHold && (
@@ -5115,7 +5349,8 @@ function LecturerGradingQueueContent() {
                   SpeedGrader Keyboard Shortcuts
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5 font-normal">
-                  High-throughput keyboard shortcuts for rapid essay evaluation and navigation.
+                  High-throughput keyboard shortcuts for rapid essay evaluation
+                  and navigation.
                 </DialogDescription>
               </div>
             </div>
@@ -5331,7 +5566,9 @@ function LecturerGradingQueueContent() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="90">High Confidence Only (≥ 90%)</SelectItem>
+                  <SelectItem value="90">
+                    High Confidence Only (≥ 90%)
+                  </SelectItem>
                   <SelectItem value="80">
                     Medium-High Confidence (≥ 80%)
                   </SelectItem>
@@ -5344,8 +5581,9 @@ function LecturerGradingQueueContent() {
                 </SelectContent>
               </Select>
               <p className="text-[11px] text-muted-foreground italic leading-relaxed font-normal">
-                Only questions meeting or exceeding this threshold will be finalized.
-                Unmatched questions remain open for manual lecturer review.
+                Only questions meeting or exceeding this threshold will be
+                finalized. Unmatched questions remain open for manual lecturer
+                review.
               </p>
             </div>
           </div>
@@ -5396,7 +5634,8 @@ function LecturerGradingQueueContent() {
                   Lift Security Hold
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5 font-normal">
-                  Lifting this hold will re-enable grade release for this student attempt.
+                  Lifting this hold will re-enable grade release for this
+                  student attempt.
                 </DialogDescription>
               </div>
             </div>
@@ -5404,7 +5643,8 @@ function LecturerGradingQueueContent() {
 
           <p className="text-xs text-muted-foreground my-2 font-normal leading-relaxed">
             Are you sure you want to lift the integrity hold on this submission?
-            The student&apos;s score will become eligible for immediate publishing.
+            The student&apos;s score will become eligible for immediate
+            publishing.
           </p>
 
           <DialogFooter className="mt-4 flex justify-end gap-2 border-t border-border/30 pt-3">
@@ -5430,7 +5670,10 @@ function LecturerGradingQueueContent() {
       </Dialog>
 
       {/* Confirmation Dialog before Bulk Release */}
-      <Dialog open={bulkReleaseDialogOpen} onOpenChange={setBulkReleaseDialogOpen}>
+      <Dialog
+        open={bulkReleaseDialogOpen}
+        onOpenChange={setBulkReleaseDialogOpen}
+      >
         <DialogContent className="sm:max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base font-bold">
@@ -5441,15 +5684,25 @@ function LecturerGradingQueueContent() {
               {bulkReleaseAction?.type === "class_ready" ? (
                 <>
                   You are about to release official assessment marks for{" "}
-                  <strong className="text-foreground">{bulkReleaseAction.count} ready student(s)</strong> in{" "}
-                  <strong className="text-foreground">{bulkReleaseAction.className || "this class section"}</strong>.
-                  Students will immediately be able to view their final scores, breakdowns, and diagnostic feedback.
+                  <strong className="text-foreground">
+                    {bulkReleaseAction.count} ready student(s)
+                  </strong>{" "}
+                  in{" "}
+                  <strong className="text-foreground">
+                    {bulkReleaseAction.className || "this class section"}
+                  </strong>
+                  . Students will immediately be able to view their final
+                  scores, breakdowns, and diagnostic feedback.
                 </>
               ) : (
                 <>
                   You are about to release official assessment marks for{" "}
-                  <strong className="text-foreground">{bulkReleaseAction?.count || selectedAttemptIds.length} selected student(s)</strong>.
-                  Students will immediately be able to view their final scores, breakdowns, and diagnostic feedback.
+                  <strong className="text-foreground">
+                    {bulkReleaseAction?.count || selectedAttemptIds.length}{" "}
+                    selected student(s)
+                  </strong>
+                  . Students will immediately be able to view their final
+                  scores, breakdowns, and diagnostic feedback.
                 </>
               )}
             </DialogDescription>
@@ -5460,7 +5713,8 @@ function LecturerGradingQueueContent() {
             <div className="space-y-1">
               <p className="font-semibold">Institutional Assessment Guard</p>
               <p className="text-[11px] leading-normal text-muted-foreground">
-                Submissions with active integrity holds will remain safeguarded and unreleased. Incomplete submissions will be safely skipped.
+                Submissions with active integrity holds will remain safeguarded
+                and unreleased. Incomplete submissions will be safely skipped.
               </p>
             </div>
           </div>

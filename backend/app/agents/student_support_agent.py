@@ -13,6 +13,11 @@ from app.services.rag_service import RAGService
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.ai.meta_identity import (
+    _META_IDENTITY_PATTERN,
+    STUDENT_META_IDENTITY_DEFLECTION,
+)
+
 logger = get_logger(__name__)
 
 class StudySupportAgentResponse(BaseModel):
@@ -48,6 +53,28 @@ class StudySupportAgent(BaseAgent):
         current_page: Optional[int] = None,
     ) -> StudySupportAgentResponse:
 
+        # Step 0: Deterministic meta-identity deflection (deflect without RAG or LLM completion)
+        if _META_IDENTITY_PATTERN.search(question):
+            await self.gateway.log_action(
+                action_type=AIActionType.STUDY_SUPPORT,
+                actor_id=student_id,
+                actor_role="student",
+                subject_entity_type="teaching_workspace" if teaching_workspace_id else None,
+                subject_entity_id=teaching_workspace_id,
+                prompt_summary=f"Meta-identity deflection: {question[:100]}",
+                prompt_version="v1",
+                raw_output={
+                    "category": "META_IDENTITY",
+                    "deflected": True,
+                    "question": question,
+                },
+            )
+            return StudySupportAgentResponse(
+                answer=STUDENT_META_IDENTITY_DEFLECTION,
+                citations=[],
+                fallback_used=False,
+            )
+
         self.rag_service = RAGService(db)
 
         # Step 1: RAG retrieval with dynamic top_k, multi-resource, and workspace scoping
@@ -61,6 +88,18 @@ class StudySupportAgent(BaseAgent):
             teaching_workspace_id=teaching_workspace_id,
             top_k=top_k_count,
         )
+
+        # Step 1.5: Grounding with exact page text if called with an active page in Study Reader
+        grounded_page_text = None
+        if selected_resource_id and current_page:
+            try:
+                from app.services.study_reader_service import StudyReaderService
+                reader_svc = StudyReaderService(db)
+                grounded_page_text = await reader_svc.extract_exact_page_text("lecturer_material", selected_resource_id, current_page)
+                if not grounded_page_text:
+                    grounded_page_text = await reader_svc.extract_exact_page_text("student_resource", selected_resource_id, current_page)
+            except Exception as exc:
+                logger.debug("Failed to extract grounded page text for tutor: %s", exc)
 
         # Step 2: Build system prompt with thinking_mode and assessment Socratic directives
         system_prompt = self._build_system_prompt(
@@ -76,6 +115,7 @@ class StudySupportAgent(BaseAgent):
             fallback=rag_result.fallback_used,
             selected_text=selected_text,
             current_page=current_page,
+            grounded_page_text=grounded_page_text,
         )
 
         # Step 4: Call LLM with dynamic budget, reasoning controls, and assessment action type
@@ -87,6 +127,7 @@ class StudySupportAgent(BaseAgent):
             thinking_mode=thinking_mode,
             is_in_assessment=is_in_assessment,
             attempt_id=attempt_id,
+            selected_resource_id=selected_resource_id,
         )
 
         # Step 5: Audit log (skipped for guided-lesson and in-assessment calls to avoid leaking into global tutor history)
@@ -120,7 +161,8 @@ class StudySupportAgent(BaseAgent):
                 "2. VISUAL & STRUCTURAL CLARITY: Use clean Markdown formatting with section headings (e.g. ### Key Concepts), concise paragraphs, bold key terms (**term**), and bullet points.\n"
                 "3. NO INLINE CITATION CLUTTER: Do NOT insert raw text markers or bracketed references like '[Source: ...]' into your response body text. Structured citations are attached automatically.\n"
                 "4. SCOPE BOUNDARIES: If the context only partially answers the question, explain what can be answered from notes first, then provide academic concepts.\n"
-                "5. ACADEMIC INTEGRITY: Never reveal exam answer keys or materials from unassigned courses."
+                "5. ACADEMIC INTEGRITY: Never reveal exam answer keys or materials from unassigned courses.\n"
+                "6. OFF-TOPIC REDIRECTION: If the student asks something entirely unrelated to their studies or academic coursework (not identity questions — those are handled separately), briefly and kindly redirect them to academic coursework without being preachy."
             )
         else:
             base_prompt = (
@@ -129,7 +171,8 @@ class StudySupportAgent(BaseAgent):
                 "1. MANDATORY GENERAL KNOWLEDGE DISCLAIMER: Your response MUST start with the exact string: '**General Knowledge:** This response is not based on your provided course material context.'\n"
                 "2. DIRECT ANSWER: Immediately after the disclaimer, answer the question accurately using general academic knowledge.\n"
                 "3. VISUAL & STRUCTURAL CLARITY: Use clean Markdown formatting with section headings (### ...), concise paragraphs, bold key terms, and bullet points.\n"
-                "4. NO CITATIONS: Do not invent or cite any file sources since this response relies on general knowledge."
+                "4. NO CITATIONS: Do not invent or cite any file sources since this response relies on general knowledge.\n"
+                "5. OFF-TOPIC REDIRECTION: If the student asks something entirely unrelated to academic topics or coursework (e.g. casual chit-chat, pop culture, non-academic inquiries), briefly and kindly redirect them to academic coursework without being preachy."
             )
 
         if is_in_assessment:
@@ -157,13 +200,21 @@ class StudySupportAgent(BaseAgent):
         fallback: bool,
         selected_text: Optional[str] = None,
         current_page: Optional[int] = None,
+        grounded_page_text: Optional[str] = None,
     ) -> str:
         prompt_parts = [f"Student Question:\n{question}\n"]
 
         if selected_text:
             page_info = f" (Page {current_page})" if current_page else ""
+            safe_selected_text = selected_text.replace('"""', "[triple-quote delimiter removed]")
             prompt_parts.append(
-                f"[STUDENT HIGHLIGHTED EXCERPT{page_info}]:\n\"\"\"\n{selected_text}\n\"\"\"\n"
+                f"[UNTRUSTED STUDENT HIGHLIGHTED EXCERPT{page_info}]:\n\"\"\"\n{safe_selected_text}\n\"\"\"\n"
+            )
+
+        if grounded_page_text:
+            page_label = f"Page {current_page}" if current_page else "Current Page"
+            prompt_parts.append(
+                f"[GROUNDED {page_label} TEXT CONTENT]:\n\"\"\"\n{grounded_page_text[:3000]}\n\"\"\"\n"
             )
 
         if not fallback:
@@ -191,6 +242,7 @@ class StudySupportAgent(BaseAgent):
         thinking_mode: bool = False,
         is_in_assessment: bool = False,
         attempt_id: Optional[uuid.UUID] = None,
+        selected_resource_id: Optional[uuid.UUID] = None,
     ) -> str:
         messages = [AIMessage(role="system", content=system_prompt)]
 
@@ -216,14 +268,18 @@ class StudySupportAgent(BaseAgent):
         )
 
         action_type = AIActionType.ASSESSMENT_AI_SUPPORT if is_in_assessment else AIActionType.STUDY_SUPPORT
+        subject_id = attempt_id if is_in_assessment else selected_resource_id
+        subject_type = "assessment_attempt" if is_in_assessment else ("resource" if selected_resource_id else None)
 
         response = await self.gateway.complete(
             request,
             action_type=action_type,
             actor_id=student_id,
             actor_role="student",
-            subject_entity_id=attempt_id,
-            subject_entity_type="assessment_attempt" if is_in_assessment else None,
+            subject_entity_id=subject_id,
+            subject_entity_type=subject_type,
+            prompt_summary="Student AI study support query",
+            prompt_version="v1",
         )
         return response.content
 

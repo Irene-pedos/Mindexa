@@ -95,6 +95,24 @@ def test_add_study_reader_capture_tables_migration_exists():
     assert '"student_material_key_point"' in source
 
 
+def test_add_reading_progress_layout_fields_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260824_1130_add_reading_progress_layout_fields.py"
+    )
+    assert migration_path.exists(), "Reading progress layout migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision = "20260824_1130_progress_layout"' in source
+    assert 'down_revision = "20260823_1045_study_reader"' in source
+    assert '"rotation"' in source
+    assert '"zoom_mode"' in source
+    assert '"two_page_view"' in source
+    assert '"furthest_page_reached"' in source
+
+
 def test_migration_chain_integrity():
     """Verify that every migration has a valid down_revision and there is exactly one head."""
     versions_dir = Path(__file__).resolve().parents[1] / ".." / "alembic" / "versions"
@@ -131,4 +149,4 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260823_1045_study_reader"
+    assert heads[0] == "20260824_1130_progress_layout"

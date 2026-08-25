@@ -86,3 +86,38 @@ async def test_gateway_fallback_success():
     assert result == expected_response
     provider1.complete.assert_called_once()
     provider2.complete.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_gateway_embedding_fallback_success():
+    db_mock = MagicMock()
+    db_mock.add = MagicMock()
+    db_mock.flush = AsyncMock()
+    db_mock.commit = AsyncMock()
+
+    from app.core.ai.providers import AIEmbeddingRequest, AIEmbeddingResponse
+
+    provider1 = MagicMock(spec=BaseProvider)
+    provider1.name = "jina"
+    provider1.default_model = "jina-embeddings-v3"
+    provider1.embed = AsyncMock(side_effect=RateLimitError("Limit reached", retry_after=0.01))
+
+    expected_response = AIEmbeddingResponse(
+        embeddings=[[0.1] * 1536],
+        provider="openai",
+        model="text-embedding-3-small",
+        total_tokens=5,
+        raw={},
+    )
+    provider2 = MagicMock(spec=BaseProvider)
+    provider2.name = "openai"
+    provider2.default_model = "text-embedding-3-small"
+    provider2.embed = AsyncMock(return_value=expected_response)
+
+    gateway = AIGateway(db=db_mock, chat_providers=[], embedding_providers=[provider1, provider2])
+    request = AIEmbeddingRequest(input="Test query")
+
+    result = await gateway.embed(request)
+    assert result.provider == "openai"
+    assert len(result.embeddings[0]) == 1536
+

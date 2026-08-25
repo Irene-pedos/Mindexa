@@ -125,5 +125,8 @@
       "database": "mindexa_db",
       "username": "postgres"
     }
-  ] // can go to "strict" later
+  ],
+  "chat.tools.terminal.autoApprove": {
+    ".\\.venv\\Scripts\\python.exe": true
+  } // can go to "strict" later
 }

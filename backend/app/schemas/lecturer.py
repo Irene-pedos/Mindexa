@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from app.db.enums import AssessmentStatus, AssessmentType, LanguageEnum
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DashboardMetric(BaseModel):
@@ -96,10 +96,10 @@ class WorkspaceCreate(BaseModel):
     description: Optional[str] = None
 
 class WorkspaceUpdate(BaseModel):
-    title: Optional[str] = None
+    title: Optional[str] = Field(default=None, min_length=1)
     description: Optional[str] = None
-    banner_image_url: Optional[str] = None
-    status: Optional[str] = None
+    banner_image_url: Optional[str] = Field(default=None, max_length=500)
+    status: Optional[str] = Field(default=None, min_length=1)
     language: Optional[LanguageEnum] = None
 
 class LecturerCourseRosterItem(BaseModel):

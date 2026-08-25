@@ -12,8 +12,8 @@ Pydantic schemas for Study Reader API:
 import uuid
 from datetime import datetime
 from typing import Any, List, Literal, Optional
-from pydantic import BaseModel, Field
 
+from pydantic import BaseModel, Field
 
 SourceKind = Literal["lecturer_material", "student_resource"]
 AnnotationColor = Literal["key_idea", "definition", "example", "confused"]
@@ -34,6 +34,9 @@ class ReaderMetadataResponse(BaseModel):
     workspace_id: Optional[uuid.UUID] = None
     course_code: Optional[str] = None
     course_title: Optional[str] = None
+    version: int = 1
+    is_current: bool = True
+    latest_material_id: Optional[uuid.UUID] = None
 
 
 # ── Progress ─────────────────────────────────────────────────────────────────
@@ -41,7 +44,11 @@ class ReaderMetadataResponse(BaseModel):
 class ReadingProgressUpdate(BaseModel):
     last_page: int = Field(ge=1, description="1-based last viewed page")
     last_scale: float = Field(default=100.0, ge=10.0, le=500.0, description="Zoom scale percentage")
-    page_count_seen: int = Field(default=1, ge=1, description="Total unique pages viewed")
+    rotation: int = Field(default=0, ge=0, le=270, description="Rotation degrees: 0, 90, 180, 270")
+    zoom_mode: str = Field(default="fit-width", description="fit-width | fit-page | custom")
+    two_page_view: bool = Field(default=False, description="Dual page view toggle")
+    furthest_page_reached: Optional[int] = Field(default=None, ge=1, description="Highest page reached")
+    page_count_seen: Optional[int] = Field(default=None, ge=1, description="Legacy alias for furthest_page_reached")
 
 
 class ReadingProgressResponse(BaseModel):
@@ -51,17 +58,21 @@ class ReadingProgressResponse(BaseModel):
     source_id: uuid.UUID
     last_page: int
     last_scale: float
-    page_count_seen: int
+    rotation: int = 0
+    zoom_mode: str = "fit-width"
+    two_page_view: bool = False
+    furthest_page_reached: int = 1
+    page_count_seen: int = 1
     updated_at: datetime
 
 
 # ── Annotations ──────────────────────────────────────────────────────────────
 
 class AnnotationRect(BaseModel):
-    x: float = Field(..., description="Normalized 0..1 left offset")
-    y: float = Field(..., description="Normalized 0..1 top offset")
-    w: float = Field(..., description="Normalized 0..1 width")
-    h: float = Field(..., description="Normalized 0..1 height")
+    x: float = Field(..., ge=0.0, le=1.0, description="Normalized 0..1 left offset")
+    y: float = Field(..., ge=0.0, le=1.0, description="Normalized 0..1 top offset")
+    w: float = Field(..., ge=0.0, le=1.0, description="Normalized 0..1 width")
+    h: float = Field(..., ge=0.0, le=1.0, description="Normalized 0..1 height")
     page: int = Field(..., ge=1, description="1-based page number")
 
 
@@ -217,7 +228,7 @@ class PageCheckResponse(BaseModel):
 
 class PageCheckAnswerItem(BaseModel):
     question_id: str
-    selected_option_index: int = Field(ge=0, le=3)
+    selected_option_index: int = Field(ge=0)
     selected_option_text: Optional[str] = None
 
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import httpx
 from app.core.config import settings
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
@@ -10,6 +11,16 @@ from .base_provider import (AICompletionRequest, AICompletionResponse,
                             BaseProvider)
 
 logger = get_logger(__name__)
+
+# Global semaphore to enforce Jina's concurrent request limit (free/standard tier: max 2 concurrent requests)
+_JINA_SEMAPHORE: asyncio.Semaphore | None = None
+
+
+def _get_jina_semaphore() -> asyncio.Semaphore:
+    global _JINA_SEMAPHORE
+    if _JINA_SEMAPHORE is None:
+        _JINA_SEMAPHORE = asyncio.Semaphore(2)
+    return _JINA_SEMAPHORE
 
 
 class JinaProvider(BaseProvider):
@@ -58,19 +69,28 @@ class JinaProvider(BaseProvider):
         }
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
+        semaphore = _get_jina_semaphore()
         try:
-            async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                response = await client.post(
-                    f"{self.base_url}/embeddings",
-                    json=payload,
-                    headers=headers,
-                )
-                response.raise_for_status()
+            async with semaphore:
+                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
+                    response = await client.post(
+                        f"{self.base_url}/embeddings",
+                        json=payload,
+                        headers=headers,
+                    )
+                    response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == 429:
+                retry_after_str = exc.response.headers.get("Retry-After")
+                retry_after = (
+                    float(retry_after_str)
+                    if retry_after_str and retry_after_str.replace(".", "", 1).isdigit()
+                    else None
+                )
                 raise RateLimitError(
                     "Jina rate limit exceeded for embeddings.",
                     code="AI_PROVIDER_RATE_LIMITED",
+                    retry_after=retry_after,
                 ) from exc
             raise ServiceUnavailableError(f"Jina embedding request failed with status {exc.response.status_code}: {exc.response.text}") from exc
         except httpx.HTTPError as exc:

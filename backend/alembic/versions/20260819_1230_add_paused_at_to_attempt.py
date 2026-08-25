@@ -27,11 +27,11 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.execute("COMMIT")
-    try:
+    bind = op.get_bind()
+    columns = sa.inspect(bind).get_columns("ai_action_log")
+    action_column = next((column for column in columns if column["name"] == "action_type"), None)
+    if action_column is not None and not isinstance(action_column["type"], sa.String):
         op.execute("ALTER TYPE aiactiontype ADD VALUE IF NOT EXISTS 'ASSESSMENT_AI_SUPPORT'")
-    except Exception:
-        pass
 
 
 def downgrade() -> None:

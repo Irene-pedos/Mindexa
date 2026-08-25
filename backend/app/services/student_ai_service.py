@@ -5,20 +5,32 @@ from datetime import UTC, datetime
 
 from app.agents.student_support_agent import StudySupportAgent
 from app.core.ai.gateway import AIGateway
-from app.core.ai.provider_factory import (get_ai_provider,
-                                          get_embedding_provider)
+from app.core.ai.meta_identity import (
+    _META_IDENTITY_PATTERN,
+    STUDENT_META_IDENTITY_DEFLECTION,
+    is_meta_identity_query,
+)
+from app.core.ai.provider_factory import (
+    get_ai_provider,
+    get_embedding_provider,
+)
 from app.core.exceptions import PermissionDeniedError, ValidationError
-from app.db.enums import AssessmentStatus, AssessmentType, AttemptStatus
+from app.db.enums import (
+    AIActionType,
+    AssessmentStatus,
+    AssessmentType,
+    AttemptStatus,
+)
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User
-from app.schemas.student_ai import (StudentSupportContextRequest,
-                                    StudentSupportRequest,
-                                    StudentSupportResponse)
+from app.schemas.student_ai import (
+    StudentSupportContextRequest,
+    StudentSupportRequest,
+    StudentSupportResponse,
+)
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-# No need for separate RAGService import if Agent handles it, but let's see.
 
 _BLOCKED_CONTEXT_PATTERN = re.compile(
     r"(?:answer[ _-]?key|hidden[ _-]?rubric|exam[ _-]?(?:paper|solution))",
@@ -47,6 +59,35 @@ class StudentAIService:
 
         await self._assert_student_support_allowed(current_user.id)
 
+        # 1. Deterministic meta / identity question pre-filter (audit without calling LLM)
+        if _META_IDENTITY_PATTERN.search(body.question):
+            chat_provider = get_ai_provider()
+            embed_provider = get_embedding_provider()
+            gateway = AIGateway(self.db, chat_provider, embed_provider)
+            await gateway.log_action(
+                action_type=AIActionType.STUDY_SUPPORT,
+                actor_id=current_user.id,
+                actor_role="student",
+                subject_entity_type="teaching_workspace"
+                if getattr(body, "teaching_workspace_id", None)
+                else None,
+                subject_entity_id=getattr(body, "teaching_workspace_id", None),
+                prompt_summary=f"Meta-identity deflection: {body.question[:100]}",
+                prompt_version="v1",
+                raw_output={
+                    "category": "META_IDENTITY",
+                    "deflected": True,
+                    "question": body.question,
+                },
+            )
+            return StudentSupportResponse(
+                explanation=STUDENT_META_IDENTITY_DEFLECTION,
+                citations=[],
+                fallback_used=False,
+                model="deterministic_evaluator",
+                provider="deterministic_rule_engine",
+            )
+
         # Validate question & injected context for safety against prohibited exam materials.
         # Only block question text when it explicitly seeks answer keys, exam solutions, or hidden rubrics,
         # while allowing legitimate grading questions that are not trying to obtain prohibited content.
@@ -66,6 +107,15 @@ class StudentAIService:
 
         # Language policy check for student AI support
         target_ws_id = getattr(body, "teaching_workspace_id", None)
+        if not target_ws_id and getattr(body, "selected_resource_id", None):
+            from app.db.models.resource import LecturerMaterial
+            stmt_mat = select(LecturerMaterial.teaching_workspace_id).where(
+                LecturerMaterial.id == body.selected_resource_id,
+                LecturerMaterial.is_deleted == False,
+            )
+            res_mat = await self.db.execute(stmt_mat)
+            target_ws_id = res_mat.scalar_one_or_none()
+
         if target_ws_id:
             from app.db.models.academic import TeachingWorkspace
             ws = await self.db.get(TeachingWorkspace, target_ws_id)
@@ -74,21 +124,32 @@ class StudentAIService:
                 assert_ai_allowed(
                     getattr(ws, "language", None),
                     action="student_tutor",
-                    context={"workspace_id": str(target_ws_id)},
+                    context={
+                        "workspace_id": str(target_ws_id),
+                        "resource_id": str(body.selected_resource_id) if getattr(body, "selected_resource_id", None) else None,
+                    },
                 )
 
-        # If attempt_id is provided, verify assessment allows AI assistance
-        is_in_assessment = getattr(body, "is_in_assessment", False) or getattr(body, "attempt_id", None) is not None
-        if body.attempt_id:
+        is_in_assessment = bool(getattr(body, "is_in_assessment", False) or getattr(body, "attempt_id", None))
+        attempt = None
+        if is_in_assessment:
+            if not body.attempt_id:
+                raise PermissionDeniedError(
+                    "An attempt is required for in-assessment AI support.",
+                    code="ATTEMPT_REQUIRED",
+                )
             from app.db.repositories.attempt_repo import AttemptRepository
             att_repo = AttemptRepository(self.db)
             attempt = await att_repo.get_by_id(body.attempt_id)
-            if attempt and attempt.assessment:
-                if not attempt.assessment.ai_assistance_allowed:
-                    raise PermissionDeniedError(
-                        "AI assistance is disabled for this assessment.",
-                        code="AI_ASSISTANCE_NOT_ALLOWED",
-                    )
+            if not attempt or not attempt.assessment:
+                raise PermissionDeniedError("Attempt not found.", code="ATTEMPT_NOT_FOUND")
+            if attempt.student_id != current_user.id:
+                raise PermissionDeniedError("Attempt ownership violation.", code="ATTEMPT_OWNERSHIP_VIOLATION")
+            if not attempt.assessment.ai_assistance_allowed:
+                raise PermissionDeniedError(
+                    "AI assistance is disabled for this assessment.",
+                    code="AI_ASSISTANCE_NOT_ALLOWED",
+                )
 
         # 1. Build Gateway
         chat_provider = get_ai_provider()

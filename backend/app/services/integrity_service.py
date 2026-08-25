@@ -39,22 +39,18 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from app.core.exceptions import AuthorizationError, NotFoundError, ValidationError
-from app.db.enums import (
-    AssessmentStatus,
-    IntegrityEventType,
-    IntegrityFlagRaisedBy,
-    IntegrityFlagStatus,
-    RiskLevel,
-    WarningLevel,
-)
-from app.db.models.integrity import IntegrityEvent, IntegrityFlag, IntegrityWarning
+from app.core.exceptions import (AuthorizationError, NotFoundError,
+                                 ValidationError)
+from app.db.enums import (AssessmentStatus, IntegrityEventType,
+                          IntegrityFlagRaisedBy, IntegrityFlagStatus,
+                          RiskLevel, WarningLevel)
+from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
+                                     IntegrityWarning)
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.repositories.result_repo import ResultRepository
+from sqlalchemy.ext.asyncio import AsyncSession
 
 # ---------------------------------------------------------------------------
 # THRESHOLD CONFIGURATION
@@ -201,10 +197,9 @@ class IntegrityService:
         if assessment and (
             assessment.assessment_type in ("HOMEWORK", "PRACTICE")
             or assessment.integrity_monitoring_enabled is False
-            or assessment.is_supervised is False
         ) and event_type != "TIME_EXPIRED":
             return None, "NONE", None
-        
+
         # Load profile
         rules = {}
         if assessment and assessment.integrity_profile_id:
@@ -413,9 +408,10 @@ class IntegrityService:
 
         # Trigger notification to lecturer
         try:
-            from app.db.repositories.notification_repo import NotificationRepository
             from app.db.enums import NotificationType
-            
+            from app.db.repositories.notification_repo import \
+                NotificationRepository
+
             notif_repo = NotificationRepository(self.db)
             attempt = await self.attempt_repo.get_by_id(attempt_id)
             if attempt and attempt.assessment and attempt.assessment.created_by_id:
@@ -572,7 +568,7 @@ class IntegrityService:
             raise NotFoundError("Integrity flag not found")
 
         report = await self.get_attempt_integrity_report(flag.attempt_id)
-        
+
         # Load assessment title
         from app.db.models.assessment import Assessment
         assessment = await self.db.get(Assessment, flag.assessment_id)
@@ -588,7 +584,8 @@ class IntegrityService:
                 language=str(assessment.language),
                 flag_id=str(flag_id),
             )
-            from app.agents.integrity_explainer_agent import IntegrityExplainerOutput
+            from app.agents.integrity_explainer_agent import \
+                IntegrityExplainerOutput
             return IntegrityExplainerOutput(
                 summary=f"Automated narrative explanation disabled for Kinyarwanda assessment '{assessment_title}'. Please inspect the raw telemetry timeline below.",
                 risk_level="MEDIUM",
@@ -598,7 +595,8 @@ class IntegrityService:
             )
 
         # 2. Call AI Explainer Agent
-        from app.agents.integrity_explainer_agent import IntegrityExplainerAgent, IntegrityExplainerOutput
+        from app.agents.integrity_explainer_agent import (
+            IntegrityExplainerAgent, IntegrityExplainerOutput)
         from app.core.ai.gateway import AIGateway
         from app.core.ai.provider_factory import get_ai_provider
 

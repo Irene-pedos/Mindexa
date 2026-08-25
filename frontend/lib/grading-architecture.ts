@@ -160,10 +160,12 @@ export function getQuestionTypeLabel(value?: string | null): string {
     return "Multiple Choice";
   }
   if (normalized === "truefalse") return "True / False";
-  if (normalized === "matching" || normalized === "matchpairs") return "Matching";
+  if (normalized === "matching" || normalized === "matchpairs")
+    return "Matching";
   if (normalized === "fillblank" || normalized === "fillblanks")
     return "Fill in the Blanks";
-  if (normalized === "ordering" || normalized === "orderedlist") return "Ordering";
+  if (normalized === "ordering" || normalized === "orderedlist")
+    return "Ordering";
   if (normalized === "shortanswer") return "Short Answer";
   if (normalized === "essay") return "Essay";
   if (normalized === "computational") return "Computational";
@@ -172,7 +174,11 @@ export function getQuestionTypeLabel(value?: string | null): string {
 }
 
 export function summarizeQuestionMix(
-  questions: Array<{ type?: string; question_type?: string; marks?: number }> = [],
+  questions: Array<{
+    type?: string;
+    question_type?: string;
+    marks?: number;
+  }> = [],
 ) {
   const summary = {
     totalQuestions: questions.length,
@@ -218,7 +224,8 @@ export function getAssessmentProgressStatus(assessment: {
   if (studentStatus === "TERMINATED" || studentStatus === "AUTO_SUBMITTED") {
     return {
       label: "Terminated / Auto-Submitted",
-      description: "This session ended automatically due to integrity violations or timeout.",
+      description:
+        "This session ended automatically due to integrity violations or timeout.",
       tone: "destructive" as const,
     };
   }
@@ -235,20 +242,23 @@ export function getAssessmentProgressStatus(assessment: {
     if (releaseMode === "manual") {
       return {
         label: "Awaiting Lecturer Review",
-        description: "Closed questions may be processed, but open responses require lecturer review.",
+        description:
+          "Closed questions may be processed, but open responses require lecturer review.",
         tone: "warning" as const,
       };
     }
     return {
       label: "Submission Processing",
-      description: "Your submission has been recorded and automatic grading is being finalized.",
+      description:
+        "Your submission has been recorded and automatic grading is being finalized.",
       tone: "info" as const,
     };
   }
 
   return {
     label: "Assessment Available",
-    description: "You can enter the assessment when the submission window is open.",
+    description:
+      "You can enter the assessment when the submission window is open.",
     tone: "default" as const,
   };
 }
@@ -260,8 +270,10 @@ export function isHighSecurityAssessment(
 ): boolean {
   const t = normalizeQuestionType(type);
 
-  // Homework and Groupwork are never high-security
-  if (t === "homework" || t === "group_work" || t === "groupwork") {
+  if (isSupervised === true) return true;
+
+  // Homework and Groupwork are never high-security when unsupervised
+  if (t === "homework" || t === "groupwork") {
     return false;
   }
 
@@ -276,7 +288,14 @@ export function isHighSecurityAssessment(
   return highSecurityTypes.has(t) || !!isSupervised;
 }
 
-export type AssessmentCategory = "ACTIVE" | "UPCOMING" | "SUBMITTED" | "MISSED" | "VIOLATION" | "GRADED" | "IN_PROGRESS";
+export type AssessmentCategory =
+  | "ACTIVE"
+  | "UPCOMING"
+  | "SUBMITTED"
+  | "MISSED"
+  | "VIOLATION"
+  | "GRADED"
+  | "IN_PROGRESS";
 
 export function getAssessmentCategory(assessment: {
   student_status?: string | null;
@@ -286,10 +305,16 @@ export function getAssessmentCategory(assessment: {
 }): AssessmentCategory {
   const status = (assessment.student_status || "").toUpperCase();
   const now = new Date();
-  const start = assessment.window_start ? new Date(assessment.window_start) : null;
+  const start = assessment.window_start
+    ? new Date(assessment.window_start)
+    : null;
   const end = assessment.window_end ? new Date(assessment.window_end) : null;
 
-  if (status === "TERMINATED" || status === "AUTO_SUBMITTED" || assessment.is_auto_submitted) {
+  if (
+    status === "TERMINATED" ||
+    status === "AUTO_SUBMITTED" ||
+    assessment.is_auto_submitted
+  ) {
     return "VIOLATION";
   }
 
@@ -308,7 +333,7 @@ export function getAssessmentCategory(assessment: {
   if (start && now < start) {
     return "UPCOMING";
   }
-  
+
   if (status === "IN_PROGRESS") {
     return "IN_PROGRESS";
   }
@@ -319,16 +344,25 @@ export function getAssessmentCategory(assessment: {
 export function getResultLifecycleSummary(result: {
   graded_question_count?: number;
   total_question_count?: number;
-  breakdowns?: Array<{ question_type?: string; grading_mode?: string; score?: number | null }>;
+  breakdowns?: Array<{
+    question_type?: string;
+    grading_mode?: string;
+    score?: number | null;
+  }>;
   student_status?: string | null;
   status?: string | null;
   is_auto_submitted?: boolean;
 }) {
   const status = (result.student_status || result.status || "").toUpperCase();
-  if (status === "TERMINATED" || status === "AUTO_SUBMITTED" || result.is_auto_submitted) {
+  if (
+    status === "TERMINATED" ||
+    status === "AUTO_SUBMITTED" ||
+    result.is_auto_submitted
+  ) {
     return {
       label: "Audit Required / Terminated",
-      description: "This attempt was automatically submitted due to a security violation or timeout. Results are subject to institutional audit.",
+      description:
+        "This attempt was automatically submitted due to a security violation or timeout. Results are subject to institutional audit.",
       tone: "destructive" as const,
       autoGradedCount: 0,
       lecturerReviewedCount: 0,
@@ -337,7 +371,9 @@ export function getResultLifecycleSummary(result: {
     };
   }
 
-  const totalQuestions = Number(result.total_question_count ?? result.breakdowns?.length ?? 0);
+  const totalQuestions = Number(
+    result.total_question_count ?? result.breakdowns?.length ?? 0,
+  );
   const gradedQuestions = Number(result.graded_question_count ?? 0);
   const pendingReviewCount = Math.max(totalQuestions - gradedQuestions, 0);
   const breakdowns = result.breakdowns ?? [];
@@ -349,7 +385,10 @@ export function getResultLifecycleSummary(result: {
     const gradingMode = (item.grading_mode || "").toLowerCase();
     if (gradingMode === "manual" || isOpenQuestionType(item.question_type)) {
       lecturerReviewedCount += 1;
-    } else if (isClosedQuestionType(item.question_type) || gradingMode === "auto") {
+    } else if (
+      isClosedQuestionType(item.question_type) ||
+      gradingMode === "auto"
+    ) {
       autoGradedCount += 1;
     }
   }

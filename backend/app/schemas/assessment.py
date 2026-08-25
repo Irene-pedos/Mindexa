@@ -418,7 +418,7 @@ class AssessmentTargetSectionResponse(BaseModel):
     def extract_related_ids(cls, data: Any) -> Any:
         if isinstance(data, dict):
             return data
-        
+
         from sqlalchemy import inspect
         try:
             state = inspect(data)
@@ -435,7 +435,7 @@ class AssessmentTargetSectionResponse(BaseModel):
                         cg = class_sec.class_group
                         if cg is not None:
                             opt_id = cg.option_id
-            
+
             data.department_id = dept_id
             data.class_group_id = cg_id
             data.option_id = opt_id
@@ -690,7 +690,7 @@ class BulkAssessmentRules(BaseModel):
     requireAllMemberParticipation: bool | None = False
     supervisor_ids: list[uuid.UUID] | None = []
     integrityMonitoring: bool | None = True
-    allowResume: bool | None = False
+    allowResume: bool | None = None
     integrityProfileCode: str | None = None
 
     @model_validator(mode="before")

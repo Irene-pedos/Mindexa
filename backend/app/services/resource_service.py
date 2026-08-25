@@ -66,7 +66,10 @@ class ResourceService:
             f.write(content)
 
         # 5. Handle versioning (mark old versions of this filename as not current in this workspace)
-        await self.repo.mark_superseded(metadata.teaching_workspace_id, file.filename)
+        latest_existing = await self.repo.get_latest_material_by_filename(metadata.teaching_workspace_id, file.filename)
+        next_version = (latest_existing.version + 1) if latest_existing else 1
+
+        superseded_ids = await self.repo.mark_superseded(metadata.teaching_workspace_id, file.filename)
 
         # 6. Create DB record
         material = LecturerMaterial(
@@ -84,11 +87,24 @@ class ResourceService:
             display_name=metadata.display_name or file.filename,
             description=metadata.description,
             is_student_visible=metadata.is_student_visible,
+            version=next_version,
+            is_current=True,
         )
 
         self.db.add(material)
         await self.db.commit()
         await self.db.refresh(material)
+
+        # 6.1 Copy forward previous version's student study data (annotations, key points, progress)
+        if superseded_ids:
+            from app.db.repositories.study_reader_repo import StudyReaderRepository
+            study_repo = StudyReaderRepository(self.db)
+            await study_repo.copy_forward_material_study_data(
+                previous_material_ids=superseded_ids,
+                new_material_id=material.id,
+                kind="lecturer_material",
+            )
+            await self.db.commit()
 
         # 6.5 Create AcademicResource for new RAG pipeline
         academic_res = AcademicResource(

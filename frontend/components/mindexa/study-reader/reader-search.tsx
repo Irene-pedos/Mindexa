@@ -1,7 +1,7 @@
 // frontend/components/mindexa/study-reader/reader-search.tsx
 "use client";
 
-import React, { useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { SearchMatch } from "./types";
 import { Search, X, ChevronUp, ChevronDown, Loader2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
@@ -22,6 +22,37 @@ interface ReaderSearchProps {
   currentPage: number;
 }
 
+function HighlightSnippet({
+  snippet,
+  query,
+}: {
+  snippet: string;
+  query: string;
+}) {
+  if (!query.trim()) return <span>{snippet}</span>;
+
+  const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`(${escapedQuery})`, "gi");
+  const parts = snippet.split(regex);
+
+  return (
+    <span>
+      {parts.map((part, i) =>
+        part.toLowerCase() === query.toLowerCase() ? (
+          <mark
+            key={i}
+            className="bg-primary/25 text-primary font-bold rounded-xs px-0.5"
+          >
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        ),
+      )}
+    </span>
+  );
+}
+
 export function ReaderSearch({
   searchQuery,
   searchMatches,
@@ -35,27 +66,53 @@ export function ReaderSearch({
   currentPage,
 }: ReaderSearchProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const [inputValue, setInputValue] = useState(searchQuery);
 
   // Auto-focus search input on mount
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
 
+  // Sync external search query changes to local input value
+  useEffect(() => {
+    setInputValue(searchQuery);
+  }, [searchQuery]);
+
+  // Debounce search by 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (inputValue !== searchQuery) {
+        onSearch(inputValue);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [inputValue, searchQuery, onSearch]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter") {
+      // Immediately fire search if pending debounce
+      if (inputValue !== searchQuery) {
+        onSearch(inputValue);
+      }
       if (e.shiftKey) {
         onPrevMatch();
       } else {
         onNextMatch();
       }
     } else if (e.key === "Escape") {
+      setInputValue("");
       onClearSearch();
     }
   };
 
+  const handleClear = () => {
+    setInputValue("");
+    onClearSearch();
+  };
+
   return (
-    <div className="flex flex-col h-full">
-      {/* Search Input Bar */}
+    <div className="flex flex-col h-full min-h-0 select-none">
+      {/* Search Header */}
       <div className="p-3 border-b border-border/40 space-y-2">
         <div className="relative flex items-center">
           <Search className="absolute left-2.5 size-3.5 text-muted-foreground pointer-events-none" />
@@ -63,20 +120,20 @@ export function ReaderSearch({
             ref={inputRef}
             type="text"
             placeholder="Search document… (Enter for next)"
-            value={searchQuery}
-            onChange={(e) => onSearch(e.target.value)}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
             onKeyDown={handleKeyDown}
             className="pl-8 pr-16 h-8 text-xs bg-muted/40 rounded-lg"
           />
           <div className="absolute right-1 flex items-center gap-0.5">
             {isSearching ? (
               <Loader2 className="size-3.5 animate-spin text-muted-foreground mr-1.5" />
-            ) : searchQuery ? (
+            ) : inputValue ? (
               <Button
                 variant="ghost"
                 size="icon"
                 className="size-6 text-muted-foreground hover:text-foreground"
-                onClick={onClearSearch}
+                onClick={handleClear}
                 title="Clear search"
               >
                 <X className="size-3.5" />
@@ -92,8 +149,8 @@ export function ReaderSearch({
               {isSearching
                 ? "Searching pages…"
                 : searchMatches.length === 0
-                ? "No matches found"
-                : `${currentMatchIndex + 1} of ${searchMatches.length} matches`}
+                  ? "No matches found"
+                  : `${currentMatchIndex + 1} of ${searchMatches.length} matches`}
             </span>
 
             {searchMatches.length > 0 && (
@@ -123,7 +180,7 @@ export function ReaderSearch({
       </div>
 
       {/* Results List */}
-      <ScrollArea className="flex-1 p-2">
+      <ScrollArea className="flex-1 min-h-0 p-2">
         {searchMatches.length > 0 ? (
           <div className="space-y-1.5 pb-4">
             {searchMatches.map((match, idx) => {
@@ -131,14 +188,16 @@ export function ReaderSearch({
               const isCurrentPage = match.pageNumber === currentPage;
 
               return (
-                <div
+                <Button
+                  type="button"
+                  variant="ghost"
                   key={`${match.pageNumber}-${idx}`}
                   onClick={() => onSelectMatch(idx)}
                   className={cn(
                     "p-2.5 rounded-lg text-xs cursor-pointer border transition-all",
                     isSelected
                       ? "border-primary bg-primary/10 text-foreground ring-1 ring-primary/30"
-                      : "border-border/40 hover:border-border hover:bg-muted/40 text-muted-foreground"
+                      : "border-border/40 hover:border-border hover:bg-muted/40 text-muted-foreground",
                   )}
                 >
                   <div className="flex items-center justify-between mb-1">
@@ -147,7 +206,7 @@ export function ReaderSearch({
                         "text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded",
                         isSelected || isCurrentPage
                           ? "bg-primary/20 text-primary"
-                          : "bg-muted text-muted-foreground"
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       Page {match.pageNumber}
@@ -158,9 +217,9 @@ export function ReaderSearch({
                   </div>
 
                   <p className="text-[11px] leading-relaxed text-foreground/90 font-mono line-clamp-2">
-                    {match.snippet}
+                    <HighlightSnippet snippet={match.snippet} query={searchQuery} />
                   </p>
-                </div>
+                </Button>
               );
             })}
           </div>

@@ -13,8 +13,8 @@ API router for the Study Reader revision workspace:
 """
 
 import uuid
-from typing import List
-from fastapi import APIRouter, Depends, status
+from typing import List, Optional
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import get_db
@@ -98,11 +98,16 @@ async def save_reading_progress(
 async def list_annotations(
     kind: SourceKind,
     resource_id: uuid.UUID,
+    page_number: Optional[int] = Query(None, ge=1, description="Filter annotations by page number"),
+    limit: int = Query(500, ge=1, le=1000, description="Max annotations to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> List[AnnotationResponse]:
     service = StudyReaderService(db)
-    return await service.list_annotations(current_user.id, kind, resource_id)
+    return await service.list_annotations(
+        current_user.id, kind, resource_id, page_number=page_number, limit=limit, offset=offset
+    )
 
 
 @router.post(
@@ -161,11 +166,17 @@ async def delete_annotation(
 async def list_key_points(
     kind: SourceKind,
     resource_id: uuid.UUID,
+    page_number: Optional[int] = Query(None, ge=1, description="Filter key points by page number"),
+    tag: Optional[str] = Query(None, description="Filter key points by tag"),
+    limit: int = Query(500, ge=1, le=1000, description="Max key points to return"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     current_user=Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> List[KeyPointResponse]:
     service = StudyReaderService(db)
-    return await service.list_key_points(current_user.id, kind, resource_id)
+    return await service.list_key_points(
+        current_user.id, kind, resource_id, page_number=page_number, tag=tag, limit=limit, offset=offset
+    )
 
 
 @router.post(

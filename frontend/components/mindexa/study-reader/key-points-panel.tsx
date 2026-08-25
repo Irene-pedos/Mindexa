@@ -2,11 +2,7 @@
 "use client";
 
 import React, { useState } from "react";
-import {
-  KeyPointConfidence,
-  KeyPointTag,
-  StudentKeyPoint,
-} from "./types";
+import { KeyPointConfidence, KeyPointTag, StudentKeyPoint } from "./types";
 import {
   Bookmark,
   Plus,
@@ -41,7 +37,10 @@ interface KeyPointsPanelProps {
     tag?: KeyPointTag;
     confidence?: KeyPointConfidence;
   }) => void;
-  onUpdateKeyPoint: (id: string, updates: { tag?: KeyPointTag; confidence?: KeyPointConfidence }) => void;
+  onUpdateKeyPoint: (
+    id: string,
+    updates: { tag?: KeyPointTag; confidence?: KeyPointConfidence },
+  ) => void;
   onDeleteKeyPoint: (id: string) => void;
   onExportRevisionSheet: () => Promise<any>;
 }
@@ -50,9 +49,24 @@ const CONFIDENCE_CONFIG: Record<
   KeyPointConfidence,
   { label: string; bg: string; text: string; dot: string }
 > = {
-  got_it: { label: "Got it", bg: "bg-emerald-500/10 border-emerald-500/30", text: "text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
-  fuzzy: { label: "Fuzzy", bg: "bg-amber-500/10 border-amber-500/30", text: "text-amber-600 dark:text-amber-400", dot: "bg-amber-500" },
-  lost: { label: "Need review", bg: "bg-rose-500/10 border-rose-500/30", text: "text-rose-600 dark:text-rose-400", dot: "bg-rose-500" },
+  got_it: {
+    label: "Got it",
+    bg: "bg-emerald-500/10 border-emerald-500/30",
+    text: "text-emerald-600 dark:text-emerald-400",
+    dot: "bg-emerald-500",
+  },
+  fuzzy: {
+    label: "Fuzzy",
+    bg: "bg-amber-500/10 border-amber-500/30",
+    text: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+  lost: {
+    label: "Need review",
+    bg: "bg-rose-500/10 border-rose-500/30",
+    text: "text-rose-600 dark:text-rose-400",
+    dot: "bg-rose-500",
+  },
 };
 
 const TAG_LABELS: Record<KeyPointTag, string> = {
@@ -79,9 +93,10 @@ export function KeyPointsPanel({
   const [copied, setCopied] = useState(false);
   const [exporting, setExporting] = useState(false);
 
-  const filteredPoints = selectedTag === "all"
-    ? keyPoints
-    : keyPoints.filter((kp) => kp.tag === selectedTag);
+  const filteredPoints =
+    selectedTag === "all"
+      ? keyPoints
+      : keyPoints.filter((kp) => kp.tag === selectedTag);
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -102,7 +117,7 @@ export function KeyPointsPanel({
     try {
       setExporting(true);
       const res = await onExportRevisionSheet();
-      if (res?.markdown) {
+      if (res?.markdown && typeof res.title === "string" && res.title.trim()) {
         await navigator.clipboard.writeText(res.markdown);
         setCopied(true);
         toast.success("Revision sheet copied to clipboard!");
@@ -124,11 +139,11 @@ export function KeyPointsPanel({
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = `revision-sheet-${res.title.toLowerCase().replace(/\s+/g, "-")}.md`;
+        a.download = `revision-sheet-${res.title.trim().toLowerCase().replace(/\s+/g, "-")}.md`;
         document.body.appendChild(a);
         a.click();
-        URL.revokeObjectURL(url);
         document.body.removeChild(a);
+        URL.revokeObjectURL(url);
         toast.success("Revision sheet downloaded!");
       }
     } catch {
@@ -139,7 +154,7 @@ export function KeyPointsPanel({
   };
 
   return (
-    <div className="flex flex-col h-full select-none">
+    <div className="flex flex-col h-full min-h-0 select-none">
       {/* Header with Export & Add Actions */}
       <div className="p-3 border-b border-border/40 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -164,11 +179,21 @@ export function KeyPointsPanel({
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48 p-1">
-                <DropdownMenuItem onClick={handleCopyMarkdown} className="text-xs gap-2">
-                  {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+                <DropdownMenuItem
+                  onClick={handleCopyMarkdown}
+                  className="text-xs gap-2"
+                >
+                  {copied ? (
+                    <Check className="size-3.5 text-emerald-500" />
+                  ) : (
+                    <Copy className="size-3.5" />
+                  )}
                   <span>Copy Markdown</span>
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleDownloadMarkdown} className="text-xs gap-2">
+                <DropdownMenuItem
+                  onClick={handleDownloadMarkdown}
+                  className="text-xs gap-2"
+                >
                   <FileDown className="size-3.5" />
                   <span>Download .MD File</span>
                 </DropdownMenuItem>
@@ -189,7 +214,10 @@ export function KeyPointsPanel({
 
       {/* Quick Add Form */}
       {isAdding && (
-        <form onSubmit={handleCreate} className="p-3 bg-muted/30 border-b border-border/40 space-y-2">
+        <form
+          onSubmit={handleCreate}
+          className="p-3 bg-muted/30 border-b border-border/40 space-y-2"
+        >
           <Input
             autoFocus
             type="text"
@@ -221,7 +249,11 @@ export function KeyPointsPanel({
               >
                 Cancel
               </Button>
-              <Button type="submit" size="sm" className="h-7 text-xs font-semibold rounded-lg">
+              <Button
+                type="submit"
+                size="sm"
+                className="h-7 text-xs font-semibold rounded-lg"
+              >
                 Save
               </Button>
             </div>
@@ -240,7 +272,7 @@ export function KeyPointsPanel({
               "px-2 py-0.5 rounded-full text-[10px] font-semibold whitespace-nowrap transition-colors",
               selectedTag === t
                 ? "bg-primary text-primary-foreground"
-                : "bg-muted/60 text-muted-foreground hover:text-foreground"
+                : "bg-muted/60 text-muted-foreground hover:text-foreground",
             )}
           >
             {t === "all" ? "All" : TAG_LABELS[t as KeyPointTag]}
@@ -249,11 +281,12 @@ export function KeyPointsPanel({
       </div>
 
       {/* Key Points List */}
-      <ScrollArea className="flex-1 p-2">
+      <ScrollArea className="flex-1 min-h-0 p-2">
         {filteredPoints.length > 0 ? (
           <div className="space-y-2 pb-4">
             {filteredPoints.map((kp) => {
-              const conf = CONFIDENCE_CONFIG[kp.confidence] || CONFIDENCE_CONFIG.got_it;
+              const conf =
+                CONFIDENCE_CONFIG[kp.confidence] || CONFIDENCE_CONFIG.got_it;
               const isCurrent = kp.page_number === currentPage;
 
               return (
@@ -261,7 +294,9 @@ export function KeyPointsPanel({
                   key={kp.id}
                   className={cn(
                     "p-3 rounded-xl border bg-card/60 transition-all hover:bg-card space-y-2 group shadow-xs",
-                    isCurrent ? "border-primary/50 ring-1 ring-primary/20" : "border-border/50"
+                    isCurrent
+                      ? "border-primary/50 ring-1 ring-primary/20"
+                      : "border-border/50",
                   )}
                 >
                   {/* Top: Title + Page Jump */}
@@ -277,7 +312,7 @@ export function KeyPointsPanel({
                         "text-[10px] font-mono font-semibold px-1.5 py-0.5 rounded shrink-0 flex items-center gap-0.5 transition-colors",
                         isCurrent
                           ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground hover:bg-primary/15 hover:text-primary"
+                          : "bg-muted text-muted-foreground hover:bg-primary/15 hover:text-primary",
                       )}
                       title={`Jump to Page ${kp.page_number}`}
                     >
@@ -295,7 +330,10 @@ export function KeyPointsPanel({
 
                   {/* Bottom: Tag + Confidence Dropdown + Delete */}
                   <div className="flex items-center justify-between pt-1 border-t border-border/30">
-                    <Badge variant="outline" className="text-[9px] font-medium h-4 px-1.5">
+                    <Badge
+                      variant="outline"
+                      className="text-[9px] font-medium h-4 px-1.5"
+                    >
                       {TAG_LABELS[kp.tag] || kp.tag}
                     </Badge>
 
@@ -308,21 +346,34 @@ export function KeyPointsPanel({
                             className={cn(
                               "text-[10px] font-semibold px-2 py-0.5 rounded-full border flex items-center gap-1 transition-all",
                               conf.bg,
-                              conf.text
+                              conf.text,
                             )}
                           >
-                            <span className={cn("size-1.5 rounded-full", conf.dot)} />
+                            <span
+                              className={cn("size-1.5 rounded-full", conf.dot)}
+                            />
                             <span>{conf.label}</span>
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-32 p-1">
-                          {(Object.keys(CONFIDENCE_CONFIG) as KeyPointConfidence[]).map((c) => (
+                          {(
+                            Object.keys(
+                              CONFIDENCE_CONFIG,
+                            ) as KeyPointConfidence[]
+                          ).map((c) => (
                             <DropdownMenuItem
                               key={c}
-                              onClick={() => onUpdateKeyPoint(kp.id, { confidence: c })}
+                              onClick={() =>
+                                onUpdateKeyPoint(kp.id, { confidence: c })
+                              }
                               className="text-xs gap-2"
                             >
-                              <span className={cn("size-2 rounded-full", CONFIDENCE_CONFIG[c].dot)} />
+                              <span
+                                className={cn(
+                                  "size-2 rounded-full",
+                                  CONFIDENCE_CONFIG[c].dot,
+                                )}
+                              />
                               <span>{CONFIDENCE_CONFIG[c].label}</span>
                             </DropdownMenuItem>
                           ))}
@@ -350,7 +401,8 @@ export function KeyPointsPanel({
             <Bookmark className="size-8 mx-auto text-muted-foreground/30" />
             <p className="font-medium">No key points yet</p>
             <p className="text-[11px] text-muted-foreground/80 max-w-[200px] mx-auto">
-              Select text in the PDF or click Add to record definitions, formulas, and takeaways.
+              Select text in the PDF or click Add to record definitions,
+              formulas, and takeaways.
             </p>
           </div>
         )}

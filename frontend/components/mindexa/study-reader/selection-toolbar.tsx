@@ -72,24 +72,45 @@ export function SelectionToolbar({
     onClose();
   };
 
+  // Auto-dismiss toolbar on window resize or orientation change
+  React.useEffect(() => {
+    const handleDismiss = () => {
+      onClose();
+    };
+
+    window.addEventListener("resize", handleDismiss, { passive: true });
+    window.addEventListener("orientationchange", handleDismiss, {
+      passive: true,
+    });
+    return () => {
+      window.removeEventListener("resize", handleDismiss);
+      window.removeEventListener("orientationchange", handleDismiss);
+    };
+  }, [onClose]);
+
   // Position toolbar right above selection (or below if near top of window)
   const isNearTop = selection.boundingRect.top < 120;
   const topPos = isNearTop
-    ? selection.boundingRect.top + selection.boundingRect.height + 8
-    : selection.boundingRect.top - 46;
+    ? Math.min(
+        window.innerHeight - 100,
+        selection.boundingRect.top + selection.boundingRect.height + 8,
+      )
+    : Math.max(12, selection.boundingRect.top - 48);
 
   const leftPos = Math.max(
     16,
     Math.min(
       window.innerWidth - 340,
-      selection.boundingRect.left + selection.boundingRect.width / 2 - 160
-    )
+      selection.boundingRect.left + selection.boundingRect.width / 2 - 160,
+    ),
   );
 
   return (
     <div
-      className="fixed z-50 animate-in fade-in zoom-in-95 duration-150"
+      className="selection-toolbar fixed z-50 animate-in fade-in zoom-in-95 duration-150"
       style={{ top: `${topPos}px`, left: `${leftPos}px` }}
+      onMouseDown={(e) => e.stopPropagation()}
+      onPointerDown={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
     >
       <div className="bg-card/95 backdrop-blur-md border border-border/70 shadow-2xl rounded-xl p-1.5 flex flex-col gap-1.5 min-w-72">

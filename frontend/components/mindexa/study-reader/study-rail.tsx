@@ -66,6 +66,12 @@ interface StudyRailProps {
   onClearSelectedAiText: () => void;
   // Page check props
   onPageCheckCompleted: () => void;
+  // Focus props
+  focusData: import("./types").FocusResponse | null;
+  isFocusLoading: boolean;
+  isFocusRefreshing: boolean;
+  onRefreshFocus: () => void;
+  onMarkKeyPointReviewed: (kpId: string) => Promise<void>;
 }
 
 export function StudyRail({
@@ -94,9 +100,14 @@ export function StudyRail({
   selectedAiText,
   onClearSelectedAiText,
   onPageCheckCompleted,
+  focusData,
+  isFocusLoading,
+  isFocusRefreshing,
+  onRefreshFocus,
+  onMarkKeyPointReviewed,
 }: StudyRailProps) {
   return (
-    <aside className="w-80 sm:w-96 border-l border-border/60 bg-card/95 backdrop-blur-md flex flex-col h-full z-20 shadow-xl animate-in slide-in-from-right duration-200">
+    <aside className="@container w-80 sm:w-96 border-l border-border/60 bg-card/95 backdrop-blur-md flex flex-col h-full z-20 shadow-xl animate-in slide-in-from-right duration-200">
       {/* Tab Switcher Header */}
       <div className="h-12 border-b border-border/40 px-2 flex items-center justify-between shrink-0 gap-1">
         <div className="flex items-center gap-0.5 bg-muted/50 p-0.5 rounded-lg overflow-x-auto no-scrollbar">
@@ -127,7 +138,7 @@ export function StudyRail({
             title="Page Comprehension Quiz"
           >
             <Target className="size-3.5" />
-            <span className="hidden sm:inline">Quiz</span>
+            <span className="hidden @[350px]:inline">Quiz</span>
           </button>
 
           <button
@@ -142,7 +153,7 @@ export function StudyRail({
             title="Key Takeaways"
           >
             <Bookmark className="size-3.5" />
-            <span className="hidden sm:inline">Key Points</span>
+            <span className="hidden @[370px]:inline">Key Points</span>
           </button>
 
           <button
@@ -201,13 +212,17 @@ export function StudyRail({
       </div>
 
       {/* Rail Tab Content */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
         {activeTab === "focus" && (
           <FocusPanel
             source={source}
             currentPage={currentPage}
+            focusData={focusData}
+            loading={isFocusLoading}
+            refreshing={isFocusRefreshing}
+            onRefresh={onRefreshFocus}
             onSelectPage={onSelectPage}
-            onUpdateKeyPoint={(id, u) => onUpdateKeyPoint(id, u)}
+            onMarkReviewed={onMarkKeyPointReviewed}
             onOpenPageCheck={() => onTabChange("check")}
           />
         )}

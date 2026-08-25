@@ -375,11 +375,19 @@ function useIntegrityMonitor({
   setIsScreenBlurred: (val: boolean) => void;
 }) {
   // If open assessment (Homework or Practice) or integrity monitoring disabled, completely bypass all event interception!
-  const isMonitoringActive = !isOpenAssessment && assessment?.integrity_monitoring_enabled !== false && isHighSecurity;
+  const isMonitoringActive =
+    !isOpenAssessment &&
+    assessment?.integrity_monitoring_enabled !== false &&
+    isHighSecurity;
 
   // Fullscreen enforcement
   useEffect(() => {
-    if (stage !== "taking" || !isMonitoringActive || !assessment?.fullscreen_required) return;
+    if (
+      stage !== "taking" ||
+      !isMonitoringActive ||
+      !assessment?.fullscreen_required
+    )
+      return;
 
     const checkFullscreen = () => {
       const isFull = !!document.fullscreenElement;
@@ -507,7 +515,14 @@ function useIntegrityMonitor({
       ];
       const detectedKeyword = aiKeywords.find((kw) => ua.includes(kw));
       const windowKeys = Object.keys(window);
-      const extensionKeywords = ["gpt", "openai", "copilot", "gemini", "monica", "sider"];
+      const extensionKeywords = [
+        "gpt",
+        "openai",
+        "copilot",
+        "gemini",
+        "monica",
+        "sider",
+      ];
       const detectedProperty = windowKeys.find((key) =>
         extensionKeywords.some((kw) => key.toLowerCase().includes(kw)),
       );
@@ -1051,13 +1066,21 @@ export default function TakeAssessmentPage() {
   const [isPausing, setIsPausing] = useState(false);
 
   const isHomeworkAssessment = useMemo(() => {
-    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    const t = (
+      assessment?.assessment_type ||
+      (assessment as any)?.type ||
+      ""
+    ).toUpperCase();
     return t === "HOMEWORK";
   }, [assessment]);
 
   // Practice = FORMATIVE type with integrity monitoring explicitly disabled
   const isPracticeAssessment = useMemo(() => {
-    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    const t = (
+      assessment?.assessment_type ||
+      (assessment as any)?.type ||
+      ""
+    ).toUpperCase();
     return (
       t === "FORMATIVE" &&
       (assessment?.integrity_monitoring_enabled === false ||
@@ -1067,7 +1090,11 @@ export default function TakeAssessmentPage() {
 
   // Open assessment = Homework, Practice (FORMATIVE + no monitoring), or Groupwork
   const isOpenAssessment = useMemo(() => {
-    const t = (assessment?.assessment_type || (assessment as any)?.type || "").toUpperCase();
+    const t = (
+      assessment?.assessment_type ||
+      (assessment as any)?.type ||
+      ""
+    ).toUpperCase();
     const isGroupWork = t === "GROUP_WORK" || t === "GROUPWORK";
     const isPractice =
       t === "FORMATIVE" &&
@@ -1238,6 +1265,8 @@ export default function TakeAssessmentPage() {
         await saveAllPendingAnswersRef.current();
       }
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
+      localStorage.removeItem(`attempt_token_${attemptId}`);
+      localStorage.removeItem(`active_attempt_${assessmentId}`);
       toast.info("Responses preserved.");
     } catch (err: unknown) {
       console.error("Auto-submit failed", err);
@@ -1248,9 +1277,11 @@ export default function TakeAssessmentPage() {
     (reason: string) => {
       setTerminationReason(reason);
       setStage("terminated");
+      if (attemptId) localStorage.removeItem(`attempt_token_${attemptId}`);
+      localStorage.removeItem(`active_attempt_${assessmentId}`);
       autoSubmit();
     },
-    [autoSubmit],
+    [assessmentId, attemptId, autoSubmit],
   );
 
   const startPollingScore = useCallback(
@@ -1285,7 +1316,13 @@ export default function TakeAssessmentPage() {
 
   const handleIntegrityEvent = useCallback(
     async (type: string, metadata: Record<string, unknown> = {}) => {
-      if (!attemptId || !attemptToken || isOpenAssessment || assessment?.integrity_monitoring_enabled === false) return;
+      if (
+        !attemptId ||
+        !attemptToken ||
+        isOpenAssessment ||
+        assessment?.integrity_monitoring_enabled === false
+      )
+        return;
       try {
         const res = await attemptApi.recordIntegrityEvent(
           attemptId,
@@ -1319,7 +1356,13 @@ export default function TakeAssessmentPage() {
         console.error("Failed to record integrity event", err);
       }
     },
-    [attemptId, attemptToken, autoSubmit, isOpenAssessment, assessment?.integrity_monitoring_enabled],
+    [
+      attemptId,
+      attemptToken,
+      autoSubmit,
+      isOpenAssessment,
+      assessment?.integrity_monitoring_enabled,
+    ],
   );
 
   useIntegrityMonitor({
@@ -1568,7 +1611,7 @@ export default function TakeAssessmentPage() {
 
         if (activeAttempt) {
           setAttemptId(activeAttempt.id);
-          const savedToken = sessionStorage.getItem(
+          const savedToken = localStorage.getItem(
             `attempt_token_${activeAttempt.id}`,
           );
 
@@ -1582,7 +1625,7 @@ export default function TakeAssessmentPage() {
                 if (controller.signal.aborted) return;
                 const newToken = resumeData.access_token;
                 setAttemptToken(newToken);
-                sessionStorage.setItem(
+                localStorage.setItem(
                   `attempt_token_${activeAttempt.id}`,
                   newToken,
                 );
@@ -1986,17 +2029,21 @@ export default function TakeAssessmentPage() {
     setIsPausing(true);
     try {
       await saveAllPendingAnswers();
+      localStorage.setItem(`attempt_token_${attemptId}`, attemptToken);
+      localStorage.setItem(`active_attempt_${assessmentId}`, attemptId);
       await attemptApi.pauseAttempt(attemptId, attemptToken);
-      sessionStorage.setItem(`attempt_token_${attemptId}`, attemptToken);
-      sessionStorage.setItem(`active_attempt_${assessmentId}`, attemptId);
-      toast.success("Homework progress saved. You can resume anytime before the deadline.");
+      toast.success(
+        "Homework progress saved. You can resume anytime before the deadline.",
+      );
       setShowPauseConfirm(false);
       router.push("/student/assessments");
     } catch (err: any) {
       console.error("Pause attempt error:", err);
-      toast.info("Saved locally. You can resume before the deadline.");
+      toast.error(
+        err.message ||
+          "Could not pause the assessment. Your current session is still active.",
+      );
       setShowPauseConfirm(false);
-      router.push("/student/assessments");
     } finally {
       setIsPausing(false);
     }
@@ -2051,11 +2098,20 @@ export default function TakeAssessmentPage() {
           });
         } catch (startErr: any) {
           const errMsg = startErr?.message || "";
-          if (startErr?.code === "ATTEMPT_ALREADY_ACTIVE" || errMsg.includes("already have an active attempt")) {
-            const storedAttemptId = sessionStorage.getItem(`active_attempt_${assessmentId}`) || attemptId;
-            const storedToken = storedAttemptId ? sessionStorage.getItem(`attempt_token_${storedAttemptId}`) : null;
+          if (
+            startErr?.code === "ATTEMPT_ALREADY_ACTIVE" ||
+            errMsg.includes("already have an active attempt")
+          ) {
+            const storedAttemptId =
+              localStorage.getItem(`active_attempt_${assessmentId}`) ||
+              attemptId;
+            const storedToken = storedAttemptId
+              ? localStorage.getItem(`attempt_token_${storedAttemptId}`)
+              : null;
             if (storedAttemptId && storedToken) {
-              data = await attemptApi.resumeAttempt(storedAttemptId, storedToken).catch(() => null);
+              data = await attemptApi
+                .resumeAttempt(storedAttemptId, storedToken)
+                .catch(() => null);
             }
           }
           if (!data) throw startErr;
@@ -2065,8 +2121,8 @@ export default function TakeAssessmentPage() {
       setAttemptId(data.id);
       setAttemptToken(data.access_token);
       setPendingAttemptStartData(null);
-      sessionStorage.setItem(`attempt_token_${data.id}`, data.access_token);
-      sessionStorage.setItem(`active_attempt_${assessmentId}`, data.id);
+      localStorage.setItem(`attempt_token_${data.id}`, data.access_token);
+      localStorage.setItem(`active_attempt_${assessmentId}`, data.id);
       setExpiresAt(data.expires_at);
 
       const attemptData = await attemptApi.getAttemptDetail(
@@ -2424,20 +2480,20 @@ export default function TakeAssessmentPage() {
           <StudentMathResponseInput
             questionId={q.id}
             value={textVal}
-            onChange={(val) =>
-              setAnswers((prev) => ({ ...prev, [q.id]: val }))
-            }
+            onChange={(val) => setAnswers((prev) => ({ ...prev, [q.id]: val }))}
             placeholder="Type your response, formula, or calculations here..."
             requiresTableAnswer={isTableReq}
             tableTemplate={q.answer_table_template || q.answerTableTemplate}
           />
           {requiresLecturerReview(q) || isTableReq ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2454,9 +2510,7 @@ export default function TakeAssessmentPage() {
           <StudentMathResponseInput
             questionId={q.id}
             value={textVal}
-            onChange={(val) =>
-              setAnswers((prev) => ({ ...prev, [q.id]: val }))
-            }
+            onChange={(val) => setAnswers((prev) => ({ ...prev, [q.id]: val }))}
             placeholder="Write your detailed essay, analysis, and calculations here..."
             minHeight="min-h-[240px]"
             minWords={q.min_words}
@@ -2467,11 +2521,13 @@ export default function TakeAssessmentPage() {
           <div className="flex items-center justify-between">
             {requiresLecturerReview(q) || isTableReq ? (
               <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-                <Clock className="size-3.5" /> Essay Review Required (No auto-grading)
+                <Clock className="size-3.5" /> Essay Review Required (No
+                auto-grading)
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-                <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+                <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+                Feedback)
               </div>
             )}
           </div>
@@ -2512,7 +2568,9 @@ export default function TakeAssessmentPage() {
                     <div className="flex items-start justify-between gap-4">
                       <h4 className="text-sm font-semibold text-foreground/90 leading-relaxed">
                         {idx + 1}.{" "}
-                        {renderRichMathText(opt.text || opt.option_text || "Sub-question")}
+                        {renderRichMathText(
+                          opt.text || opt.option_text || "Sub-question",
+                        )}
                       </h4>
                       <Badge
                         variant="secondary"
@@ -2549,18 +2607,22 @@ export default function TakeAssessmentPage() {
                 }
                 placeholder="Write your analysis, equations, and response here..."
                 minHeight="min-h-[180px]"
-                requiresTableAnswer={!!(q.requires_table_answer || q.requiresTableAnswer)}
+                requiresTableAnswer={
+                  !!(q.requires_table_answer || q.requiresTableAnswer)
+                }
                 tableTemplate={q.answer_table_template || q.answerTableTemplate}
               />
             </div>
           )}
           {requiresLecturerReview(q) ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Case Study Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Case Study Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2625,7 +2687,11 @@ export default function TakeAssessmentPage() {
                   if (typeof currentVal === "object" && currentVal !== null) {
                     setAnswers((prev) => ({
                       ...prev,
-                      [q.id]: { ...fileVal, table_json: tableJson, answer_text: answerText || tableJson },
+                      [q.id]: {
+                        ...fileVal,
+                        table_json: tableJson,
+                        answer_text: answerText || tableJson,
+                      },
                     }));
                   } else {
                     setAnswers((prev) => ({ ...prev, [q.id]: tableJson }));
@@ -2784,11 +2850,13 @@ export default function TakeAssessmentPage() {
 
           {requiresLecturerReview(q) || isTableReq ? (
             <div className="flex items-center gap-1.5 text-[10px] text-amber-600 font-semibold uppercase tracking-wider bg-amber-500/10 p-2.5 rounded-lg border border-amber-500/10">
-              <Clock className="size-3.5" /> Lecturer Review Required (No auto-grading)
+              <Clock className="size-3.5" /> Lecturer Review Required (No
+              auto-grading)
             </div>
           ) : (
             <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 font-semibold uppercase tracking-wider bg-emerald-500/10 p-2.5 rounded-lg border border-emerald-500/10">
-              <CheckCircle className="size-3.5" /> Auto-Graded (Instant Feedback)
+              <CheckCircle className="size-3.5" /> Auto-Graded (Instant
+              Feedback)
             </div>
           )}
         </div>
@@ -2977,7 +3045,10 @@ export default function TakeAssessmentPage() {
   );
 
   return (
-    <div data-tour="student-taking" className="min-h-screen bg-background flex flex-col font-sans">
+    <div
+      data-tour="student-taking"
+      className="min-h-screen bg-background flex flex-col font-sans"
+    >
       {!isOnline && (
         <div className="bg-amber-500 text-white py-2 px-6 text-center text-xs font-semibold tracking-wider flex items-center justify-center gap-2 z-50">
           <WifiOff className="size-3.5 animate-pulse" />
@@ -3091,7 +3162,10 @@ export default function TakeAssessmentPage() {
       </div>
 
       {stage === "intro" && assessment && (
-        <div data-tour="student-taking" className="flex-1 flex items-center justify-center p-4">
+        <div
+          data-tour="student-taking"
+          className="flex-1 flex items-center justify-center p-4"
+        >
           <Card className="max-w-xl w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
             <CardHeader className="text-center py-6 bg-muted/20 border-b border-border/40">
               <CardTitle className="text-2xl font-semibold tracking-tight">
@@ -3186,7 +3260,11 @@ export default function TakeAssessmentPage() {
                       Academic Time Accommodation Active
                     </span>
                     <p className="text-xs text-muted-foreground leading-relaxed">
-                      You have an approved accommodation granting <strong className="text-emerald-700 dark:text-emerald-300">+{extraTimePercent}% extra time</strong>. This has been automatically added to your exam timer.
+                      You have an approved accommodation granting{" "}
+                      <strong className="text-emerald-700 dark:text-emerald-300">
+                        +{extraTimePercent}% extra time
+                      </strong>
+                      . This has been automatically added to your exam timer.
                     </p>
                   </div>
                 </div>
@@ -3254,10 +3332,16 @@ export default function TakeAssessmentPage() {
                     variant="outline"
                     className="h-6 px-2.5 text-xs font-medium rounded-full border-border/80 text-muted-foreground flex items-center gap-1"
                   >
-                    <span>{assessment.fullscreen_required
-                      ? "Lockdown Mode"
-                      : "Open Environment"}</span>
-                    <ContextualExplainer topic="fullscreen-integrity" variant="icon" className="size-4" />
+                    <span>
+                      {assessment.fullscreen_required
+                        ? "Lockdown Mode"
+                        : "Open Environment"}
+                    </span>
+                    <ContextualExplainer
+                      topic="fullscreen-integrity"
+                      variant="icon"
+                      className="size-4"
+                    />
                   </Badge>
                 </div>
               </div>
@@ -3319,18 +3403,20 @@ export default function TakeAssessmentPage() {
       {stage === "readiness" &&
         (() => {
           const readinessItems = isOpenAssessment
-            ? [
+            ? ([
                 {
                   text: isPracticeAssessment
                     ? "Practice Environment: You are free to reference textbooks, notes, and study resources without penalty."
                     : "Open Resource Environment: You are free to reference textbooks, course notes, and approved academic materials.",
-                  icon: <BookOpen className="size-4 text-emerald-600 shrink-0" />,
+                  icon: (
+                    <BookOpen className="size-4 text-emerald-600 shrink-0" />
+                  ),
                 },
-                (assessment?.ai_assistance_allowed || isOpenAssessment) && {
+                assessment?.ai_assistance_allowed && {
                   text: "AI Study Assistant Enabled: An AI tutor is available in your workspace to answer conceptual questions.",
                   icon: <Sparkles className="size-4 text-primary shrink-0" />,
                 },
-                ((assessment as any)?.allow_resume || isOpenAssessment) && {
+                (assessment as any)?.allow_resume && {
                   text: isPracticeAssessment
                     ? "Self-Paced Flexibility: You may pause, exit, and resume your practice session at any time."
                     : "Take-Home Flexibility: You may pause, exit, and resume your session anytime before the final deadline.",
@@ -3340,8 +3426,8 @@ export default function TakeAssessmentPage() {
                   text: `Submission Deadline: All work must be submitted by ${new Date(assessment.end_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} on ${new Date(assessment.end_date).toLocaleDateString([], { month: "short", day: "numeric" })}. Attempts will auto-submit when the window expires.`,
                   icon: <Clock className="size-4 text-amber-600 shrink-0" />,
                 },
-              ].filter(Boolean) as { text: string; icon: React.ReactNode }[]
-            : [
+              ].filter(Boolean) as { text: string; icon: React.ReactNode }[])
+            : ([
                 assessment?.fullscreen_required && {
                   text: "You must remain in full-screen mode throughout this assessment.",
                   icon: <Monitor className="size-4 text-amber-600 shrink-0" />,
@@ -3366,16 +3452,22 @@ export default function TakeAssessmentPage() {
                 },
                 assessment?.duration_minutes && {
                   text: `You have ${assessment?.duration_minutes} minutes. The timer begins immediately when you click Commit & Begin.`,
-                  icon: <Clock className="size-4 text-foreground/60 shrink-0" />,
+                  icon: (
+                    <Clock className="size-4 text-foreground/60 shrink-0" />
+                  ),
                 },
-              ].filter(Boolean) as { text: string; icon: React.ReactNode }[];
+              ].filter(Boolean) as { text: string; icon: React.ReactNode }[]);
 
           return (
             <div className="flex-1 flex items-center justify-center p-4">
               <Card className="max-w-md w-full border border-border/50 shadow-none rounded-xl overflow-hidden bg-background">
                 <CardHeader className="py-4 border-b bg-muted/20 border-border/40 text-center">
                   <CardTitle className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                    {isHomeworkAssessment ? "Homework Protocol Declaration" : isPracticeAssessment ? "Practice Protocol Declaration" : "Protocol Declaration"}
+                    {isHomeworkAssessment
+                      ? "Homework Protocol Declaration"
+                      : isPracticeAssessment
+                        ? "Practice Protocol Declaration"
+                        : "Protocol Declaration"}
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6 space-y-6">
@@ -3416,7 +3508,11 @@ export default function TakeAssessmentPage() {
                       disabled={!readinessChecked}
                       className="w-full h-10 text-sm font-semibold rounded-lg shadow-sm"
                     >
-                      {isHomeworkAssessment ? "Begin Homework" : isPracticeAssessment ? "Begin Practice" : "Start Timer & Begin Assessment"}
+                      {isHomeworkAssessment
+                        ? "Begin Homework"
+                        : isPracticeAssessment
+                          ? "Begin Practice"
+                          : "Start Timer & Begin Assessment"}
                     </Button>
                     <p className="text-[10px] text-muted-foreground text-center font-medium">
                       {isOpenAssessment
@@ -3866,22 +3962,30 @@ export default function TakeAssessmentPage() {
                                   variant="outline"
                                   className="text-[9px] h-4.5 py-0 px-1.5 font-bold uppercase tracking-wider bg-primary/5 text-primary border-primary/20 gap-1"
                                 >
-                                  <TableIcon className="size-2.5" /> Table Response Required
+                                  <TableIcon className="size-2.5" /> Table
+                                  Response Required
                                 </Badge>
                               )}
                             </div>
                             <h2 className="text-lg font-medium leading-relaxed text-foreground/90">
-                              {renderRichMathText(currentQ?.text || currentQ?.content || "")}
+                              {renderRichMathText(
+                                currentQ?.text || currentQ?.content || "",
+                              )}
                             </h2>
                           </div>
                         </div>
-                        {(currentQ?.question_table_context || currentQ?.questionTableContext) && (
+                        {(currentQ?.question_table_context ||
+                          currentQ?.questionTableContext) && (
                           <div className="ml-10.5 space-y-1.5">
                             <div className="text-[11px] font-bold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                              <TableIcon className="size-3.5 text-primary" /> Reference Table
+                              <TableIcon className="size-3.5 text-primary" />{" "}
+                              Reference Table
                             </div>
                             <TableContextViewer
-                              data={currentQ.question_table_context || currentQ.questionTableContext}
+                              data={
+                                currentQ.question_table_context ||
+                                currentQ.questionTableContext
+                              }
                             />
                           </div>
                         )}
@@ -4139,7 +4243,10 @@ export default function TakeAssessmentPage() {
       )}
 
       {/* Auto-Submission Violation Dialog */}
-      <Dialog open={autoSubmitModalOpen && !isOpenAssessment} onOpenChange={() => {}}>
+      <Dialog
+        open={autoSubmitModalOpen && !isOpenAssessment}
+        onOpenChange={() => {}}
+      >
         <DialogContent className="max-w-md p-6 rounded-xl border border-destructive/30 bg-card text-center sm:text-center">
           <DialogHeader className="space-y-2">
             <div className="size-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center mx-auto">
@@ -4182,7 +4289,10 @@ export default function TakeAssessmentPage() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={warningModalOpen && !isOpenAssessment} onOpenChange={() => {}}>
+      <Dialog
+        open={warningModalOpen && !isOpenAssessment}
+        onOpenChange={() => {}}
+      >
         <DialogContent
           className="sm:max-w-md p-6 border-none shadow-2xl rounded-xl text-center bg-background"
           role="alertdialog"
@@ -4248,11 +4358,17 @@ export default function TakeAssessmentPage() {
                 Ready to Submit Your Exam?
               </DialogTitle>
               <div className="flex items-center gap-1.5">
-                <HelpPopover topic="submit" variant="badge" label="Submit Rules" />
+                <HelpPopover
+                  topic="submit"
+                  variant="badge"
+                  label="Submit Rules"
+                />
               </div>
             </div>
             <DialogDescription className="text-xs text-muted-foreground mt-1.5 leading-relaxed">
-              You are about to hand in your assessment. Once you submit, your answers are permanently locked and submitted to your lecturer for grading.
+              You are about to hand in your assessment. Once you submit, your
+              answers are permanently locked and submitted to your lecturer for
+              grading.
             </DialogDescription>
           </DialogHeader>
 
@@ -4265,7 +4381,9 @@ export default function TakeAssessmentPage() {
                 </span>
               </div>
               <div className="p-3 bg-emerald-50/30 dark:bg-emerald-950/20 border border-emerald-500/20 rounded-xl flex flex-col justify-between">
-                <span className="text-emerald-700 dark:text-emerald-300">Answered</span>
+                <span className="text-emerald-700 dark:text-emerald-300">
+                  Answered
+                </span>
                 <span className="text-lg font-bold text-emerald-700 dark:text-emerald-300 mt-1">
                   {
                     questions.filter((q) =>
@@ -4283,7 +4401,9 @@ export default function TakeAssessmentPage() {
                   <span className="font-bold block mb-0.5">
                     Required Questions Incomplete
                   </span>
-                  You have {unansweredRequired.length} required question{unansweredRequired.length === 1 ? "" : "s"} left to answer before submitting.
+                  You have {unansweredRequired.length} required question
+                  {unansweredRequired.length === 1 ? "" : "s"} left to answer
+                  before submitting.
                   <span className="block mt-1 font-semibold">
                     Question numbers: {unansweredRequiredNums.join(", ")}
                   </span>
@@ -4291,26 +4411,30 @@ export default function TakeAssessmentPage() {
               </div>
             )}
 
-            {unansweredRequired.length === 0 && unansweredOptional.length > 0 && (
-              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-left">
-                <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                <div className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
-                  <span className="font-bold block mb-0.5">
-                    Unanswered Questions ({unansweredOptional.length})
-                  </span>
-                  You can still submit now, but any blank questions will receive 0 marks.
-                  <span className="block mt-1 font-medium text-muted-foreground">
-                    Questions: {unansweredOptionalNums.join(", ")}
-                  </span>
+            {unansweredRequired.length === 0 &&
+              unansweredOptional.length > 0 && (
+                <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-start gap-2.5 text-left">
+                  <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                    <span className="font-bold block mb-0.5">
+                      Unanswered Questions ({unansweredOptional.length})
+                    </span>
+                    You can still submit now, but any blank questions will
+                    receive 0 marks.
+                    <span className="block mt-1 font-medium text-muted-foreground">
+                      Questions: {unansweredOptionalNums.join(", ")}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            )}
+              )}
 
             {manualSubmitError && (
               <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-left flex items-start gap-2.5">
                 <AlertTriangle className="size-4 text-red-600 shrink-0 mt-0.5" />
                 <div className="text-xs text-red-700 dark:text-red-300 leading-relaxed">
-                  <span className="font-bold block mb-0.5">Submission Error</span>
+                  <span className="font-bold block mb-0.5">
+                    Submission Error
+                  </span>
                   {manualSubmitError}
                 </div>
               </div>
@@ -4327,7 +4451,8 @@ export default function TakeAssessmentPage() {
                   setShowSubmitConfirm(false);
                 }}
               >
-                <ArrowRight className="size-3.5" /> Return to Question {firstUnansweredIndex + 1}
+                <ArrowRight className="size-3.5" /> Return to Question{" "}
+                {firstUnansweredIndex + 1}
               </Button>
             )}
             <div className="flex gap-3">
@@ -4345,7 +4470,8 @@ export default function TakeAssessmentPage() {
               >
                 {submitting ? (
                   <>
-                    <Loader2 className="mr-1.5 size-3.5 animate-spin" /> Submitting...
+                    <Loader2 className="mr-1.5 size-3.5 animate-spin" />{" "}
+                    Submitting...
                   </>
                 ) : (
                   "Yes, Submit Exam"
@@ -4392,10 +4518,7 @@ export default function TakeAssessmentPage() {
       </Dialog>
 
       {/* Pause Homework / Practice Assessment Modal */}
-      <Dialog
-        open={showPauseConfirm}
-        onOpenChange={setShowPauseConfirm}
-      >
+      <Dialog open={showPauseConfirm} onOpenChange={setShowPauseConfirm}>
         <DialogContent className="sm:max-w-md p-6 border border-border/80 shadow-xl rounded-2xl bg-card text-center">
           <div className="mx-auto size-12 rounded-full bg-primary/10 flex items-center justify-center mb-2 text-primary">
             <RotateCcw className="size-6" />

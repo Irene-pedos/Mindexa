@@ -16,10 +16,7 @@ import {
   Calendar,
 } from "lucide-react";
 import Link from "next/link";
-import {
-  studentApi,
-  StudentCourseListItem,
-} from "@/lib/api/student";
+import { studentApi, StudentCourseListItem } from "@/lib/api/student";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { cn } from "@/lib/utils";
 
@@ -38,18 +35,35 @@ function statusLabel(s: string) {
 export default function StudentCoursesPage() {
   const [workspaces, setWorkspaces] = useState<StudentCourseListItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>({});
+  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>(
+    {},
+  );
+
+  const loadWorkspaces = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setWorkspaces(await studentApi.getWorkspaces());
+    } catch (err) {
+      console.error(err);
+      setError("Unable to load your courses.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    studentApi.getWorkspaces().then(setWorkspaces).catch(console.error).finally(() => setLoading(false));
+    loadWorkspaces();
   }, []);
 
   const filtered = useMemo(() => {
     const q = searchQuery.toLowerCase();
     if (!q) return workspaces;
     return workspaces.filter(
-      (w) => w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q),
+      (w) =>
+        w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q),
     );
   }, [workspaces, searchQuery]);
 
@@ -106,12 +120,30 @@ export default function StudentCoursesPage() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {error ? (
+        <div className="py-16 text-center border-2 border-dashed rounded-xl border-destructive/30 bg-destructive/5">
+          <BookOpen className="size-9 mx-auto mb-3 text-destructive/50" />
+          <p className="text-xs font-medium text-destructive">{error}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3 text-xs"
+            onClick={loadWorkspaces}
+          >
+            Retry
+          </Button>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="py-16 text-center border-2 border-dashed rounded-xl border-border/30 bg-muted/5">
           <BookOpen className="size-9 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-xs font-medium text-muted-foreground">No courses found</p>
+          <p className="text-xs font-medium text-muted-foreground">
+            No courses found
+          </p>
           {searchQuery && (
-            <p className="text-[11px] text-muted-foreground/70 mt-1">Try adjusting your search</p>
+            <p className="text-[11px] text-muted-foreground/70 mt-1">
+              Try adjusting your search
+            </p>
           )}
         </div>
       ) : (
@@ -119,22 +151,31 @@ export default function StudentCoursesPage() {
           {grouped.map(([year, courses]) => {
             const isCollapsed = !!collapsedYears[year];
             return (
-              <div key={year} className="border border-border/50 rounded-xl overflow-hidden bg-card/30">
+              <div
+                key={year}
+                className="border border-border/50 rounded-xl overflow-hidden bg-card/30"
+              >
                 <button
                   type="button"
                   onClick={() => toggleYear(year)}
                   className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b border-border/40 hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex items-center gap-2">
-                    {isCollapsed
-                      ? <ChevronRight className="size-3.5 text-muted-foreground" />
-                      : <ChevronDown className="size-3.5 text-muted-foreground" />}
+                    {isCollapsed ? (
+                      <ChevronRight className="size-3.5 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="size-3.5 text-muted-foreground" />
+                    )}
                     <Calendar className="size-3.5 text-muted-foreground" />
                     <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
                       Academic Period: {year}
                     </span>
-                    <Badge variant="secondary" className="text-[9px] font-semibold h-4 px-1.5 bg-muted/60">
-                      {courses.length} {courses.length === 1 ? "course" : "courses"}
+                    <Badge
+                      variant="secondary"
+                      className="text-[9px] font-semibold h-4 px-1.5 bg-muted/60"
+                    >
+                      {courses.length}{" "}
+                      {courses.length === 1 ? "course" : "courses"}
                     </Badge>
                   </div>
                 </button>
@@ -149,7 +190,9 @@ export default function StudentCoursesPage() {
                         {ws.banner_image_url ? (
                           <div
                             className="h-20 bg-cover bg-center shrink-0"
-                            style={{ backgroundImage: `url(${ws.banner_image_url})` }}
+                            style={{
+                              backgroundImage: `url(${ws.banner_image_url})`,
+                            }}
                           />
                         ) : (
                           <div className="h-20 bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center shrink-0">
@@ -174,7 +217,8 @@ export default function StudentCoursesPage() {
                               variant="outline"
                               className={cn(
                                 "text-[9px] h-4 px-1.5 shrink-0 font-medium capitalize",
-                                STATUS_COLORS[ws.status] ?? STATUS_COLORS.INACTIVE,
+                                STATUS_COLORS[ws.status] ??
+                                  STATUS_COLORS.INACTIVE,
                               )}
                             >
                               {statusLabel(ws.status)}
@@ -186,14 +230,18 @@ export default function StudentCoursesPage() {
                           {ws.lecturer_name && (
                             <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
                               <GraduationCap className="size-3 shrink-0" />
-                              <span className="truncate">{ws.lecturer_name}</span>
+                              <span className="truncate">
+                                {ws.lecturer_name}
+                              </span>
                             </p>
                           )}
 
                           <div className="space-y-1">
                             <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
                               <span>Progress</span>
-                              <span className="text-foreground font-semibold">{ws.progress}%</span>
+                              <span className="text-foreground font-semibold">
+                                {ws.progress}%
+                              </span>
                             </div>
                             <Progress value={ws.progress} className="h-1.5" />
                           </div>
@@ -203,7 +251,9 @@ export default function StudentCoursesPage() {
                             size="sm"
                             className="w-full h-7 text-xs font-semibold rounded-lg shadow-none mt-auto"
                           >
-                            <Link href={`/student/courses/${ws.id}`}>View Course</Link>
+                            <Link href={`/student/courses/${ws.id}`}>
+                              View Course
+                            </Link>
                           </Button>
                         </CardContent>
                       </Card>

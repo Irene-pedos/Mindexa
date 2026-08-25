@@ -6,22 +6,14 @@ import math
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from app.core.constants import UserRole
-from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (AuthorizationError, ConflictError,
+                                 NotFoundError, ValidationError)
 from app.core.logger import get_logger
-from app.db.enums import (
-    GroupActivityType,
-    GroupAppealStatus,
-    GroupApprovalStatus,
-    GroupSubmissionStatus,
-    NotificationType,
-    QuestionDistributionMode,
-    QuestionType,
-    StudentGroupStatus,
-)
+from app.db.enums import (GroupActivityType, GroupAppealStatus,
+                          GroupApprovalStatus, GroupSubmissionStatus,
+                          NotificationType, QuestionDistributionMode,
+                          QuestionType, StudentGroupStatus)
 from app.db.models.attempt import GroupSubmissionAnswer
 from app.db.models.auth import User, UserProfile
 from app.db.models.question import Question
@@ -33,36 +25,36 @@ from app.db.repositories.group_submission_repo import GroupSubmissionRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.result_repo import ResultRepository
+from app.schemas.group_work import (AddGroupCommentRequest,
+                                    ApproveGroupAppealRequest,
+                                    ApproveGroupSubmissionRequest,
+                                    AutoGenerateGroupsRequest,
+                                    CreateGroupAppealRequest,
+                                    FinalizeGroupSubmissionRequest,
+                                    GradeGroupQuestionRequest,
+                                    GroupActivityLogResponse,
+                                    GroupAppealApprovalResponse,
+                                    GroupAppealResponse,
+                                    GroupAssessmentMaterialResponse,
+                                    GroupCsvImportRequest,
+                                    GroupCsvImportResponse,
+                                    GroupMemberResponse,
+                                    GroupSubmissionAnswerResponse,
+                                    GroupSubmissionApprovalResponse,
+                                    GroupSubmissionCommentResponse,
+                                    GroupSubmissionGradeRequest,
+                                    GroupWorkspaceAssessmentResponse,
+                                    GroupWorkspaceMemberResponse,
+                                    GroupWorkspaceQuestionOptionResponse,
+                                    GroupWorkspaceQuestionResponse,
+                                    GroupWorkspaceResponse,
+                                    ManualGroupCreateRequest,
+                                    ResolveGroupAppealRequest,
+                                    SaveGroupAnswerRequest,
+                                    StudentGroupResponse)
 from app.services.result_service import _compute_letter_grade
-from app.schemas.group_work import (
-    AddGroupCommentRequest,
-    ApproveGroupAppealRequest,
-    ApproveGroupSubmissionRequest,
-    AutoGenerateGroupsRequest,
-    CreateGroupAppealRequest,
-    FinalizeGroupSubmissionRequest,
-    GradeGroupQuestionRequest,
-    GroupCsvImportRequest,
-    GroupCsvImportResponse,
-    GroupWorkspaceAssessmentResponse,
-    GroupWorkspaceMemberResponse,
-    GroupWorkspaceQuestionOptionResponse,
-    GroupWorkspaceQuestionResponse,
-    GroupMemberResponse,
-    GroupWorkspaceResponse,
-    GroupSubmissionAnswerResponse,
-    GroupSubmissionApprovalResponse,
-    GroupSubmissionCommentResponse,
-    GroupActivityLogResponse,
-    GroupAppealApprovalResponse,
-    GroupAppealResponse,
-    GroupAssessmentMaterialResponse,
-    GroupSubmissionGradeRequest,
-    ManualGroupCreateRequest,
-    ResolveGroupAppealRequest,
-    SaveGroupAnswerRequest,
-    StudentGroupResponse,
-)
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = get_logger("mindexa.group_work_service")
 
@@ -888,9 +880,10 @@ class GroupWorkService:
         if submission.total_score is not None and assessment.passing_marks is not None:
             if submission.total_score >= assessment.passing_marks:
                  raise ConflictError("Reassessment cannot be assigned to a passing group.", code="GROUP_NOT_ELIGIBLE_FOR_REASSESSMENT")
-        
+
         # Create new assessment (reassessment)
-        from app.db.models.assessment import Assessment, AssessmentType, AssessmentStatus
+        from app.db.models.assessment import (Assessment, AssessmentStatus,
+                                              AssessmentType)
         reassessment = Assessment(
             title=f"Reassessment: {assessment.title}",
             description=assessment.description,
@@ -968,8 +961,10 @@ class GroupWorkService:
         page_size: int = 30,
     ) -> tuple[list[GroupSubmissionSummary], int]:
         """Fetch group submissions that need grading for a lecturer."""
-        from app.db.enums import GroupSubmissionStatus, GroupAppealStatus, GroupApprovalStatus
-        from app.schemas.grading import GroupSubmissionSummary, GroupMemberSummary
+        from app.db.enums import (GroupAppealStatus, GroupApprovalStatus,
+                                  GroupSubmissionStatus)
+        from app.schemas.grading import (GroupMemberSummary,
+                                         GroupSubmissionSummary)
 
         status_enum = None
         if status and status.upper() != "ALL":
@@ -1163,7 +1158,7 @@ class GroupWorkService:
             raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
         if submission.status not in {GroupSubmissionStatus.SUBMITTED, GroupSubmissionStatus.APPEALED, GroupSubmissionStatus.GRADED}:
             raise ConflictError("Only submitted group work can be graded.", code="GROUP_SUBMISSION_NOT_GRADABLE")
-        
+
         is_final = data.is_final if data.is_final is not None else True
         status = GroupSubmissionStatus.GRADED if is_final else GroupSubmissionStatus.SUBMITTED
         await self.submission_repo.set_grade(
@@ -1440,7 +1435,7 @@ class GroupWorkService:
                 continue
             q = aq.question
             raw_type = q.question_type.value if hasattr(q.question_type, "value") else str(q.question_type)
-            
+
             # Fetch rubric if attached
             rubric_data = None
             if q.rubric_id:
@@ -1823,14 +1818,11 @@ class GroupWorkService:
 
         aq = next((aq for aq in assessment_questions if aq.question_id == question_id), None)
         if not aq or not aq.question:
-            question = await self.question_repo.get_by_id(question_id)
-            if not question:
-                raise NotFoundError("Question not found.", code="QUESTION_NOT_FOUND")
-            max_score = float(question.marks or 0.0)
-        else:
-            max_score = float(aq.marks_override if aq.marks_override is not None else (aq.question.marks or 0.0))
+            raise NotFoundError("Question is not assigned to this assessment.", code="QUESTION_NOT_IN_ASSESSMENT")
+        max_score = float(aq.marks_override if aq.marks_override is not None else (aq.question.marks or 0.0))
 
-        if data.score is not None and (data.score < 0 or data.score > max_score):
+        import math
+        if data.score is not None and (not math.isfinite(data.score) or data.score < 0 or data.score > max_score):
             raise ValidationError(
                 f"Score {data.score} is out of range [0, {max_score}]",
                 code="SCORE_OUT_OF_RANGE",
@@ -1959,7 +1951,8 @@ class GroupWorkService:
 
         # Enqueue background Celery task
         try:
-            from app.workers.tasks.grading import trigger_ai_grading_for_group_question
+            from app.workers.tasks.grading import \
+                trigger_ai_grading_for_group_question
             trigger_ai_grading_for_group_question.delay(str(submission_id), str(question_id))
         except Exception as e:
             logger.warning(
@@ -2030,7 +2023,7 @@ class GroupWorkService:
         if not submission:
             raise NotFoundError("Group submission not found.", code="GROUP_SUBMISSION_NOT_FOUND")
         assessment = await self._get_assessment_for_edit(submission.assessment_id, current_user)
-        
+
         group = await self.group_repo.get_group_by_id(submission.group_id, include_members=True)
         if not group:
             raise NotFoundError("Group not found.", code="GROUP_NOT_FOUND")
@@ -2060,13 +2053,13 @@ class GroupWorkService:
             )
             for item in activity
         ]
-        
+
         workspace_members = []
         approval_map = {approval.student_id: approval.status for approval in approvals}
         participation_map: dict[uuid.UUID, int] = {}
         for entry in activity:
             participation_map[entry.student_id] = participation_map.get(entry.student_id, 0) + 1
-            
+
         for member in group.members:
             if member.is_deleted:
                 continue

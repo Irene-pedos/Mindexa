@@ -1,7 +1,7 @@
 // frontend/components/mindexa/study-reader/hooks/use-annotations.ts
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import {
   AnnotationColor,
   KeyPointConfidence,
@@ -25,6 +25,26 @@ export function useAnnotations(source: ReaderSource) {
   const [keyPoints, setKeyPoints] = useState<StudentKeyPoint[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRange, setSelectedRange] = useState<SelectionRangeInfo | null>(null);
+
+  // Pending delete timers ref: ID -> NodeJS.Timeout
+  const pendingAnnotationDeletionsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const pendingKeyPointDeletionsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+
+  // Cleanup on unmount: flush pending deletions immediately to the server
+  useEffect(() => {
+    const pendingAnns = pendingAnnotationDeletionsRef.current;
+    const pendingKps = pendingKeyPointDeletionsRef.current;
+    return () => {
+      pendingAnns.forEach((timer, id) => {
+        clearTimeout(timer);
+        studyReaderApi.deleteAnnotation(id).catch(() => {});
+      });
+      pendingKps.forEach((timer, id) => {
+        clearTimeout(timer);
+        studyReaderApi.deleteKeyPoint(id).catch(() => {});
+      });
+    };
+  }, []);
 
   // Load annotations & key points from server
   const loadData = useCallback(async () => {
@@ -103,19 +123,49 @@ export function useAnnotations(source: ReaderSource) {
   );
 
   const deleteAnnotation = useCallback(
-    async (id: string) => {
+    (id: string) => {
       const original = annotations.find((a) => a.id === id);
       if (!original) return;
 
+      // Optimistically remove from UI
       setAnnotations((prev) => prev.filter((a) => a.id !== id));
 
-      try {
-        await studyReaderApi.deleteAnnotation(id);
-        toast.info("Highlight deleted");
-      } catch {
-        setAnnotations((prev) => [...prev, original]);
-        toast.error("Failed to delete highlight");
+      // Cancel any existing timer for this ID
+      const existingTimer = pendingAnnotationDeletionsRef.current.get(id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
       }
+
+      // Schedule network deletion after 5 seconds
+      const timer = setTimeout(async () => {
+        pendingAnnotationDeletionsRef.current.delete(id);
+        try {
+          await studyReaderApi.deleteAnnotation(id);
+        } catch {
+          setAnnotations((prev) => (prev.some((a) => a.id === id) ? prev : [...prev, original]));
+          toast.error("Failed to delete highlight on server");
+        }
+      }, 5000);
+
+      pendingAnnotationDeletionsRef.current.set(id, timer);
+
+      // Toast with Undo action
+      toast("Highlight deleted", {
+        description: original.note_text ? `Note: "${original.note_text.slice(0, 35)}..."` : undefined,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const pending = pendingAnnotationDeletionsRef.current.get(id);
+            if (pending) {
+              clearTimeout(pending);
+              pendingAnnotationDeletionsRef.current.delete(id);
+            }
+            setAnnotations((prev) => (prev.some((a) => a.id === id) ? prev : [...prev, original]));
+            toast.success("Highlight restored");
+          },
+        },
+        duration: 5000,
+      });
     },
     [annotations]
   );
@@ -155,39 +205,82 @@ export function useAnnotations(source: ReaderSource) {
   );
 
   const updateKeyPoint = useCallback(
-    async (id: string, payload: UpdateKeyPointPayload) => {
+    async (
+      id: string,
+      payload: UpdateKeyPointPayload,
+    ): Promise<StudentKeyPoint | null> => {
       const original = keyPoints.find((kp) => kp.id === id);
-      if (!original) return;
+      if (!original) return null;
 
       setKeyPoints((prev) =>
-        prev.map((kp) => (kp.id === id ? { ...kp, ...payload, updated_at: new Date().toISOString() } : kp))
+        prev.map((kp) =>
+          kp.id === id
+            ? { ...kp, ...payload, updated_at: new Date().toISOString() }
+            : kp,
+        ),
       );
 
       try {
         const updated = await studyReaderApi.updateKeyPoint(id, payload);
-        setKeyPoints((prev) => prev.map((kp) => (kp.id === id ? updated : kp)));
+        setKeyPoints((prev) =>
+          prev.map((kp) => (kp.id === id ? updated : kp)),
+        );
+        return updated;
       } catch {
-        setKeyPoints((prev) => prev.map((kp) => (kp.id === id ? original : kp)));
+        setKeyPoints((prev) =>
+          prev.map((kp) => (kp.id === id ? original : kp)),
+        );
         toast.error("Failed to update key point");
+        return null;
       }
     },
-    [keyPoints]
+    [keyPoints],
   );
 
   const deleteKeyPoint = useCallback(
-    async (id: string) => {
+    (id: string) => {
       const original = keyPoints.find((kp) => kp.id === id);
       if (!original) return;
 
+      // Optimistically remove from UI
       setKeyPoints((prev) => prev.filter((kp) => kp.id !== id));
 
-      try {
-        await studyReaderApi.deleteKeyPoint(id);
-        toast.info("Key point removed");
-      } catch {
-        setKeyPoints((prev) => [...prev, original]);
-        toast.error("Failed to remove key point");
+      // Cancel any existing timer for this ID
+      const existingTimer = pendingKeyPointDeletionsRef.current.get(id);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
       }
+
+      // Schedule network deletion after 5 seconds
+      const timer = setTimeout(async () => {
+        pendingKeyPointDeletionsRef.current.delete(id);
+        try {
+          await studyReaderApi.deleteKeyPoint(id);
+        } catch {
+          setKeyPoints((prev) => (prev.some((kp) => kp.id === id) ? prev : [original, ...prev]));
+          toast.error("Failed to remove key point on server");
+        }
+      }, 5000);
+
+      pendingKeyPointDeletionsRef.current.set(id, timer);
+
+      // Toast with Undo action
+      toast("Key point removed", {
+        description: `"${original.title.slice(0, 35)}..."`,
+        action: {
+          label: "Undo",
+          onClick: () => {
+            const pending = pendingKeyPointDeletionsRef.current.get(id);
+            if (pending) {
+              clearTimeout(pending);
+              pendingKeyPointDeletionsRef.current.delete(id);
+            }
+            setKeyPoints((prev) => (prev.some((kp) => kp.id === id) ? prev : [original, ...prev]));
+            toast.success("Key point restored");
+          },
+        },
+        duration: 5000,
+      });
     },
     [keyPoints]
   );

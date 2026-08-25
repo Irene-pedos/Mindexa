@@ -2,14 +2,27 @@
 "use client";
 
 import React, { useEffect, useState, use } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import dynamic from "next/dynamic";
 import { studentApi, StudentCourseDetail } from "@/lib/api/student";
 import { LecturerMaterialResponse } from "@/lib/api/lecturer";
-import { StudyReader } from "@/components/mindexa/study-reader/study-reader";
 import { ReaderSource } from "@/components/mindexa/study-reader/types";
 import { Loader2, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+
+const StudyReader = dynamic(
+  () => import("@/components/mindexa/study-reader/study-reader").then((m) => m.StudyReader),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="fixed inset-0 z-50 bg-background flex flex-col items-center justify-center p-6 gap-3">
+        <Loader2 className="size-8 animate-spin text-primary" />
+        <p className="text-xs text-muted-foreground font-medium">Opening study reader…</p>
+      </div>
+    ),
+  },
+);
 
 interface PageProps {
   params: Promise<{
@@ -24,6 +37,11 @@ export default function CourseMaterialReaderPage({ params }: PageProps) {
   const materialId = resolvedParams.materialId;
 
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const pageParam = searchParams.get("page");
+  const parsedPage = pageParam ? parseInt(pageParam, 10) : null;
+  const initialPage = parsedPage && !isNaN(parsedPage) && parsedPage >= 1 ? parsedPage : null;
+
   const [workspace, setWorkspace] = useState<StudentCourseDetail | null>(null);
   const [material, setMaterial] = useState<LecturerMaterialResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,6 +115,7 @@ export default function CourseMaterialReaderPage({ params }: PageProps) {
     <StudyReader
       source={source}
       onBack={() => router.push(`/student/courses/${workspaceId}`)}
+      initialPage={initialPage}
     />
   );
 }

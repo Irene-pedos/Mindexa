@@ -109,9 +109,9 @@ class GradingRepository:
         from app.db.models.assessment import (Rubric, RubricCriterion,
                                               RubricCriterionLevel)
         from app.db.models.attempt import StudentResponse, SubmissionGrade
-        from app.db.models.question import Question, AssessmentQuestion
-        from sqlalchemy.orm import selectinload
+        from app.db.models.question import AssessmentQuestion, Question
         from sqlalchemy import or_
+        from sqlalchemy.orm import selectinload
 
         # Single query accepting either grade.id or grade.response_id
         result = await self.db.execute(
@@ -728,7 +728,10 @@ class GradingRepository:
                 code="GRADE_NOT_FOUND",
             )
 
-        if old_grade.max_score is not None and (new_score < 0 or new_score > old_grade.max_score):
+        import math
+        if old_grade.max_score is not None and (
+            not math.isfinite(new_score) or new_score < 0 or new_score > old_grade.max_score
+        ):
             raise ValidationError(
                 f"Score {new_score} is out of range [0, {old_grade.max_score}]",
                 code="SCORE_OUT_OF_RANGE",

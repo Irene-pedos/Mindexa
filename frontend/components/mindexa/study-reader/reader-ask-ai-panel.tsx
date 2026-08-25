@@ -16,6 +16,7 @@ import {
   Lightbulb,
   FileQuestion,
   GraduationCap,
+  RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -61,9 +62,19 @@ export function ReaderAskAiPanel({
   const [activeView, setActiveView] = useState<"chat" | "skim">("chat");
 
   // Skim state
-  const [skimBullets, setSkimBullets] = useState<SkimBullet[]>([]);
-  const [skimSummary, setSkimSummary] = useState<string>("");
   const [loadingSkim, setLoadingSkim] = useState(false);
+  const [skimSummary, setSkimSummary] = useState<string | null>(null);
+  const [skimBullets, setSkimBullets] = useState<SkimBullet[]>([]);
+  const MAX_EXCERPT_CHARS = 240;
+
+  const formatExcerptPrompt = (text: string) => {
+    if (text.length <= MAX_EXCERPT_CHARS) {
+      return `Explain this excerpt in simple terms: "${text}"`;
+    }
+    const preview = text.slice(0, MAX_EXCERPT_CHARS);
+    const remaining = text.length - MAX_EXCERPT_CHARS;
+    return `Explain this excerpt in simple terms: "${preview}…" (+${remaining} more characters selected)`;
+  };
 
   const handleSend = async (customPrompt?: string) => {
     const questionText = customPrompt || input.trim();
@@ -83,7 +94,8 @@ export function ReaderAskAiPanel({
     setLoading(true);
 
     try {
-      const history = messages.map((m) => ({
+      // Bounded chat history: trim to the last 10 messages (5 turns) to prevent unbounded payload growth
+      const history = messages.slice(-10).map((m) => ({
         role: m.role,
         content: m.content,
       }));
@@ -94,7 +106,11 @@ export function ReaderAskAiPanel({
         selected_resource_id: source.id,
         teaching_workspace_id: source.workspaceId,
         current_page: currentPage,
-        selected_text: selectedText || undefined,
+        selected_text: selectedText
+          ? selectedText.length > 2000
+            ? selectedText.slice(0, 2000)
+            : selectedText
+          : undefined,
       });
 
       const aiMsg: ChatMessage = {
@@ -120,17 +136,17 @@ export function ReaderAskAiPanel({
     }
   };
 
-  const handleLoadSkim = async () => {
+  const handleLoadSkim = async (force = false) => {
     setActiveView("skim");
-    if (skimBullets.length > 0) return;
+    if (!force && skimBullets.length > 0) return;
 
     setLoadingSkim(true);
     try {
       const res = await studyReaderApi.skimDocument(source.kind, source.id);
       setSkimSummary(res.summary);
       setSkimBullets(res.bullets || []);
-    } catch {
-      toast.error("Failed to generate document skim");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to generate document skim");
     } finally {
       setLoadingSkim(false);
     }
@@ -144,7 +160,7 @@ export function ReaderAskAiPanel({
   };
 
   return (
-    <div className="flex flex-col h-full select-none">
+    <div className="flex flex-col h-full min-h-0 select-none">
       {/* Top Switcher: Tutor Chat vs Rapid Skim */}
       <div className="p-3 border-b border-border/40 flex items-center justify-between gap-2">
         <div className="flex items-center gap-1 bg-muted/50 p-0.5 rounded-lg">
@@ -163,7 +179,7 @@ export function ReaderAskAiPanel({
           </button>
           <button
             type="button"
-            onClick={handleLoadSkim}
+            onClick={() => handleLoadSkim(false)}
             className={cn(
               "px-2.5 py-1 text-xs font-medium rounded-md transition-colors flex items-center gap-1.5",
               activeView === "skim"
@@ -176,14 +192,29 @@ export function ReaderAskAiPanel({
           </button>
         </div>
 
-        <Badge variant="outline" className="text-[9px] font-mono h-5 px-1.5 border-border/60">
-          p. {currentPage}
-        </Badge>
+        <div className="flex items-center gap-1">
+          {activeView === "skim" && (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 text-muted-foreground hover:text-foreground rounded"
+              onClick={() => handleLoadSkim(true)}
+              disabled={loadingSkim}
+              title="Regenerate document skim"
+            >
+              <RefreshCw className={cn("size-3", loadingSkim && "animate-spin text-primary")} />
+            </Button>
+          )}
+
+          <Badge variant="outline" className="text-[9px] font-mono h-5 px-1.5 border-border/60">
+            p. {currentPage}
+          </Badge>
+        </div>
       </div>
 
       {activeView === "skim" ? (
         /* Document Skim View */
-        <ScrollArea className="flex-1 p-3">
+        <ScrollArea className="flex-1 min-h-0 p-3">
           {loadingSkim ? (
             <div className="py-20 flex flex-col items-center justify-center gap-3 text-center">
               <Loader2 className="size-6 animate-spin text-primary" />
@@ -232,8 +263,24 @@ export function ReaderAskAiPanel({
               </div>
             </div>
           ) : (
-            <div className="py-16 text-center text-xs text-muted-foreground">
-              <p>Click Quick Skim to extract high-impact bullets.</p>
+            <div className="py-16 text-center space-y-3 px-4">
+              <ListFilter className="size-8 text-muted-foreground/30 mx-auto" />
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-foreground">Rapid Document Skim</p>
+                <p className="text-[11px] text-muted-foreground leading-relaxed max-w-[230px] mx-auto">
+                  Extract high-impact bullets, core definitions, and page references.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => handleLoadSkim(true)}
+                disabled={loadingSkim}
+                className="text-xs font-semibold gap-1.5"
+              >
+                <Sparkles className="size-3.5 text-primary" />
+                <span>Generate Skim</span>
+              </Button>
             </div>
           )}
         </ScrollArea>
@@ -241,7 +288,7 @@ export function ReaderAskAiPanel({
         /* AI Tutor Chat View */
         <>
           {/* Chat Messages */}
-          <ScrollArea className="flex-1 p-3 select-text">
+          <ScrollArea className="flex-1 min-h-0 p-3 select-text">
             {messages.length === 0 ? (
               <div className="py-10 text-center space-y-4">
                 <div className="size-10 rounded-full bg-primary/10 mx-auto flex items-center justify-center border border-primary/20">
@@ -260,7 +307,7 @@ export function ReaderAskAiPanel({
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => handleSend(`Explain this excerpt in simple terms: "${selectedText}"`)}
+                      onClick={() => handleSend(formatExcerptPrompt(selectedText))}
                       className="w-full justify-start h-auto py-2 px-2.5 text-xs text-left font-medium border-primary/30 bg-primary/5 text-primary hover:bg-primary/10 rounded-lg gap-2"
                     >
                       <Lightbulb className="size-3.5 shrink-0 text-primary" />
@@ -374,8 +421,13 @@ export function ReaderAskAiPanel({
               <div className="flex items-center gap-1.5 min-w-0">
                 <Sparkles className="size-3 text-primary shrink-0" />
                 <span className="text-[11px] font-medium text-foreground truncate">
-                  Context: &ldquo;{selectedText}&rdquo;
+                  Context: &ldquo;{selectedText.length > 70 ? `${selectedText.slice(0, 70)}…` : selectedText}&rdquo;
                 </span>
+                {selectedText.length > 70 && (
+                  <span className="text-[9px] font-mono text-primary/80 bg-primary/15 px-1 py-0.2 rounded shrink-0">
+                    +{selectedText.length - 70} chars
+                  </span>
+                )}
               </div>
               <Button
                 variant="ghost"
