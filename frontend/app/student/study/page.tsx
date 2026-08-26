@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
-import { AISupportChat } from "@/components/mindexa/student/ai-support-chat";
 import { StudyPlanDashboard } from "@/components/mindexa/study/study-plan-dashboard";
 import { StudyPlanWizard } from "@/components/mindexa/study/study-plan-wizard";
 import { SessionCompletionModal } from "@/components/mindexa/study/session-completion-modal";
@@ -18,12 +17,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useRouter } from "next/navigation";
 import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import {
@@ -39,7 +32,6 @@ import {
   Play,
   AlertTriangle,
   RotateCcw,
-  Bot,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -51,7 +43,6 @@ import { cn } from "@/lib/utils";
 export default function StudentStudyPage() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState<string>("overview");
-  const [selectedTopicContext, setSelectedTopicContext] = useState<string>("");
   const [summary, setSummary] = useState<StudyPlannerSummary | null>(null);
   const [plans, setPlans] = useState<StudyPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +52,6 @@ export default function StudentStudyPage() {
   const [completeModalSession, setCompleteModalSession] = useState<StudySession | null>(null);
   const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(null);
   const [rescheduleSession, setRescheduleSession] = useState<StudySession | null>(null);
-  const [aiTutorModalOpen, setAiTutorModalOpen] = useState(false);
 
   // Collapsible section state
   const [nextExpanded, setNextExpanded] = useState(true);
@@ -88,9 +78,8 @@ export default function StudentStudyPage() {
   useEffect(() => { loadData(); }, []);
 
   const handleSelectTabWithTopic = (tab: string, topic?: string) => {
-    if (topic) setSelectedTopicContext(topic);
-    if (tab === "tutor") {
-      setAiTutorModalOpen(true);
+    if (tab === "tutor" || topic) {
+      router.push(topic ? `/student/study/tutor?topic=${encodeURIComponent(topic)}` : "/student/study/tutor");
     } else {
       setActiveTab(tab);
     }
@@ -162,13 +151,12 @@ export default function StudentStudyPage() {
           <ContextualExplainer topic="ai-study-support" variant="pill" label="Guide" />
           <Button
             variant="ghost"
-            onClick={() => setAiTutorModalOpen(true)}
+            onClick={() => router.push("/student/study/tutor")}
             size="sm"
             className="h-8 px-3 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
           >
             <Sparkles className="size-3.5" />
             AI Tutor
-            {selectedTopicContext && <span className="size-1.5 rounded-full bg-primary" />}
           </Button>
           <Button
             onClick={() => handleOpenWizardWithAssessment()}
@@ -479,24 +467,6 @@ export default function StudentStudyPage() {
           </div>
         )}
       </Tabs>
-
-      {/* AI Tutor Modal */}
-      <Dialog open={aiTutorModalOpen} onOpenChange={setAiTutorModalOpen}>
-        <DialogContent className="fixed inset-2 sm:inset-4 md:inset-6 max-w-none max-h-none w-auto h-auto translate-x-0 translate-y-0 p-0 rounded-2xl border border-border bg-background shadow-2xl flex flex-col overflow-hidden sm:max-w-none">
-          <DialogHeader className="px-4 py-3 border-b border-border/40 flex flex-row items-center gap-3 space-y-0 shrink-0">
-            <div className="size-8 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
-              <Bot className="size-4" />
-            </div>
-            <div>
-              <DialogTitle className="text-sm font-medium text-foreground">Study AI Tutor</DialogTitle>
-              <p className="text-xs text-muted-foreground">Ask questions, request explanations, or practice concepts.</p>
-            </div>
-          </DialogHeader>
-          <div className="flex-1 overflow-hidden p-4">
-            <AISupportChat initialTopicContext={selectedTopicContext} />
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Modals */}
       <StudyPlanWizard

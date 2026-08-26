@@ -13,7 +13,14 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import {
   Sparkles,
   ShieldAlert,
@@ -21,7 +28,6 @@ import {
   CheckCircle2,
   FileText,
   Lightbulb,
-  Brain,
   BookOpen,
   ChevronDown,
   RefreshCw,
@@ -31,11 +37,58 @@ import {
   History,
   Clock,
   MessageSquare,
-  PanelRightClose,
-  PanelRightOpen,
+  PanelLeftClose,
+  PanelLeftOpen,
   AlertTriangle,
+  X,
+  Send,
+  Download,
+  CheckSquare,
+  Square,
+  ArrowRight,
+  Layers,
+  Copy,
+  Check,
+  Edit2,
+  RotateCcw,
+  Pin,
+  PinOff,
+  Trash2,
+  Share2,
+  Printer,
+  ChevronRight,
+  MoreVertical,
 } from "lucide-react";
-import { studentAiApi, type StudentChatHistoryItem } from "@/lib/api/student-ai";
+import {
+  studentAiApi,
+  type StudentConversationSummary,
+  type RevisionGuideOutput,
+} from "@/lib/api/student-ai";
+import {
+  studentApi,
+  StudentResourceResponse,
+  StudentCourseListItem,
+} from "@/lib/api/student";
+import {
+  studyPlannerApi,
+  type LearningUnit,
+} from "@/lib/api/study-planner";
+import { apiClient } from "@/lib/api/client";
+import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
+import { cn } from "@/lib/utils";
+import { toast } from "sonner";
+import {
+  MessageScroller,
+  MessageScrollerButton,
+  MessageScrollerContent,
+  MessageScrollerItem,
+  MessageScrollerProvider,
+  MessageScrollerViewport,
+} from "@/components/ui/message-scroller";
+import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
+import { Spinner } from "@/components/ui/spinner";
+import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
+import { useRouter, useSearchParams } from "next/navigation";
 
 function formatHistoryDate(dateStr?: string) {
   if (!dateStr) return "";
@@ -51,45 +104,18 @@ function formatHistoryDate(dateStr?: string) {
     return "";
   }
 }
-import {
-  studentApi,
-  StudentResourceResponse,
-  StudentCourseListItem,
-} from "@/lib/api/student";
-import { assessmentApi } from "@/lib/api/assessment";
-import { apiClient } from "@/lib/api/client";
-import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
-import { cn } from "@/lib/utils";
-import { toast } from "sonner";
 
-// Vertical and horizontal tabs primitives
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Tooltip as UITooltip,
-  TooltipContent as UITooltipContent,
-  TooltipProvider as UITooltipProvider,
-  TooltipTrigger as UITooltipTrigger,
-} from "@/components/ui/tooltip";
-
-// Chat improvements
-import {
-  MessageScroller,
-  MessageScrollerButton,
-  MessageScrollerContent,
-  MessageScrollerProvider,
-  MessageScrollerViewport,
-} from "@/components/ui/message-scroller";
-import { Marker, MarkerContent, MarkerIcon } from "@/components/ui/marker";
-import { Spinner } from "@/components/ui/spinner";
-import {
-  Attachment as UIAttachment,
-  AttachmentMedia as UIAttachmentMedia,
-  AttachmentContent as UIAttachmentContent,
-  AttachmentTitle as UIAttachmentTitle,
-  AttachmentDescription as UIAttachmentDescription,
-} from "@/components/ui/attachment";
-import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
-import { MessageActionBar } from "@/components/mindexa/common/message-action-bar";
+function downloadTextFile(filename: string, content: string, mimeType: string = "text/markdown;charset=utf-8;") {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 interface Message {
   id: string;
@@ -112,23 +138,235 @@ interface Message {
 
 interface AISupportChatProps {
   initialTopicContext?: string;
+  initialTab?: "support" | "revision";
+  isFullPage?: boolean;
 }
 
-export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) {
-  const [activeTab, setActiveTab] = useState<"support" | "revision">("support");
+export function AISupportChat({
+  initialTopicContext,
+  initialTab,
+  isFullPage = false,
+}: AISupportChatProps = {}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Tab State with LocalStorage and URL synchronization
+  const [activeTab, setActiveTab] = useState<"support" | "revision">(() => {
+    if (initialTab) return initialTab;
+    if (typeof window !== "undefined") {
+      const urlTab = searchParams.get("tab");
+      if (urlTab === "revision" || urlTab === "support") return urlTab;
+      const saved = localStorage.getItem("mindexa_ai_tutor_tab");
+      if (saved === "revision" || saved === "support") return saved;
+    }
+    return "support";
+  });
+
+  const handleTabChange = (tab: "support" | "revision") => {
+    setActiveTab(tab);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("mindexa_ai_tutor_tab", tab);
+      const params = new URLSearchParams(window.location.search);
+      params.set("tab", tab);
+      router.replace(`?${params.toString()}`);
+    }
+  };
+
   const [prompt, setPrompt] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [isThinking, setIsThinking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Left sidebar state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+
+  // Chat Conversation State
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [conversations, setConversations] = useState<StudentConversationSummary[]>([]);
+  const [currentConversationId, setCurrentConversationId] = useState<string | null>(null);
+  const [isLoadingConversation, setIsLoadingConversation] = useState(false);
+
+  // Pinned Conversations State (persisted to localStorage)
+  const [pinnedIds, setPinnedIds] = useState<Set<string>>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = localStorage.getItem("mindexa_pinned_conversations");
+        return saved ? new Set(JSON.parse(saved)) : new Set();
+      } catch (e) {
+        return new Set();
+      }
+    }
+    return new Set();
+  });
+
+  const togglePinConversation = (convId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setPinnedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(convId)) {
+        next.delete(convId);
+        toast.info("Conversation unpinned.");
+      } else {
+        next.add(convId);
+        toast.success("Conversation pinned to top.");
+      }
+      if (typeof window !== "undefined") {
+        localStorage.setItem("mindexa_pinned_conversations", JSON.stringify(Array.from(next)));
+      }
+      return next;
+    });
+  };
+
+  // Modals State: Delete, Share, Export
+  const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [copiedActionId, setCopiedActionId] = useState<string | null>(null);
+  const [expandedCitationMessageIds, setExpandedCitationMessageIds] = useState<Set<string>>(new Set());
+
+  // Context & Resources State with LocalStorage and URL persistence
+  const [resources, setResources] = useState<StudentResourceResponse[]>([]);
+  const [workspaces, setWorkspaces] = useState<StudentCourseListItem[]>([]);
+  const [lecturerMaterials, setLecturerMaterials] = useState<any[]>([]);
+  const [selectedResource, setSelectedResourceState] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const urlScope = searchParams.get("scope");
+      if (urlScope) return urlScope;
+      const savedScope = localStorage.getItem("mindexa_ai_tutor_scope");
+      if (savedScope) return savedScope;
+    }
+    return null;
+  });
+
+  const setSelectedResource = (id: string | null) => {
+    setSelectedResourceState(id);
+    if (typeof window !== "undefined") {
+      if (id) {
+        localStorage.setItem("mindexa_ai_tutor_scope", id);
+      } else {
+        localStorage.removeItem("mindexa_ai_tutor_scope");
+      }
+      const params = new URLSearchParams(window.location.search);
+      if (id) {
+        params.set("scope", id);
+      } else {
+        params.delete("scope");
+      }
+      router.replace(`?${params.toString()}`);
+    }
+  };
+
+  const [loadingResources, setLoadingResources] = useState(true);
+
+  // Blocker States
+  const [isBlockedByLanguagePolicy, setIsBlockedByLanguagePolicy] = useState(false);
+  const [isBlockedByActiveExam, setIsBlockedByActiveExam] = useState(false);
+  const [blockingExamTitle, setBlockingExamTitle] = useState("");
+
+  // Dropdowns & Popovers
+  const [resourcesDropdownOpen, setResourcesDropdownOpen] = useState(false);
+  const [tipsPopoverOpen, setTipsPopoverOpen] = useState(false);
+  const [integrityPopoverOpen, setIntegrityPopoverOpen] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+
+  // Revision Center State with Persistence
+  const [selectedRevisionWorkspace, setSelectedRevisionWorkspaceState] = useState<string | null>(() => {
+    if (typeof window !== "undefined") {
+      const urlWs = searchParams.get("course");
+      if (urlWs) return urlWs;
+      const saved = localStorage.getItem("mindexa_ai_tutor_course");
+      if (saved) return saved;
+    }
+    return null;
+  });
+
+  const setSelectedRevisionWorkspace = (id: string | null) => {
+    setSelectedRevisionWorkspaceState(id);
+    if (typeof window !== "undefined") {
+      if (id) {
+        localStorage.setItem("mindexa_ai_tutor_course", id);
+      } else {
+        localStorage.removeItem("mindexa_ai_tutor_course");
+      }
+    }
+  };
+
+  const [learningUnits, setLearningUnits] = useState<LearningUnit[]>([]);
+  const [selectedLearningUnit, setSelectedLearningUnit] = useState<LearningUnit | null>(null);
+  const [isLoadingLearningUnits, setIsLoadingLearningUnits] = useState(false);
+  const [customRevisionTopic, setCustomRevisionTopic] = useState("");
+  const [revisionResult, setRevisionResult] = useState<RevisionGuideOutput | null>(null);
+  const [isGeneratingRevision, setIsGeneratingRevision] = useState(false);
+  const [checkedChecklistItems, setCheckedChecklistItems] = useState<Set<number>>(new Set());
+
+  const latestAiMessageRef = useRef<HTMLDivElement>(null);
+  const resourcesRef = useRef<HTMLDivElement>(null);
+  const tipsRef = useRef<HTMLDivElement>(null);
+  const integrityRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
   useEffect(() => {
     if (initialTopicContext && initialTopicContext.trim()) {
-      setPrompt(`I am reviewing "${initialTopicContext}". Can you explain the core concepts and test my understanding?`);
+      setPrompt(
+        `I am reviewing "${initialTopicContext}". Can you explain the core concepts and test my understanding?`
+      );
+      if (activeTab === "revision") {
+        setCustomRevisionTopic(initialTopicContext);
+      }
     }
-  }, [initialTopicContext]);
+  }, [initialTopicContext, activeTab]);
+
+  const isSelectedRwanda = useMemo(() => {
+    if (!selectedResource) return false;
+    const directWs = workspaces.find((w) => w.id === selectedResource);
+    if (directWs) return directWs.language === "RW";
+
+    const lecturerMat = lecturerMaterials.find((m) => m.id === selectedResource);
+    if (lecturerMat) {
+      const targetWsId = lecturerMat.workspace_id || lecturerMat.teaching_workspace_id;
+      const ws = workspaces.find((w) => w.id === targetWsId);
+      return ws?.language === "RW";
+    }
+
+    return false;
+  }, [workspaces, lecturerMaterials, selectedResource]);
+
+  const selectedResourceName = useMemo(() => {
+    if (!selectedResource) return null;
+    const directWs = workspaces.find((w) => w.id === selectedResource);
+    if (directWs) return `${directWs.code || directWs.title} (Course)`;
+
+    const personal = resources.find((r) => r.id === selectedResource);
+    if (personal) return personal.display_name || personal.original_filename;
+
+    const lecturerMat = lecturerMaterials.find((m) => m.id === selectedResource);
+    if (lecturerMat)
+      return `${lecturerMat.display_name || lecturerMat.original_filename} (${lecturerMat.course_code || "Material"})`;
+
+    return "Context Selected";
+  }, [selectedResource, workspaces, resources, lecturerMaterials]);
 
   const handleApiError = (err: any, fallbackMessage: string) => {
     const rawMessage = err?.message || "";
+    const errorCode = err?.code || "";
+
+    const isRwandaIssue =
+      errorCode === "AI_BLOCKED_LANGUAGE_POLICY" ||
+      errorCode === "AI_LANGUAGE_POLICY_RESTRICTED" ||
+      rawMessage.toLowerCase().includes("kinyarwanda") ||
+      rawMessage.toLowerCase().includes("language policy");
+
+    if (isRwandaIssue) {
+      setIsBlockedByLanguagePolicy(true);
+      const userFriendlyMessage =
+        "AI Study Tutor is disabled for Kinyarwanda courses according to institutional academic policy.";
+      setError(userFriendlyMessage);
+      toast.error(userFriendlyMessage);
+      return;
+    }
+
     const isInternetIssue =
       rawMessage.toLowerCase().includes("internet issue") ||
       rawMessage.toLowerCase().includes("timeout") ||
@@ -149,108 +387,28 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     }
   };
 
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
-
-  // Chat Conversation
-  const [messages, setMessages] = useState<Message[]>([]);
-
-  // Approved Resources
-  const [resources, setResources] = useState<StudentResourceResponse[]>([]);
-  const [workspaces, setWorkspaces] = useState<StudentCourseListItem[]>([]);
-  const [lecturerMaterials, setLecturerMaterials] = useState<any[]>([]);
-  const [selectedResource, setSelectedResource] = useState<string | null>(null);
-  const [loadingResources, setLoadingResources] = useState(true);
-
-  const isSelectedRwanda = useMemo(() => {
-    if (!selectedResource) return false;
-    const selectedWs = workspaces.find((w) => w.id === selectedResource);
-    return selectedWs?.language === "RW";
-  }, [workspaces, selectedResource]);
-
-  // Dropdowns
-  const [resourcesDropdownOpen, setResourcesDropdownOpen] = useState(false);
-  const [tipsDropdownOpen, setTipsDropdownOpen] = useState(false);
-  const [integrityDropdownOpen, setIntegrityDropdownOpen] = useState(false);
-
-  // Blocker State
-  const [isBlockedByActiveExam, setIsBlockedByActiveExam] = useState(false);
-  const [blockingExamTitle, setBlockingExamTitle] = useState("");
-
-  // Fullscreen State
-  const [isFullScreen, setIsFullScreen] = useState(false);
-
-  // Revision State
-  const [revisionTopic, setRevisionTopic] = useState("");
-  const [revisionResult, setRevisionResult] = useState<{
-    summary: string;
-    checklist: string[];
-    readings: string[];
-  } | null>(null);
-  const [isGeneratingRevision, setIsGeneratingRevision] = useState(false);
-
-  const resourcesRef = useRef<HTMLDivElement>(null);
-  const tipsRef = useRef<HTMLDivElement>(null);
-  const integrityRef = useRef<HTMLDivElement>(null);
-  // NOTE: No manual scroll ref — MessageScrollerContent handles auto-scroll
-  // via isAtBottom state, preserving the user's scroll position when they scroll up.
-
-  // Right-side History Panel State
-  const [isRightHistoryCollapsed, setIsRightHistoryCollapsed] = useState(false);
-  const [rawHistory, setRawHistory] = useState<StudentChatHistoryItem[]>([]);
-  const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null);
-
-  // Esc key listener for fullscreen
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && isFullScreen) {
-        setIsFullScreen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isFullScreen]);
-
-  const handleStartNewChat = () => {
-    setMessages([]);
-    setActiveHistoryId(null);
-    setPrompt("");
-    setError(null);
-    toast.success("Started a new chat session");
-  };
-
-  const handleSelectHistoryItem = (item: StudentChatHistoryItem) => {
-    setActiveHistoryId(item.id);
-    setMessages([
-      {
-        id: item.id + "-q",
-        sender: "student",
-        text: item.question,
-        timestamp: new Date(item.created_at),
-      },
-      {
-        id: item.id + "-a",
-        sender: "ai",
-        text: item.answer,
-        citations: item.citations,
-        timestamp: new Date(item.created_at),
-      },
-    ]);
-  };
-
+  // Load initial resources, active exam blockers, and conversation history
   useEffect(() => {
     async function loadData() {
       try {
         setLoadingResources(true);
-        const [personalResData, attemptsData, workspacesData, historyData] =
+        const [personalResData, attemptsData, workspacesData, convData] =
           await Promise.all([
-            studentApi.getPersonalResources(),
-            apiClient("/attempts/me"),
+            studentApi.getPersonalResources().catch(() => []),
+            apiClient("/attempts/me").catch(() => ({ items: [] })),
             studentApi.getWorkspaces().catch(() => []),
-            studentAiApi.getHistory().catch(() => []),
+            studentAiApi.getConversations().catch(() => []),
           ]);
 
         setResources(personalResData);
         setWorkspaces(workspacesData);
+        setSelectedRevisionWorkspaceState((prev) => {
+          const defaultWs = prev || (workspacesData.length > 0 ? workspacesData[0].id : null);
+          if (defaultWs && typeof window !== "undefined") {
+            localStorage.setItem("mindexa_ai_tutor_course", defaultWs);
+          }
+          return defaultWs;
+        });
 
         // Load materials for all workspaces
         const workspaceMaterialsPromises = workspacesData.map(async (ws) => {
@@ -258,6 +416,8 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
             const mats = await studentApi.getWorkspaceMaterials(ws.id);
             return mats.map((m) => ({
               ...m,
+              workspace_id: ws.id,
+              teaching_workspace_id: ws.id,
               course_code: ws.code,
               course_name: ws.title,
             }));
@@ -271,47 +431,54 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         setLecturerMaterials(allWorkspaceMaterials);
 
         // Restore chat conversation history from server
-        if (historyData && historyData.length > 0) {
-          setRawHistory(historyData);
-          const loadedMessages: Message[] = historyData.flatMap((item) => [
-            {
-              id: item.id + "-q",
-              sender: "student",
-              text: item.question,
-              timestamp: new Date(item.created_at),
-            },
-            {
-              id: item.id + "-a",
-              sender: "ai",
-              text: item.answer,
-              citations: item.citations,
-              timestamp: new Date(item.created_at),
-            },
-          ]);
-          setMessages(loadedMessages);
+        if (convData && convData.length > 0) {
+          setConversations(convData);
+          const latestConvId = convData[0].conversation_id;
+          setCurrentConversationId(latestConvId);
+          try {
+            const turns = await studentAiApi.getConversation(latestConvId);
+            const loadedMessages: Message[] = turns.flatMap((item) => [
+              {
+                id: item.id + "-q",
+                sender: "student",
+                text: item.question,
+                timestamp: new Date(item.created_at),
+              },
+              {
+                id: item.id + "-a",
+                sender: "ai",
+                text: item.answer,
+                citations: item.citations,
+                timestamp: new Date(item.created_at),
+              },
+            ]);
+            setMessages(loadedMessages);
+          } catch (e) {
+            console.warn("Failed to load initial conversation turns:", e);
+          }
         }
 
-        // Active assessment blocking check - eliminate N+1 fetch loop
+        // Active assessment blocking check
         const activeAttempts = (attemptsData.items || []).filter(
-          (a: any) => a.status === "IN_PROGRESS" || a.status === "PAUSED",
+          (a: any) => a.status === "IN_PROGRESS" || a.status === "PAUSED"
         );
         if (activeAttempts.length > 0) {
-          const blocking = activeAttempts.find(
-            (a: any) =>
-              a.assessment_type === "CAT" ||
-              a.assessment_type === "SUMMATIVE" ||
-              a.is_supervised ||
-              a.ai_assistance_allowed === false,
-          ) || activeAttempts[0];
+          const blocking =
+            activeAttempts.find(
+              (a: any) =>
+                a.assessment_type === "CAT" ||
+                a.assessment_type === "SUMMATIVE" ||
+                a.is_supervised ||
+                a.ai_assistance_allowed === false
+            ) || activeAttempts[0];
 
           setIsBlockedByActiveExam(true);
-          setBlockingExamTitle(blocking.title || blocking.assessment_title || "Active Assessment");
+          setBlockingExamTitle(
+            blocking.title || blocking.assessment_title || "Active Assessment"
+          );
         }
       } catch (err) {
-        console.error(
-          "Failed to load study data or check active attempts",
-          err,
-        );
+        console.error("Failed to load study tutor data", err);
       } finally {
         setLoadingResources(false);
       }
@@ -319,6 +486,30 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     loadData();
   }, []);
 
+  // Load Learning Units when selectedRevisionWorkspace changes
+  useEffect(() => {
+    if (!selectedRevisionWorkspace) return;
+    async function loadUnits() {
+      setIsLoadingLearningUnits(true);
+      try {
+        const units = await studyPlannerApi.getLearningUnits(selectedRevisionWorkspace!);
+        setLearningUnits(units);
+        if (units.length > 0) {
+          setSelectedLearningUnit(units[0]);
+        } else {
+          setSelectedLearningUnit(null);
+        }
+      } catch (e) {
+        setLearningUnits([]);
+        setSelectedLearningUnit(null);
+      } finally {
+        setIsLoadingLearningUnits(false);
+      }
+    }
+    loadUnits();
+  }, [selectedRevisionWorkspace]);
+
+  // Click outside listener for dropdowns
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
       if (
@@ -328,69 +519,158 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         setResourcesDropdownOpen(false);
       }
       if (tipsRef.current && !tipsRef.current.contains(event.target as Node)) {
-        setTipsDropdownOpen(false);
+        setTipsPopoverOpen(false);
       }
       if (
         integrityRef.current &&
         !integrityRef.current.contains(event.target as Node)
       ) {
-        setIntegrityDropdownOpen(false);
+        setIntegrityPopoverOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const selectedResourceName = useMemo(() => {
-    if (!selectedResource) return null;
-    const personal = resources.find((r) => r.id === selectedResource);
-    if (personal) return personal.display_name || personal.original_filename;
+  // Sorted conversations: pinned first, then by last activity
+  const sortedConversations = useMemo(() => {
+    return [...conversations].sort((a, b) => {
+      const aPinned = pinnedIds.has(a.conversation_id);
+      const bPinned = pinnedIds.has(b.conversation_id);
+      if (aPinned && !bPinned) return -1;
+      if (!aPinned && bPinned) return 1;
+      const aDate = new Date(a.last_activity_at || a.created_at).getTime();
+      const bDate = new Date(b.last_activity_at || b.created_at).getTime();
+      return bDate - aDate;
+    });
+  }, [conversations, pinnedIds]);
 
-    const lecturerMat = lecturerMaterials.find(
-      (m) => m.id === selectedResource,
-    );
-    if (lecturerMat)
-      return lecturerMat.display_name || lecturerMat.original_filename;
+  // Start a new chat thread
+  const handleStartNewChat = () => {
+    setCurrentConversationId(null);
+    setMessages([]);
+    setError(null);
+    setPrompt("");
+    handleTabChange("support");
+  };
 
-    return "Context Selected";
-  }, [selectedResource, resources, lecturerMaterials]);
+  // Switch to a previous conversation
+  const handleSelectConversation = async (conversationId: string) => {
+    if (conversationId === currentConversationId) return;
+    setIsLoadingConversation(true);
+    setError(null);
+    try {
+      const turns = await studentAiApi.getConversation(conversationId);
+      const loadedMessages: Message[] = turns.flatMap((item) => [
+        {
+          id: item.id + "-q",
+          sender: "student",
+          text: item.question,
+          timestamp: new Date(item.created_at),
+        },
+        {
+          id: item.id + "-a",
+          sender: "ai",
+          text: item.answer,
+          citations: item.citations,
+          timestamp: new Date(item.created_at),
+        },
+      ]);
+      setCurrentConversationId(conversationId);
+      setMessages(loadedMessages);
+      handleTabChange("support");
+    } catch (err) {
+      toast.error("Failed to load conversation history.");
+    } finally {
+      setIsLoadingConversation(false);
+    }
+  };
 
-  // Student Resource Management
-  const [isUploading, setIsUploading] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Delete Conversation confirmation
+  const handleConfirmDeleteConversation = async () => {
+    if (!conversationToDelete) return;
+    setIsDeletingConversation(true);
+    try {
+      await studentAiApi.deleteConversation(conversationToDelete);
+      setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationToDelete));
+      setPinnedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(conversationToDelete);
+        if (typeof window !== "undefined") {
+          localStorage.setItem("mindexa_pinned_conversations", JSON.stringify(Array.from(next)));
+        }
+        return next;
+      });
+      if (currentConversationId === conversationToDelete) {
+        handleStartNewChat();
+      }
+      toast.success("Conversation deleted.");
+    } catch (err) {
+      toast.error("Failed to delete conversation.");
+    } finally {
+      setIsDeletingConversation(false);
+      setConversationToDelete(null);
+    }
+  };
 
+  // Upload personal resource
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const formData = new FormData();
-    formData.append("file", file);
-
+    setIsUploading(true);
     try {
-      setIsUploading(true);
-      await studentApi.uploadPersonalResource(formData);
-      toast.success("File uploaded successfully! Processing started.");
-      // Refresh resources
-      const personalResData = await studentApi.getPersonalResources();
-      setResources(personalResData);
+      const formData = new FormData();
+      formData.append("file", file);
+      const newRes = await studentApi.uploadPersonalResource(formData);
+      setResources((prev) => [newRes, ...prev]);
+      setSelectedResource(newRes.id);
+      toast.success(
+        `Uploaded "${file.name}". Background processing initiated for AI context grounding.`
+      );
     } catch (err: any) {
-      toast.error(err.message || "Failed to upload file.");
+      handleApiError(err, "Failed to upload study resource.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
+  // Delete personal resource
   const handleDeleteResource = async (id: string) => {
     try {
       await studentApi.deletePersonalResource(id);
-      toast.success("Resource deleted.");
       setResources((prev) => prev.filter((r) => r.id !== id));
-    } catch (err: any) {
-      toast.error(err.message || "Failed to delete resource.");
+      if (selectedResource === id) setSelectedResource(null);
+      toast.success("Resource deleted successfully.");
+    } catch (err) {
+      toast.error("Failed to delete resource.");
     }
   };
 
+  // Copy helper
+  const handleCopyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedActionId(id);
+    toast.success("Copied to clipboard!");
+    setTimeout(() => setCopiedActionId(null), 2000);
+  };
+
+  // Edit user message (places it back into composer)
+  const handleEditUserMessage = (text: string) => {
+    setPrompt(text);
+    toast.info("Message placed in composer for editing.");
+  };
+
+  // Regenerate / Retry last prompt
+  const handleRegenerateLastMessage = () => {
+    const lastStudentMsg = [...messages].reverse().find((m) => m.sender === "student");
+    if (lastStudentMsg) {
+      handleSendMessage({ input: lastStudentMsg.text, attachments: lastStudentMsg.attachments });
+    }
+  };
+
+  // Suggested prompts
   const studySuggestedActions = [
     {
       title: "Explain Concept",
@@ -399,7 +679,7 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     },
     {
       title: "Active Recall",
-      label: "SQL Joins practice scenario",
+      label: "SQL Joins practice scenarios",
       action:
         "Provide scenarios to test my understanding of SQL Outer and Inner Joins",
     },
@@ -410,24 +690,36 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         "Summarize the key takeaways and learning outcomes from the selected resource",
     },
     {
-      title: "Lecturer Feedback",
-      label: "Explain my grade on assessments",
+      title: "Exam Preparation",
+      label: "Common pitfalls and exam tips",
       action:
-        "Explain standard database assessment rubrics and how to improve design marks",
+        "What are the most common exam mistakes and pitfalls for this topic?",
     },
   ];
 
-  // Core Chat Support Handlers
+  // Send Message Handler
   const handleSendMessage = async (
-    params: string | { input: string; attachments?: Attachment[]; isThinking?: boolean; isDeepSearch?: boolean },
+    params:
+      | string
+      | {
+          input: string;
+          attachments?: Attachment[];
+          isThinking?: boolean;
+          isDeepSearch?: boolean;
+        }
   ) => {
     const rawInput = typeof params === "string" ? params : params?.input || "";
-    const attachmentList = typeof params === "string" ? [] : params?.attachments || [];
-    const isThinkingMode = typeof params === "object" ? params?.isThinking : false;
-    const isDeepSearchMode = typeof params === "object" ? params?.isDeepSearch : false;
+    const attachmentList =
+      typeof params === "string" ? [] : params?.attachments || [];
+    const isThinkingMode =
+      typeof params === "object" ? params?.isThinking : false;
+    const isDeepSearchMode =
+      typeof params === "object" ? params?.isDeepSearch : false;
 
-    if (isSelectedRwanda) {
-      toast.error("AI Study Tutor is disabled for Kinyarwanda courses according to institutional academic policy.");
+    if (isSelectedRwanda || isBlockedByLanguagePolicy) {
+      toast.error(
+        "AI Study Tutor is disabled for Kinyarwanda courses according to institutional academic policy."
+      );
       return;
     }
 
@@ -445,22 +737,28 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
       const fileDetails = attachmentList
         .map((a) => {
           if (a.extractedText) {
-            return `\n--- ATTACHED STUDY FILE: ${a.name} ---\n${a.extractedText.slice(0, 15000)}\n--- END FILE ---`;
+            return `\n--- ATTACHED STUDY FILE: ${a.name} ---\n${a.extractedText.slice(
+              0,
+              15000
+            )}\n--- END FILE ---`;
           }
           return `\n[Attached Study File: ${a.name}]`;
         })
         .join("\n");
 
-      promptWithContext = userQuery ? `${promptWithContext}\n${fileDetails}` : fileDetails;
+      promptWithContext = userQuery
+        ? `${promptWithContext}\n${fileDetails}`
+        : fileDetails;
 
-      // Automatically upload file to student personal resources in background if file exists
       for (const att of attachmentList) {
         if ((att as any).file) {
           try {
             const formData = new FormData();
             formData.append("file", (att as any).file);
             await studentApi.uploadPersonalResource(formData);
-            toast.success(`Uploaded ${att.name} to personal study resources. Attachment used for current turn & queued for background indexing.`);
+            toast.success(
+              `Uploaded ${att.name} to personal study resources.`
+            );
           } catch (uploadErr) {
             console.warn("Auto-upload error:", uploadErr);
           }
@@ -489,10 +787,32 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
         content: m.text,
       }));
 
+      let selectedResourceId: string | undefined = undefined;
+      let teachingWorkspaceId: string | undefined = undefined;
+
+      if (selectedResource) {
+        const directWs = workspaces.find((w) => w.id === selectedResource);
+        if (directWs) {
+          teachingWorkspaceId = directWs.id;
+        } else {
+          selectedResourceId = selectedResource;
+          const lecturerMat = lecturerMaterials.find(
+            (m) => m.id === selectedResource
+          );
+          if (lecturerMat) {
+            teachingWorkspaceId =
+              lecturerMat.workspace_id || lecturerMat.teaching_workspace_id;
+          }
+        }
+      }
+
       const res = await studentAiApi.getSupport({
         question: promptWithContext,
+        source_surface: "study_tutor",
+        conversation_id: currentConversationId || undefined,
         conversation_history: history,
-        selected_resource_id: selectedResource || undefined,
+        selected_resource_id: selectedResourceId,
+        teaching_workspace_id: teachingWorkspaceId,
         thinking_mode: isThinkingMode,
         deep_search_mode: isDeepSearchMode,
       });
@@ -508,18 +828,56 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
 
       setMessages((prev) => [...prev, newAiMessage]);
 
-      const newHistItem: StudentChatHistoryItem = {
-        id: (Date.now() + 1).toString(),
-        question: userQuery,
-        answer: res.explanation,
-        citations: res.citations || [],
-        created_at: new Date().toISOString(),
-      };
-      setRawHistory((prev) => [...prev, newHistItem]);
-      setActiveHistoryId(newHistItem.id);
+      // Anchor scroll to the start of the AI message turn
+      setTimeout(() => {
+        latestAiMessageRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+
+      const activeConvId = res.conversation_id || currentConversationId;
+      if (activeConvId) {
+        setCurrentConversationId(activeConvId);
+        setConversations((prev) => {
+          const existingIdx = prev.findIndex(
+            (c) => c.conversation_id === activeConvId
+          );
+          const nowIso = new Date().toISOString();
+          if (existingIdx >= 0) {
+            const existing = prev[existingIdx];
+            const updated: StudentConversationSummary = {
+              ...existing,
+              last_activity_at: nowIso,
+              turn_count: existing.turn_count + 1,
+            };
+            return [updated, ...prev.filter((_, idx) => idx !== existingIdx)];
+          } else {
+            const newConv: StudentConversationSummary = {
+              conversation_id: activeConvId,
+              preview:
+                userQuery.length > 80
+                  ? userQuery.slice(0, 77) + "..."
+                  : userQuery || "New Conversation",
+              created_at: nowIso,
+              last_activity_at: nowIso,
+              turn_count: 1,
+            };
+            return [newConv, ...prev];
+          }
+        });
+      }
     } catch (err: any) {
-      if (err?.status === 403 || err?.code === "AI_BLOCKED_DURING_ACTIVE_ASSESSMENT" || String(err?.message || "").includes("during an active")) {
+      if (
+        err?.status === 403 ||
+        err?.code === "AI_BLOCKED_DURING_ACTIVE_ASSESSMENT" ||
+        String(err?.message || "").includes("during an active")
+      ) {
         setIsBlockedByActiveExam(true);
+      }
+      if (
+        err?.code === "AI_BLOCKED_LANGUAGE_POLICY" ||
+        err?.code === "AI_LANGUAGE_POLICY_RESTRICTED" ||
+        String(err?.message || "").toLowerCase().includes("kinyarwanda")
+      ) {
+        setIsBlockedByLanguagePolicy(true);
       }
       handleApiError(err, "Failed to retrieve AI explanation.");
     } finally {
@@ -527,24 +885,33 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     }
   };
 
-  // Revision Center Handler - uses structured Pydantic schema backend endpoint (T3)
-  const handleGenerateRevision = async () => {
-    if (!revisionTopic.trim()) {
-      toast.error("Please enter a topic or concept name.");
+  // Launch interactive Socratic review turn in chat
+  const handleStartSocraticReview = (unitTitle: string) => {
+    handleTabChange("support");
+    const socraticPrompt = `Let's review the curriculum learning unit: "${unitTitle}". Please give me a concise breakdown of the core concept followed by one comprehension-check question to test my understanding.`;
+    handleSendMessage(socraticPrompt);
+  };
+
+  // Generate downloadable markdown revision sheet
+  const handleGenerateDownloadableRevisionSheet = async (unit?: LearningUnit | null) => {
+    const topicToUse = unit ? unit.title : customRevisionTopic.trim();
+    if (!topicToUse) {
+      toast.error("Please select a learning unit or enter a topic name.");
       return;
     }
+
     setIsGeneratingRevision(true);
     setRevisionResult(null);
+    setCheckedChecklistItems(new Set());
     setError(null);
 
     try {
-      const guide = await studentAiApi.getRevisionGuide(revisionTopic);
-
-      setRevisionResult({
-        summary: guide.summary,
-        checklist: guide.checklist,
-        readings: guide.readings,
+      const guide = await studentAiApi.getRevisionGuide({
+        topic: topicToUse,
+        learningUnitId: unit?.id || undefined,
+        teachingWorkspaceId: selectedRevisionWorkspace || undefined,
       });
+      setRevisionResult(guide);
       toast.success("Structured revision guide generated!");
     } catch (err: any) {
       handleApiError(err, "Failed to generate revision guide.");
@@ -553,6 +920,82 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
     }
   };
 
+  // Toggle checklist item completion
+  const toggleChecklistItem = (idx: number) => {
+    setCheckedChecklistItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(idx)) next.delete(idx);
+      else next.add(idx);
+      return next;
+    });
+  };
+
+  // Toggle citation expand for message
+  const toggleCitationExpand = (msgId: string) => {
+    setExpandedCitationMessageIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(msgId)) next.delete(msgId);
+      else next.add(msgId);
+      return next;
+    });
+  };
+
+  // Build markdown transcript for export / share
+  const buildConversationMarkdown = () => {
+    const lines = [
+      "# Mindexa AI Study Tutor - Conversation Transcript",
+      `*Exported on ${new Date().toLocaleString()}*`,
+      "",
+      "---",
+      "",
+    ];
+
+    messages.forEach((msg) => {
+      if (msg.sender === "student") {
+        lines.push(`### 🧑 Student (${msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`);
+        lines.push(msg.text);
+        if (msg.attachments && msg.attachments.length > 0) {
+          lines.push(`*Attached: ${msg.attachments.map((a) => a.name).join(", ")}*`);
+        }
+        lines.push("");
+      } else {
+        lines.push(`### ✨ AI Study Tutor (${msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })})`);
+        lines.push(msg.text);
+        if (msg.citations && msg.citations.length > 0) {
+          lines.push("\n**References:**");
+          msg.citations.forEach((c) => {
+            lines.push(`- ${c.resource_name}${c.page_number ? ` (p. ${c.page_number})` : ""}`);
+          });
+        }
+        lines.push("");
+      }
+      lines.push("---");
+      lines.push("");
+    });
+
+    return lines.join("\n");
+  };
+
+  // Build plain text transcript
+  const buildConversationPlainText = () => {
+    const lines = [
+      "MINDEXA AI STUDY TUTOR - CONVERSATION TRANSCRIPT",
+      `Exported: ${new Date().toLocaleString()}`,
+      "==================================================",
+      "",
+    ];
+
+    messages.forEach((msg) => {
+      const sender = msg.sender === "student" ? "STUDENT" : "AI TUTOR";
+      lines.push(`[${msg.timestamp.toLocaleTimeString()}] ${sender}:`);
+      lines.push(msg.text);
+      lines.push("");
+    });
+
+    return lines.join("\n");
+  };
+
+  // Active Assessment Blocker Card
   if (isBlockedByActiveExam) {
     return (
       <Card className="shadow-none border w-full flex flex-col h-full justify-center items-center bg-zinc-50/20 p-8 min-h-[400px]">
@@ -584,447 +1027,519 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
   }
 
   return (
-    <MessageScrollerProvider>
-      <Card
+    <MessageScrollerProvider scrollPreviousItemPeek={64} scrollMargin={24}>
+      <div
         className={cn(
-          "shadow-none border w-full flex flex-col relative overflow-hidden bg-zinc-50/20",
+          "w-full flex flex-row relative overflow-hidden bg-background",
           isFullScreen
-            ? "fixed inset-0 z-50 h-screen w-screen rounded-none border-none p-4 md:p-4 bg-white"
-            : "h-full",
+            ? "fixed inset-0 z-50 h-screen w-screen p-0 bg-background"
+            : "h-full min-h-0"
         )}
       >
-        {/* Top Navigation Bar */}
-        <div className="border-b bg-muted/5 px-4 py-3 flex flex-wrap gap-3 items-center justify-between shrink-0 z-30">
-          <div className="flex items-center gap-3">
-            {/* Approved Resource Selectors */}
-            <div className="relative" ref={resourcesRef}>
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn(
-                  "h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-white",
-                  selectedResource && "border-primary text-primary bg-primary/5",
-                )}
-                onClick={() => {
-                  setResourcesDropdownOpen(!resourcesDropdownOpen);
-                  setTipsDropdownOpen(false);
-                  setIntegrityDropdownOpen(false);
-                }}
-              >
-                <FileText className="size-3.5 shrink-0" />
-                <span className="max-w-[200px] truncate">
-                  {selectedResourceName || "Select Learning Material (RAG)"}
-                </span>
-                <ChevronDown className="size-3 ml-0.5 opacity-60" />
-              </Button>
-              {resourcesDropdownOpen && (
-                <div className="absolute left-0 mt-2 w-80 bg-white text-zinc-950 border rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="space-y-4 max-h-80 overflow-y-auto pr-1 text-left">
-                    {/* Lecturer Materials section */}
-                    <div>
-                      <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2">
-                        Lecturer Course Materials
-                      </div>
-                      {loadingResources ? (
-                        <div className="text-xs text-muted-foreground py-1 pl-2">
-                          Loading materials...
-                        </div>
-                      ) : lecturerMaterials.length === 0 ? (
-                        <div className="text-xs text-muted-foreground py-1 pl-2">
-                          No course materials available.
-                        </div>
-                      ) : (
-                        <div className="space-y-1">
-                          {lecturerMaterials.map((file) => (
-                            <div
-                              key={file.id}
-                              className={cn(
-                                "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-zinc-50 transition-colors",
-                                selectedResource === file.id &&
-                                  "border-primary bg-primary/5 text-primary",
-                              )}
-                              onClick={() => {
-                                setSelectedResource(
-                                  selectedResource === file.id ? null : file.id,
-                                );
-                                setResourcesDropdownOpen(false);
-                              }}
-                            >
-                              <FileText className="size-3.5 shrink-0 text-blue-500" />
-                              <div className="truncate flex-1 font-medium text-left">
-                                <div className="truncate">
-                                  {file.display_name || file.original_filename}
-                                </div>
-                                <div className="text-[10px] text-muted-foreground">
-                                  {file.course_code} • Lecturer Material
-                                </div>
-                              </div>
-                              {selectedResource === file.id && (
-                                <CheckCircle2 className="size-3.5 text-primary shrink-0" />
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+        {/* ── Left Collapsible Rail (ChatGPT/Claude Style) ── */}
+        <aside
+          className={cn(
+            "flex flex-col border-r border-border/40 bg-muted/15 transition-all duration-300 shrink-0 z-20 overflow-hidden",
+            isSidebarOpen ? "w-[280px]" : "w-0 border-r-0"
+          )}
+        >
+          {isSidebarOpen && (
+            <div className="flex flex-col h-full w-[280px]">
+              {/* Left Rail Header */}
+              <div className="p-3 border-b border-border/40 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2">
+                  <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                    <Sparkles className="size-4" />
+                  </div>
+                  <span className="text-xs font-bold tracking-tight text-foreground">
+                    AI Study Tutor
+                  </span>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarOpen(false)}
+                  className="size-7 text-muted-foreground hover:text-foreground"
+                  title="Collapse sidebar"
+                >
+                  <PanelLeftClose className="size-4" />
+                </Button>
+              </div>
 
-                    {/* Personal Resources section */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest">
-                          Personal Study Files
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-6 px-2 text-[10px] text-primary hover:bg-primary/5"
-                          onClick={() => fileInputRef.current?.click()}
-                          disabled={isUploading}
-                        >
-                          {isUploading ? (
-                            <RefreshCw className="size-2.5 animate-spin mr-1" />
-                          ) : (
-                            <Sparkles className="size-2.5 mr-1" />
+              {/* Mode Switcher Tabs */}
+              <div className="p-2 border-b border-border/30 shrink-0">
+                <div className="grid grid-cols-2 gap-1 p-1 bg-muted/50 rounded-lg">
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange("support")}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1 px-2 text-[11px] font-semibold rounded-md transition-all",
+                      activeTab === "support"
+                        ? "bg-background text-foreground shadow-xs font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Sparkles className="size-3" />
+                    Study Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleTabChange("revision")}
+                    className={cn(
+                      "flex items-center justify-center gap-1.5 py-1 px-2 text-[11px] font-semibold rounded-md transition-all",
+                      activeTab === "revision"
+                        ? "bg-background text-foreground shadow-xs font-bold"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <BookOpen className="size-3" />
+                    Revision
+                  </button>
+                </div>
+              </div>
+
+              {/* New Chat Button */}
+              <div className="p-2 border-b border-border/30 shrink-0">
+                <Button
+                  onClick={handleStartNewChat}
+                  className="w-full h-8 gap-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs"
+                  type="button"
+                >
+                  <Plus className="size-3.5" />
+                  <span>New Chat</span>
+                </Button>
+              </div>
+
+              {/* Resource & Context Scoping Picker */}
+              <div className="p-2 border-b border-border/30 shrink-0 relative" ref={resourcesRef}>
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-1 pb-1">
+                  Active Knowledge Scope
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={cn(
+                    "w-full h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-background justify-between px-2.5",
+                    selectedResource && "border-primary text-primary bg-primary/5"
+                  )}
+                  onClick={() => setResourcesDropdownOpen(!resourcesDropdownOpen)}
+                >
+                  <div className="flex items-center gap-1.5 truncate">
+                    <FileText className="size-3.5 shrink-0 text-primary" />
+                    <span className="truncate max-w-[190px] text-left">
+                      {selectedResourceName || "General Knowledge"}
+                    </span>
+                  </div>
+                  <ChevronDown className="size-3 shrink-0 opacity-60 ml-1" />
+                </Button>
+
+                {resourcesDropdownOpen && (
+                  <div className="absolute left-2 right-2 top-full mt-1 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+                    <div className="space-y-3 max-h-72 overflow-y-auto pr-1 text-left">
+                      {/* General Knowledge option */}
+                      <div>
+                        <div
+                          className={cn(
+                            "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-muted/50 transition-colors",
+                            !selectedResource &&
+                              "border-primary bg-primary/10 text-primary font-semibold"
                           )}
-                          Upload
-                        </Button>
-                        <input
-                          type="file"
-                          ref={fileInputRef}
-                          className="hidden"
-                          accept=".pdf,.docx,.txt"
-                          onChange={handleFileUpload}
-                        />
+                          onClick={() => {
+                            setSelectedResource(null);
+                            setResourcesDropdownOpen(false);
+                          }}
+                        >
+                          <Sparkles className="size-3.5 shrink-0 text-amber-500" />
+                          <div className="truncate flex-1 font-medium text-left">
+                            <div>General Knowledge</div>
+                            <div className="text-[10px] text-muted-foreground">
+                              No course context
+                            </div>
+                          </div>
+                          {!selectedResource && (
+                            <CheckCircle2 className="size-3.5 text-primary shrink-0" />
+                          )}
+                        </div>
                       </div>
-                      {loadingResources ? (
-                        <div className="text-xs text-muted-foreground py-1 pl-2">
-                          Loading files...
-                        </div>
-                      ) : resources.length === 0 ? (
-                        <div className="text-xs text-muted-foreground py-1 pl-2 text-center bg-zinc-50 rounded-lg border border-dashed p-3">
-                          No personal files uploaded.
-                        </div>
-                      ) : (
-                        <div className="space-y-1">
-                          {resources.map((file) => (
-                            <div
-                              key={file.id}
-                              className={cn(
-                                "group flex items-center gap-2 p-2 rounded-lg border text-xs hover:bg-zinc-50 transition-colors",
-                                selectedResource === file.id &&
-                                  "border-primary bg-primary/5 text-primary",
-                              )}
-                            >
+
+                      {/* Enrolled Courses section */}
+                      {workspaces.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 px-1">
+                            Enrolled Courses
+                          </div>
+                          <div className="space-y-1">
+                            {workspaces.map((ws) => (
                               <div
-                                className="flex-1 flex items-center gap-2 cursor-pointer"
+                                key={ws.id}
+                                className={cn(
+                                  "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-muted/50 transition-colors",
+                                  selectedResource === ws.id &&
+                                    "border-primary bg-primary/10 text-primary font-semibold"
+                                )}
                                 onClick={() => {
                                   setSelectedResource(
-                                    selectedResource === file.id ? null : file.id,
+                                    selectedResource === ws.id ? null : ws.id
+                                  );
+                                  setSelectedRevisionWorkspace(ws.id);
+                                  setResourcesDropdownOpen(false);
+                                }}
+                              >
+                                <BookOpen className="size-3.5 shrink-0 text-indigo-500" />
+                                <div className="truncate flex-1 font-medium text-left">
+                                  <div className="truncate">
+                                    {ws.code}: {ws.title}
+                                  </div>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    {ws.language === "RW"
+                                      ? "Kinyarwanda (Disabled)"
+                                      : "All course materials"}
+                                  </div>
+                                </div>
+                                {selectedResource === ws.id && (
+                                  <CheckCircle2 className="size-3.5 text-primary shrink-0" />
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Lecturer Materials section */}
+                      <div>
+                        <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 px-1">
+                          Lecturer Materials
+                        </div>
+                        {loadingResources ? (
+                          <div className="text-xs text-muted-foreground py-1 pl-2">
+                            Loading materials...
+                          </div>
+                        ) : lecturerMaterials.length === 0 ? (
+                          <div className="text-xs text-muted-foreground py-1 pl-2">
+                            No materials uploaded.
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {lecturerMaterials.map((file) => (
+                              <div
+                                key={file.id}
+                                className={cn(
+                                  "flex items-center gap-2 p-2 rounded-lg border text-xs cursor-pointer hover:bg-muted/50 transition-colors",
+                                  selectedResource === file.id &&
+                                    "border-primary bg-primary/10 text-primary font-semibold"
+                                )}
+                                onClick={() => {
+                                  setSelectedResource(
+                                    selectedResource === file.id ? null : file.id
                                   );
                                   setResourcesDropdownOpen(false);
                                 }}
                               >
-                                <FileText className="size-3.5 shrink-0 text-emerald-500" />
+                                <FileText className="size-3.5 shrink-0 text-blue-500" />
                                 <div className="truncate flex-1 font-medium text-left">
                                   <div className="truncate">
                                     {file.display_name || file.original_filename}
                                   </div>
-                                  <div className="flex items-center gap-1.5 mt-0.5">
-                                    <Badge
-                                      variant="outline"
-                                      className={cn(
-                                        "px-1.5 py-0 text-[8px] font-bold uppercase",
-                                        file.processing_status === "COMPLETED"
-                                          ? "bg-emerald-50 text-emerald-600 border-emerald-200"
-                                          : file.processing_status === "FAILED"
-                                            ? "bg-red-50 text-red-600 border-red-200"
-                                            : "bg-amber-50 text-amber-600 border-amber-200 animate-pulse",
-                                      )}
-                                    >
-                                      {file.processing_status}
-                                    </Badge>
-                                    <span className="text-[10px] text-muted-foreground">
-                                      Personal File
-                                    </span>
+                                  <div className="text-[10px] text-muted-foreground">
+                                    {file.course_code}
                                   </div>
                                 </div>
+                                {selectedResource === file.id && (
+                                  <CheckCircle2 className="size-3.5 text-primary shrink-0" />
+                                )}
                               </div>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="size-6 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-red-600 hover:bg-red-50"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  handleDeleteResource(file.id);
-                                }}
-                              >
-                                <ShieldAlert className="size-3" />
-                              </Button>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Personal Resources section */}
+                      <div>
+                        <div className="flex items-center justify-between mb-1.5 px-1">
+                          <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                            Personal Files
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-5 px-1.5 text-[10px] text-primary"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading}
+                          >
+                            {isUploading ? (
+                              <RefreshCw className="size-2.5 animate-spin mr-1" />
+                            ) : (
+                              <Plus className="size-2.5 mr-1" />
+                            )}
+                            Upload
+                          </Button>
+                          <input
+                            type="file"
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept=".pdf,.docx,.txt"
+                            onChange={handleFileUpload}
+                          />
                         </div>
-                      )}
+                        {resources.length === 0 ? (
+                          <div className="text-xs text-muted-foreground py-1 pl-2">
+                            No personal files.
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            {resources.map((file) => (
+                              <div
+                                key={file.id}
+                                className={cn(
+                                  "group flex items-center gap-2 p-2 rounded-lg border text-xs hover:bg-muted/50 transition-colors",
+                                  selectedResource === file.id &&
+                                    "border-primary bg-primary/10 text-primary font-semibold"
+                                )}
+                              >
+                                <div
+                                  className="flex-1 flex items-center gap-2 cursor-pointer"
+                                  onClick={() => {
+                                    setSelectedResource(
+                                      selectedResource === file.id ? null : file.id
+                                    );
+                                    setResourcesDropdownOpen(false);
+                                  }}
+                                >
+                                  <FileText className="size-3.5 shrink-0 text-emerald-500" />
+                                  <div className="truncate flex-1 font-medium text-left">
+                                    <div className="truncate">
+                                      {file.display_name || file.original_filename}
+                                    </div>
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="size-5 opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteResource(file.id);
+                                  }}
+                                >
+                                  <X className="size-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
+                )}
+              </div>
+
+              {/* Previous Chats History List (with Pin & Delete) */}
+              <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-0">
+                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
+                  <span>Recent Conversations</span>
+                  <History className="size-3" />
                 </div>
-              )}
-            </div>
 
-            {/* Tips Dropdown */}
-            <div className="relative" ref={tipsRef}>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-white"
-                onClick={() => {
-                  setTipsDropdownOpen(!tipsDropdownOpen);
-                  setResourcesDropdownOpen(false);
-                  setIntegrityDropdownOpen(false);
-                }}
-              >
-                <Lightbulb className="size-3.5 text-amber-500 shrink-0" />
-                <span>Study Tips</span>
-                <ChevronDown className="size-3 ml-0.5 opacity-60" />
-              </Button>
-              {tipsDropdownOpen && (
-                <div className="absolute left-0 mt-2 w-80 bg-white text-zinc-950 border rounded-xl shadow-lg p-5 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-3 flex items-center gap-1.5">
-                    <Lightbulb className="size-4 text-amber-500" /> Active Recall Tips
+                {sortedConversations.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-muted-foreground font-medium bg-muted/30 rounded-lg border border-dashed border-border/40 my-2">
+                    No chat history yet.
                   </div>
-                  <div className="space-y-4">
-                    <div className="flex gap-3">
-                      <div className="size-6 rounded-full bg-emerald-50 flex items-center justify-center shrink-0">
-                        <CheckCircle2 className="size-3.5 text-emerald-700" />
-                      </div>
-                      <div className="text-xs font-medium text-zinc-600 leading-relaxed">
-                        Always try to formulate explanations in your own words before consulting solutions.
-                      </div>
-                    </div>
-                    <div className="border-t my-2" />
-                    <div className="flex gap-3">
-                      <div className="size-6 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                        <BookOpen className="size-3.5 text-primary" />
-                      </div>
-                      <div className="text-xs font-medium text-zinc-600 leading-relaxed">
-                        Use the Revision Center to generate concept summaries and key learning checklists.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Policies & Fullscreen */}
-          <div className="flex items-center gap-2">
-            <div className="relative" ref={integrityRef}>
-              <Badge
-                variant="outline"
-                className="cursor-pointer border-red-600/20 bg-red-50 text-red-700 hover:bg-red-100/50 py-1 px-2.5 rounded-full text-[10px] font-bold uppercase tracking-wider flex items-center gap-1"
-                onClick={() => {
-                  setIntegrityDropdownOpen(!integrityDropdownOpen);
-                  setResourcesDropdownOpen(false);
-                  setTipsDropdownOpen(false);
-                }}
-              >
-                <ShieldAlert className="size-3" />
-                Integrity Rules
-              </Badge>
-              {integrityDropdownOpen && (
-                <div className="absolute right-0 mt-2 w-72 bg-white text-zinc-950 border border-red-100 rounded-xl shadow-lg p-4 z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-                  <div className="text-xs font-bold text-red-700 uppercase tracking-widest mb-2 flex items-center gap-1.5">
-                    <ShieldAlert className="size-4" /> Academic Policy
-                  </div>
-                  <p className="text-[11px] text-zinc-600 leading-relaxed font-medium">
-                    Student AI only supports study and learning. Generating cheat
-                    notes, accessing hidden assessments, or bypassing integrity
-                    checks is strictly prohibited.
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <Button
-              variant="outline"
-              size="sm"
-              className={cn(
-                "h-8 gap-1.5 rounded-lg border-zinc-200 text-xs font-semibold bg-white lg:hidden",
-                !isRightHistoryCollapsed && "border-primary text-primary bg-primary/5"
-              )}
-              onClick={() => setIsRightHistoryCollapsed(!isRightHistoryCollapsed)}
-              title="Toggle Chat History"
-              type="button"
-            >
-              <History className="size-3.5 text-primary shrink-0" />
-              <span className="hidden sm:inline">History</span>
-            </Button>
-
-            <Button
-              variant={isFullScreen ? "default" : "outline"}
-              size="sm"
-              className={cn(
-                "h-8 gap-1.5 px-3 text-xs font-bold transition-all shadow-2xs",
-                isFullScreen
-                  ? "bg-zinc-900 text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 border-zinc-800"
-                  : "bg-white border-zinc-200 text-zinc-700 hover:bg-zinc-100"
-              )}
-              onClick={() => setIsFullScreen(!isFullScreen)}
-              title={isFullScreen ? "Exit Fullscreen (Esc)" : "Enter Fullscreen"}
-              type="button"
-            >
-              {isFullScreen ? (
-                <>
-                  <Minimize2 className="size-3.5 text-zinc-200 dark:text-zinc-800 shrink-0" />
-                  <span>Exit Fullscreen</span>
-                </>
-              ) : (
-                <>
-                  <Maximize2 className="size-3.5 text-zinc-600 shrink-0" />
-                  <span className="hidden sm:inline">Fullscreen</span>
-                </>
-              )}
-            </Button>
-          </div>
-        </div>
-
-        {/* Tabs Switcher & Content Wrapper */}
-        <Tabs
-          value={activeTab}
-          onValueChange={(v) => {
-            setActiveTab(v as any);
-            setError(null);
-          }}
-          className="flex-1 flex flex-col md:flex-row min-h-0 overflow-hidden p-3 md:p-4 gap-4 bg-zinc-50/20"
-        >
-          {/* Horizontal Navigation on Mobile */}
-          <TabsList className="flex md:hidden flex-row bg-muted/30 p-1 rounded-xl w-full overflow-x-auto gap-1 border shadow-none shrink-0 scrollbar-none mb-2">
-            {[
-              { id: "support", label: "Support", icon: Brain },
-              { id: "revision", label: "Revision", icon: BookOpen },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <TabsTrigger
-                  key={tab.id}
-                  value={tab.id}
-                  className="flex-1 py-1.5 text-[11px] font-semibold rounded-lg text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground"
-                >
-                  <Icon className="size-3.5 mr-1" />
-                  {tab.label}
-                </TabsTrigger>
-              );
-            })}
-          </TabsList>
-
-          {/* Vertical Navigation Sidebar on Desktop */}
-          <TabsList
-            className={cn(
-              "hidden md:flex flex-col bg-muted/30 p-1.5 rounded-xl border border-border/40 gap-1.5 h-fit shrink-0 text-start transition-all duration-300 relative",
-              isSidebarCollapsed ? "w-[54px]" : "w-[180px]",
-            )}
-          >
-            {[
-              { id: "support", label: "Study Support", icon: Brain },
-              { id: "revision", label: "Revision Center", icon: BookOpen },
-            ].map((tab) => {
-              const Icon = tab.icon;
-              return (
-                <UITooltipProvider key={tab.id} delayDuration={0}>
-                  <UITooltip>
-                    <UITooltipTrigger asChild>
-                      <TabsTrigger
-                        value={tab.id}
+                ) : (
+                  sortedConversations.map((item) => {
+                    const isActive = currentConversationId === item.conversation_id;
+                    const isPinned = pinnedIds.has(item.conversation_id);
+                    return (
+                      <div
+                        key={item.conversation_id}
+                        onClick={() => handleSelectConversation(item.conversation_id)}
                         className={cn(
-                          "w-full justify-start gap-2.5 px-3 py-2 text-xs font-semibold rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm transition-all",
-                          isSidebarCollapsed && "justify-center px-0 gap-0",
+                          "group relative p-2 rounded-lg border text-xs cursor-pointer transition-all space-y-0.5 text-left",
+                          isActive
+                            ? "border-primary/50 bg-primary/10 text-primary font-semibold"
+                            : "border-transparent hover:bg-muted/50 text-foreground/80 hover:text-foreground",
+                          isLoadingConversation && "pointer-events-none opacity-70"
                         )}
                       >
-                        <Icon className="size-4 shrink-0" />
-                        {!isSidebarCollapsed && (
-                          <span className="truncate">{tab.label}</span>
-                        )}
-                      </TabsTrigger>
-                    </UITooltipTrigger>
-                    <UITooltipContent
-                      side="right"
-                      className="px-2 py-1 text-xs font-medium"
-                    >
-                      {tab.label}
-                    </UITooltipContent>
-                  </UITooltip>
-                </UITooltipProvider>
-              );
-            })}
+                        <div className="flex items-center gap-1.5 pr-12">
+                          {isPinned ? (
+                            <Pin className="size-3 shrink-0 text-amber-500 fill-amber-500" />
+                          ) : (
+                            <MessageSquare className="size-3 shrink-0 text-primary" />
+                          )}
+                          <span className="truncate font-medium flex-1 text-[11px]">
+                            {item.preview || "Untitled Chat"}
+                          </span>
+                        </div>
+                        <div className="text-[9px] text-muted-foreground flex items-center justify-between pl-4">
+                          <span>
+                            {formatHistoryDate(item.last_activity_at || item.created_at)}
+                          </span>
+                          {item.turn_count > 0 && (
+                            <span className="font-mono">
+                              {item.turn_count} msg{item.turn_count > 1 ? "s" : ""}
+                            </span>
+                          )}
+                        </div>
 
-            <Separator className="my-1 bg-border/25" />
-
-            {/* Collapse/Expand Toggle Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-              className="w-full h-8 text-xs font-semibold rounded-lg text-muted-foreground/60 hover:text-foreground hover:bg-muted/40 flex items-center justify-center p-0"
-              title={isSidebarCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}
-              type="button"
-            >
-              <ChevronDown
-                className={cn(
-                  "size-4 transition-transform duration-300",
-                  isSidebarCollapsed ? "-rotate-90" : "rotate-90",
+                        {/* Hover Action Buttons (Pin & Delete) */}
+                        <div className="absolute right-1 top-1.5 hidden group-hover:flex items-center gap-0.5 bg-background/90 backdrop-blur-xs rounded-md px-1 shadow-xs border border-border/50">
+                          <button
+                            type="button"
+                            onClick={(e) => togglePinConversation(item.conversation_id, e)}
+                            className="p-1 hover:text-amber-500 text-muted-foreground transition-colors"
+                            title={isPinned ? "Unpin chat" : "Pin chat to top"}
+                          >
+                            {isPinned ? <PinOff className="size-3" /> : <Pin className="size-3" />}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConversationToDelete(item.conversation_id);
+                            }}
+                            className="p-1 hover:text-destructive text-muted-foreground transition-colors"
+                            title="Delete conversation"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
                 )}
-              />
-            </Button>
-          </TabsList>
+              </div>
+            </div>
+          )}
+        </aside>
 
-          {/* Main Content Area */}
-          <div className="flex-1 grow rounded-xl border border-border/40 bg-card/25 backdrop-blur-sm shadow-sm p-3.5 md:p-4 flex flex-col min-h-0 overflow-y-auto relative">
-            {error && (
-              <Alert variant="destructive" className="mb-4 rounded-xl">
-                <ShieldAlert className="size-4" />
-                <AlertTitle className="text-sm font-semibold">
-                  Study Assistant Error
-                </AlertTitle>
-                <AlertDescription className="text-xs mt-1 font-medium">
-                  {error}
-                </AlertDescription>
-              </Alert>
-            )}
+        {/* ── Main Content Area ── */}
+        <main className="flex-1 flex flex-col min-w-0 h-full relative overflow-hidden bg-background">
+          {/* Top Navbar */}
+          <div className="h-12 border-b border-border/40 px-4 flex items-center justify-between shrink-0 z-10 bg-background/80 backdrop-blur-sm">
+            <div className="flex items-center gap-2">
+              {!isSidebarOpen && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setIsSidebarOpen(true)}
+                  className="size-8 text-muted-foreground hover:text-foreground mr-1"
+                  title="Open sidebar"
+                >
+                  <PanelLeftOpen className="size-4" />
+                </Button>
+              )}
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-foreground">
+                  {activeTab === "support"
+                    ? "Study Support Chat"
+                    : "Revision Center"}
+                </span>
+                {selectedResourceName ? (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-medium border-primary/30 bg-primary/5 text-primary"
+                  >
+                    Context: {selectedResourceName}
+                  </Badge>
+                ) : (
+                  <Badge
+                    variant="outline"
+                    className="text-[10px] font-normal text-muted-foreground"
+                  >
+                    General Knowledge
+                  </Badge>
+                )}
+              </div>
+            </div>
 
-            {/* Tab 1: STUDY SUPPORT CHAT */}
-            <TabsContent
-              value="support"
-              className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden focus-visible:outline-none"
-            >
-              <div className="flex-1 min-h-[300px] flex flex-col relative overflow-hidden">
+            <div className="flex items-center gap-1.5">
+              {messages.length > 0 && activeTab === "support" && (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                    onClick={() => setShareModalOpen(true)}
+                    title="Share conversation"
+                  >
+                    <Share2 className="size-3.5 text-primary" />
+                    <span className="hidden sm:inline">Share</span>
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
+                    onClick={() => setExportModalOpen(true)}
+                    title="Export conversation"
+                  >
+                    <Download className="size-3.5" />
+                    <span className="hidden sm:inline">Export</span>
+                  </Button>
+                </>
+              )}
+
+              <Button
+                variant={isFullScreen ? "default" : "ghost"}
+                size="icon"
+                className="size-8 text-muted-foreground hover:text-foreground ml-1"
+                onClick={() => setIsFullScreen(!isFullScreen)}
+                title={isFullScreen ? "Exit Fullscreen" : "Fullscreen"}
+              >
+                {isFullScreen ? (
+                  <Minimize2 className="size-4" />
+                ) : (
+                  <Maximize2 className="size-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {/* Error Banner if any */}
+          {error && (
+            <Alert variant="destructive" className="m-4 mb-0 rounded-xl">
+              <ShieldAlert className="size-4" />
+              <AlertTitle className="text-xs font-semibold">
+                Study Tutor Notice
+              </AlertTitle>
+              <AlertDescription className="text-xs mt-0.5">
+                {error}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Tab 1: STUDY SUPPORT CHAT */}
+          {activeTab === "support" && (
+            <div className="flex-1 flex flex-col min-h-0 relative">
+              {/* Centered Chat Message Stream */}
+              <div className="flex-1 min-h-0 flex flex-col relative overflow-hidden">
                 {messages.length === 0 && !isThinking ? (
                   <div className="flex-1 overflow-y-auto">
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 max-w-xl mx-auto space-y-6">
-                      <div className="size-16 rounded-full bg-primary/10 flex items-center justify-center animate-pulse">
-                        <Brain className="size-8 text-primary" />
+                      <div className="size-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+                        <Sparkles className="size-7 text-primary" />
                       </div>
                       <div className="space-y-2">
-                        <h2 className="text-lg font-semibold tracking-tight">
-                          Revision & Study Support AI
+                        <h2 className="text-base font-semibold tracking-tight text-foreground">
+                          What would you like to study today?
                         </h2>
-                        <p className="text-xs text-muted-foreground leading-relaxed max-w-md font-medium">
-                          Ask questions to clarify academic concepts, get revision
-                          advice, and prepare for exams. Select a study record above
-                          to add specific context.
+                        <p className="text-xs text-muted-foreground leading-relaxed max-w-md">
+                          Ask questions, break down complex topics, or practice
+                          active recall with grounded course materials.
                         </p>
                       </div>
 
                       {/* Suggested Start Buttons */}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 w-full pt-2">
                         {studySuggestedActions.map((act, idx) => (
                           <button
                             key={idx}
                             onClick={() => setPrompt(act.action)}
-                            className="p-3 text-left border rounded-xl text-xs hover:bg-zinc-50 transition-colors font-medium space-y-1 bg-white shadow-sm border-zinc-200/60"
+                            className="p-3 text-left border rounded-xl text-xs hover:bg-muted/40 transition-colors font-medium space-y-1 bg-card shadow-2xs border-border/60"
                           >
                             <div className="text-primary font-bold text-[10px] uppercase tracking-wide">
                               {act.title}
                             </div>
-                            <div className="text-muted-foreground truncate">
+                            <div className="text-muted-foreground text-[11px] truncate">
                               {act.label}
                             </div>
                           </button>
@@ -1037,107 +1552,186 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                     <MessageScrollerViewport className="scroll-fade">
                       <MessageScrollerContent
                         aria-busy={isThinking}
-                        className="max-w-3xl mx-auto py-2"
+                        className="max-w-3xl mx-auto py-4 px-4 space-y-4"
                       >
-                        {messages.map((msg) => (
-                          <div
-                            key={msg.id}
-                            className={cn(
-                              "flex flex-col max-w-[85%] space-y-2 p-4 rounded-2xl text-xs font-medium shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300",
-                              msg.sender === "student"
-                                ? "bg-primary text-primary-foreground ml-auto rounded-tr-none"
-                                : "bg-card border border-border/80 text-foreground mr-auto rounded-tl-none text-left",
-                            )}
-                          >
-                            <div className="font-semibold text-[9px] uppercase tracking-wider opacity-65 flex items-center justify-between">
-                              <span>
-                                {msg.sender === "student" ? "You" : "Study AI"}
-                              </span>
-                            </div>
+                        {messages.map((msg, index) => {
+                          const isLatestUserTurn =
+                            msg.sender === "student" &&
+                            (index === messages.length - 1 ||
+                              index === messages.length - 2);
+                          const isExpandedCitations = expandedCitationMessageIds.has(msg.id);
+                          const visibleCitations = isExpandedCitations
+                            ? msg.citations
+                            : (msg.citations || []).slice(0, 2);
+                          const remainingCitationsCount =
+                            (msg.citations?.length || 0) - 2;
 
-                            {msg.sender === "student" ? (
-                              <div className="space-y-2">
-                                {msg.attachments &&
-                                  msg.attachments.length > 0 && (
-                                    <div className="flex flex-wrap gap-1.5 pt-0.5">
-                                      {msg.attachments.map(
-                                        (att: any, aIdx: number) => (
-                                          <div
-                                            key={aIdx}
-                                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-xs font-medium"
-                                          >
-                                            <FileText className="size-3.5 shrink-0" />
-                                            <span className="truncate max-w-[160px] text-[11px]">
-                                              {att.name}
-                                            </span>
-                                          </div>
-                                        ),
+                          return (
+                            <MessageScrollerItem
+                              key={msg.id}
+                              scrollAnchor={isLatestUserTurn}
+                              className="w-full"
+                            >
+                              {/* Student Message Turn */}
+                              {msg.sender === "student" ? (
+                                <div className="flex flex-col items-end max-w-[85%] ml-auto group space-y-1">
+                                  <div className="bg-primary text-primary-foreground px-3.5 py-2 rounded-2xl rounded-tr-xs shadow-2xs text-xs font-medium leading-relaxed">
+                                    {msg.attachments &&
+                                      msg.attachments.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5 pb-1">
+                                          {msg.attachments.map(
+                                            (att: any, aIdx: number) => (
+                                              <div
+                                                key={aIdx}
+                                                className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg border border-primary-foreground/30 bg-primary-foreground/15 text-primary-foreground text-[11px] font-medium"
+                                              >
+                                                <FileText className="size-3 shrink-0" />
+                                                <span className="truncate max-w-[160px]">
+                                                  {att.name}
+                                                </span>
+                                              </div>
+                                            )
+                                          )}
+                                        </div>
                                       )}
+                                    {msg.text && (
+                                      <div className="whitespace-pre-wrap">
+                                        {msg.text}
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Student Quick Actions (Outside message bubble) */}
+                                  <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopyText(msg.text, `copy-${msg.id}`)}
+                                      className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                      title="Copy prompt"
+                                    >
+                                      {copiedActionId === `copy-${msg.id}` ? (
+                                        <Check className="size-3 text-emerald-500" />
+                                      ) : (
+                                        <Copy className="size-3" />
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditUserMessage(msg.text)}
+                                      className="p-1 hover:text-foreground text-muted-foreground/80 hover:bg-muted/50 rounded transition-colors"
+                                      title="Edit prompt in composer"
+                                    >
+                                      <Edit2 className="size-3" />
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                /* AI Message Turn */
+                                <div className="group relative flex flex-col max-w-[88%] space-y-2 p-3.5 rounded-2xl bg-card border border-border text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                  <RichMessageRenderer content={msg.text} />
+
+                                  {/* Optimized Compact Citations Accordion */}
+                                  {msg.citations && msg.citations.length > 0 && (
+                                    <div className="pt-2 border-t border-border/40 space-y-1.5">
+                                      <div className="flex items-center justify-between text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
+                                        <span className="flex items-center gap-1">
+                                          <FileText className="size-3 text-primary" />
+                                          References ({msg.citations.length})
+                                        </span>
+                                        {remainingCitationsCount > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleCitationExpand(msg.id)}
+                                            className="text-[10px] text-primary hover:underline font-semibold flex items-center gap-0.5 normal-case"
+                                          >
+                                            {isExpandedCitations ? (
+                                              "Show less"
+                                            ) : (
+                                              <>
+                                                <span>+{remainingCitationsCount} more</span>
+                                                <ChevronRight className="size-3 rotate-90" />
+                                              </>
+                                            )}
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                                        {visibleCitations?.map((c, cIdx) => (
+                                          <div
+                                            key={cIdx}
+                                            className="p-2 rounded-lg border border-border/60 bg-muted/20 text-[10px] space-y-1"
+                                          >
+                                            <div className="font-semibold text-foreground truncate">
+                                              {c.resource_name}
+                                              {c.page_number
+                                                ? ` (p. ${c.page_number})`
+                                                : ""}
+                                            </div>
+                                            {c.excerpt && (
+                                              <div className="text-muted-foreground italic line-clamp-2">
+                                                &ldquo;{c.excerpt}&rdquo;
+                                              </div>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
                                     </div>
                                   )}
-                                {msg.text && (
-                                  <div className="whitespace-pre-wrap leading-relaxed">
-                                    {msg.text}
+
+                                  {/* AI Message Action Bar (Copy & Try Again) */}
+                                  <div className="pt-1.5 border-t border-border/30 flex items-center justify-between text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => handleCopyText(msg.text, `ai-copy-${msg.id}`)}
+                                        className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                                      >
+                                        {copiedActionId === `ai-copy-${msg.id}` ? (
+                                          <>
+                                            <Check className="size-3 text-emerald-500" />
+                                            <span>Copied</span>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <Copy className="size-3" />
+                                            <span>Copy</span>
+                                          </>
+                                        )}
+                                      </Button>
+                                      {index === messages.length - 1 && (
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          onClick={handleRegenerateLastMessage}
+                                          className="h-6 px-2 text-[10px] gap-1 text-muted-foreground hover:text-foreground"
+                                          title="Regenerate this explanation"
+                                        >
+                                          <RotateCcw className="size-3" />
+                                          <span>Try Again</span>
+                                        </Button>
+                                      )}
+                                    </div>
                                   </div>
-                                )}
-                              </div>
-                            ) : (
-                              <RichMessageRenderer
-                                content={msg.text}
-                                citations={msg.citations}
-                              />
-                            )}
-
-                            {msg.fallback_used && (
-                              <Marker className="mt-2" role="status">
-                                <MarkerIcon className="bg-amber-500/10 text-amber-600 border-amber-500/20">
-                                  <ShieldAlert className="size-3" />
-                                </MarkerIcon>
-                                <MarkerContent className="text-[10px] text-amber-700">
-                                  No matching course materials found — answering
-                                  from general knowledge.
-                                </MarkerContent>
-                              </Marker>
-                            )}
-
-                            {msg.sender === "ai" && (
-                              <div className="pt-2.5 flex justify-end border-t border-border/30">
-                                <MessageActionBar
-                                  content={msg.text}
-                                  onRegenerate={() =>
-                                    handleSendMessage({
-                                      input:
-                                        messages[messages.length - 2]?.text ||
-                                        "",
-                                      attachments: [],
-                                    })
-                                  }
-                                  isStreaming={
-                                    isThinking &&
-                                    msg.id === messages[messages.length - 1]?.id
-                                  }
-                                  onStop={() => setIsThinking(false)}
-                                />
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                                </div>
+                              )}
+                            </MessageScrollerItem>
+                          );
+                        })}
 
                         {isThinking && (
-                          <div className="max-w-[85%] mr-auto py-1">
+                          <div className="py-2 mr-auto max-w-[88%]">
                             <Marker
                               role="status"
-                              className="bg-card border border-border/80 rounded-2xl p-3.5 space-y-1"
+                              className="bg-card border border-border rounded-2xl p-3 shadow-2xs"
                             >
-                              <div className="flex items-center gap-2">
-                                <MarkerIcon>
-                                  <Spinner className="size-3" />
-                                </MarkerIcon>
-                                <MarkerContent className="shimmer text-xs font-semibold text-primary">
-                                  Analyzing course materials & assessment
-                                  records...
-                                </MarkerContent>
-                              </div>
+                              <MarkerIcon>
+                                <Spinner />
+                              </MarkerIcon>
+                              <MarkerContent className="shimmer text-xs font-medium">
+                                Study AI is formulating a tailored academic explanation...
+                              </MarkerContent>
                             </Marker>
                           </div>
                         )}
@@ -1148,314 +1742,628 @@ export function AISupportChat({ initialTopicContext }: AISupportChatProps = {}) 
                 )}
               </div>
 
-              {isSelectedRwanda && (
-                <div className="p-3 my-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
-                  <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                  <div>
-                    <strong className="block font-semibold">AI Study Tutor Disabled</strong>
-                    <span className="opacity-90">
-                      The selected course has Kinyarwanda set as its instruction language. AI assistance is deactivated for Kinyarwanda modules according to institutional policies.
-                    </span>
-                  </div>
-                </div>
-              )}
-
-              {/* Input Bar with Attachment & Thinking support */}
-              <div className="pt-2">
-                <AIChatInput
-                  value={prompt}
-                  onChange={setPrompt}
-                  onSend={handleSendMessage}
-                  isGenerating={isThinking}
-                  onStop={() => setIsThinking(false)}
-                  attachments={attachments}
-                  setAttachments={setAttachments}
-                  disabled={isSelectedRwanda}
-                  placeholder={isSelectedRwanda ? "AI Study Tutor is disabled for Kinyarwanda courses" : undefined}
-                  onUploadFile={async (file: File) => {
-                    const formData = new FormData();
-                    formData.append("file", file);
-                    const res =
-                      await studentApi.uploadPersonalResource(formData);
-                    return { id: res.id };
-                  }}
-                />
-              </div>
-            </TabsContent>
-
-            {/* Tab 2: REVISION CENTER */}
-            <TabsContent
-              value="revision"
-              className="flex-1 flex flex-col min-h-0 mt-0 data-[state=inactive]:hidden focus-visible:outline-none"
-            >
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-                <Card className="shadow-none border border-zinc-200/60 lg:col-span-4 bg-white rounded-xl">
-                  <CardHeader className="py-4">
-                    <CardTitle className="text-sm font-semibold">
-                      Generate Revision Guide
-                    </CardTitle>
-                    <CardDescription className="text-xs">
-                      Summarize materials and create checklists.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                      <Label
-                        htmlFor="rev-topic"
-                        className="text-xs font-semibold text-zinc-700"
-                      >
-                        Topic or Concept Name
-                      </Label>
-                      <Input
-                        id="rev-topic"
-                        placeholder="e.g. Database Normalization"
-                        value={revisionTopic}
-                        onChange={(e) => setRevisionTopic(e.target.value)}
-                        className="h-9 text-xs"
-                      />
-                    </div>
-                    <Button
-                      onClick={handleGenerateRevision}
-                      disabled={isGeneratingRevision || !revisionTopic}
-                      className="w-full h-9 text-xs font-semibold"
-                    >
-                      {isGeneratingRevision && (
-                        <RefreshCw className="size-3.5 animate-spin mr-1.5" />
-                      )}
-                      Generate Study Note
-                    </Button>
-                  </CardContent>
-                </Card>
-
-                <div className="lg:col-span-8 space-y-4">
-                  {isGeneratingRevision && (
-                    <div className="py-2">
-                      <Marker
-                        role="status"
-                        className="bg-card border border-border/80 rounded-xl p-3"
-                      >
-                        <MarkerIcon>
-                          <Spinner />
-                        </MarkerIcon>
-                        <MarkerContent className="shimmer text-xs">
-                          Study AI is thinking & compiling revision guide...
-                        </MarkerContent>
-                      </Marker>
+              {/* ── Pinned Bottom Composer with Collapsible Helper Chips ── */}
+              <div className="shrink-0 border-t border-border/40 bg-background/95 backdrop-blur-sm p-3 md:p-4">
+                <div className="max-w-3xl mx-auto w-full space-y-2">
+                  {/* Rwanda Course Warning */}
+                  {(isSelectedRwanda || isBlockedByLanguagePolicy) && (
+                    <div className="p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2.5">
+                      <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="block font-semibold">
+                          AI Study Tutor Disabled for Course
+                        </strong>
+                        <span className="opacity-90">
+                          The selected course has Kinyarwanda set as its instruction language. AI assistance is deactivated for Kinyarwanda modules according to institutional academic policy.
+                        </span>
+                      </div>
                     </div>
                   )}
 
-                  {revisionResult && (
-                    <div className="space-y-6 animate-in fade-in duration-300">
-                      <Card className="shadow-none border border-zinc-200/60 bg-white rounded-xl">
-                        <CardHeader className="py-4 border-b bg-zinc-50/50">
-                          <div className="flex justify-between items-center">
-                            <CardTitle className="text-sm font-semibold text-primary">
-                              {revisionTopic}
-                            </CardTitle>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-[10px] font-bold uppercase tracking-wider"
-                              onClick={() => {
-                                navigator.clipboard.writeText(
-                                  `${revisionTopic} Revision Summary\n\n${revisionResult.summary}`,
-                                );
-                                toast.success("Revision summary copied!");
-                              }}
-                            >
-                              Copy Guide
-                            </Button>
-                          </div>
-                        </CardHeader>
-                        <CardContent className="p-6 space-y-6">
-                          <div className="space-y-2">
-                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                              <BookOpen className="size-3.5 text-primary" /> Concept
-                              Summary
-                            </h4>
-                            <div className="p-4 bg-zinc-50 rounded-xl border border-zinc-200/40">
-                              <RichMessageRenderer
-                                content={revisionResult.summary}
-                              />
+                  {/* Helper Chips Row: Scope, Tips, Integrity */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                    {/* Active Scope Chip */}
+                    {selectedResourceName &&
+                      !isSelectedRwanda &&
+                      !isBlockedByLanguagePolicy && (
+                        <span className="text-[11px] font-medium text-primary flex items-center gap-1.5 bg-primary/5 border border-primary/20 px-2.5 py-0.5 rounded-lg">
+                          <FileText className="size-3" />
+                          Searching:{" "}
+                          <strong className="font-semibold">
+                            {selectedResourceName}
+                          </strong>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedResource(null)}
+                            className="ml-1 hover:text-red-500 text-muted-foreground transition-colors"
+                            title="Clear scope and search general knowledge"
+                          >
+                            <X className="size-3" />
+                          </button>
+                        </span>
+                      )}
+
+                    {/* Collapsible Chips for Tips & Integrity (Near Composer) */}
+                    <div className="flex items-center gap-2 ml-auto">
+                      {/* Tips Popover Chip */}
+                      <div className="relative" ref={tipsRef}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setTipsPopoverOpen(!tipsPopoverOpen);
+                            setIntegrityPopoverOpen(false);
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <Lightbulb className="size-3 text-amber-500" />
+                          <span>Study Tips</span>
+                        </button>
+                        {tipsPopoverOpen && (
+                          <div className="absolute right-0 bottom-full mb-2 w-72 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                            <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                              <Lightbulb className="size-3.5 text-amber-500" />
+                              Active Recall Tips
+                            </div>
+                            <div className="space-y-2 text-xs text-muted-foreground leading-relaxed">
+                              <p>
+                                • Try explaining the concept in your own words
+                                first.
+                              </p>
+                              <p>
+                                • Ask for practice questions and scenarios to test
+                                retention.
+                              </p>
                             </div>
                           </div>
+                        )}
+                      </div>
 
-                          {revisionResult.checklist &&
-                            revisionResult.checklist.length > 0 && (
-                              <div className="space-y-2">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                                  <ListChecks className="size-3.5 text-primary" />{" "}
-                                  Key Learning Checklist
-                                </h4>
-                                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium text-foreground/75 pl-1">
-                                  {revisionResult.checklist.map((item, idx) => (
-                                    <li
-                                      key={idx}
-                                      className="flex items-start gap-2 bg-emerald-500/5 p-2.5 border border-emerald-500/15 rounded-xl transition-all hover:bg-emerald-500/10"
-                                    >
-                                      <CheckCircle2 className="size-4 text-emerald-600 shrink-0 mt-0.5" />
-                                      <span>{item}</span>
-                                    </li>
-                                  ))}
-                                </ul>
-                              </div>
-                            )}
-
-                          {revisionResult.readings &&
-                            revisionResult.readings.length > 0 && (
-                              <div className="space-y-2">
-                                <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-                                  <BookOpen className="size-3.5 text-primary" />{" "}
-                                  Recommended Readings
-                                </h4>
-                                <div className="grid grid-cols-1 gap-2 pl-1">
-                                  {revisionResult.readings.map((item, idx) => (
-                                    <UIAttachment
-                                      key={idx}
-                                      className="bg-card/20 border-border/40 hover:border-primary/20"
-                                    >
-                                      <UIAttachmentMedia>
-                                        <FileText className="size-4 text-primary" />
-                                      </UIAttachmentMedia>
-                                      <UIAttachmentContent>
-                                        <UIAttachmentTitle className="text-xs">
-                                          {item}
-                                        </UIAttachmentTitle>
-                                        <UIAttachmentDescription className="text-[10px]">
-                                          Academic Reference
-                                        </UIAttachmentDescription>
-                                      </UIAttachmentContent>
-                                    </UIAttachment>
-                                  ))}
-                                </div>
-                              </div>
-                            )}
-                        </CardContent>
-                      </Card>
+                      {/* Integrity Popover Chip */}
+                      <div className="relative" ref={integrityRef}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIntegrityPopoverOpen(!integrityPopoverOpen);
+                            setTipsPopoverOpen(false);
+                          }}
+                          className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full border border-border/60 bg-muted/30 text-muted-foreground hover:text-foreground transition-colors"
+                        >
+                          <ShieldAlert className="size-3 text-red-500" />
+                          <span>Academic Integrity</span>
+                        </button>
+                        {integrityPopoverOpen && (
+                          <div className="absolute right-0 bottom-full mb-2 w-72 bg-popover text-popover-foreground border rounded-xl shadow-xl p-3 z-50 animate-in fade-in slide-in-from-bottom-2 duration-150">
+                            <div className="text-[10px] font-bold text-red-600 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                              <ShieldAlert className="size-3.5" />
+                              Honor Code Policy
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">
+                              Student AI provides concept explanations and
+                              study support. Generating cheat sheets or attempting
+                              to bypass assessment integrity checks is prohibited.
+                            </p>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  )}
+                  </div>
 
-                  {!revisionResult && !isGeneratingRevision && (
-                    <div className="border border-dashed border-zinc-200 rounded-xl p-12 text-center text-xs text-muted-foreground bg-white/40">
-                      <BookOpen className="size-8 mx-auto mb-2 opacity-40 text-muted-foreground" />
-                      Your generated revision guide and checklists will appear
-                      here.
-                    </div>
-                  )}
+                  {/* Input Box */}
+                  <AIChatInput
+                    value={prompt}
+                    onChange={setPrompt}
+                    onSend={handleSendMessage}
+                    isGenerating={isThinking}
+                    onStop={() => setIsThinking(false)}
+                    attachments={attachments}
+                    setAttachments={setAttachments}
+                    disabled={isSelectedRwanda || isBlockedByLanguagePolicy}
+                    placeholder={
+                      isSelectedRwanda || isBlockedByLanguagePolicy
+                        ? "AI Study Tutor is disabled for Kinyarwanda courses"
+                        : "Ask your AI tutor anything..."
+                    }
+                    onUploadFile={async (file: File) => {
+                      const formData = new FormData();
+                      formData.append("file", file);
+                      const res = await studentApi.uploadPersonalResource(
+                        formData
+                      );
+                      return { id: res.id };
+                    }}
+                  />
                 </div>
               </div>
-            </TabsContent>
-          </div>
+            </div>
+          )}
 
-          {/* Right Side Panel: New Chat & Previous Chats History */}
-          <div
-            className={cn(
-              "hidden lg:flex flex-col border border-border/40 bg-card/40 backdrop-blur-sm rounded-xl transition-all duration-300 shrink-0 relative overflow-hidden shadow-xs",
-              isRightHistoryCollapsed ? "w-[48px]" : "w-[260px] xl:w-[280px]"
-            )}
-          >
-            {/* Header & Toggle */}
-            <div className="p-2.5 border-b border-border/40 bg-muted/30 flex items-center justify-between shrink-0">
-              {!isRightHistoryCollapsed && (
-                <div className="flex items-center gap-2 text-xs font-bold text-foreground">
-                  <History className="size-4 text-primary" />
-                  <span>Chat History</span>
-                  {rawHistory.length > 0 && (
-                    <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-mono font-semibold">
-                      {rawHistory.length}
+          {/* Tab 2: REVISION CENTER (Curriculum-aware Learning Units & Socratic Loop) */}
+          {activeTab === "revision" && (
+            <div className="flex-1 overflow-y-auto p-4 md:p-6 max-w-4xl w-full mx-auto space-y-6">
+              {/* Header & Course Selection */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-border/40">
+                <div>
+                  <h2 className="text-sm font-bold tracking-tight text-foreground flex items-center gap-2">
+                    <BookOpen className="size-4 text-primary" />
+                    Curriculum Revision Center
+                  </h2>
+                  <p className="text-xs text-muted-foreground">
+                    Select an official course Learning Unit to start an interactive Socratic review or generate an offline revision guide.
+                  </p>
+                </div>
+
+                {/* Course Switcher */}
+                {workspaces.length > 0 && (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-xs font-semibold text-muted-foreground">Course:</span>
+                    <select
+                      value={selectedRevisionWorkspace || ""}
+                      onChange={(e) => {
+                        setSelectedRevisionWorkspace(e.target.value);
+                        setRevisionResult(null);
+                      }}
+                      className="h-8 px-2.5 text-xs font-semibold bg-muted/40 border border-border/70 rounded-lg text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                    >
+                      {workspaces.map((ws) => (
+                        <option key={ws.id} value={ws.id}>
+                          {ws.code}: {ws.title}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Learning Units Section */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <Layers className="size-3.5 text-primary" />
+                    Course Learning Units
+                  </div>
+                  {learningUnits.length > 0 && (
+                    <Badge variant="secondary" className="text-[10px]">
+                      {learningUnits.length} Units Available
                     </Badge>
                   )}
                 </div>
-              )}
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsRightHistoryCollapsed(!isRightHistoryCollapsed)}
-                className="size-7 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors mx-auto"
-                title={isRightHistoryCollapsed ? "Expand Chat History" : "Collapse Chat History"}
-                type="button"
-              >
-                {isRightHistoryCollapsed ? (
-                  <PanelRightOpen className="size-4 text-primary" />
-                ) : (
-                  <PanelRightClose className="size-4" />
-                )}
-              </Button>
-            </div>
 
-            {/* New Chat Button */}
-            <div className="p-2.5 border-b border-border/30">
-              {!isRightHistoryCollapsed ? (
-                <Button
-                  onClick={handleStartNewChat}
-                  className="w-full h-8 gap-2 text-xs font-bold rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs"
-                  type="button"
-                >
-                  <Plus className="size-3.5" />
-                  <span>New Chat</span>
-                </Button>
-              ) : (
-                <Button
-                  onClick={handleStartNewChat}
-                  size="icon"
-                  className="size-7 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 shadow-2xs mx-auto flex"
-                  title="New Chat"
-                  type="button"
-                >
-                  <Plus className="size-3.5" />
-                </Button>
-              )}
-            </div>
-
-            {/* Previous Chats List */}
-            {!isRightHistoryCollapsed && (
-              <div className="flex-1 overflow-y-auto p-2 space-y-1.5 min-h-0">
-                <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider px-2 py-1 flex items-center justify-between">
-                  <span>Previous Chats</span>
-                  <Clock className="size-3" />
-                </div>
-
-                {rawHistory.length === 0 ? (
-                  <div className="p-4 text-center text-xs text-muted-foreground font-medium bg-muted/20 rounded-lg border border-dashed border-border/40 my-2">
-                    No previous chats yet.
+                {isLoadingLearningUnits ? (
+                  <div className="p-8 text-center bg-muted/20 rounded-xl border border-border/40">
+                    <Spinner className="size-6 text-primary mx-auto mb-2" />
+                    <p className="text-xs text-muted-foreground font-medium">
+                      Loading curriculum learning units...
+                    </p>
                   </div>
-                ) : (
-                  rawHistory.slice().reverse().map((item) => {
-                    const isActive = activeHistoryId === item.id;
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => handleSelectHistoryItem(item)}
-                        className={cn(
-                          "group p-2.5 rounded-xl border text-xs cursor-pointer transition-all space-y-1 text-left",
-                          isActive
-                            ? "border-primary/50 bg-primary/10 text-primary shadow-2xs font-semibold"
-                            : "border-border/30 bg-background/60 hover:bg-background hover:border-border/70 text-foreground/90"
-                        )}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <MessageSquare className="size-3.5 shrink-0 text-primary" />
-                          <span className="truncate font-medium flex-1 text-[11px]">
-                            {item.question}
-                          </span>
-                        </div>
-                        <div className="text-[9px] text-muted-foreground flex items-center justify-between pt-0.5">
-                          <span>{formatHistoryDate(item.created_at)}</span>
-                          {item.citations && item.citations.length > 0 && (
-                            <span className="text-primary/80 font-mono">
-                              {item.citations.length} ref{item.citations.length > 1 ? "s" : ""}
-                            </span>
+                ) : learningUnits.length === 0 ? (
+                  /* Fallback Custom Topic Card */
+                  <Card className="shadow-none border border-dashed border-border/60 bg-card rounded-xl p-4">
+                    <CardHeader className="p-0 pb-3">
+                      <CardTitle className="text-xs font-semibold text-foreground">
+                        Custom Revision Topic
+                      </CardTitle>
+                      <CardDescription className="text-xs">
+                        No auto-extracted units found for this course. Enter any topic or concept name to revise.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-0 space-y-3">
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="e.g. Relational Calculus & Query Optimization"
+                          value={customRevisionTopic}
+                          onChange={(e) => setCustomRevisionTopic(e.target.value)}
+                          className="h-9 text-xs flex-1"
+                        />
+                        <Button
+                          onClick={() => handleGenerateDownloadableRevisionSheet(null)}
+                          disabled={isGeneratingRevision || !customRevisionTopic.trim()}
+                          className="h-9 px-4 text-xs font-semibold"
+                        >
+                          {isGeneratingRevision && (
+                            <RefreshCw className="size-3.5 animate-spin mr-1.5" />
                           )}
-                        </div>
+                          Generate Sheet
+                        </Button>
                       </div>
-                    );
-                  })
+                    </CardContent>
+                  </Card>
+                ) : (
+                  /* Learning Units Grid */
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {learningUnits.map((unit) => {
+                      const isSelected = selectedLearningUnit?.id === unit.id;
+                      return (
+                        <div
+                          key={unit.id}
+                          onClick={() => setSelectedLearningUnit(unit)}
+                          className={cn(
+                            "p-3.5 rounded-xl border text-xs transition-all space-y-2 cursor-pointer text-left bg-card",
+                            isSelected
+                              ? "border-primary bg-primary/5 shadow-2xs"
+                              : "border-border/60 hover:border-border hover:bg-muted/20"
+                          )}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="font-semibold text-foreground text-xs leading-snug line-clamp-1">
+                              <span className="text-primary font-mono mr-1.5">
+                                Unit {unit.order_index + 1}:
+                              </span>
+                              {unit.title}
+                            </div>
+                            {unit.estimated_study_minutes && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] font-mono shrink-0 px-1.5 py-0"
+                              >
+                                {unit.estimated_study_minutes}m
+                              </Badge>
+                            )}
+                          </div>
+
+                          {unit.summary && (
+                            <p className="text-[11px] text-muted-foreground line-clamp-2 leading-relaxed">
+                              {unit.summary}
+                            </p>
+                          )}
+
+                          <div className="flex items-center gap-2 pt-1 border-t border-border/40">
+                            {/* Primary Action: Socratic Review Turn in Chat */}
+                            <Button
+                              variant="default"
+                              size="sm"
+                              className="h-7 text-[11px] font-semibold flex-1 gap-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStartSocraticReview(unit.title);
+                              }}
+                            >
+                              <Sparkles className="size-3" />
+                              <span>Socratic Chat</span>
+                              <ArrowRight className="size-2.5 ml-0.5" />
+                            </Button>
+
+                            {/* Secondary Action: Offline Downloadable Sheet */}
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-[11px] font-semibold gap-1"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedLearningUnit(unit);
+                                handleGenerateDownloadableRevisionSheet(unit);
+                              }}
+                              disabled={isGeneratingRevision}
+                              title="Generate offline revision guide (.md)"
+                            >
+                              <Download className="size-3" />
+                              <span>Sheet</span>
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
-            )}
+
+              {/* Generating Status Marker */}
+              {isGeneratingRevision && (
+                <div className="py-2">
+                  <Marker
+                    role="status"
+                    className="bg-card border border-border rounded-xl p-4"
+                  >
+                    <MarkerIcon>
+                      <Spinner />
+                    </MarkerIcon>
+                    <MarkerContent className="shimmer text-xs">
+                      Compiling structured offline revision sheet and learning checklist...
+                    </MarkerContent>
+                  </Marker>
+                </div>
+              )}
+
+              {/* Revision Guide Sheet Results Card */}
+              {revisionResult && (
+                <div className="space-y-4 animate-in fade-in duration-300">
+                  <Card className="shadow-none border border-border/60 bg-card rounded-xl overflow-hidden">
+                    <CardHeader className="py-3 px-4 border-b border-border/40 bg-muted/20 flex flex-row items-center justify-between">
+                      <div>
+                        <CardTitle className="text-xs font-bold uppercase tracking-wider text-primary flex items-center gap-1.5">
+                          <ListChecks className="size-4" />
+                          <span>{revisionResult.title || "Revision Guide"}</span>
+                        </CardTitle>
+                        <CardDescription className="text-[11px]">
+                          Curriculum-grounded summary, interactive recall checklist, and readings.
+                        </CardDescription>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {/* Download Markdown Action */}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs font-semibold bg-background"
+                          onClick={() => {
+                            if (revisionResult.markdown) {
+                              const safeName = (revisionResult.title || "Revision_Guide")
+                                .replace(/[^a-zA-Z0-9_-]/g, "_");
+                              downloadTextFile(`${safeName}_Revision_Sheet.md`, revisionResult.markdown);
+                              toast.success("Revision sheet downloaded as markdown file!");
+                            }
+                          }}
+                        >
+                          <Download className="size-3.5 text-primary" />
+                          <span>Download .md</span>
+                        </Button>
+
+                        {/* Jump to Socratic Chat with this topic */}
+                        <Button
+                          variant="default"
+                          size="sm"
+                          className="h-8 gap-1.5 text-xs font-semibold"
+                          onClick={() =>
+                            handleStartSocraticReview(revisionResult.title || "Revision Topic")
+                          }
+                        >
+                          <Sparkles className="size-3.5" />
+                          <span>Practice in Chat</span>
+                        </Button>
+                      </div>
+                    </CardHeader>
+
+                    <CardContent className="p-4 space-y-4">
+                      {/* Executive Summary */}
+                      <div className="space-y-1.5">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                          Core Concept Summary
+                        </h4>
+                        <div className="p-3 bg-muted/20 rounded-xl border border-border/40">
+                          <RichMessageRenderer content={revisionResult.summary} />
+                        </div>
+                      </div>
+
+                      {/* Interactive Learning Outcomes Checklist */}
+                      {revisionResult.checklist &&
+                        revisionResult.checklist.length > 0 && (
+                          <div className="space-y-2 pt-2 border-t border-border/40">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
+                                Actionable Learning Checklist
+                              </h4>
+                              <span className="text-[11px] font-mono text-muted-foreground">
+                                {checkedChecklistItems.size}/{revisionResult.checklist.length} Mastered
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs font-medium pl-1">
+                              {revisionResult.checklist.map((item, idx) => {
+                                const isChecked = checkedChecklistItems.has(idx);
+                                return (
+                                  <div
+                                    key={idx}
+                                    onClick={() => toggleChecklistItem(idx)}
+                                    className={cn(
+                                      "flex items-start gap-2.5 p-2.5 border rounded-xl cursor-pointer transition-all text-left",
+                                      isChecked
+                                        ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-900 dark:text-emerald-200 line-through opacity-80"
+                                        : "bg-muted/20 border-border/60 hover:bg-muted/40 text-foreground"
+                                    )}
+                                  >
+                                    {isChecked ? (
+                                      <CheckSquare className="size-4 text-emerald-600 shrink-0 mt-0.5" />
+                                    ) : (
+                                      <Square className="size-4 text-muted-foreground shrink-0 mt-0.5" />
+                                    )}
+                                    <span className="leading-snug">{item}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+
+                      {/* Recommended Readings & References */}
+                      {revisionResult.readings &&
+                        revisionResult.readings.length > 0 && (
+                          <div className="space-y-2 pt-2 border-t border-border/40">
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                              <BookOpen className="size-3.5 text-primary" />
+                              Recommended Readings & References
+                            </h4>
+                            <div className="grid grid-cols-1 gap-2 pl-1">
+                              {revisionResult.readings.map((item, idx) => (
+                                <div
+                                  key={idx}
+                                  className="p-2.5 rounded-lg border border-border/60 bg-muted/20 text-xs flex items-center gap-2 text-left"
+                                >
+                                  <FileText className="size-4 text-primary shrink-0" />
+                                  <span className="font-medium text-foreground">
+                                    {item}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ── Delete Conversation Confirmation Modal ── */}
+      <Dialog
+        open={!!conversationToDelete}
+        onOpenChange={(open) => {
+          if (!open) setConversationToDelete(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-destructive">
+              <Trash2 className="size-4" />
+              Delete Conversation
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Are you sure you want to delete this conversation? This will permanently remove the chat thread from your history.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setConversationToDelete(null)}
+              disabled={isDeletingConversation}
+              className="text-xs"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={handleConfirmDeleteConversation}
+              disabled={isDeletingConversation}
+              className="text-xs gap-1.5"
+            >
+              {isDeletingConversation && <RefreshCw className="size-3 animate-spin" />}
+              Delete Chat
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Share Conversation Modal ── */}
+      <Dialog open={shareModalOpen} onOpenChange={setShareModalOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+              <Share2 className="size-4 text-primary" />
+              Share Conversation
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Share your academic tutor study dialogue and grounded explanations with peers or study groups.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            <div className="p-3 bg-muted/30 rounded-xl border border-border/50 max-h-48 overflow-y-auto font-mono text-[11px] text-muted-foreground whitespace-pre-wrap">
+              {buildConversationMarkdown()}
+            </div>
           </div>
-        </Tabs>
-      </Card>
+
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                handleCopyText(window.location.href, "share-link");
+                toast.success("Page link copied to clipboard!");
+              }}
+              className="text-xs gap-1.5"
+            >
+              <Copy className="size-3.5" />
+              Copy URL
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              onClick={() => {
+                handleCopyText(buildConversationMarkdown(), "share-transcript");
+                toast.success("Full formatted transcript copied to clipboard!");
+              }}
+              className="text-xs gap-1.5"
+            >
+              <Copy className="size-3.5" />
+              Copy Markdown
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Export Conversation Modal ── */}
+      <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
+              <Download className="size-4 text-primary" />
+              Export Conversation
+            </DialogTitle>
+            <DialogDescription className="text-xs">
+              Download your study dialogue for offline revision or printing.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid grid-cols-1 gap-2.5 py-2">
+            {/* Markdown */}
+            <button
+              type="button"
+              onClick={() => {
+                downloadTextFile("AI_Tutor_Study_Chat.md", buildConversationMarkdown());
+                toast.success("Downloaded conversation as Markdown (.md)");
+                setExportModalOpen(false);
+              }}
+              className="p-3 border rounded-xl flex items-center justify-between text-left hover:bg-muted/40 transition-colors bg-card"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="size-8 rounded-lg bg-primary/10 text-primary flex items-center justify-center font-bold text-xs">
+                  MD
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Markdown Document</div>
+                  <div className="text-[10px] text-muted-foreground">Formatted with headings, checklists & citations</div>
+                </div>
+              </div>
+              <Download className="size-4 text-muted-foreground" />
+            </button>
+
+            {/* Plain Text */}
+            <button
+              type="button"
+              onClick={() => {
+                downloadTextFile("AI_Tutor_Study_Chat.txt", buildConversationPlainText(), "text/plain;charset=utf-8;");
+                toast.success("Downloaded conversation as Plain Text (.txt)");
+                setExportModalOpen(false);
+              }}
+              className="p-3 border rounded-xl flex items-center justify-between text-left hover:bg-muted/40 transition-colors bg-card"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="size-8 rounded-lg bg-muted text-muted-foreground flex items-center justify-center font-bold text-xs">
+                  TXT
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Plain Text (.txt)</div>
+                  <div className="text-[10px] text-muted-foreground">Simple raw transcript for any device</div>
+                </div>
+              </div>
+              <Download className="size-4 text-muted-foreground" />
+            </button>
+
+            {/* Print / PDF */}
+            <button
+              type="button"
+              onClick={() => {
+                window.print();
+                setExportModalOpen(false);
+              }}
+              className="p-3 border rounded-xl flex items-center justify-between text-left hover:bg-muted/40 transition-colors bg-card"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="size-8 rounded-lg bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                  <Printer className="size-4" />
+                </div>
+                <div>
+                  <div className="text-xs font-semibold text-foreground">Print to PDF</div>
+                  <div className="text-[10px] text-muted-foreground">Print view or save as PDF via browser</div>
+                </div>
+              </div>
+              <Printer className="size-4 text-muted-foreground" />
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </MessageScrollerProvider>
   );
 }

@@ -102,6 +102,7 @@ export function ReaderAskAiPanel({
 
       const res: AskAIReaderResponse = await studyReaderApi.askAI({
         question: questionText,
+        source_surface: "study_reader",
         conversation_history: history,
         selected_resource_id: source.id,
         teaching_workspace_id: source.workspaceId,

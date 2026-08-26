@@ -44,12 +44,12 @@ interface RichMessageRendererProps {
 
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 
-/** Formatted inline text component for bold **text**, `code`, and KaTeX math formulas */
+/** Formatted inline text component for bold **text**, italic *text*, `code`, and KaTeX math formulas */
 function FormattedText({ text }: { text: string }) {
   if (!text) return null;
 
-  // Split by bold (**...**) and inline code (`...`)
-  const parts = text.split(/(\*\*.*?\*\*|`.*?`)/g);
+  // Split by bold (**...**), italic (*...* or _..._), and inline code (`...`)
+  const parts = text.split(/(\*\*.*?\*\*|\*[^*\n]+?\*|_[^_\n]+?_|`.*?`)/g);
 
   return (
     <>
@@ -59,6 +59,17 @@ function FormattedText({ text }: { text: string }) {
             <strong key={i} className="font-semibold text-foreground">
               {renderRichMathText(part.slice(2, -2))}
             </strong>
+          );
+        }
+        if (
+          ((part.startsWith("*") && part.endsWith("*")) ||
+            (part.startsWith("_") && part.endsWith("_"))) &&
+          part.length > 2
+        ) {
+          return (
+            <span key={i} className="italic text-foreground/90 font-medium">
+              {renderRichMathText(part.slice(1, -1))}
+            </span>
           );
         }
         if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
@@ -267,32 +278,49 @@ function ParsedContentBlock({ text }: { text: string }) {
         continue;
       }
 
-      // Check Markdown Headers (# Heading 1, ## Heading 2, ### Heading 3)
-      if (trimmed.startsWith("# ")) {
-        flushList(`h1-${i}`);
+      // Check Horizontal Rules (---, ***, ___)
+      if (/^(\s*[-*_]\s*){3,}$/.test(trimmed)) {
+        flushList(`hr-${i}`);
         result.push(
-          <h1 key={`h1-${i}`} className="mt-4 mb-2 text-base font-bold text-foreground tracking-tight border-b border-border/40 pb-1.5">
-            <FormattedText text={trimmed.replace(/^#\s+/, "")} />
-          </h1>
+          <div key={`hr-${i}`} className="my-3 py-0.5">
+            <Separator className="bg-border/50" />
+          </div>
         );
         continue;
       }
-      if (trimmed.startsWith("## ")) {
-        flushList(`h2-${i}`);
-        result.push(
-          <h2 key={`h2-${i}`} className="mt-3.5 mb-1.5 text-sm font-bold text-foreground tracking-tight">
-            <FormattedText text={trimmed.replace(/^##\s+/, "")} />
-          </h2>
-        );
-        continue;
-      }
-      if (trimmed.startsWith("### ")) {
-        flushList(`h3-${i}`);
-        result.push(
-          <h3 key={`h3-${i}`} className="mt-3 mb-1 text-xs font-bold text-foreground uppercase tracking-wide">
-            <FormattedText text={trimmed.replace(/^###\s+/, "")} />
-          </h3>
-        );
+
+      // Check Markdown Headers (# Heading 1, ## Heading 2, ### Heading 3, #### Heading 4, etc.)
+      const headerMatch = trimmed.match(/^(#{1,6})\s*(.*)$/);
+      if (headerMatch && headerMatch[2]) {
+        flushList(`h-${i}`);
+        const level = headerMatch[1].length;
+        const headerText = headerMatch[2].trim();
+        if (level === 1) {
+          result.push(
+            <h1 key={`h1-${i}`} className="mt-4 mb-2 text-base font-bold text-foreground tracking-tight border-b border-border/40 pb-1.5">
+              <FormattedText text={headerText} />
+            </h1>
+          );
+        } else if (level === 2) {
+          result.push(
+            <h2 key={`h2-${i}`} className="mt-3.5 mb-1.5 text-sm font-bold text-foreground tracking-tight">
+              <FormattedText text={headerText} />
+            </h2>
+          );
+        } else if (level === 3) {
+          result.push(
+            <h3 key={`h3-${i}`} className="mt-3 mb-1 text-xs font-bold text-foreground tracking-wide">
+              <FormattedText text={headerText} />
+            </h3>
+          );
+        } else {
+          result.push(
+            <h4 key={`h4-${i}`} className="mt-2.5 mb-1 text-xs font-semibold text-foreground/90 tracking-normal flex items-center gap-1.5">
+              <span className="size-1 rounded-full bg-primary/60 shrink-0" />
+              <FormattedText text={headerText} />
+            </h4>
+          );
+        }
         continue;
       }
 

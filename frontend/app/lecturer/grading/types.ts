@@ -261,6 +261,8 @@ export interface SubmissionRecord extends AiSuggestion {
   score: number | null;
   override_score: number | null;
   feedback: string | null;
+  feedback_comments?: string | null;
+  rubric_scores?: RubricScore[] | null;
   is_final: boolean;
 }
 
@@ -275,6 +277,9 @@ export interface ClassStatRecord {
   reviewed_count: number;
   released_count: number;
   latest_submission_at: string | null;
+  performance_avg?: number | null;
+  average_score?: number | null;
+  pass_rate?: number | null;
 }
 
 export interface ClassAiSummary {

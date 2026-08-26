@@ -1,4 +1,4 @@
-﻿// app/student/courses/page.tsx
+// app/student/courses/page.tsx
 "use client";
 
 import React, { useEffect, useState, useMemo } from "react";
@@ -14,6 +14,8 @@ import {
   ChevronDown,
   ChevronRight,
   Calendar,
+  Layers,
+  ArrowRight,
 } from "lucide-react";
 import Link from "next/link";
 import { studentApi, StudentCourseListItem } from "@/lib/api/student";
@@ -21,9 +23,9 @@ import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { cn } from "@/lib/utils";
 
 const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: "text-success bg-success/10 border-success/20",
+  ACTIVE: "text-emerald-600 bg-emerald-500/10 border-emerald-500/20",
   COMPLETED: "text-primary bg-primary/10 border-primary/20",
-  INACTIVE: "text-muted-foreground bg-muted border-border",
+  INACTIVE: "text-muted-foreground bg-muted border-border/60",
 };
 
 function statusLabel(s: string) {
@@ -37,9 +39,7 @@ export default function StudentCoursesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
-  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [collapsedYears, setCollapsedYears] = useState<Record<string, boolean>>({});
 
   const loadWorkspaces = async () => {
     setLoading(true);
@@ -48,7 +48,7 @@ export default function StudentCoursesPage() {
       setWorkspaces(await studentApi.getWorkspaces());
     } catch (err) {
       console.error(err);
-      setError("Unable to load your courses.");
+      setError("Unable to load your enrolled courses.");
     } finally {
       setLoading(false);
     }
@@ -63,14 +63,14 @@ export default function StudentCoursesPage() {
     if (!q) return workspaces;
     return workspaces.filter(
       (w) =>
-        w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q),
+        w.title?.toLowerCase().includes(q) || w.code?.toLowerCase().includes(q)
     );
   }, [workspaces, searchQuery]);
 
   const grouped = useMemo(() => {
     const map: Record<string, StudentCourseListItem[]> = {};
     filtered.forEach((ws) => {
-      const key = ws.academic_year || "Ongoing";
+      const key = ws.academic_year || "Ongoing Academic Period";
       if (!map[key]) map[key] = [];
       map[key].push(ws);
     });
@@ -89,7 +89,7 @@ export default function StudentCoursesPage() {
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {[...Array(6)].map((_, i) => (
-            <Skeleton key={i} className="h-44 rounded-xl" />
+            <Skeleton key={i} className="h-48 rounded-xl" />
           ))}
         </div>
       </div>
@@ -99,20 +99,20 @@ export default function StudentCoursesPage() {
   return (
     <div className="w-full space-y-4 animate-in fade-in duration-200">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/25 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
         <div className="space-y-0.5">
           <h1 className="text-lg font-semibold text-foreground flex items-center gap-2">
-            <GraduationCap className="size-4.5 text-primary" />
+            <GraduationCap className="size-5 text-primary" />
             My Courses
           </h1>
           <p className="text-xs text-muted-foreground font-medium">
-            {filtered.length} enrolled course{filtered.length !== 1 ? "s" : ""}
+            {filtered.length} enrolled course{filtered.length !== 1 ? "s" : ""} across academic periods
           </p>
         </div>
-        <div className="relative w-full sm:w-60">
+        <div className="relative w-full sm:w-64">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search courses…"
+            placeholder="Search courses or codes…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="pl-8 h-8 text-xs bg-background border-border/60"
@@ -135,14 +135,14 @@ export default function StudentCoursesPage() {
           </Button>
         </div>
       ) : filtered.length === 0 ? (
-        <div className="py-16 text-center border-2 border-dashed rounded-xl border-border/30 bg-muted/5">
-          <BookOpen className="size-9 mx-auto mb-3 text-muted-foreground/30" />
-          <p className="text-xs font-medium text-muted-foreground">
+        <div className="py-16 text-center border-2 border-dashed rounded-xl border-border/50 bg-muted/10">
+          <BookOpen className="size-9 mx-auto mb-3 text-muted-foreground/40" />
+          <p className="text-xs font-semibold text-foreground">
             No courses found
           </p>
           {searchQuery && (
-            <p className="text-[11px] text-muted-foreground/70 mt-1">
-              Try adjusting your search
+            <p className="text-[11px] text-muted-foreground mt-1">
+              Try adjusting your search query
             </p>
           )}
         </div>
@@ -153,12 +153,12 @@ export default function StudentCoursesPage() {
             return (
               <div
                 key={year}
-                className="border border-border/50 rounded-xl overflow-hidden bg-card/30"
+                className="border border-border/60 rounded-2xl overflow-hidden bg-card/40 shadow-2xs"
               >
                 <button
                   type="button"
                   onClick={() => toggleYear(year)}
-                  className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/30 border-b border-border/40 hover:bg-muted/50 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-2.5 bg-muted/20 border-b border-border/40 hover:bg-muted/40 transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     {isCollapsed ? (
@@ -172,53 +172,54 @@ export default function StudentCoursesPage() {
                     </span>
                     <Badge
                       variant="secondary"
-                      className="text-[9px] font-semibold h-4 px-1.5 bg-muted/60"
+                      className="text-[10px] font-semibold h-4 px-1.5 bg-muted/60"
                     >
-                      {courses.length}{" "}
-                      {courses.length === 1 ? "course" : "courses"}
+                      {courses.length} {courses.length === 1 ? "course" : "courses"}
                     </Badge>
                   </div>
                 </button>
 
                 {!isCollapsed && (
-                  <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in duration-150">
+                  <div className="p-3.5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 animate-in fade-in duration-150">
                     {courses.map((ws) => (
                       <Card
                         key={ws.id}
-                        className="flex flex-col overflow-hidden hover:border-primary/30 transition-all duration-200 shadow-xs border-border/60 rounded-xl"
+                        className="group flex flex-col overflow-hidden hover:border-primary/40 hover:shadow-xs transition-all duration-200 border-border/60 rounded-xl bg-card"
                       >
+                        {/* Course Banner: Image or Book Placeholder */}
                         {ws.banner_image_url ? (
                           <div
-                            className="h-20 bg-cover bg-center shrink-0"
+                            className="h-24 w-full bg-cover bg-center shrink-0 border-b border-border/40 relative overflow-hidden group-hover:scale-[1.01] transition-transform duration-300"
                             style={{
                               backgroundImage: `url(${ws.banner_image_url})`,
                             }}
-                          />
+                          >
+                            <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent" />
+                          </div>
                         ) : (
-                          <div className="h-20 bg-gradient-to-br from-primary/15 via-primary/5 to-muted flex items-center justify-center shrink-0">
-                            <BookOpen className="size-7 text-primary/25" />
+                          <div className="h-24 w-full bg-gradient-to-br from-primary/10 via-muted/30 to-muted/60 flex items-center justify-center shrink-0 border-b border-border/40">
+                            <BookOpen className="size-8 text-primary/30" />
                           </div>
                         )}
 
-                        <CardHeader className="px-3.5 pt-3 pb-1.5">
+                        <CardHeader className="p-3.5 pb-1">
                           <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
+                            <div className="min-w-0 flex-1 space-y-1">
                               <Badge
                                 variant="outline"
-                                className="text-[9px] font-mono px-1.5 h-4 mb-1.5 border-border/50"
+                                className="text-[10px] font-mono px-1.5 h-4 border-border/60 bg-muted/40"
                               >
                                 {ws.code}
                               </Badge>
-                              <CardTitle className="text-xs font-semibold leading-snug text-foreground line-clamp-2">
+                              <CardTitle className="text-xs sm:text-sm font-semibold leading-snug text-foreground line-clamp-2 group-hover:text-primary transition-colors">
                                 {ws.title}
                               </CardTitle>
                             </div>
                             <Badge
                               variant="outline"
                               className={cn(
-                                "text-[9px] h-4 px-1.5 shrink-0 font-medium capitalize",
-                                STATUS_COLORS[ws.status] ??
-                                  STATUS_COLORS.INACTIVE,
+                                "text-[10px] h-4.5 px-1.5 shrink-0 font-medium capitalize",
+                                STATUS_COLORS[ws.status] ?? STATUS_COLORS.INACTIVE
                               )}
                             >
                               {statusLabel(ws.status)}
@@ -226,19 +227,17 @@ export default function StudentCoursesPage() {
                           </div>
                         </CardHeader>
 
-                        <CardContent className="px-3.5 pb-3.5 pt-0 flex flex-col gap-2.5 flex-1">
+                        <CardContent className="p-3.5 pt-1.5 flex flex-col gap-2.5 flex-1">
                           {ws.lecturer_name && (
                             <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 font-medium">
-                              <GraduationCap className="size-3 shrink-0" />
-                              <span className="truncate">
-                                {ws.lecturer_name}
-                              </span>
+                              <GraduationCap className="size-3.5 shrink-0 text-muted-foreground/80" />
+                              <span className="truncate">{ws.lecturer_name}</span>
                             </p>
                           )}
 
-                          <div className="space-y-1">
-                            <div className="flex justify-between text-[10px] text-muted-foreground font-medium">
-                              <span>Progress</span>
+                          <div className="space-y-1 mt-auto pt-1">
+                            <div className="flex justify-between text-[11px] text-muted-foreground font-medium">
+                              <span>Course Progress</span>
                               <span className="text-foreground font-semibold">
                                 {ws.progress}%
                               </span>
@@ -249,10 +248,10 @@ export default function StudentCoursesPage() {
                           <Button
                             asChild
                             size="sm"
-                            className="w-full h-7 text-xs font-semibold rounded-lg shadow-none mt-auto"
+                            className="w-full h-8 text-xs font-semibold rounded-lg shadow-2xs mt-2"
                           >
                             <Link href={`/student/courses/${ws.id}`}>
-                              View Course
+                              View Course <ArrowRight className="size-3 ml-1" />
                             </Link>
                           </Button>
                         </CardContent>

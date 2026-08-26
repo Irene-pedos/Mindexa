@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import UTC, datetime
 
 from app.agents.student_support_agent import StudySupportAgent
@@ -21,10 +22,15 @@ from app.db.enums import (
     AssessmentType,
     AttemptStatus,
 )
+from typing import Any
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User
 from app.schemas.student_ai import (
+    RevisionGuideOutput,
+    RevisionGuideRequest,
+    StudentChatHistoryItem,
+    StudentConversationSummary,
     StudentSupportContextRequest,
     StudentSupportRequest,
     StudentSupportResponse,
@@ -59,6 +65,9 @@ class StudentAIService:
 
         await self._assert_student_support_allowed(current_user.id)
 
+        # Determine conversation_id
+        conversation_id = body.conversation_id or uuid.uuid4()
+
         # 1. Deterministic meta / identity question pre-filter (audit without calling LLM)
         if _META_IDENTITY_PATTERN.search(body.question):
             chat_provider = get_ai_provider()
@@ -82,6 +91,7 @@ class StudentAIService:
             )
             return StudentSupportResponse(
                 explanation=STUDENT_META_IDENTITY_DEFLECTION,
+                conversation_id=conversation_id,
                 citations=[],
                 fallback_used=False,
                 model="deterministic_evaluator",
@@ -130,7 +140,13 @@ class StudentAIService:
                     },
                 )
 
-        is_in_assessment = bool(getattr(body, "is_in_assessment", False) or getattr(body, "attempt_id", None))
+        source_surface = getattr(body, "source_surface", "study_tutor")
+        is_in_assessment = bool(
+            getattr(body, "is_in_assessment", False)
+            or getattr(body, "attempt_id", None)
+            or source_surface == "assessment_inline"
+        )
+        log_to_global_history = (source_surface == "study_tutor") and not is_in_assessment
         attempt = None
         if is_in_assessment:
             if not body.attempt_id:
@@ -167,25 +183,162 @@ class StudentAIService:
             teaching_workspace_id=getattr(body, "teaching_workspace_id", None),
             thinking_mode=getattr(body, "thinking_mode", False),
             deep_search_mode=getattr(body, "deep_search_mode", False),
+            log_to_global_history=log_to_global_history,
             is_in_assessment=is_in_assessment,
             attempt_id=getattr(body, "attempt_id", None),
             question_id=getattr(body, "question_id", None),
             selected_text=getattr(body, "selected_text", None),
             current_page=getattr(body, "current_page", None),
+            conversation_id=conversation_id,
             db=self.db,
         )
 
         return StudentSupportResponse(
             explanation=output.answer,
+            conversation_id=conversation_id,
             citations=[c.model_dump() for c in output.citations],
             fallback_used=output.fallback_used,
             model=chat_provider.default_model,
             provider=chat_provider.name,
         )
 
-    async def get_chat_history(self, student_id: uuid.UUID) -> list[Any]:
+    async def get_conversations(
+        self,
+        student_id: uuid.UUID,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> list[Any]:
         from app.db.models.study_support_session import StudySupportSession
-        from app.schemas.student_ai import StudentChatHistoryItem
+        from app.schemas.student_ai import StudentConversationSummary
+        from sqlalchemy import func
+
+        stmt = (
+            select(
+                StudySupportSession.conversation_id,
+                func.max(StudySupportSession.created_at).label("last_activity_at"),
+                func.min(StudySupportSession.created_at).label("first_activity_at"),
+                func.count(StudySupportSession.id).label("turn_count"),
+            )
+            .where(
+                StudySupportSession.student_id == student_id,
+                StudySupportSession.is_deleted == False,
+            )
+            .group_by(StudySupportSession.conversation_id)
+            .order_by(func.max(StudySupportSession.created_at).desc())
+            .limit(limit)
+            .offset(offset)
+        )
+        res = await self.db.execute(stmt)
+        grouped_rows = res.all()
+
+        if not grouped_rows:
+            return []
+
+        conv_ids = [row.conversation_id for row in grouped_rows]
+
+        # Fetch first question for each conversation to use as preview/title
+        first_turns_stmt = (
+            select(StudySupportSession)
+            .where(
+                StudySupportSession.conversation_id.in_(conv_ids),
+                StudySupportSession.student_id == student_id,
+                StudySupportSession.is_deleted == False,
+            )
+            .order_by(StudySupportSession.created_at.asc())
+        )
+        first_turns_res = await self.db.execute(first_turns_stmt)
+        all_turns = first_turns_res.scalars().all()
+
+        first_questions: dict[uuid.UUID, str] = {}
+        for turn in all_turns:
+            if turn.conversation_id not in first_questions:
+                first_questions[turn.conversation_id] = turn.question
+
+        summaries = []
+        for row in grouped_rows:
+            cid = row.conversation_id
+            preview_text = first_questions.get(cid, "New Conversation")
+            if len(preview_text) > 80:
+                preview_text = preview_text[:77] + "..."
+
+            created_str = (
+                row.first_activity_at.isoformat()
+                if row.first_activity_at
+                else datetime.now(UTC).isoformat()
+            )
+            last_activity_str = (
+                row.last_activity_at.isoformat()
+                if row.last_activity_at
+                else datetime.now(UTC).isoformat()
+            )
+            summaries.append(
+                StudentConversationSummary(
+                    conversation_id=cid,
+                    preview=preview_text,
+                    created_at=created_str,
+                    last_activity_at=last_activity_str,
+                    turn_count=row.turn_count,
+                )
+            )
+
+        return summaries
+
+    async def get_conversation(
+        self,
+        student_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+    ) -> list[StudentChatHistoryItem]:
+        from app.db.models.study_support_session import StudySupportSession
+
+        stmt = (
+            select(StudySupportSession)
+            .where(
+                StudySupportSession.student_id == student_id,
+                StudySupportSession.conversation_id == conversation_id,
+                StudySupportSession.is_deleted == False,
+            )
+            .order_by(StudySupportSession.created_at.asc())
+        )
+        res = await self.db.execute(stmt)
+        sessions = list(res.scalars().all())
+
+        return [
+            StudentChatHistoryItem(
+                id=s.id,
+                conversation_id=s.conversation_id,
+                question=s.question,
+                answer=s.llm_response,
+                citations=s.source_citations or [],
+                created_at=s.created_at.isoformat() if s.created_at else datetime.now(UTC).isoformat(),
+            )
+            for s in sessions
+        ]
+
+    async def delete_conversation(self, student_id: uuid.UUID, conversation_id: uuid.UUID) -> bool:
+        from app.db.models.study_support_session import StudySupportSession
+
+        stmt = (
+            select(StudySupportSession)
+            .where(
+                StudySupportSession.student_id == student_id,
+                StudySupportSession.conversation_id == conversation_id,
+                StudySupportSession.is_deleted == False,
+            )
+        )
+        res = await self.db.execute(stmt)
+        sessions = list(res.scalars().all())
+        if not sessions:
+            return False
+
+        now = datetime.now(UTC)
+        for s in sessions:
+            s.is_deleted = True
+            s.deleted_at = now
+        await self.db.commit()
+        return True
+
+    async def get_chat_history(self, student_id: uuid.UUID) -> list[StudentChatHistoryItem]:
+        from app.db.models.study_support_session import StudySupportSession
         stmt = (
             select(StudySupportSession)
             .where(
@@ -201,6 +354,7 @@ class StudentAIService:
         return [
             StudentChatHistoryItem(
                 id=s.id,
+                conversation_id=s.conversation_id,
                 question=s.question,
                 answer=s.llm_response,
                 citations=s.source_citations or [],
@@ -210,18 +364,38 @@ class StudentAIService:
         ]
 
     async def generate_revision_guide(
-        self, body: Any, student_id: uuid.UUID
-    ) -> Any:
+        self, body: RevisionGuideRequest, student_id: uuid.UUID
+    ) -> RevisionGuideOutput:
         await self._assert_student_support_allowed(student_id)
+
+        resolved_topic = body.topic
+        workspace_id = getattr(body, "teaching_workspace_id", None)
+
+        if getattr(body, "learning_unit_id", None):
+            from app.db.models.learning_unit import LearningUnit
+            lu = await self.db.get(LearningUnit, body.learning_unit_id)
+            if lu:
+                resolved_topic = lu.title
+                workspace_id = workspace_id or lu.teaching_workspace_id
+
+        if workspace_id:
+            from app.db.models.academic import TeachingWorkspace
+            ws = await self.db.get(TeachingWorkspace, workspace_id)
+            if ws and getattr(ws, "language", None) and str(ws.language).upper() == "RW":
+                from app.core.exceptions import AILanguageBlockedError
+                raise AILanguageBlockedError(
+                    "AI revision is unavailable for Kinyarwanda courses.",
+                    code="AI_BLOCKED_LANGUAGE_POLICY",
+                )
 
         chat_provider = get_ai_provider()
         embed_provider = get_embedding_provider()
         gateway = AIGateway(self.db, chat_provider, embed_provider)
         agent = StudySupportAgent(gateway)
         return await agent.generate_revision_guide(
-            topic=body.topic,
+            topic=resolved_topic,
             student_id=student_id,
-            teaching_workspace_id=body.teaching_workspace_id,
+            teaching_workspace_id=workspace_id,
             db=self.db,
         )
 

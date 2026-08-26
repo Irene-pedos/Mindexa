@@ -97,6 +97,7 @@ class StudentCourseListItem(BaseModel):
     progress: int = 0
     academic_year: str
     workspace_id: Optional[uuid.UUID] = None
+    banner_image_url: Optional[str] = None
 
 class StudentDashboardResponse(BaseModel):
     """Complete aggregated data for the student dashboard."""

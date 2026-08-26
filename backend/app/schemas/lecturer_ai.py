@@ -13,6 +13,9 @@ class LecturerSupportRequest(BaseModel):
 
     workspace_id: uuid.UUID = Field(..., description="The active teaching workspace ID")
     question: str = Field(..., min_length=1, max_length=64000, description="Lecturer question")
+    conversation_id: Optional[uuid.UUID] = Field(
+        default=None, description="Optional conversation thread ID"
+    )
     mode: str = Field(
         default="chat",
         description="Mode: 'chat', 'content', 'review', 'feedback', 'analytics', 'insights'",
@@ -34,6 +37,7 @@ class LecturerSupportResponse(BaseModel):
     """Lecturer Support Agent response."""
 
     answer: str
+    conversation_id: Optional[uuid.UUID] = None
     citations: List[SourceCitation] = Field(default_factory=list)
     fallback_used: bool = False
     selected_sources: List[str] = Field(default_factory=list)

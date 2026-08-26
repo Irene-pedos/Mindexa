@@ -118,8 +118,10 @@ class LecturerAIService:
             for row in res.all():
                 selected_sources.append(row[0] or row[1])
 
+        resolved_conv_id = body.conversation_id or uuid.uuid4()
         return LecturerSupportResponse(
             answer=output.answer,
+            conversation_id=resolved_conv_id,
             citations=[c for c in output.citations],
             fallback_used=output.fallback_used,
             selected_sources=selected_sources,

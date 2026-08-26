@@ -1,3 +1,4 @@
+import re
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -9,6 +10,24 @@ from app.core.ai.providers import AICompletionRequest, AIMessage
 from app.db.enums import AIActionType
 from app.db.schemas.rag import RAGRetrievalResult, SourceCitation
 from app.services.rag_service import RAGService
+
+_LECTURER_GREETING_PATTERN = re.compile(
+    r"^\s*(?:hi|hello|hey|greetings|good\s+(?:morning|afternoon|evening|day)|howdy|sup|hola|bonjour|muraho|mwiriwe)\b[^\w]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_LECTURER_COURTESY_PATTERN = re.compile(
+    r"^\s*(?:thanks|thank\s+you|thank\s+you\s+so\s+much|thx|ty|great|awesome|perfect|got\s+it|understood|okay|ok|cool|nice|good\s+job)\b[^\w]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+LECTURER_GREETING_RESPONSE = (
+    "Hello Professor! 👋 How can I assist you with your curriculum, assessments, rubric design, or teaching materials today?"
+)
+
+LECTURER_COURTESY_RESPONSE = (
+    "You're very welcome! 😊 Let me know if you would like to draft additional assessment items, refine learning objectives, or analyze student performance."
+)
 
 
 class LecturerSupportAgentResponse(BaseModel):
@@ -33,6 +52,20 @@ class LecturerSupportAgent(BaseAgent):
         conversation_history: List[Dict[str, Any]],
         db: Any,
     ) -> LecturerSupportAgentResponse:
+        # Step 0: Conversational greetings and politeness without triggering RAG fallback
+        trimmed_q = question.strip()
+        if _LECTURER_GREETING_PATTERN.match(trimmed_q) or _LECTURER_COURTESY_PATTERN.match(trimmed_q):
+            answer_text = (
+                LECTURER_GREETING_RESPONSE
+                if _LECTURER_GREETING_PATTERN.match(trimmed_q)
+                else LECTURER_COURTESY_RESPONSE
+            )
+            return LecturerSupportAgentResponse(
+                answer=answer_text,
+                citations=[],
+                fallback_used=False,
+            )
+
         self.rag_service = RAGService(db)
 
         # 1. RAG retrieval

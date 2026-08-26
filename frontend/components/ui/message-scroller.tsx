@@ -20,14 +20,27 @@ interface MessageScrollerContextType {
   scrollToBottom: (behavior?: ScrollBehavior) => void;
   showScrollButton: boolean;
   setShowScrollButton: (show: boolean) => void;
+  scrollPreviousItemPeek: number;
+  scrollMargin: number;
+  isAnchoring: boolean;
+  setIsAnchoring: (anchoring: boolean) => void;
 }
 
 const MessageScrollerContext = createContext<MessageScrollerContextType | undefined>(undefined);
 
-export function MessageScrollerProvider({ children }: { children: React.ReactNode }) {
+export function MessageScrollerProvider({
+  children,
+  scrollPreviousItemPeek = 64,
+  scrollMargin = 24,
+}: {
+  children: React.ReactNode;
+  scrollPreviousItemPeek?: number;
+  scrollMargin?: number;
+}) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
   const [showScrollButton, setShowScrollButton] = useState(false);
+  const [isAnchoring, setIsAnchoring] = useState(false);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
     if (viewportRef.current) {
@@ -48,8 +61,19 @@ export function MessageScrollerProvider({ children }: { children: React.ReactNod
       scrollToBottom,
       showScrollButton,
       setShowScrollButton,
+      scrollPreviousItemPeek,
+      scrollMargin,
+      isAnchoring,
+      setIsAnchoring,
     }),
-    [isAtBottom, scrollToBottom, showScrollButton]
+    [
+      isAtBottom,
+      scrollToBottom,
+      showScrollButton,
+      scrollPreviousItemPeek,
+      scrollMargin,
+      isAnchoring,
+    ]
   );
 
   return (
@@ -97,10 +121,6 @@ export function MessageScroller({ children, className }: { children: React.React
 export function MessageScrollerViewport({ children, className }: { children: React.ReactNode; className?: string }) {
   const { viewportRef, setIsAtBottom, setShowScrollButton } = useMessageScroller();
 
-  // Disengage auto-scroll on any deliberate user interaction so they
-  // aren't pulled back to the bottom while reading, selecting text, or
-  // using keyboard navigation. Auto-scroll re-engages automatically
-  // when the user scrolls back to the bottom (handleScroll in MessageScroller).
   useEffect(() => {
     const el = viewportRef.current;
     if (!el) return;
@@ -150,13 +170,13 @@ export function MessageScrollerContent({
   className?: string;
   "aria-busy"?: boolean;
 }) {
-  const { isAtBottom, scrollToBottom } = useMessageScroller();
+  const { isAtBottom, scrollToBottom, isAnchoring } = useMessageScroller();
 
   useEffect(() => {
-    if (isAtBottom) {
+    if (isAtBottom && !isAnchoring) {
       scrollToBottom("auto");
     }
-  }, [children, isAtBottom, scrollToBottom]);
+  }, [children, isAtBottom, scrollToBottom, isAnchoring]);
 
   return (
     <div
@@ -165,6 +185,71 @@ export function MessageScrollerContent({
       aria-busy={ariaBusy}
       className={cn("flex flex-col gap-4", className)}
     >
+      {children}
+    </div>
+  );
+}
+
+export function MessageScrollerItem({
+  children,
+  className,
+  scrollAnchor = false,
+}: {
+  children: React.ReactNode;
+  className?: string;
+  scrollAnchor?: boolean;
+}) {
+  const itemRef = useRef<HTMLDivElement | null>(null);
+  const {
+    viewportRef,
+    scrollPreviousItemPeek,
+    scrollMargin,
+    setIsAnchoring,
+    setIsAtBottom,
+  } = useMessageScroller();
+
+  useEffect(() => {
+    if (scrollAnchor && itemRef.current && viewportRef.current) {
+      const container = viewportRef.current;
+      const element = itemRef.current;
+
+      setIsAnchoring(true);
+      setIsAtBottom(false);
+
+      const frameId = requestAnimationFrame(() => {
+        if (!container || !element) return;
+        const containerRect = container.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const relativeTop = elementRect.top - containerRect.top + container.scrollTop;
+
+        const targetScrollTop = Math.max(
+          0,
+          relativeTop - scrollPreviousItemPeek - scrollMargin
+        );
+
+        container.scrollTo({
+          top: targetScrollTop,
+          behavior: "smooth",
+        });
+
+        setTimeout(() => {
+          setIsAnchoring(false);
+        }, 300);
+      });
+
+      return () => cancelAnimationFrame(frameId);
+    }
+  }, [
+    scrollAnchor,
+    viewportRef,
+    scrollPreviousItemPeek,
+    scrollMargin,
+    setIsAnchoring,
+    setIsAtBottom,
+  ]);
+
+  return (
+    <div ref={itemRef} className={className}>
       {children}
     </div>
   );

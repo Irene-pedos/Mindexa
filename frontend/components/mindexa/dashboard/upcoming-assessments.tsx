@@ -1,258 +1,301 @@
 // components/mindexa/dashboard/upcoming-assessments.tsx
 "use client";
 
+import React, { useMemo } from "react";
+import Link from "next/link";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Calendar, Clock, PlayCircle, CheckCircle2, AlertTriangle, History, ShieldAlert } from "lucide-react";
-import Link from "next/link";
-import { useEffect, useState } from "react";
-import { assessmentApi } from "@/lib/api/assessment";
-import { Skeleton } from "@/components/ui/interfaces-skeleton";
-import { getAssessmentCategory, getAssessmentProgressStatus } from "@/lib/grading-architecture";
-
+import {
+  Clock,
+  PlayCircle,
+  CheckCircle2,
+  Calendar,
+  Layers,
+  ArrowRight,
+  ShieldAlert,
+  Sparkles,
+} from "lucide-react";
+import { cn, formatAssessmentType } from "@/lib/utils";
 import {
   StudentActiveAttempt,
   StudentUpcomingAssessment,
 } from "@/lib/api/student";
 
-export function UpcomingAssessments({
-  activeAttempts,
-  upcomingAssessments,
-}: {
+interface UpcomingAssessmentsProps {
   activeAttempts: StudentActiveAttempt[];
   upcomingAssessments: StudentUpcomingAssessment[];
-}) {
-  const now = new Date();
+  submittedCount?: number;
+}
 
-  // 1. In Progress
-  const inProgress = activeAttempts.filter(a => a.status === 'IN_PROGRESS' || a.status === 'PAUSED');
+export function UpcomingAssessments({
+  activeAttempts = [],
+  upcomingAssessments = [],
+  submittedCount,
+}: UpcomingAssessmentsProps) {
+  const [currentTimestamp, setCurrentTimestamp] = React.useState<number>(0);
 
-  // 2. Available (Open but not started)
-  const available = upcomingAssessments.filter(a => {
-    const isStarted = (!a.window_start || new Date(a.window_start) <= now);
-    const isNotEnded = (!(a as any).window_end || new Date((a as any).window_end) >= now);
-    const hasNoAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
-    return isStarted && isNotEnded && hasNoAttempt;
-  });
+  React.useEffect(() => {
+    setCurrentTimestamp(Date.now());
+  }, [activeAttempts, upcomingAssessments]);
 
-  // 3. Upcoming
-  const upcoming = upcomingAssessments.filter(a => 
-    a.window_start && new Date(a.window_start) > now
+  const inProgress = useMemo(
+    () => activeAttempts.filter((a) => a.status === "IN_PROGRESS" || a.status === "PAUSED"),
+    [activeAttempts]
   );
 
-  // 4. Violations / Auto-Submitted
-  const violations = activeAttempts.filter(a => a.status === 'TERMINATED' || a.status === 'AUTO_SUBMITTED');
+  const violations = useMemo(
+    () => activeAttempts.filter((a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED"),
+    [activeAttempts]
+  );
 
-  // 5. Missed
-  const missed = upcomingAssessments.filter(a => {
-    const hasEnded = (a as any).window_end && new Date((a as any).window_end) < now;
-    const noAttempt = !activeAttempts.some(att => att.assessment_id === a.id);
-    return hasEnded && noAttempt;
-  });
+  const availableOpen = useMemo(() => {
+    if (!currentTimestamp) return [];
+    return upcomingAssessments.filter((a) => {
+      const isStarted = !a.window_start || new Date(a.window_start).getTime() <= currentTimestamp;
+      const isNotEnded = !a.window_end || new Date(a.window_end).getTime() >= currentTimestamp;
+      const hasNoAttempt = !activeAttempts.some((att) => att.assessment_id === a.id);
+      return isStarted && isNotEnded && hasNoAttempt;
+    });
+  }, [upcomingAssessments, activeAttempts, currentTimestamp]);
+
+  const upcomingScheduled = useMemo(() => {
+    if (!currentTimestamp) return [];
+    return upcomingAssessments.filter(
+      (a) => a.window_start && new Date(a.window_start).getTime() > currentTimestamp
+    );
+  }, [upcomingAssessments, currentTimestamp]);
+
+  const activeTotalCount = inProgress.length + availableOpen.length;
+  const upcomingTotalCount = upcomingScheduled.length;
+
+  // Build Top 3 Priority queue:
+  // 1. In progress
+  // 2. Open now
+  // 3. Upcoming soon
+  // 4. Violations
+  const priorityItems = useMemo(() => {
+    const queue: Array<{
+      id: string;
+      title: string;
+      type: string;
+      courseCode?: string | null;
+      courseName?: string | null;
+      statusKind: "in_progress" | "open" | "upcoming" | "violation";
+      actionUrl: string;
+      actionLabel: string;
+      metaText: string;
+      statusTone: "primary" | "emerald" | "amber" | "destructive";
+    }> = [];
+
+    // 1. In Progress
+    inProgress.forEach((item) => {
+      queue.push({
+        id: item.id,
+        title: item.assessment_title,
+        type: item.assessment_type || "Assessment",
+        courseCode: item.course_code,
+        courseName: item.course_name,
+        statusKind: "in_progress",
+        actionUrl: (item.assessment_type || "").toLowerCase().includes("group")
+          ? `/student/group-work/${item.assessment_id}`
+          : `/student/assessments/${item.assessment_id}/take`,
+        actionLabel: item.status === "PAUSED" ? "Resume" : "Continue",
+        metaText: item.status === "PAUSED" ? "Session paused" : "Session in progress",
+        statusTone: "primary",
+      });
+    });
+
+    // 2. Open Now
+    availableOpen.forEach((item) => {
+      queue.push({
+        id: item.id,
+        title: item.title,
+        type: item.type || "Assessment",
+        courseCode: item.course_code,
+        courseName: item.course_name,
+        statusKind: "open",
+        actionUrl: `/student/assessments/${item.id}/take`,
+        actionLabel: "Start",
+        metaText: item.duration_minutes ? `${item.duration_minutes} min duration` : "Open window",
+        statusTone: "emerald",
+      });
+    });
+
+    // 3. Upcoming Scheduled
+    upcomingScheduled.forEach((item) => {
+      queue.push({
+        id: item.id,
+        title: item.title,
+        type: item.type || "Assessment",
+        courseCode: item.course_code,
+        courseName: item.course_name,
+        statusKind: "upcoming",
+        actionUrl: "/student/assessments",
+        actionLabel: "View",
+        metaText: item.window_start
+          ? `Starts ${new Date(item.window_start).toLocaleDateString(undefined, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}`
+          : "Scheduled soon",
+        statusTone: "amber",
+      });
+    });
+
+    // 4. Violations
+    violations.forEach((item) => {
+      queue.push({
+        id: item.id,
+        title: item.assessment_title,
+        type: item.assessment_type || "Assessment",
+        courseCode: item.course_code,
+        courseName: item.course_name,
+        statusKind: "violation",
+        actionUrl: `/student/results/${item.id}`,
+        actionLabel: "Review Audit",
+        metaText: "Session terminated • Audit required",
+        statusTone: "destructive",
+      });
+    });
+
+    // Return only top 3 items
+    return queue.slice(0, 3);
+  }, [inProgress, availableOpen, upcomingScheduled, violations]);
 
   return (
-    <Card className="shadow-none border rounded-xl overflow-hidden">
-      <CardHeader className="py-2.5 px-4 bg-muted/5 border-b">
-        <div className="flex items-center justify-between">
+    <Card className="rounded-2xl border border-border/60 bg-card shadow-xs overflow-hidden">
+      <CardHeader className="py-3 px-4 bg-muted/20 border-b border-border/40 flex flex-row items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="size-6 rounded-lg bg-primary/10 flex items-center justify-center">
+            <Layers className="size-3.5 text-primary" />
+          </div>
           <div>
-            <CardTitle className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-2">
-               <History className="size-3" /> Assessment Command
+            <CardTitle className="text-xs font-semibold text-foreground tracking-tight">
+              Assessment Command
             </CardTitle>
           </div>
-          <Button variant="ghost" size="sm" className="h-6 text-[9px] font-bold uppercase px-2 rounded-lg" asChild>
-            <Link href="/student/assessments">View Registry</Link>
+        </div>
+
+        {/* Counts summary chip */}
+        <div className="flex items-center gap-1.5">
+          <Badge variant="outline" className="text-[11px] font-medium px-2 py-0.5 rounded-md border-border/60 bg-background text-muted-foreground">
+            <span className={cn("font-semibold mr-1", activeTotalCount > 0 ? "text-primary" : "text-foreground")}>
+              {activeTotalCount} Active
+            </span>
+            &bull;
+            <span className="ml-1 font-medium text-muted-foreground">
+              {upcomingTotalCount} Upcoming
+            </span>
+            {submittedCount !== undefined && submittedCount > 0 && (
+              <>
+                <span className="mx-1 text-muted-foreground/50">&bull;</span>
+                <span className="font-medium text-muted-foreground">
+                  {submittedCount} Submitted
+                </span>
+              </>
+            )}
+          </Badge>
+          <Button variant="ghost" size="sm" className="h-7 text-xs font-medium px-2 text-primary hover:text-primary gap-1" asChild>
+            <Link href="/student/assessments">
+              Registry <ArrowRight className="size-3" />
+            </Link>
           </Button>
         </div>
       </CardHeader>
-      <CardContent className="p-3 space-y-5">
-        {/* Violations / Alerts */}
-        {violations.length > 0 && (
+
+      <CardContent className="p-3 sm:p-4 space-y-2.5">
+        {priorityItems.length > 0 ? (
           <div className="space-y-2">
-            <h4 className="text-[9px] font-bold uppercase tracking-widest text-red-600 flex items-center gap-1.5 px-1">
-              <ShieldAlert className="size-3" /> Integrity Violations
-            </h4>
-            {violations.map((item) => (
+            {priorityItems.map((item) => (
               <div
                 key={item.id}
-                className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50/50 p-2.5 transition-all group"
+                className="flex items-center justify-between p-3 rounded-xl border border-border/50 bg-background/80 hover:bg-muted/30 transition-colors gap-3 group"
               >
-                <div className="space-y-0.5 min-w-0 flex-1">
-                  <div className="font-bold text-xs truncate text-red-800">
-                    {item.assessment_title}
-                  </div>
-                  <div className="text-[9px] text-red-600/70 font-bold uppercase tracking-tighter">
-                     Session Terminated • Pending Review
-                  </div>
-                </div>
-                <Button variant="destructive" size="sm" className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg shadow-none" asChild>
-                  <Link href={`/student/results/${item.id}`}>Audit</Link>
-                </Button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 1. In Progress Section */}
-        {inProgress.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-[9px] font-bold uppercase tracking-widest text-primary flex items-center gap-1.5 px-1">
-              <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-primary"></span>
-              </span>
-              In Progress
-            </h4>
-            {inProgress.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between rounded-xl border bg-primary/5 p-2.5 hover:bg-primary/10 transition-all group"
-              >
-                <div className="space-y-0.5 min-w-0 flex-1">
-                  <div className="font-semibold text-xs truncate text-foreground/80">
-                    {item.assessment_title}
-                  </div>
-                  <div className="text-[9px] text-muted-foreground flex items-center gap-2 font-medium">
-                     <span className="font-bold text-primary uppercase text-[8px]">
-                        {item.status === 'PAUSED' ? 'Paused' : 'Active Session'}
-                     </span>
-                     {item.course_code && (
-                       <span className="opacity-60 uppercase tracking-tighter">
-                         {item.course_code}
-                       </span>
-                     )}
-                  </div>
-                </div>
-
-                <div className="flex shrink-0">
-                  <Button size="sm" className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg shadow-none" asChild>
-                    <Link
-                      href={
-                        (item.assessment_type || '').toLowerCase().includes('group')
-                          ? `/student/group-work/${item.assessment_id}`
-                          : `/student/assessments/${item.assessment_id}/take`
-                      }
+                <div className="space-y-1 min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    {item.courseCode && (
+                      <span className="text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
+                        {item.courseCode}
+                      </span>
+                    )}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "text-[10px] px-1.5 py-0.5 rounded font-medium",
+                        item.statusTone === "primary" && "bg-primary/10 text-primary border-primary/20",
+                        item.statusTone === "emerald" && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+                        item.statusTone === "amber" && "bg-amber-500/10 text-amber-600 border-amber-500/20",
+                        item.statusTone === "destructive" && "bg-destructive/10 text-destructive border-destructive/20"
+                      )}
                     >
-                      Resume
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 2. Available Section */}
-        {available.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-[9px] font-bold uppercase tracking-widest text-emerald-600 flex items-center gap-1 px-1">
-              <CheckCircle2 className="size-3" />
-              Open Sessions
-            </h4>
-            {available.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between rounded-xl border p-2.5 hover:bg-muted/30 transition-all group"
-              >
-                <div className="space-y-0.5 min-w-0 flex-1">
-                  <div className="font-semibold text-xs truncate text-foreground/80">{item.title}</div>
-                  <div className="text-[9px] text-muted-foreground flex items-center gap-2 font-medium">
-                    <span className="flex items-center gap-1 uppercase tracking-tighter">
-                      <Clock className="size-2.5" /> {item.duration_minutes || 90}m
-                    </span>
-                    <Badge variant="outline" className="text-[7px] h-3.5 px-1 uppercase font-bold tracking-tight opacity-70 rounded-md">
                       {item.type}
                     </Badge>
                   </div>
-                </div>
 
-                <div className="flex shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 px-3 text-[9px] font-bold uppercase rounded-lg border-muted/60"
-                    asChild
-                  >
-                    <Link href={`/student/assessments/${item.id}/take`}>
-                      Enter
-                    </Link>
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+                  <div className="text-xs sm:text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
+                    {item.title}
+                  </div>
 
-        {/* 3. Upcoming Soon Section */}
-        {upcoming.length > 0 && (
-          <div className="space-y-2">
-            <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground flex items-center gap-1 px-1">
-              <Calendar className="size-3" />
-              Scheduled
-            </h4>
-            {upcoming.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between rounded-xl border border-dashed p-2.5 bg-muted/5 opacity-70"
-              >
-                <div className="space-y-0.5 min-w-0 flex-1">
-                  <div className="font-medium text-xs truncate text-muted-foreground/80">{item.title}</div>
-                  <div className="text-[8px] text-muted-foreground flex items-center gap-2 font-semibold uppercase tracking-tight">
-                    <span className="flex items-center gap-1">
-                      <Clock className="size-2.5" />
-                      {item.window_start
-                        ? new Date(item.window_start).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                        : "TBD"}
-                    </span>
+                  <div className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                    <Clock className="size-3 text-muted-foreground/70 shrink-0" />
+                    <span className="truncate">{item.metaText}</span>
                   </div>
                 </div>
 
-                <Badge variant="secondary" className="text-[7px] h-3.5 px-1 uppercase opacity-50 rounded-md">
-                  {item.type}
-                </Badge>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* 5. Missed / Closed Section */}
-        {missed.length > 0 && (
-          <div className="space-y-2">
-             <h4 className="text-[9px] font-bold uppercase tracking-widest text-muted-foreground/40 flex items-center gap-1 px-1">
-              <AlertTriangle className="size-3" /> Missed / Expired
-            </h4>
-            {missed.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center justify-between rounded-xl border p-2.5 opacity-40 grayscale bg-muted/20"
-              >
-                 <div className="space-y-0.5 min-w-0 flex-1">
-                  <div className="font-medium text-xs truncate text-muted-foreground/80">{item.title}</div>
-                  <div className="text-[7px] text-muted-foreground uppercase font-bold tracking-widest">
-                     Window Closed
-                  </div>
+                <div className="shrink-0">
+                  {item.statusKind === "in_progress" ? (
+                    <Button size="sm" className="h-8 text-xs font-semibold px-3.5 rounded-lg shadow-xs" asChild>
+                      <Link href={item.actionUrl}>{item.actionLabel}</Link>
+                    </Button>
+                  ) : item.statusKind === "open" ? (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs font-semibold px-3.5 rounded-lg border-primary/30 text-primary hover:bg-primary/10"
+                      asChild
+                    >
+                      <Link href={item.actionUrl}>{item.actionLabel}</Link>
+                    </Button>
+                  ) : item.statusKind === "violation" ? (
+                    <Button size="sm" variant="destructive" className="h-8 text-xs font-semibold px-3 rounded-lg" asChild>
+                      <Link href={item.actionUrl}>{item.actionLabel}</Link>
+                    </Button>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-8 text-xs font-medium px-3 rounded-lg text-muted-foreground hover:text-foreground" asChild>
+                      <Link href={item.actionUrl}>{item.actionLabel}</Link>
+                    </Button>
+                  )}
                 </div>
-                <Badge variant="outline" className="text-[7px] h-3.5 px-1 uppercase font-bold tracking-tight rounded-md">
-                  {item.type}
-                </Badge>
               </div>
             ))}
           </div>
-        )}
-
-        {inProgress.length === 0 && available.length === 0 && upcoming.length === 0 && violations.length === 0 && missed.length === 0 && (
-           <div className="py-10 text-center bg-muted/5 rounded-xl border border-dashed border-muted/30">
-             <div className="size-8 rounded-full bg-muted/20 flex items-center justify-center mx-auto mb-2">
-                <Clock className="size-4 text-muted-foreground/30" />
-             </div>
-             <p className="text-[9px] text-muted-foreground font-bold uppercase tracking-[0.2em]">No activities found.</p>
-           </div>
+        ) : (
+          <div className="py-8 px-4 text-center rounded-xl border border-dashed border-border/70 bg-muted/10 space-y-2.5">
+            <div className="size-9 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto text-emerald-600">
+              <CheckCircle2 className="size-4.5" />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs sm:text-sm font-semibold text-foreground">
+                All Assessments Up to Date
+              </p>
+              <p className="text-xs text-muted-foreground max-w-sm mx-auto">
+                You have no active assessments or upcoming deadlines right now. All previous assessments are recorded in your registry.
+              </p>
+            </div>
+            <div className="pt-1">
+              <Button asChild variant="outline" size="sm" className="h-7.5 text-xs font-medium rounded-lg border-border/70">
+                <Link href="/student/assessments">View Assessment Registry</Link>
+              </Button>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>

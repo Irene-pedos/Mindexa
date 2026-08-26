@@ -38,7 +38,7 @@ export type ExplainerTopic =
 interface TopicData {
   title: string;
   category: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   colorClass: string;
   summary: string;
   details: string;

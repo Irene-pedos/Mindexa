@@ -39,7 +39,7 @@ export type HelpTopic =
 interface HelpTopicDefinition {
   title: string;
   text: string;
-  icon: React.ElementType;
+  icon: React.ComponentType<{ className?: string }>;
   colorClass: string;
 }
 

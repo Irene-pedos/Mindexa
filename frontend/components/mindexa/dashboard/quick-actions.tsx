@@ -1,36 +1,46 @@
 // components/mindexa/dashboard/quick-actions.tsx
-import { Button } from "@/components/ui/button"
-import { Play, Calendar, Brain, Plus } from "lucide-react"
-import Link from "next/link"
+"use client";
+
+import React from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import {
+  FileText,
+  Calendar,
+  Sparkles,
+  BookOpen,
+} from "lucide-react";
 
 export function QuickActions() {
   return (
-    <div className="flex flex-wrap gap-2">
-      <Button asChild size="sm" className="h-8 text-xs gap-1.5">
+    <div className="flex flex-wrap items-center gap-2">
+      <Button asChild size="sm" className="h-8.5 text-xs font-semibold px-3.5 gap-2 rounded-xl shadow-xs">
         <Link href="/student/assessments">
-          <Play className="size-3.5" />
-          Join Assessment
+          <FileText className="size-3.5" />
+          Assessments
         </Link>
       </Button>
 
-      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-border/60" asChild>
+      <Button variant="outline" size="sm" className="h-8.5 text-xs font-medium px-3.5 gap-2 rounded-xl border-border/70 hover:bg-muted/50 hover:text-foreground" asChild>
         <Link href="/student/schedule">
-          <Calendar className="size-3.5" />
-          Full Schedule
+          <Calendar className="size-3.5 text-muted-foreground" />
+          Class Schedule
         </Link>
       </Button>
 
-      <Button variant="outline" size="sm" className="h-8 text-xs gap-1.5 border-border/60" asChild>
+      <Button variant="outline" size="sm" className="h-8.5 text-xs font-medium px-3.5 gap-2 rounded-xl border-border/70 hover:bg-muted/50 hover:text-foreground" asChild>
         <Link href="/student/study">
-          <Brain className="size-3.5" />
-          Study Support
+          <Sparkles className="size-3.5 text-muted-foreground" />
+          AI Study Tutor
         </Link>
       </Button>
 
-      <Button variant="ghost" size="sm" className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground">
-        <Plus className="size-3.5" />
-        Submit Homework
+      <Button variant="outline" size="sm" className="h-8.5 text-xs font-medium px-3.5 gap-2 rounded-xl border-border/70 hover:bg-muted/50 hover:text-foreground" asChild>
+        <Link href="/student/courses">
+          <BookOpen className="size-3.5 text-muted-foreground" />
+          My Courses
+        </Link>
       </Button>
     </div>
-  )
+  );
 }

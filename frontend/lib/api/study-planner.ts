@@ -380,6 +380,19 @@ export const studyPlannerApi = {
       }
     );
   },
+  generateQuiz: async (
+    planId: string,
+    sessionId: string,
+    questionCount: number = 5
+  ): Promise<QuizQuestion[]> => {
+    return apiClient(
+      `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/generate`,
+      {
+        method: "POST",
+        body: JSON.stringify({ question_count: questionCount }),
+      }
+    );
+  },
   submitKnowledgeCheck: async (
     sessionId: string,
     answers: Record<string, any>

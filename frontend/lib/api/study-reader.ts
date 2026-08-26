@@ -51,6 +51,7 @@ export interface UpdateKeyPointPayload {
 
 export interface AskAIReaderPayload {
   question: string;
+  source_surface?: "study_tutor" | "study_reader" | "assessment_inline";
   conversation_history?: Array<{ role: string; content: string }>;
   selected_resource_id?: string;
   teaching_workspace_id?: string;
@@ -198,7 +199,10 @@ export const studyReaderApi = {
   askAI: async (payload: AskAIReaderPayload): Promise<AskAIReaderResponse> => {
     return apiClient("/student/ai/support", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        source_surface: "study_reader",
+        ...payload,
+      }),
     });
   },
 

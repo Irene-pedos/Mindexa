@@ -26,6 +26,11 @@ class StudentSupportRequest(BaseModel):
     """Student Support Agent request."""
 
     question: str = Field(..., min_length=1, max_length=64000)
+    source_surface: Literal["study_tutor", "study_reader", "assessment_inline"] = Field(
+        default="study_tutor",
+        description="Originating UI surface for scoping logs and history isolation",
+    )
+    conversation_id: uuid.UUID | None = Field(default=None, description="Conversation / thread ID")
     conversation_history: list[dict] = Field(default_factory=list)
     selected_resource_id: uuid.UUID | None = Field(default=None, description="Scope query to single resource")
     selected_resource_ids: list[uuid.UUID] = Field(default_factory=list, description="Scope query to multiple resources")
@@ -46,6 +51,7 @@ class StudentSupportResponse(BaseModel):
     """Validated Student Support Agent response."""
 
     explanation: str
+    conversation_id: uuid.UUID | None = None
     citations: list[dict] = Field(default_factory=list)
     fallback_used: bool = False
     model: str | None = None
@@ -55,19 +61,43 @@ class StudentSupportResponse(BaseModel):
 class RevisionGuideRequest(BaseModel):
     topic: str = Field(..., min_length=1, max_length=500)
     teaching_workspace_id: uuid.UUID | None = None
+    learning_unit_id: uuid.UUID | None = None
 
     model_config = {"str_strip_whitespace": True}
 
 
 class RevisionGuideOutput(BaseModel):
+    title: str = Field(default="Revision Guide")
     summary: str = Field(..., description="Comprehensive summary of key concepts")
     checklist: list[str] = Field(default_factory=list, description="Actionable revision checklist items")
     readings: list[str] = Field(default_factory=list, description="Recommended course reading materials & topics")
+    markdown: str | None = Field(default=None, description="Formatted markdown revision sheet for export/download")
 
 
 class StudentChatHistoryItem(BaseModel):
     id: uuid.UUID
+    conversation_id: uuid.UUID | None = None
     question: str
     answer: str
     citations: list[dict] = Field(default_factory=list)
     created_at: str
+
+
+class StudentConversationSummary(BaseModel):
+    conversation_id: uuid.UUID
+    preview: str
+    created_at: str
+    last_activity_at: str
+    turn_count: int
+
+
+class StudentConversationListResponse(BaseModel):
+    items: list[StudentConversationSummary]
+    total: int
+    page: int = 1
+    page_size: int = 50
+
+
+class StudentConversationDetail(BaseModel):
+    conversation_id: uuid.UUID
+    turns: list[StudentChatHistoryItem]

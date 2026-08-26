@@ -68,32 +68,43 @@ class StudentService:
         delta_gpa = round(((curr_gpa - last_gpa) / last_gpa * 100), 1) if last_gpa > 0 else 0
         gpa_metric = DashboardMetric(value=curr_gpa, delta=delta_gpa, last_month=last_gpa, positive=curr_gpa >= last_gpa)
 
-        # 2. Active Tasks (Upcoming)
+        # 2. Active Tasks (Open or In-Progress Assessments)
         available_assessments, _ = await self.assessment_repo.list_available_for_student(
             student_id=student_id, page_size=100
         )
-        upcoming_count = 0
+        active_count = 0
         upcoming_assessments_data = []
         for ass in available_assessments:
-            count = await self.attempt_repo.count_attempts_by_student(student_id, ass.id)
-            if count == 0:
-                upcoming_count += 1
-            upcoming_assessments_data.append(StudentUpcomingAssessment(
-                id=ass.id,
-                title=ass.title,
-                type=ass.assessment_type,
-                course_code=ass.course.code if ass.course else None,
-                course_name=ass.course.name if ass.course else None,
-                academic_year=ass.academic_year,
-                window_start=ass.window_start,
-                window_end=ass.window_end,
-                duration_minutes=ass.duration_minutes,
-                total_marks=ass.total_marks,
-            ))
-        active_metric = DashboardMetric(value=upcoming_count, delta=0, last_month=upcoming_count, positive=True)
+            attempts, _ = await self.attempt_repo.list_by_student(student_id=student_id, assessment_id=ass.id)
+            has_submitted = any(att.status in [AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED] for att in attempts)
 
-        # 3. Completed Assessments
-        stmt_completed = select(func.count(AssessmentAttempt.id)).where(
+            if not has_submitted:
+                w_start = ass.window_start
+                w_end = ass.window_end
+
+                # Exclude expired / missed assessments from active list
+                if w_end and now > w_end:
+                    continue
+
+                if not w_start or now >= w_start:
+                    active_count += 1
+
+                upcoming_assessments_data.append(StudentUpcomingAssessment(
+                    id=ass.id,
+                    title=ass.title,
+                    type=ass.assessment_type,
+                    course_code=ass.course.code if ass.course else None,
+                    course_name=ass.course.name if ass.course else None,
+                    academic_year=ass.academic_year,
+                    window_start=ass.window_start,
+                    window_end=ass.window_end,
+                    duration_minutes=ass.duration_minutes,
+                    total_marks=ass.total_marks,
+                ))
+        active_metric = DashboardMetric(value=active_count, delta=0, last_month=active_count, positive=True)
+
+        # 3. Completed Assessments (Distinct assessments completed/submitted by student)
+        stmt_completed = select(func.count(func.distinct(AssessmentAttempt.assessment_id))).where(
             AssessmentAttempt.student_id == student_id,
             AssessmentAttempt.status.in_([AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED]),
             AssessmentAttempt.is_deleted == False
@@ -230,7 +241,8 @@ class StudentService:
                 status="Active",
                 progress=progress,
                 academic_year=ws.academic_period.name if ws.academic_period else "GLOBAL",
-                workspace_id=ws.id
+                workspace_id=ws.id,
+                banner_image_url=ws.banner_image_url,
             ))
         return items
 

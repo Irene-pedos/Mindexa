@@ -5,6 +5,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import Image from "next/image";
+import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Users,
@@ -29,7 +30,8 @@ import {
   SidebarMenuItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
-import { NavUser } from "@/components/nav-user"
+import { NavUser } from "@/components/nav-user";
+import { SidebarAiWidget } from "@/components/mindexa/layout/sidebar-ai-widget";
 import { useAuth } from "@/hooks/use-auth";
 
 const mainNav = [
@@ -110,10 +112,16 @@ export function AdminSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      isActive
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
                   >
-                    <Link href={item.url} data-tour={item.tourId}>
-                      <item.icon className="size-5" />
-                      <span>{item.title}</span>
+                    <Link href={item.url} data-tour={item.tourId} className="relative flex items-center w-full">
+                      <item.icon className="size-4.5 shrink-0" />
+                      <span className="truncate">{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -136,10 +144,16 @@ export function AdminSidebar({
                     asChild
                     tooltip={item.title}
                     isActive={isActive}
+                    className={cn(
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      isActive
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
                   >
-                    <Link href={item.url}>
-                      <item.icon className="size-5" />
-                      <span>{item.title}</span>
+                    <Link href={item.url} className="relative flex items-center w-full">
+                      <item.icon className="size-4.5 shrink-0" />
+                      <span className="truncate">{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -149,7 +163,14 @@ export function AdminSidebar({
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="gap-2">
+        <SidebarAiWidget
+          storageKey="mindexa_admin_sidebar_ai_widget"
+          title="AI Integrity & Audits"
+          description="Monitor assessment integrity, track anomalies, and supervise institutional governance."
+          buttonText="Integrity Dashboard"
+          buttonHref="/admin/integrity"
+        />
         <NavUser />
       </SidebarFooter>
 

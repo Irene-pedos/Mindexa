@@ -1,8 +1,9 @@
 // app/(student)/dashboard/page.tsx
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/hooks/use-auth";
 import {
   studentApi,
@@ -10,6 +11,7 @@ import {
   StudentScheduleResponse,
   StudentResourceResponse,
 } from "@/lib/api/student";
+import { assessmentApi } from "@/lib/api/assessment";
 import {
   notificationApi,
   NotificationListResponse,
@@ -26,13 +28,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
-  CardToolbar,
-} from "@/components/ui/card-v2";
-import { Badge } from "@/components/ui/badge-v2";
-import { Button } from "@/components/ui/button-v2";
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Bell,
   MessageSquare,
@@ -44,34 +44,14 @@ import {
   ArrowUp,
   ArrowDown,
   MoreHorizontal,
-  Settings,
-  Pin,
-  Trash,
   BookOpen,
   ShieldAlert,
   AlertTriangle,
+  Calendar,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu-v2";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-
-import {
-  getAssessmentCategory,
-  getAssessmentProgressStatus,
-  isHighSecurityAssessment,
-} from "@/lib/grading-architecture";
-import Link from "next/link";
+import { getAssessmentCategory } from "@/lib/grading-architecture";
 
 interface PersonalResource extends StudentResourceResponse {
   title: string;
@@ -151,16 +131,12 @@ export default function StudentDashboard() {
   }, [user]);
 
   const [data, setData] = useState<StudentDashboardResponse | null>(null);
-  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(
-    null,
-  );
-  const [notifications, setNotifications] =
-    useState<NotificationListResponse | null>(null);
+  const [schedule, setSchedule] = useState<StudentScheduleResponse | null>(null);
+  const [notifications, setNotifications] = useState<NotificationListResponse | null>(null);
   const [resources, setResources] = useState<PersonalResource[]>([]);
+  const [assessmentsList, setAssessmentsList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>(
-    {},
-  );
+  const [sectionErrors, setSectionErrors] = useState<Record<string, string>>({});
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
@@ -169,12 +145,12 @@ export default function StudentDashboard() {
     async function loadDashboard() {
       try {
         setSectionErrors({});
-        const [dashRes, schedRes, notifRes, resRes] = await Promise.allSettled([
+        const [dashRes, schedRes, notifRes, resRes, assessRes] = await Promise.allSettled([
           studentApi.getDashboard(),
           studentApi.getSchedule(),
-          // Note: API module does not support named params yet, using positional args
           notificationApi.getNotifications(false, 1, 5),
           studentApi.getPersonalResources(),
+          assessmentApi.getAssessments({ page_size: 100 }),
         ]);
         if (controller.signal.aborted) return;
 
@@ -204,10 +180,13 @@ export default function StudentDashboard() {
             (resRes.value || []).map((r: any) => ({
               ...r,
               title: r.display_name || r.original_filename,
-            })),
+            }))
           );
         }
-        // Resources failure is silent — non-critical
+
+        if (assessRes.status === "fulfilled") {
+          setAssessmentsList(assessRes.value.items || []);
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
@@ -217,20 +196,42 @@ export default function StudentDashboard() {
     return () => controller.abort();
   }, [retryKey]);
 
+  // Compute exact counts matching @student/assessments page
+  const assessmentCounts = useMemo(() => {
+    let active = 0;
+    let upcoming = 0;
+    let submitted = 0;
+
+    for (const a of assessmentsList) {
+      const cat = getAssessmentCategory(a);
+      if (cat === "ACTIVE" || cat === "IN_PROGRESS") {
+        active++;
+      } else if (cat === "UPCOMING") {
+        upcoming++;
+      } else if (cat === "SUBMITTED" || cat === "GRADED") {
+        submitted++;
+      }
+    }
+
+    return {
+      active: active || (data?.summary.active_assessments_count.value ?? 0),
+      upcoming,
+      submitted: submitted || (data?.summary.completed_assessments_count.value ?? 0),
+    };
+  }, [assessmentsList, data]);
+
   const violations = useMemo(() => {
     if (!data) return [];
     return (data.active_attempts ?? []).filter(
-      (a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED",
+      (a) => a.status === "TERMINATED" || a.status === "AUTO_SUBMITTED"
     );
   }, [data]);
 
   const displayName = user
-    ? (user?.profile as { first_name?: string; display_name?: string })
-        ?.first_name ||
-      (user?.profile as { first_name?: string; display_name?: string })
-        ?.display_name ||
+    ? (user?.profile as { first_name?: string; display_name?: string })?.first_name ||
+      (user?.profile as { first_name?: string; display_name?: string })?.display_name ||
       "Student"
-    : null; // null = still loading
+    : null;
 
   const greeting = useMemo(() => {
     const hour = new Date().getHours();
@@ -251,15 +252,15 @@ export default function StudentDashboard() {
     },
     {
       title: "Active Tasks",
-      value: data?.summary.active_assessments_count.value ?? 0,
-      delta: data?.summary.active_assessments_count.delta ?? 0,
-      positive: data?.summary.active_assessments_count.positive ?? true,
-      lastMonth: data?.summary.active_assessments_count.last_month ?? 0,
+      value: assessmentCounts.active,
+      delta: 0,
+      positive: true,
+      lastMonth: assessmentCounts.active,
       icon: Clock,
     },
     {
-      title: "Completed",
-      value: data?.summary.completed_assessments_count.value ?? 0,
+      title: "Submitted",
+      value: assessmentCounts.submitted,
       delta: data?.summary.completed_assessments_count.delta ?? 0,
       positive: data?.summary.completed_assessments_count.positive ?? true,
       lastMonth: data?.summary.completed_assessments_count.last_month ?? 0,
@@ -284,7 +285,7 @@ export default function StudentDashboard() {
 
   const unreadCount = useMemo(
     () => (notifications?.items ?? []).filter((n) => !n.is_read).length,
-    [notifications],
+    [notifications]
   );
 
   const dueTodayCount = useMemo(() => {
@@ -319,9 +320,9 @@ export default function StudentDashboard() {
         </div>
 
         {/* Quick actions skeleton */}
-        <Skeleton className="h-16 w-full rounded-xl" />
+        <Skeleton className="h-14 w-full rounded-xl" />
 
-        {/* Main content skeleton — mirrors lg:col-span-7 / lg:col-span-5 */}
+        {/* Main content skeleton */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           <div className="lg:col-span-7 space-y-4">
             <Skeleton className="h-64 w-full rounded-xl" />
@@ -364,24 +365,22 @@ export default function StudentDashboard() {
 
   return (
     <div data-tour="student-dashboard" className="space-y-4">
-      {/* Welcome Header with Planner Button */}
+      {/* Welcome Header with Academic Planner Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-1">
-        <div className="flex items-center gap-2">
-          <div>
-            <h1 className="text-2xl font-semibold ">
-              {greeting},{" "}
-              {displayName ? (
-                <>{displayName}</>
-              ) : (
-                <Skeleton className="inline-block h-6 w-28 align-middle" />
-              )}
-            </h1>
-            <p className="text-muted-foreground text-[12px] mt-0.5">
-              {data?.current_academic_period
-                ? `${data.current_academic_period} • Student portal for learning and do assessments`
-                : "Student portal for learning and do assessments"}
-            </p>
-          </div>
+        <div>
+          <h1 className="text-xl sm:text-2xl font-semibold tracking-tight text-foreground">
+            {greeting},{" "}
+            {displayName ? (
+              <>{displayName}</>
+            ) : (
+              <Skeleton className="inline-block h-6 w-28 align-middle" />
+            )}
+          </h1>
+          <p className="text-muted-foreground text-xs mt-0.5">
+            {data?.current_academic_period
+              ? `${data.current_academic_period} • Academic assessment and learning portal`
+              : "Academic assessment and learning portal"}
+          </p>
         </div>
 
         <AcademicPlannerDropdown />
@@ -389,71 +388,59 @@ export default function StudentDashboard() {
 
       {/* Due Today banner if applicable */}
       {dueTodayCount > 0 && (
-        <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/[0.04] text-amber-700">
-          <AlertTriangle className="size-3.5 shrink-0" />
-          <p className="text-xs font-semibold flex-1">
-            {dueTodayCount} assessment{dueTodayCount > 1 ? "s" : ""} due today.{" "}
+        <div className="flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-amber-900 dark:text-amber-200">
+          <AlertTriangle className="size-4 text-amber-600 shrink-0" />
+          <p className="text-xs font-medium flex-1">
+            <strong className="font-semibold">{dueTodayCount} assessment{dueTodayCount > 1 ? "s" : ""}</strong> due today.{" "}
             <Link
               href="/student/assessments"
-              className="underline underline-offset-2 font-bold"
+              className="underline underline-offset-2 font-semibold hover:opacity-80"
             >
-              View now →
+              View registry →
             </Link>
           </p>
         </div>
       )}
 
       {/* Metrics Overview */}
-      <div data-tour="student-dashboard-metrics" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div data-tour="student-dashboard-metrics" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {metrics.map((stat, index) => (
-          <Card key={index} className="rounded-xl shadow-none border">
-            <CardHeader className="border-0 pb-0.5 pt-2.5 px-3">
-              <CardTitle className="text-muted-foreground text-[9px] font-semibold uppercase tracking-wider">
+          <Card key={index} className="rounded-xl border border-border/60 bg-card shadow-2xs hover:border-border transition-colors">
+            <CardHeader className="p-3.5 pb-1 flex flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
                 {stat.title}
               </CardTitle>
-              <CardToolbar>
-                <Button
-                  variant="dim"
-                  size="sm"
-                  mode="icon"
-                  className="-me-1 opacity-40 hover:opacity-100 h-6 w-6"
-                  asChild
-                >
-                  <Link href="/student/results">
-                    <MoreHorizontal className="size-3" />
-                  </Link>
-                </Button>
-              </CardToolbar>
+              <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                <stat.icon className="size-3.5" />
+              </div>
             </CardHeader>
-            <CardContent className="space-y-1 pt-0 px-3 pb-2.5">
+            <CardContent className="p-3.5 pt-1 space-y-1">
               <div className="flex items-center gap-2">
-                <span className="text-xl font-bold text-primary tracking-tight tabular-nums">
-                  {stat.format
-                    ? stat.format(stat.value)
-                    : formatNumber(stat.value)}
+                <span className="text-xl font-bold text-foreground tracking-tight tabular-nums">
+                  {stat.format ? stat.format(stat.value) : formatNumber(stat.value)}
                   {stat.unit || ""}
                 </span>
                 {stat.delta !== 0 && (
                   <Badge
-                    variant={stat.positive ? "success" : "destructive"}
-                    appearance="light"
-                    className="rounded-full h-3.5 px-1.5 text-[8px] font-semibold"
+                    variant={stat.positive ? "outline" : "destructive"}
+                    className={cn(
+                      "rounded-full h-4 px-1.5 text-[9px] font-semibold",
+                      stat.positive && "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
+                    )}
                   >
                     {stat.delta > 0 ? (
-                      <ArrowUp className="size-2" />
+                      <ArrowUp className="size-2 mr-0.5" />
                     ) : (
-                      <ArrowDown className="size-2" />
+                      <ArrowDown className="size-2 mr-0.5" />
                     )}
                     {Math.abs(stat.delta)}%
                   </Badge>
                 )}
               </div>
-              <div className="text-[9px] text-muted-foreground mt-0.5 border-t border-muted/10 pt-1 flex justify-between items-center uppercase font-medium tracking-wide">
-                <span>Prev. Period</span>
-                <span className="text-foreground/70">
-                  {stat.format
-                    ? stat.format(stat.lastMonth)
-                    : formatNumber(stat.lastMonth)}
+              <div className="text-[10px] text-muted-foreground border-t border-border/40 pt-1 flex justify-between items-center font-medium">
+                <span>Previous Period</span>
+                <span className="text-foreground/80 font-semibold">
+                  {stat.format ? stat.format(stat.lastMonth) : formatNumber(stat.lastMonth)}
                   {stat.unit || ""}
                 </span>
               </div>
@@ -465,36 +452,34 @@ export default function StudentDashboard() {
       <QuickActions />
 
       {violations.length > 0 && (
-        <Card className="border-destructive/20 bg-destructive/[0.03] shadow-none rounded-xl overflow-hidden mb-4">
-          <CardHeader className="py-3 px-5 border-b border-destructive/10 flex flex-row items-center gap-3">
-            <ShieldAlert className="size-5 text-destructive" />
-            <CardTitle className="text-xs font-bold uppercase tracking-widest text-destructive">
+        <Card className="border-destructive/20 bg-destructive/5 shadow-2xs rounded-xl overflow-hidden mb-4">
+          <CardHeader className="py-2.5 px-4 border-b border-destructive/15 flex flex-row items-center gap-2">
+            <ShieldAlert className="size-4 text-destructive" />
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-destructive">
               Integrity Protocol Alerts
             </CardTitle>
           </CardHeader>
-          <CardContent className="p-4 space-y-3">
+          <CardContent className="p-3 space-y-2">
             {violations.map((v) => (
               <div
                 key={v.id}
-                className="flex items-center justify-between bg-background/60 p-3 rounded-lg border border-destructive/10"
+                className="flex items-center justify-between bg-card p-3 rounded-lg border border-destructive/20"
               >
-                <div className="space-y-1">
-                  <p className="text-sm font-bold text-destructive">
+                <div className="space-y-0.5">
+                  <p className="text-xs font-bold text-destructive">
                     {v.assessment_title}
                   </p>
-                  <p className="text-[10px] text-destructive font-medium uppercase">
+                  <p className="text-[11px] text-muted-foreground font-medium">
                     {getTerminationLabel(v.status, v.termination_reason)}
                   </p>
                 </div>
                 <Button
                   variant="destructive"
                   size="sm"
-                  className="h-8 text-[10px] font-bold uppercase"
+                  className="h-7 text-xs font-semibold"
                   asChild
                 >
-                  <Link href={`/student/results/${v.id}`}>
-                    Review Audit
-                  </Link>
+                  <Link href={`/student/results/${v.id}`}>Review Audit</Link>
                 </Button>
               </div>
             ))}
@@ -503,12 +488,14 @@ export default function StudentDashboard() {
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left column – Schedule & Activity */}
+        {/* Left column – Assessment Command & Schedule */}
         <div className="lg:col-span-7 space-y-4">
           <UpcomingAssessments
-            activeAttempts={(data?.active_attempts ?? []).slice(0, 5)}
-            upcomingAssessments={(data?.upcoming_assessments ?? []).slice(0, 5)}
+            activeAttempts={data?.active_attempts ?? []}
+            upcomingAssessments={data?.upcoming_assessments ?? []}
+            submittedCount={assessmentCounts.submitted}
           />
+
           {sectionErrors.schedule ? (
             <Card className="border-destructive/15 bg-destructive/[0.02] shadow-none rounded-xl">
               <CardContent className="py-6 text-center text-xs font-medium text-destructive">
@@ -520,20 +507,20 @@ export default function StudentDashboard() {
           )}
 
           {/* Recent Notifications Card */}
-          <Card className="shadow-none border rounded-xl overflow-hidden">
-            <CardHeader className="py-2.5 px-4 border-b flex flex-row items-center justify-between space-y-0 bg-muted/5">
-              <CardTitle className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <Bell className="size-3" />
+          <Card className="shadow-2xs border border-border/60 rounded-xl overflow-hidden">
+            <CardHeader className="py-2.5 px-4 border-b border-border/40 flex flex-row items-center justify-between space-y-0 bg-muted/10">
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                <Bell className="size-3.5 text-primary" />
                 Notifications
                 {unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary text-primary-foreground text-[8px] font-bold">
+                  <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold">
                     {unreadCount}
                   </span>
                 )}
               </CardTitle>
               <Link
                 href="/student/notifications"
-                className="text-[9px] text-muted-foreground font-semibold uppercase tracking-wider hover:text-foreground transition-colors"
+                className="text-[11px] text-primary font-medium hover:underline"
               >
                 View All →
               </Link>
@@ -544,26 +531,24 @@ export default function StudentDashboard() {
                   {sectionErrors.notifications}
                 </div>
               ) : (
-                <div className="divide-y divide-muted/20">
+                <div className="divide-y divide-border/40">
                   {notifications?.items && notifications.items.length > 0 ? (
                     notifications.items.map((notification) => (
                       <Link
                         key={notification.id}
                         href={getNotificationLink(notification)}
                         className={cn(
-                          "p-3 flex items-start gap-3 hover:bg-muted/10 transition-colors block",
-                          isCriticalNotification(
-                            notification.notification_type,
-                          ) &&
-                            "border-l-2 border-destructive bg-destructive/[0.02]",
+                          "p-3 flex items-start gap-3 hover:bg-muted/30 transition-colors block",
+                          isCriticalNotification(notification.notification_type) &&
+                            "border-l-2 border-destructive bg-destructive/5"
                         )}
                       >
                         <div
                           className={cn(
-                            "mt-0.5 rounded-md p-1",
+                            "mt-0.5 rounded-md p-1.5 shrink-0",
                             notification.is_read
                               ? "bg-muted text-muted-foreground"
-                              : "bg-primary/5 text-primary",
+                              : "bg-primary/10 text-primary"
                           )}
                         >
                           {getNotificationIcon(notification.notification_type)}
@@ -574,19 +559,18 @@ export default function StudentDashboard() {
                               "text-xs",
                               notification.is_read
                                 ? "font-medium text-muted-foreground"
-                                : "font-semibold text-foreground/80",
+                                : "font-semibold text-foreground"
                             )}
                           >
                             {notification.title}
                           </p>
-                          <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
                             {notification.body}
                           </p>
-                          <p className="text-[8px] text-muted-foreground mt-1 font-semibold uppercase tracking-tight">
-                            {formatDistanceToNow(
-                              new Date(notification.created_at),
-                              { addSuffix: true },
-                            )}
+                          <p className="text-[10px] text-muted-foreground/80 mt-1 font-medium">
+                            {formatDistanceToNow(new Date(notification.created_at), {
+                              addSuffix: true,
+                            })}
                           </p>
                         </div>
                       </Link>

@@ -17,6 +17,14 @@ class StudySupportSession(BaseModel, table=True):
             nullable=False,
         )
     )
+    conversation_id: uuid.UUID = Field(
+        default_factory=uuid.uuid4,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            nullable=False,
+            index=True,
+        )
+    )
     question: str = Field(sa_column=Column(Text, nullable=False))
     retrieved_chunk_ids: List[uuid.UUID] = Field(
         default_factory=list,

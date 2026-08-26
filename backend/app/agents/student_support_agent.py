@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 import json
 import uuid
 from typing import Any, Dict, List, Optional
@@ -13,9 +14,31 @@ from app.services.rag_service import RAGService
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import re
 from app.core.ai.meta_identity import (
     _META_IDENTITY_PATTERN,
     STUDENT_META_IDENTITY_DEFLECTION,
+)
+
+_STUDENT_GREETING_PATTERN = re.compile(
+    r"^\s*(?:hi|hello|hey|greetings|good\s+(?:morning|afternoon|evening|day)|howdy|sup|hola|bonjour|muraho|mwiriwe)\b[^\w]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+_STUDENT_COURTESY_PATTERN = re.compile(
+    r"^\s*(?:thanks|thank\s+you|thank\s+you\s+so\s+much|thx|ty|great|awesome|perfect|got\s+it|understood|okay|ok|cool|nice|good\s+job)\b[^\w]*$",
+    re.IGNORECASE | re.UNICODE,
+)
+
+STUDENT_GREETING_RESPONSE = (
+    "Hello! 👋 How can I assist you with your studies today? "
+    "If you have a question about a particular subject, concept, or assignment, "
+    "feel free to let me know and I'll be happy to help."
+)
+
+STUDENT_COURTESY_RESPONSE = (
+    "You're very welcome! 😊 Let me know if you want to explore this concept further, "
+    "review another topic, or test your understanding with practice questions."
 )
 
 logger = get_logger(__name__)
@@ -51,6 +74,7 @@ class StudySupportAgent(BaseAgent):
         question_id: Optional[uuid.UUID] = None,
         selected_text: Optional[str] = None,
         current_page: Optional[int] = None,
+        conversation_id: Optional[uuid.UUID] = None,
     ) -> StudySupportAgentResponse:
 
         # Step 0: Deterministic meta-identity deflection (deflect without RAG or LLM completion)
@@ -75,19 +99,64 @@ class StudySupportAgent(BaseAgent):
                 fallback_used=False,
             )
 
+        # Step 0.5: Conversational greetings and politeness without triggering RAG fallback
+        trimmed_q = question.strip()
+        if _STUDENT_GREETING_PATTERN.match(trimmed_q) or _STUDENT_COURTESY_PATTERN.match(trimmed_q):
+            answer_text = (
+                STUDENT_GREETING_RESPONSE
+                if _STUDENT_GREETING_PATTERN.match(trimmed_q)
+                else STUDENT_COURTESY_RESPONSE
+            )
+            if log_to_global_history and not is_in_assessment:
+                dummy_rag = RAGRetrievalResult(
+                    context_string="",
+                    citations=[],
+                    chunk_ids_used=[],
+                    retrieval_score=1.0,
+                    fallback_used=False,
+                )
+                await self._log_session(
+                    student_id=student_id,
+                    question=question,
+                    rag_result=dummy_rag,
+                    llm_response=answer_text,
+                    db=db,
+                    conversation_id=conversation_id,
+                )
+            return StudySupportAgentResponse(
+                answer=answer_text,
+                citations=[],
+                fallback_used=False,
+            )
+
         self.rag_service = RAGService(db)
 
         # Step 1: RAG retrieval with dynamic top_k, multi-resource, and workspace scoping
         top_k_count = 16 if deep_search_mode else 5
         rag_query = f"{question} {selected_text}" if selected_text else question
-        rag_result = await self.rag_service.retrieve_context(
-            question=rag_query,
-            student_id=student_id,
-            selected_resource_id=selected_resource_id,
-            selected_resource_ids=selected_resource_ids,
-            teaching_workspace_id=teaching_workspace_id,
-            top_k=top_k_count,
-        )
+
+        # If no specific resource or workspace is selected, answer directly from general knowledge without un-scoped cross-course search
+        if not selected_resource_id and not selected_resource_ids and not teaching_workspace_id:
+            logger.info(
+                "StudySupportAgent: no resource or workspace selected, answering from general knowledge",
+                student_id=str(student_id),
+            )
+            rag_result = RAGRetrievalResult(
+                context_string="",
+                citations=[],
+                chunk_ids_used=[],
+                retrieval_score=0.0,
+                fallback_used=True,
+            )
+        else:
+            rag_result = await self.rag_service.retrieve_context(
+                question=rag_query,
+                student_id=student_id,
+                selected_resource_id=selected_resource_id,
+                selected_resource_ids=selected_resource_ids,
+                teaching_workspace_id=teaching_workspace_id,
+                top_k=top_k_count,
+            )
 
         # Step 1.5: Grounding with exact page text if called with an active page in Study Reader
         grounded_page_text = None
@@ -138,6 +207,7 @@ class StudySupportAgent(BaseAgent):
                 rag_result=rag_result,
                 llm_response=llm_response,
                 db=db,
+                conversation_id=conversation_id,
             )
 
         # Step 6: Return response with citations
@@ -290,9 +360,11 @@ class StudySupportAgent(BaseAgent):
         rag_result: RAGRetrievalResult,
         llm_response: str,
         db: AsyncSession,
+        conversation_id: Optional[uuid.UUID] = None,
     ) -> None:
         session = StudySupportSession(
             student_id=student_id,
+            conversation_id=conversation_id or uuid.uuid4(),
             question=question,
             retrieved_chunk_ids=rag_result.chunk_ids_used,
             context_used=rag_result.context_string,
@@ -310,7 +382,8 @@ class StudySupportAgent(BaseAgent):
         db: Optional[AsyncSession] = None,
     ) -> Any:
         from app.schemas.student_ai import RevisionGuideOutput
-        if db:
+        ctx = ""
+        if db and teaching_workspace_id:
             self.rag_service = RAGService(db)
             rag_res = await self.rag_service.retrieve_context(
                 question=topic,
@@ -319,13 +392,12 @@ class StudySupportAgent(BaseAgent):
                 top_k=8,
             )
             ctx = rag_res.context_string
-        else:
-            ctx = ""
 
         system_prompt = (
             "You are an academic study coach. Generate a structured revision guide for the requested topic. "
             "Respond ONLY with a single JSON object matching this schema:\n"
             "{\n"
+            '  "title": "Title of the revision unit",\n'
             '  "summary": "Comprehensive topic summary.",\n'
             '  "checklist": ["Action item 1", "Action item 2"],\n'
             '  "readings": ["Recommended material 1", "Recommended material 2"]\n'
@@ -349,4 +421,25 @@ class StudySupportAgent(BaseAgent):
         )
 
         res = self._parse_json_output(response.content, RevisionGuideOutput)
+        if not res.title or res.title == "Revision Guide":
+            res.title = topic
+
+        # Generate downloadable markdown revision sheet
+        now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+        md_lines = [
+            f"# Revision Sheet: {res.title}",
+            f"*Generated by Mindexa AI Study Workspace on {now_str}*",
+            "",
+            "## 📌 Core Concept Summary",
+            res.summary,
+            "",
+            "## ✅ Learning Outcomes & Recall Checklist",
+        ]
+        for item in res.checklist:
+            md_lines.append(f"- [ ] {item}")
+        md_lines.append("\n## 📖 Recommended Readings & References")
+        for reading in res.readings:
+            md_lines.append(f"- {reading}")
+
+        res.markdown = "\n".join(md_lines)
         return res

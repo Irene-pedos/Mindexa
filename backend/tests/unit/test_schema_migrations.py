@@ -113,6 +113,22 @@ def test_add_reading_progress_layout_fields_migration_exists():
     assert '"furthest_page_reached"' in source
 
 
+def test_add_conversation_id_to_study_support_session_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260825_1200_add_conversation_id_to_study_support_session.py"
+    )
+    assert migration_path.exists(), "Study support conversation_id migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision = "20260825_1200_study_support_conv"' in source
+    assert 'down_revision = "20260824_1130_progress_layout"' in source
+    assert '"conversation_id"' in source
+    assert '"ix_study_support_sessions_conversation_id"' in source
+
+
 def test_migration_chain_integrity():
     """Verify that every migration has a valid down_revision and there is exactly one head."""
     versions_dir = Path(__file__).resolve().parents[1] / ".." / "alembic" / "versions"
@@ -149,4 +165,4 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260824_1130_progress_layout"
+    assert heads[0] == "20260825_1200_study_support_conv"

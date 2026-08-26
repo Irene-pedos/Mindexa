@@ -5,9 +5,10 @@ import { SidebarProvider, SidebarInset } from "@/components/ui/sidebar";
 import { LecturerSidebar } from "@/components/mindexa/layout/lecturer-sidebar";
 import { SiteHeader } from "@/components/mindexa/layout/site-header";
 import { useAuth } from "@/hooks/use-auth";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { cn } from "@/lib/utils";
 
 export default function LecturerLayout({
   children,
@@ -16,6 +17,8 @@ export default function LecturerLayout({
 }) {
   const { user, isAuthenticated, loading, isInitializing } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const isGrading = pathname?.startsWith("/lecturer/grading");
 
   useEffect(() => {
     // Wait until both the loading state and initialization are done
@@ -102,9 +105,14 @@ export default function LecturerLayout({
   return (
     <SidebarProvider>
       <LecturerSidebar />
-      <SidebarInset>
+      <SidebarInset className="min-w-0 transition-[margin,width] duration-300">
         <SiteHeader />
-        <main className="flex-1 p-6 bg-muted/30 min-h-[calc(100vh-3.5rem)]">
+        <main
+          className={cn(
+            "flex-1 bg-muted/30 min-h-[calc(100vh-3.5rem)] w-full min-w-0 transition-all duration-300",
+            isGrading ? "p-2 sm:p-4 lg:p-6" : "p-4 sm:p-6",
+          )}
+        >
           {children}
         </main>
       </SidebarInset>

@@ -365,9 +365,29 @@ export function StudyPlanDashboard({
                   </div>
                 )}
                 {weakTopics.length > 0 && (
-                  <div className="flex items-start gap-2 text-[11px] text-muted-foreground">
-                    <AlertTriangle className="size-3 text-amber-500 shrink-0 mt-0.5" />
-                    Revision needed: <span className="text-foreground font-medium ml-1">{weakTopics.join(", ")}</span>
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300">
+                      <AlertTriangle className="size-3 text-amber-500 shrink-0" />
+                      <span>Revision Needed:</span>
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {weakTopics.map((topic, tIdx) => (
+                        <button
+                          key={tIdx}
+                          type="button"
+                          onClick={() =>
+                            router.push(
+                              `/student/study/tutor?topic=${encodeURIComponent(topic)}`
+                            )
+                          }
+                          className="px-2 py-0.5 text-[10px] font-medium rounded-md border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 hover:bg-amber-500/20 transition-colors text-left flex items-center gap-1"
+                          title={`Study ${topic} with AI Tutor`}
+                        >
+                          <Sparkles className="size-2.5 text-primary shrink-0" />
+                          <span>{topic}</span>
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

@@ -32,11 +32,12 @@ import {
 import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BorderTrail } from "@/components/ui/border-trail";
 import { NavUser } from "@/components/nav-user";
+import { SidebarAiWidget } from "@/components/mindexa/layout/sidebar-ai-widget";
 import { useAuth } from "@/hooks/use-auth";
 import { studentApi } from "@/lib/api/student";
 import { assessmentApi } from "@/lib/api/assessment";
+import { getAssessmentCategory } from "@/lib/grading-architecture";
 
 const mainNav = [
   { title: "Dashboard", url: "/student/dashboard", icon: LayoutDashboard, tourId: "student-dashboard" },
@@ -80,24 +81,27 @@ export function StudentSidebar({
     async function checkPendingAssessments() {
       if (!user) return;
       try {
-        const dash = await studentApi.getDashboard().catch(() => null);
-        if (dash?.summary?.active_assessments_count?.value !== undefined) {
-          setPendingAssessmentsCount(
-            dash.summary.active_assessments_count.value,
-          );
-        } else {
-          const res = await assessmentApi.getAssessments({ page_size: 50 });
-          const validItems = (res.items || []).filter(
-            (a: any) => a.status === "PUBLISHED" || a.status === "IN_PROGRESS",
-          );
-          setPendingAssessmentsCount(validItems.length);
+        const res = await assessmentApi.getAssessments({ page_size: 100 });
+        const items = res.items || [];
+        let upcoming = 0;
+        let active = 0;
+        for (const a of items) {
+          const cat = getAssessmentCategory(a);
+          if (cat === "UPCOMING") {
+            upcoming++;
+          } else if (cat === "ACTIVE" || cat === "IN_PROGRESS") {
+            active++;
+          }
         }
+        // Show upcoming count first; if 0, show active count
+        const count = upcoming > 0 ? upcoming : active;
+        setPendingAssessmentsCount(count);
       } catch (e) {
         console.error("Failed to check pending assessments", e);
       }
     }
     checkPendingAssessments();
-    const interval = setInterval(checkPendingAssessments, 120000);
+    const interval = setInterval(checkPendingAssessments, 60000);
     return () => clearInterval(interval);
   }, [user]);
 
@@ -163,9 +167,10 @@ export function StudentSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                     className={cn(
-                      "transition-all duration-200",
-                      isActive &&
-                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      isActive
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
                     <Link
@@ -173,10 +178,17 @@ export function StudentSidebar({
                       data-tour={item.tourId}
                       className="relative flex items-center w-full"
                     >
-                      <item.icon className="size-5" />
-                      <span>{item.title}</span>
+                      <item.icon className="size-4.5 shrink-0" />
+                      <span className="truncate">{item.title}</span>
                       {showBadge && (
-                        <Badge className="ml-auto mr-1 h-5 px-1.5 flex items-center justify-center text-xs font-semibold bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300 border-none group-data-[collapsible=icon]:hidden">
+                        <Badge
+                          className={cn(
+                            "ml-auto mr-1 h-5 px-1.5 flex items-center justify-center text-xs font-semibold border-none group-data-[collapsible=icon]:hidden",
+                            isActive
+                              ? "bg-white/20 text-white"
+                              : "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-300"
+                          )}
+                        >
                           {pendingAssessmentsCount}
                         </Badge>
                       )}
@@ -204,14 +216,15 @@ export function StudentSidebar({
                     tooltip={item.title}
                     isActive={isActive}
                     className={cn(
-                      "transition-all duration-200",
-                      isActive &&
-                        "!bg-primary !text-primary-foreground font-semibold shadow-xs [&>svg]:!text-primary-foreground",
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      isActive
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
-                    <Link href={item.url} data-tour={item.tourId}>
-                      <item.icon className="size-5" />
-                      <span>{item.title}</span>
+                    <Link href={item.url} data-tour={item.tourId} className="relative flex items-center w-full">
+                      <item.icon className="size-4.5 shrink-0" />
+                      <span className="truncate">{item.title}</span>
                     </Link>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
@@ -222,26 +235,13 @@ export function StudentSidebar({
       </SidebarContent>
 
       <SidebarFooter className="gap-2">
-        <div className="group-data-[collapsible=icon]:hidden px-1">
-          <div className="relative rounded-xl border border-primary/40 bg-card p-3 shadow-xs space-y-2 text-left transition-all duration-300 hover:border-primary/70 overflow-hidden">
-            <div className="absolute -inset-px rounded-xl border border-primary/30 animate-pulse pointer-events-none" />
-            <div className="flex items-center gap-1.5 font-semibold text-xs text-foreground">
-              <SparklesIcon size={16} className="text-primary" />
-              Study with AI
-            </div>
-            <p className="text-[11px] text-muted-foreground font-medium leading-relaxed">
-              Get explanations from your course materials, ask questions, and
-              practice before assessments.
-            </p>
-            <Button
-              asChild
-              size="sm"
-              className="w-full h-7.5 text-xs font-semibold rounded-lg shadow-xs"
-            >
-              <Link href="/student/study">Open Study AI</Link>
-            </Button>
-          </div>
-        </div>
+        <SidebarAiWidget
+          storageKey="mindexa_student_sidebar_ai_widget"
+          title="Study with AI"
+          description="Get explanations from your course materials, ask questions, and practice before assessments."
+          buttonText="Open Study AI"
+          buttonHref="/student/study"
+        />
         <NavUser />
       </SidebarFooter>
 

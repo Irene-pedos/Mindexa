@@ -106,6 +106,7 @@ export function AssessmentAskAiPanel({
 
       const res = await studentAiApi.getSupport({
         question: userText,
+        source_surface: "assessment_inline",
         conversation_history: historyPayload,
         teaching_workspace_id: teachingWorkspaceId,
         selected_resource_ids: selectedResourceIds,

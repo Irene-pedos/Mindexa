@@ -358,11 +358,36 @@ export const lecturerApi = {
     workspace_id: string;
     question: string;
     mode: string;
+    conversation_id?: string;
     selected_material_ids?: string[];
     conversation_history?: Array<{ role: string; content: string }>;
     feature_payload?: any;
   }): Promise<{
     answer: string;
+    conversation_id?: string;
+    citations: any[];
+    fallback_used: boolean;
+    selected_sources: string[];
+    mode: string;
+    model?: string;
+    provider?: string;
+  }> => {
+    return apiClient("/lecturers/ai/support", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  },
+  aiSupport: async (data: {
+    workspace_id: string;
+    question: string;
+    mode: string;
+    conversation_id?: string;
+    selected_material_ids?: string[];
+    conversation_history?: Array<{ role: string; content: string }>;
+    feature_payload?: any;
+  }): Promise<{
+    answer: string;
+    conversation_id?: string;
     citations: any[];
     fallback_used: boolean;
     selected_sources: string[];
