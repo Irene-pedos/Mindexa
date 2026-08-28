@@ -243,6 +243,7 @@ export function StudyRail({
             numPages={numPages}
             currentPage={currentPage}
             onSelectPage={onSelectPage}
+            source={source}
           />
         )}
 

@@ -129,6 +129,39 @@ def test_add_conversation_id_to_study_support_session_migration_exists():
     assert '"ix_study_support_sessions_conversation_id"' in source
 
 
+def test_add_generate_slide_deck_to_ai_action_type_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260827_1030_add_generate_slide_deck_to_ai_action_type.py"
+    )
+    assert migration_path.exists(), "Slide deck action migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = \'20260827_1030_slide_deck_action\'' in source or 'revision = "20260827_1030_slide_deck_action"' in source
+    assert 'down_revision' in source
+    assert "'GENERATE_SLIDE_DECK'" in source
+
+
+def test_extend_learning_unit_and_outcomes_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260827_2030_extend_learning_unit_and_outcomes.py"
+    )
+    assert migration_path.exists(), "Extend learning unit migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert "20260827_2030_extend_lu" in source
+    assert "down_revision" in source
+    assert "learning_outcomes" in source
+    assert "start_page" in source
+    assert "end_page" in source
+    assert "uq_lu_workspace_material_order" in source
+
+
 def test_migration_chain_integrity():
     """Verify that every migration has a valid down_revision and there is exactly one head."""
     versions_dir = Path(__file__).resolve().parents[1] / ".." / "alembic" / "versions"
@@ -165,4 +198,4 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260825_1200_study_support_conv"
+    assert heads[0] == "20260827_2030_extend_lu"

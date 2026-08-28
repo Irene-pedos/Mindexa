@@ -10,6 +10,7 @@ import {
   PageCheckAnswerItem,
   PageCheckResponse,
   PageCheckSubmitResponse,
+  ReaderLearningUnitItem,
   ReaderSourceKind,
   RevisionSheetExport,
   SkimResponse,
@@ -79,6 +80,13 @@ export interface AskAIReaderResponse {
 export const studyReaderApi = {
   getMetadata: async (kind: ReaderSourceKind, id: string) => {
     return apiClient(`/student/reader/${kind}/${id}`);
+  },
+
+  getLearningUnits: async (
+    kind: ReaderSourceKind,
+    id: string
+  ): Promise<ReaderLearningUnitItem[]> => {
+    return apiClient(`/student/reader/${kind}/${id}/learning-units`);
   },
 
   getProgress: async (kind: ReaderSourceKind, id: string) => {

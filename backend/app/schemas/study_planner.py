@@ -49,6 +49,9 @@ class LearningUnitResponse(BaseModel):
     order_index: int
     title: str
     summary: Optional[str] = None
+    learning_outcomes: List[str] = []
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
     source_chunk_ids: List[str] = []
     estimated_study_minutes: int = 45
     is_active: bool = True

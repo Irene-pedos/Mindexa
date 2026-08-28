@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import {
   Loader2, AlertCircle, Sparkles, CheckCircle2, XCircle,
-  Clock, Shield, BookOpen, FileText, Edit3, Info, ChevronDown, ChevronUp,
+  Clock, Shield, ShieldAlert, ShieldCheck, Lock, BookOpen, FileText, Edit3, Info, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { toast } from "sonner";
@@ -31,15 +31,74 @@ import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
 // ─── AI Safety Notice ─────────────────────────────────────────────────────────
 function AISafetyNotice() {
   return (
-    <Alert className="border-amber-200 bg-amber-50 dark:bg-amber-950/20">
-      <Shield className="size-4 text-amber-600" />
-      <AlertTitle className="text-amber-700 font-semibold">AI Draft Mode — Lecturer Review Required</AlertTitle>
-      <AlertDescription className="text-amber-600 text-xs mt-1 space-y-1">
-        <p>✅ Generated questions are <strong>drafts only</strong> — they will NOT be added to any assessment without your explicit approval.</p>
-        <p>❌ AI cannot publish, schedule, or release assessments.</p>
-        <p>❌ AI cannot override blueprint rules or add questions directly to official exams.</p>
-      </AlertDescription>
-    </Alert>
+    <div className="relative overflow-hidden rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent p-4 sm:p-5 shadow-xs transition-all dark:border-amber-500/20 dark:from-amber-950/30 dark:via-amber-900/10 dark:to-transparent">
+      {/* Decorative ambient background accent */}
+      <div
+        className="pointer-events-none absolute -right-8 -top-8 size-36 rounded-full bg-amber-500/10 blur-2xl dark:bg-amber-400/5"
+        aria-hidden="true"
+      />
+
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3.5 border-b border-amber-500/15">
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-amber-500/15 text-amber-600 shadow-inner ring-1 ring-amber-500/30 dark:bg-amber-500/20 dark:text-amber-400">
+            <ShieldAlert className="size-5" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold tracking-tight text-amber-950 dark:text-amber-200">
+                AI Draft Mode — Lecturer Review Required
+              </h3>
+              <Badge
+                variant="outline"
+                className="border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300"
+              >
+                Human-in-the-Loop Active
+              </Badge>
+            </div>
+            <p className="mt-0.5 text-[11px] text-amber-800/80 dark:text-amber-300/70">
+              Strict institutional governance and exam integrity safeguards are enforced.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Safety Policy Points */}
+      <div className="mt-3.5 grid grid-cols-1 md:grid-cols-3 gap-3">
+        {/* Point 1: Drafts Only */}
+        <div className="flex items-start gap-2.5 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 dark:border-emerald-500/20 dark:bg-emerald-950/20">
+          <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-emerald-600 dark:bg-emerald-500/30 dark:text-emerald-400">
+            <CheckCircle2 className="size-3.5" />
+          </div>
+          <div className="text-[11px] leading-relaxed text-foreground/90">
+            <span className="font-semibold text-emerald-800 dark:text-emerald-300">Drafts Only:</span>{" "}
+            Generated questions are drafts only — they will <strong className="font-semibold text-emerald-900 dark:text-emerald-200 underline decoration-emerald-500/40">NOT</strong> be added to any assessment without your explicit approval.
+          </div>
+        </div>
+
+        {/* Point 2: No Publishing */}
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 dark:border-amber-500/20 dark:bg-amber-950/20">
+          <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-600 dark:bg-amber-500/30 dark:text-amber-400">
+            <XCircle className="size-3.5" />
+          </div>
+          <div className="text-[11px] leading-relaxed text-foreground/90">
+            <span className="font-semibold text-amber-800 dark:text-amber-300">No Publish Rights:</span>{" "}
+            AI cannot publish, schedule, or release assessments.
+          </div>
+        </div>
+
+        {/* Point 3: Blueprint Rules */}
+        <div className="flex items-start gap-2.5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-3 dark:border-amber-500/20 dark:bg-amber-950/20">
+          <div className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-amber-500/20 text-amber-600 dark:bg-amber-500/30 dark:text-amber-400">
+            <XCircle className="size-3.5" />
+          </div>
+          <div className="text-[11px] leading-relaxed text-foreground/90">
+            <span className="font-semibold text-amber-800 dark:text-amber-300">Exam Integrity:</span>{" "}
+            AI cannot override blueprint rules or add questions directly to official exams.
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 

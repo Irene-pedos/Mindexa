@@ -108,6 +108,18 @@ export interface SkimResponse {
   bullets: SkimBullet[];
 }
 
+export interface ReaderLearningUnitItem {
+  id: string;
+  order_index: number;
+  title: string;
+  summary?: string | null;
+  learning_outcomes?: string[];
+  start_page?: number | null;
+  end_page?: number | null;
+  chunk_count: number;
+  estimated_study_minutes: number;
+}
+
 export interface RevisionSheetExport {
   source_id: string;
   source_kind: string;

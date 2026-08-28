@@ -428,11 +428,38 @@ export function StudyPlanWizard({
                       <SelectContent>
                         {learningUnits.map((lu) => (
                           <SelectItem key={lu.id} value={lu.id} className="text-xs">
-                            {lu.order_index}. {lu.title} ({lu.estimated_study_minutes} mins)
+                            Unit {lu.order_index}: {lu.title} {lu.start_page ? `(p. ${lu.start_page}${lu.end_page && lu.end_page !== lu.start_page ? `–${lu.end_page}` : ""})` : `(~${lu.estimated_study_minutes}m)`}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+
+                    {targetLearningUnitId && (() => {
+                      const selectedLU = learningUnits.find((u) => u.id === targetLearningUnitId);
+                      if (!selectedLU) return null;
+                      return (
+                        <div className="p-2.5 rounded-lg border border-border/50 bg-muted/20 text-[11px] space-y-1 mt-1.5">
+                          <div className="flex items-center justify-between text-muted-foreground">
+                            <span className="font-semibold text-foreground">{selectedLU.title}</span>
+                            {selectedLU.start_page && (
+                              <span className="font-mono text-[10px] bg-primary/10 text-primary px-1.5 py-0.2 rounded">
+                                Pages {selectedLU.start_page}–{selectedLU.end_page || selectedLU.start_page}
+                              </span>
+                            )}
+                          </div>
+                          {selectedLU.summary && (
+                            <p className="text-muted-foreground line-clamp-2">{selectedLU.summary}</p>
+                          )}
+                          {selectedLU.learning_outcomes && selectedLU.learning_outcomes.length > 0 && (
+                            <div className="pt-1 text-[10px] text-muted-foreground">
+                              <span className="font-medium text-foreground/80">Outcomes ({selectedLU.learning_outcomes.length}):</span>{" "}
+                              {selectedLU.learning_outcomes.slice(0, 2).join("; ")}
+                              {selectedLU.learning_outcomes.length > 2 ? "..." : ""}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>

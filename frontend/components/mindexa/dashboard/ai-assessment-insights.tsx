@@ -101,7 +101,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
               Weak Topics Identified
             </span>
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-              {data.weak_topics.length}
+              {data.weak_topics?.length ?? 0}
             </Badge>
           </div>
           {weakExpanded ? (
@@ -112,7 +112,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
         </button>
         {weakExpanded && (
           <div className="px-3 py-2.5 space-y-1.5">
-            {data.weak_topics.length === 0 ? (
+            {!data.weak_topics || data.weak_topics.length === 0 ? (
               <p className="text-[11px] text-muted-foreground italic">No significant weak areas detected.</p>
             ) : (
               data.weak_topics.map((topic, i) => (
@@ -138,7 +138,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
               Suggested Interventions
             </span>
             <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-              {data.recommended_interventions.length}
+              {data.recommended_interventions?.length ?? 0}
             </Badge>
           </div>
           {suggestionsExpanded ? (
@@ -149,7 +149,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
         </button>
         {suggestionsExpanded && (
           <div className="px-3 py-2.5 space-y-1.5">
-            {data.recommended_interventions.map((item, i) => (
+            {(data.recommended_interventions || []).map((item, i) => (
               <div key={i} className="flex items-start gap-2 text-[11px] text-foreground/80">
                 <span className="mt-1.5 size-1.5 rounded-full bg-primary/60 shrink-0" />
                 {item}
@@ -160,7 +160,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
       </div>
 
       {/* Strategic Insights */}
-      {data.insights.length > 0 && (
+      {(data.insights?.length ?? 0) > 0 && (
         <div className="rounded-xl border border-border/50 overflow-hidden">
           <button
             onClick={() => setInsightsExpanded(!insightsExpanded)}
@@ -170,7 +170,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
               <Info className="size-3.5 text-muted-foreground" />
               <span className="text-[11px] font-semibold text-foreground">Strategic Insights</span>
               <Badge variant="secondary" className="text-[9px] px-1.5 py-0">
-                {data.insights.length}
+                {data.insights?.length ?? 0}
               </Badge>
             </div>
             {insightsExpanded ? (
@@ -181,7 +181,7 @@ export function AIAssessmentInsights({ assessmentId }: AIAssessmentInsightsProps
           </button>
           {insightsExpanded && (
             <div className="px-3 py-2.5 grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {data.insights.map((insight, i) => (
+              {(data.insights || []).map((insight, i) => (
                 <div key={i} className="p-2.5 rounded-lg border border-border/40 bg-muted/10 text-[11px] text-muted-foreground leading-relaxed">
                   {insight}
                 </div>

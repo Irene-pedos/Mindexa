@@ -23,6 +23,18 @@ KeyPointConfidence = Literal["got_it", "fuzzy", "lost"]
 
 # ── Metadata ─────────────────────────────────────────────────────────────────
 
+class ReaderLearningUnitItem(BaseModel):
+    id: uuid.UUID
+    order_index: int
+    title: str
+    summary: Optional[str] = None
+    learning_outcomes: List[str] = Field(default_factory=list)
+    start_page: Optional[int] = None
+    end_page: Optional[int] = None
+    chunk_count: int = 0
+    estimated_study_minutes: int = 45
+
+
 class ReaderMetadataResponse(BaseModel):
     id: uuid.UUID
     kind: SourceKind

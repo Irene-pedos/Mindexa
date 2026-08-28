@@ -17,16 +17,19 @@ class LearningUnit(BaseModel, table=True):
     __tablename__ = "learning_unit"
 
     teaching_workspace_id: uuid.UUID = Field(foreign_key="teaching_workspace.id", index=True, nullable=False)
-    source_material_id: Optional[uuid.UUID] = Field(default=None, foreign_key="lecturer_material.id", nullable=True)
+    source_material_id: Optional[uuid.UUID] = Field(default=None, foreign_key="lecturer_material.id", nullable=True, index=True)
     order_index: int = Field(nullable=False, index=True)
     title: str = Field(max_length=255, nullable=False)
     summary: Optional[str] = Field(default=None)
+    learning_outcomes: List[str] = Field(default=[], sa_column=Column(JSON))
+    start_page: Optional[int] = Field(default=None)
+    end_page: Optional[int] = Field(default=None)
     source_chunk_ids: List[str] = Field(default=[], sa_column=Column(JSON))
     estimated_study_minutes: int = Field(default=45)
     is_active: bool = Field(default=True)
 
     __table_args__ = (
-        UniqueConstraint("teaching_workspace_id", "order_index", name="uq_lu_workspace_order"),
+        UniqueConstraint("teaching_workspace_id", "source_material_id", "order_index", name="uq_lu_workspace_material_order"),
     )
 
 

@@ -45,10 +45,7 @@ class BaseAgent:
             content_str = content.strip()
 
             # 1. Try extracting content inside markdown blocks
-            match = re.search(r"```json\s*(.*?)\s*```", content_str, re.DOTALL)
-            if not match:
-                match = re.search(r"```\s*(.*?)\s*```", content_str, re.DOTALL)
-
+            match = re.search(r"```(?:json)?\s*(.*?)\s*```", content_str, re.DOTALL)
             if match:
                 clean_content = match.group(1).strip()
             else:
@@ -73,13 +70,33 @@ class BaseAgent:
                 else:
                     clean_content = content_str
 
-            data = json.loads(clean_content, strict=False)
+            try:
+                data = json.loads(clean_content, strict=False)
+            except json.JSONDecodeError:
+                # Robust recovery for common LLM JSON syntax anomalies
+                # 1. Strip trailing commas before closing braces or brackets
+                repaired = re.sub(r",\s*([\]\}])", r"\1", clean_content)
+                try:
+                    data = json.loads(repaired, strict=False)
+                except json.JSONDecodeError:
+                    # 2. Attempt recovery for truncated JSON (e.g. output token budget reached)
+                    open_braces = repaired.count("{") - repaired.count("}")
+                    open_brackets = repaired.count("[") - repaired.count("]")
+                    if open_braces > 0 or open_brackets > 0:
+                        repaired_truncated = repaired.rstrip().rstrip(",")
+                        # If an odd number of quotes exists, close the pending string literal
+                        if repaired_truncated.count('"') % 2 == 1:
+                            repaired_truncated += '"'
+                        repaired_truncated += ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
+                        data = json.loads(repaired_truncated, strict=False)
+                    else:
+                        raise
 
             if extract_list:
                 if not isinstance(data, list):
                     # Attempt to find list in dict if wrapped
                     if isinstance(data, dict):
-                        for key in ("questions", "items", "data", "results"):
+                        for key in ("questions", "items", "data", "results", "slides"):
                             if key in data and isinstance(data[key], list):
                                 data = data[key]
                                 break

@@ -1467,38 +1467,76 @@ class StudyPlannerService:
                 await self.repo.update_session(session)
                 return StudySessionResponse.model_validate(session)
 
-            # Retrieve RAG context grounded in vector embeddings
+            # Retrieve RAG context grounded in vector embeddings / Learning Unit hard scope
             rag_context = ""
             rag_citations = []
-            try:
-                from app.services.rag_service import RAGService
-                rag_service = RAGService(self.db)
-                if plan and plan.teaching_workspace_id:
-                    rag_res = await rag_service.retrieve_context_for_lecturer(
-                        topic=session.topic,
-                        teaching_workspace_id=plan.teaching_workspace_id,
-                        top_k=8,
-                    )
-                    if rag_res and rag_res.context_string:
-                        rag_context = rag_res.context_string
-                        if hasattr(rag_res, "citations") and rag_res.citations:
-                            rag_citations = [c.model_dump() for c in rag_res.citations]
 
-                if not rag_context:
-                    rag_res = await rag_service.retrieve_context(
-                        question=session.topic,
-                        student_id=student_id,
-                        top_k=8,
+            # 1. Hard RAG scoping if session is bound to a specific Learning Unit
+            if session.learning_unit_id:
+                try:
+                    from app.db.models.learning_unit import LearningUnit
+                    from app.db.models.resource_chunk import ResourceChunk
+                    lu = await self.db.get(LearningUnit, session.learning_unit_id)
+                    if lu and lu.source_chunk_ids:
+                        chunk_uuids = []
+                        for cid in lu.source_chunk_ids:
+                            try:
+                                chunk_uuids.append(uuid.UUID(str(cid)))
+                            except (ValueError, TypeError):
+                                continue
+                        if chunk_uuids:
+                            chunk_stmt = select(ResourceChunk).where(
+                                ResourceChunk.id.in_(chunk_uuids)
+                            )
+                            lu_chunks = list((await self.db.execute(chunk_stmt)).scalars().all())
+                            if lu_chunks:
+                                rag_context_lines = []
+                                for c in lu_chunks:
+                                    pg = c.metadata_json.get("page") if c.metadata_json else 1
+                                    rag_context_lines.append(f"--- Learning Unit: {lu.title} (Page {pg}) ---\n{c.content[:1000]}")
+                                    rag_citations.append({
+                                        "resource_id": str(c.resource_id),
+                                        "resource_name": lu.title,
+                                        "title": lu.title,
+                                        "snippet": c.content[:300],
+                                        "chunk_index": c.chunk_index,
+                                        "page_number": pg,
+                                    })
+                                rag_context = "\n\n".join(rag_context_lines)
+                except Exception as lu_rag_err:
+                    logger.warning("Learning unit hard RAG scoping error, falling back to general retrieval", error=str(lu_rag_err))
+
+            # 2. General RAG vector retrieval if no LU context was loaded
+            if not rag_context:
+                try:
+                    from app.services.rag_service import RAGService
+                    rag_service = RAGService(self.db)
+                    if plan and plan.teaching_workspace_id:
+                        rag_res = await rag_service.retrieve_context_for_lecturer(
+                            topic=session.topic,
+                            teaching_workspace_id=plan.teaching_workspace_id,
+                            top_k=8,
+                        )
+                        if rag_res and rag_res.context_string:
+                            rag_context = rag_res.context_string
+                            if hasattr(rag_res, "citations") and rag_res.citations:
+                                rag_citations = [c.model_dump() for c in rag_res.citations]
+
+                    if not rag_context:
+                        rag_res = await rag_service.retrieve_context(
+                            question=session.topic,
+                            student_id=student_id,
+                            top_k=8,
+                        )
+                        if rag_res and rag_res.context_string:
+                            rag_context = rag_res.context_string
+                            if hasattr(rag_res, "citations") and rag_res.citations:
+                                rag_citations = [c.model_dump() for c in rag_res.citations]
+                except Exception as exc:
+                    logger.warning(
+                        "Guided lesson RAG vector retrieval failed, attempting fallback",
+                        error=str(exc),
                     )
-                    if rag_res and rag_res.context_string:
-                        rag_context = rag_res.context_string
-                        if hasattr(rag_res, "citations") and rag_res.citations:
-                            rag_citations = [c.model_dump() for c in rag_res.citations]
-            except Exception as exc:
-                logger.warning(
-                    "Guided lesson RAG vector retrieval failed, attempting fallback",
-                    error=str(exc),
-                )
 
             if not rag_context and plan and plan.teaching_workspace_id:
                 topic_keywords = [w for w in session.topic.replace("-", " ").split() if len(w) > 3]
@@ -2087,55 +2125,84 @@ class StudyPlannerService:
 
     async def extract_learning_units(self, material_id: uuid.UUID) -> List[Any]:
         """
-        AI Extraction Pipeline (5b): Extract structured Learning Units from material chunks and persist.
+        AI Extraction Pipeline: Extract structured Learning Units from material chunks and persist.
         """
-        from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk
+        from app.db.models.resource import LecturerMaterial
+        from app.db.models.resource_chunk import ResourceChunk
         from app.db.models.learning_unit import LearningUnit
+        from app.db.models.academic import TeachingWorkspace
+        from app.core.ai.language_policy import assert_ai_allowed
 
         material = await self.db.get(LecturerMaterial, material_id)
         if not material or not material.teaching_workspace_id:
             return []
 
-        chunks_stmt = select(LecturerMaterialChunk).where(
-            LecturerMaterialChunk.lecturer_material_id == material_id
-        ).order_by(LecturerMaterialChunk.chunk_index.asc())
-        chunks_res = await self.db.execute(chunks_stmt)
-        chunks = list(chunks_res.scalars().all())
+        # Idempotency check
+        existing_stmt = select(LearningUnit).where(
+            LearningUnit.source_material_id == material_id,
+            LearningUnit.is_active == True,
+            LearningUnit.is_deleted == False,
+        ).order_by(LearningUnit.order_index.asc())
+        existing = list((await self.db.execute(existing_stmt)).scalars().all())
+        if existing:
+            return existing
+
+        # Language policy check
+        workspace = await self.db.get(TeachingWorkspace, material.teaching_workspace_id)
+        if workspace:
+            assert_ai_allowed(
+                getattr(workspace, "language", None),
+                action="segment_learning_units",
+                context={"material_id": str(material.id), "workspace_id": str(workspace.id)},
+            )
+
+        # Retrieve chunks (prefer ResourceChunk if academic_resource_id exists)
+        if material.academic_resource_id:
+            chunks_stmt = select(ResourceChunk).where(
+                ResourceChunk.resource_id == material.academic_resource_id
+            ).order_by(ResourceChunk.chunk_index.asc())
+            chunks = list((await self.db.execute(chunks_stmt)).scalars().all())
+        else:
+            chunks = []
 
         if not chunks:
             return []
 
-        max_idx_stmt = select(func.max(LearningUnit.order_index)).where(
-            LearningUnit.teaching_workspace_id == material.teaching_workspace_id,
-            LearningUnit.is_deleted == False,
-        )
-        max_res = await self.db.execute(max_idx_stmt)
-        current_max = max_res.scalar() or 0
-
         from app.agents.study_planner_agent import StudyPlannerAgent
         from app.core.ai.gateway import AIGateway
-        from app.core.ai.provider_factory import get_ai_provider, get_embedding_provider
+        from app.core.ai.provider_factory import get_ai_providers, get_embedding_providers
 
-        chat_provider = get_ai_provider()
-        embed_provider = get_embedding_provider()
-        gateway = AIGateway(self.db, chat_provider, embed_provider)
+        gateway = AIGateway(self.db, get_ai_providers(), get_embedding_providers())
         agent = StudyPlannerAgent(gateway)
 
         chunk_dicts = [
-            {"chunk_index": c.chunk_index, "content": getattr(c, "content", None) or getattr(c, "snippet", "") or ""}
+            {"chunk_index": c.chunk_index, "content": c.content or "", "metadata": c.metadata_json or {}}
             for c in chunks
         ]
-        segments = await agent.segment_into_learning_units(material.title or "Material", chunk_dicts)
+        title = material.display_name or material.original_filename or "Material"
+        segments = await agent.segment_into_learning_units(title, chunk_dicts, actor_id=material.lecturer_id)
 
         created_units = []
         for i, seg in enumerate(segments):
-            chunk_ids = [str(chunks[c_i].id) for c_i in seg.chunk_indices if 0 <= c_i < len(chunks)]
+            assigned_chunks = [chunks[c_i] for c_i in seg.chunk_indices if 0 <= c_i < len(chunks)]
+            pages = [
+                c.metadata_json.get("page")
+                for c in assigned_chunks
+                if c.metadata_json and isinstance(c.metadata_json.get("page"), int)
+            ]
+            start_page = min(pages) if pages else None
+            end_page = max(pages) if pages else None
+            chunk_ids = [str(c.id) for c in assigned_chunks]
+
             lu = LearningUnit(
                 teaching_workspace_id=material.teaching_workspace_id,
                 source_material_id=material.id,
-                order_index=current_max + i + 1,
+                order_index=i + 1,
                 title=seg.title,
                 summary=seg.summary,
+                learning_outcomes=seg.learning_outcomes or [],
+                start_page=start_page,
+                end_page=end_page,
                 source_chunk_ids=chunk_ids,
                 estimated_study_minutes=seg.estimated_minutes,
                 is_active=True,
@@ -2181,6 +2248,9 @@ class StudyPlannerService:
                     order_index=lu.order_index,
                     title=lu.title,
                     summary=lu.summary,
+                    learning_outcomes=lu.learning_outcomes or [],
+                    start_page=lu.start_page,
+                    end_page=lu.end_page,
                     source_chunk_ids=lu.source_chunk_ids or [],
                     estimated_study_minutes=lu.estimated_study_minutes,
                     is_active=lu.is_active,

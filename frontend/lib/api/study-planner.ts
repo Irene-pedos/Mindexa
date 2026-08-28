@@ -87,6 +87,9 @@ export interface LearningUnit {
   order_index: number;
   title: string;
   summary?: string | null;
+  learning_outcomes?: string[];
+  start_page?: number | null;
+  end_page?: number | null;
   source_chunk_ids?: string[];
   estimated_study_minutes: number;
   is_active: boolean;

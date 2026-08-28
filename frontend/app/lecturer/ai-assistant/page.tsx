@@ -10,17 +10,11 @@ import React, {
   Suspense,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-} from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -31,33 +25,31 @@ import {
 } from "@/components/ui/dialog";
 import {
   Sparkles,
-  ShieldCheck,
   BookOpen,
   BarChart2,
-  RefreshCw,
   Plus,
   Trash2,
   Folder,
   Layers,
   Award,
-  BookOpenCheck,
   Maximize2,
   Minimize2,
   Copy,
   Check,
   Edit2,
   RotateCcw,
-  Lightbulb,
   AlertTriangle,
   FileText,
   ChevronDown,
-  ChevronUp,
   Pin,
   Share2,
   Download,
   Printer,
   FileCode,
   Menu,
+  Loader2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import { AIChatInput, type Attachment } from "@/components/ui/ai-chat-input";
 import { ChatMessage } from "@/lib/api/gemini";
@@ -67,7 +59,6 @@ import {
   WorkspaceDetail,
   LecturerMaterialResponse,
 } from "@/lib/api/lecturer";
-import { Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { Separator } from "@/components/ui/separator";
@@ -98,14 +89,35 @@ import { Marker, MarkerIcon, MarkerContent } from "@/components/ui/marker";
 import { Spinner } from "@/components/ui/spinner";
 import { RichMessageRenderer } from "@/components/mindexa/common/rich-message-renderer";
 
+// 5 Grounded Sub-components
+import { QuestionGeneratorLauncher } from "@/components/mindexa/lecturer/question-generator-launcher";
+import { SlideDeckGenerator } from "@/components/mindexa/lecturer/slide-deck-generator";
+import { RubricAssistant } from "@/components/mindexa/lecturer/rubric-assistant";
+import { ClassDigest } from "@/components/mindexa/lecturer/class-digest";
+
+export type AIModule = "chat" | "questions" | "slides" | "rubric" | "digest";
+
+const VALID_MODULES: AIModule[] = ["chat", "questions", "slides", "rubric", "digest"];
+
 interface AISession {
   id: string;
   title: string;
-  module: "chat" | "assessment" | "content" | "review" | "feedback" | "analytics" | "insights";
+  module: AIModule;
   workspaceId: string | null;
   history: ChatMessage[];
   generatedContent: string;
   created_at: string;
+}
+
+/**
+ * Defensive migration for legacy session modules
+ */
+function sanitizeSessionModule(rawModule: string): AIModule {
+  if (rawModule === "assessment") return "questions";
+  if (rawModule === "content") return "slides";
+  if (rawModule === "analytics" || rawModule === "insights") return "digest";
+  if (VALID_MODULES.includes(rawModule as AIModule)) return rawModule as AIModule;
+  return "chat";
 }
 
 function LecturerAIAssistantContent() {
@@ -114,21 +126,23 @@ function LecturerAIAssistantContent() {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // Tab State with LocalStorage and URL synchronization
-  const [activeTab, setActiveTabState] = useState<"chat" | "assessment" | "content" | "review" | "feedback" | "analytics" | "insights">(() => {
+  const [activeTab, setActiveTabState] = useState<AIModule>(() => {
     if (typeof window !== "undefined") {
       const urlModule = searchParams.get("module");
-      if (urlModule && ["chat", "assessment", "content", "review", "feedback", "analytics", "insights"].includes(urlModule)) {
-        return urlModule as any;
+      if (urlModule) {
+        const sanitized = sanitizeSessionModule(urlModule);
+        return sanitized;
       }
       const saved = localStorage.getItem("mindexa_lecturer_ai_module");
-      if (saved && ["chat", "assessment", "content", "review", "feedback", "analytics", "insights"].includes(saved)) {
-        return saved as any;
+      if (saved) {
+        const sanitized = sanitizeSessionModule(saved);
+        return sanitized;
       }
     }
     return "chat";
   });
 
-  const setActiveTab = (tab: "chat" | "assessment" | "content" | "review" | "feedback" | "analytics" | "insights") => {
+  const setActiveTab = (tab: AIModule) => {
     setActiveTabState(tab);
     if (typeof window !== "undefined") {
       localStorage.setItem("mindexa_lecturer_ai_module", tab);
@@ -147,7 +161,6 @@ function LecturerAIAssistantContent() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isContextSheetOpen, setIsContextSheetOpen] = useState(false);
-  const [isConfigExpanded, setIsConfigExpanded] = useState(true);
 
   // Native Fullscreen Sync
   const toggleFullScreen = () => {
@@ -212,10 +225,7 @@ function LecturerAIAssistantContent() {
   const [activeWorkspaceDetail, setActiveWorkspaceDetail] = useState<WorkspaceDetail | null>(null);
   const [loadingWorkspaceDetail, setLoadingWorkspaceDetail] = useState(false);
 
-  // Resource / Materials Context Settings with persistence
-  const [useCourseNotes, setUseCourseNotes] = useState(true);
-  const [useLecturerMaterials, setUseLecturerMaterials] = useState(true);
-  const [useAssessmentRubric, setUseAssessmentRubric] = useState(false);
+  // Resource / Materials Context Settings
   const [workspaceMaterials, setWorkspaceMaterials] = useState<LecturerMaterialResponse[]>([]);
   const [selectedMaterials, setSelectedMaterialsState] = useState<string[]>(() => {
     if (typeof window !== "undefined") {
@@ -275,25 +285,7 @@ function LecturerAIAssistantContent() {
   const [shareModalOpen, setShareModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
 
-  // Module Forms Inputs
-  const [asmtTopic, setAsmtTopic] = useState("");
-  const [asmtType, setAsmtType] = useState("MCQ");
-  const [asmtDifficulty, setAsmtDifficulty] = useState("Medium");
-  const [asmtBloomLevel, setAsmtBloomLevel] = useState("Apply");
-  const [asmtQuestionCount, setAsmtQuestionCount] = useState("5");
-  const [asmtMarks, setAsmtMarks] = useState("10");
-  const [asmtIncludeRubrics, setAsmtIncludeRubrics] = useState(true);
-
-  const [contentTopic, setContentTopic] = useState("");
-  const [contentType, setContentType] = useState("Summarize selected material");
-  const [contentOutcomes, setContentOutcomes] = useState("");
-
-  const [studentResponse, setStudentResponse] = useState("");
-  const [gradingRubric, setGradingRubric] = useState("");
-
-  const [feedbackPerformance, setFeedbackPerformance] = useState("");
-
-  // Load Workspaces & Saved Sessions on Mount
+  // Load Workspaces & Saved Sessions on Mount (with defensive migration)
   useEffect(() => {
     async function loadData() {
       try {
@@ -319,7 +311,19 @@ function LecturerAIAssistantContent() {
         const stored = localStorage.getItem("mindexa_lecturer_ai_sessions");
         if (stored) {
           try {
-            setSessions(JSON.parse(stored));
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              // Defensive sanitization of stored sessions
+              const sanitizedList: AISession[] = parsed.map((s: any) => ({
+                ...s,
+                module: sanitizeSessionModule(s.module),
+              }));
+              setSessions(sanitizedList);
+              localStorage.setItem(
+                "mindexa_lecturer_ai_sessions",
+                JSON.stringify(sanitizedList)
+              );
+            }
           } catch (e) {
             console.error("Failed to parse saved AI sessions", e);
           }
@@ -359,16 +363,19 @@ function LecturerAIAssistantContent() {
   }, [workspaces, selectedWorkspaceId]);
 
   const isRwandaBlocked = useMemo(() => {
-    return activeWorkspace?.language === "RW" || activeWorkspaceDetail?.language === "RW";
+    return (
+      activeWorkspace?.language === "RW" ||
+      activeWorkspaceDetail?.language === "RW"
+    );
   }, [activeWorkspace, activeWorkspaceDetail]);
 
   const activeWorkspaceName = useMemo(() => {
-    return activeWorkspaceDetail?.title || activeWorkspace?.title || "No Workspace Selected";
+    return (
+      activeWorkspaceDetail?.title ||
+      activeWorkspace?.title ||
+      "No Workspace Selected"
+    );
   }, [activeWorkspaceDetail, activeWorkspace]);
-
-  const selectedProcessedMaterials = useMemo(() => {
-    return workspaceMaterials.filter((m) => selectedMaterials.includes(m.id));
-  }, [workspaceMaterials, selectedMaterials]);
 
   // Session Management
   const saveCurrentSession = useCallback(
@@ -413,7 +420,7 @@ function LecturerAIAssistantContent() {
     [activeTab, currentSessionId, selectedWorkspaceId]
   );
 
-  const startNewSession = (tab?: "chat" | "assessment" | "content" | "review" | "feedback" | "analytics" | "insights") => {
+  const startNewSession = (tab?: AIModule) => {
     setCurrentSessionId(null);
     setHistory([]);
     setGeneratedContent("");
@@ -460,7 +467,7 @@ function LecturerAIAssistantContent() {
     toast.info("Prompt loaded into composer.");
   };
 
-  // Full-featured Export Handlers (PDF, Markdown, Plain Text)
+  // Export Handlers
   const handleExportMarkdown = () => {
     const title = `lecturer-ai-${activeTab}-${new Date().toISOString().slice(0, 10)}.md`;
     let content = `# Lecturer Academic AI — ${activeTab.toUpperCase()}\n\n`;
@@ -599,8 +606,8 @@ function LecturerAIAssistantContent() {
     }
   };
 
-  // AI execution engine
-  const executeAIRequest = async (
+  // AI Chat execution engine
+  const executeAIChatRequest = async (
     userPrompt: string,
     systemInstruction: string,
     chatUserDisplay?: string,
@@ -626,15 +633,13 @@ function LecturerAIAssistantContent() {
     };
 
     const newHistory = [...history, userMessage];
-    if (activeTab === "chat") {
-      setHistory(newHistory);
-    }
+    setHistory(newHistory);
 
     try {
       const response = await lecturerApi.getAISupport({
         workspace_id: selectedWorkspaceId,
         question: userPrompt,
-        mode: activeTab,
+        mode: "chat",
         selected_material_ids: selectedMaterials.length > 0 ? selectedMaterials : undefined,
         conversation_history: history.map((h) => ({
           role: h.role,
@@ -642,12 +647,6 @@ function LecturerAIAssistantContent() {
         })),
         feature_payload: {
           systemInstruction,
-          topic: asmtTopic || contentTopic,
-          itemType: asmtType,
-          difficulty: asmtDifficulty,
-          bloomLevel: asmtBloomLevel,
-          count: asmtQuestionCount,
-          marks: asmtMarks,
         },
       });
 
@@ -665,7 +664,7 @@ function LecturerAIAssistantContent() {
       toast.success("Response generated.");
     } catch (err: any) {
       console.error("AI Error:", err);
-      toast.error(err.message || "Failed to generate AI response. Please check your connection.");
+      toast.error(err.message || "Failed to generate AI response.");
     } finally {
       setIsGenerating(false);
     }
@@ -700,7 +699,7 @@ function LecturerAIAssistantContent() {
     setPrompt("");
 
     let systemContext =
-      "You are an expert Mindexa Lecturer AI Assistant. Read all attached file contents carefully and help the lecturer by answering questions directly, explaining concepts, or helping them draft course materials. If the lecturer asks a direct question or asks about attached files, answer directly and accurately. All recommendations are suggestions for the lecturer's review.";
+      "You are an expert Mindexa Lecturer AI Assistant. Read all attached file contents carefully and help the lecturer by answering questions directly, explaining concepts, or helping them draft course materials.";
 
     if (isThinkingMode) {
       systemContext = `[THINKING & DEEP REASONING MODE ACTIVE]\nPerform step-by-step deep reasoning and detailed academic analysis before providing your final answer.\n${systemContext}`;
@@ -712,80 +711,34 @@ function LecturerAIAssistantContent() {
       toast.info("Deep Document RAG Search active");
     }
 
-    executeAIRequest(promptWithContext, systemContext, userQuery, attachmentList);
+    executeAIChatRequest(promptWithContext, systemContext, userQuery, attachmentList);
   };
 
-  const handleGenerateAssessment = async () => {
-    if (!asmtTopic) {
-      toast.error("Please enter an assessment topic outline.");
-      return;
-    }
-    const sys = `Draft a comprehensive academic assessment on '${asmtTopic}'. Type: ${asmtType}, Difficulty: ${asmtDifficulty}, Bloom: ${asmtBloomLevel}, Questions: ${asmtQuestionCount}, Suggested Marks: ${asmtMarks}. ${asmtIncludeRubrics ? "Include a rubric grading schema." : ""}`;
-    executeAIRequest(sys, "Generate structured assessment draft questions.", asmtTopic);
-  };
-
-  const handleGenerateContent = async () => {
-    if (!contentTopic) {
-      toast.error("Please enter a topic outline.");
-      return;
-    }
-    const sys = `Create academic learning materials for '${contentTopic}'. Material Type: ${contentType}. Outcomes/Focus: ${contentOutcomes || "Comprehensive mastery"}.`;
-    executeAIRequest(sys, "Generate structured course materials.", contentTopic);
-  };
-
-  const handleReviewSubmission = async () => {
-    if (!studentResponse) {
-      toast.error("Please enter a student response.");
-      return;
-    }
-    const sys = `Review and grade the following student response against the rubric: [RUBRIC]: ${gradingRubric || "Standard accuracy"}\n[RESPONSE]: ${studentResponse}`;
-    executeAIRequest(sys, "Evaluate student response and explain scoring rationale.", "Review student response");
-  };
-
-  const handleGenerateFeedback = async () => {
-    if (!feedbackPerformance) {
-      toast.error("Please enter student performance metrics.");
-      return;
-    }
-    const sys = `Draft constructive, personalized student feedback for the following performance summary: ${feedbackPerformance}`;
-    executeAIRequest(sys, "Draft student feedback.", "Draft feedback");
-  };
-
+  // 4 Essential Quick Actions
   const essentialQuickActions = [
     {
-      title: "Draft MCQ Quiz",
-      description: "Generate 5 multiple-choice questions with answer rationales.",
+      title: "Draft Exam Questions",
+      description: "Launch the audited question generator with blueprint constraints.",
       icon: Layers,
-      onClick: () => {
-        setActiveTab("assessment");
-        setAsmtType("MCQ");
-        setAsmtQuestionCount("5");
-      },
+      onClick: () => setActiveTab("questions"),
     },
     {
-      title: "Summarize Handout",
-      description: "Extract core concepts, key formulas, and discussion prompts.",
+      title: "Generate Slide Deck",
+      description: "Build 8–15 pedagogical lecture slides from a Learning Unit.",
       icon: BookOpen,
-      onClick: () => {
-        setActiveTab("content");
-        setContentType("Summarize selected material");
-      },
+      onClick: () => setActiveTab("slides"),
     },
     {
-      title: "Review Essay Response",
-      description: "Analyze open-ended student submissions against your rubric.",
-      icon: BookOpenCheck,
-      onClick: () => {
-        setActiveTab("review");
-      },
-    },
-    {
-      title: "Formulate Feedback",
-      description: "Create encouraging, actionable feedback based on scores.",
+      title: "Draft Marking Rubric",
+      description: "Create objective, criterion-referenced marking rubrics for a question.",
       icon: Award,
-      onClick: () => {
-        setActiveTab("feedback");
-      },
+      onClick: () => setActiveTab("rubric"),
+    },
+    {
+      title: "Cohort Class Digest",
+      description: "Synthesize real statistical aggregates into actionable intervention insights.",
+      icon: BarChart2,
+      onClick: () => setActiveTab("digest"),
     },
   ];
 
@@ -799,14 +752,13 @@ function LecturerAIAssistantContent() {
     });
   }, [sessions, pinnedSessionIds]);
 
+  // 5 Grounded Module Tabs
   const moduleTabs = [
     { id: "chat", label: "Assistant Chat", icon: Sparkles },
-    { id: "assessment", label: "Assessment Draft", icon: Layers },
-    { id: "content", label: "Learning Materials", icon: BookOpen },
-    { id: "review", label: "Response Review", icon: BookOpenCheck },
-    { id: "feedback", label: "Student Feedback", icon: Award },
-    { id: "analytics", label: "Class Analytics", icon: BarChart2 },
-    { id: "insights", label: "Reinforcement", icon: Lightbulb },
+    { id: "questions", label: "Question Generator", icon: Layers },
+    { id: "slides", label: "Slide Deck (LU)", icon: BookOpen },
+    { id: "rubric", label: "Rubric Assistant", icon: Award },
+    { id: "digest", label: "Class Digest", icon: BarChart2 },
   ];
 
   const renderContextPanel = () => {
@@ -872,70 +824,37 @@ function LecturerAIAssistantContent() {
 
         <Separator className="bg-border/50" />
 
-        {/* Resource Context */}
-        <div className="space-y-2">
-          <Label className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">Reference Sources</Label>
-          <div className="space-y-1.5 p-3 rounded-xl border border-border/60 bg-muted/20">
-            <label className="flex items-center gap-2 text-xs font-medium text-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useCourseNotes}
-                onChange={(e) => setUseCourseNotes(e.target.checked)}
-                className="rounded border-border text-primary focus:ring-primary size-3.5"
-              />
-              <span>Syllabus / Course Notes</span>
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useLecturerMaterials}
-                onChange={(e) => setUseLecturerMaterials(e.target.checked)}
-                className="rounded border-border text-primary focus:ring-primary size-3.5"
-              />
-              <span>Lecturer Handouts</span>
-            </label>
-            <label className="flex items-center gap-2 text-xs font-medium text-foreground cursor-pointer">
-              <input
-                type="checkbox"
-                checked={useAssessmentRubric}
-                onChange={(e) => setUseAssessmentRubric(e.target.checked)}
-                className="rounded border-border text-primary focus:ring-primary size-3.5"
-              />
-              <span>Assessment Rubric Schema</span>
-            </label>
-          </div>
-
-          {workspaceMaterials.length > 0 && (
-            <div className="pt-1.5">
-              <span className="text-[9px] font-semibold text-muted-foreground uppercase tracking-wider block mb-1">
-                Uploaded Handouts ({workspaceMaterials.length})
-              </span>
-              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 border border-border/60 rounded-xl p-2.5 bg-background">
-                {workspaceMaterials.map((mat) => (
-                  <label
-                    key={mat.id}
-                    className="flex items-center gap-2 text-xs font-medium text-foreground cursor-pointer truncate"
-                    title={mat.display_name || mat.original_filename}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedMaterials.includes(mat.id)}
-                      onChange={(e) => {
-                        if (e.target.checked) {
-                          setSelectedMaterials([...selectedMaterials, mat.id]);
-                        } else {
-                          setSelectedMaterials(selectedMaterials.filter((id) => id !== mat.id));
-                        }
-                      }}
-                      className="rounded border-border text-primary focus:ring-primary size-3.5"
-                    />
-                    <span className="truncate">{mat.display_name || mat.original_filename}</span>
-                  </label>
-                ))}
-              </div>
+        {/* Handout References */}
+        {workspaceMaterials.length > 0 && (
+          <div className="space-y-2">
+            <Label className="text-[10px] font-semibold uppercase text-muted-foreground tracking-wider">
+              Workspace Handouts ({workspaceMaterials.length})
+            </Label>
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 border border-border/60 rounded-xl p-2.5 bg-background">
+              {workspaceMaterials.map((mat) => (
+                <label
+                  key={mat.id}
+                  className="flex items-center gap-2 text-xs font-medium text-foreground cursor-pointer truncate"
+                  title={mat.display_name || mat.original_filename}
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedMaterials.includes(mat.id)}
+                    onChange={(e) => {
+                      if (e.target.checked) {
+                        setSelectedMaterials([...selectedMaterials, mat.id]);
+                      } else {
+                        setSelectedMaterials(selectedMaterials.filter((id) => id !== mat.id));
+                      }
+                    }}
+                    className="rounded border-border text-primary focus:ring-primary size-3.5"
+                  />
+                  <span className="truncate">{mat.display_name || mat.original_filename}</span>
+                </label>
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <Separator className="bg-border/50" />
 
@@ -1019,18 +938,28 @@ function LecturerAIAssistantContent() {
         isFullScreen && "fixed inset-0 z-[9999] h-screen w-screen p-0 m-0 bg-background"
       )}
     >
-      {/* Sleek, Modern Top Header Bar (No breadcrumb, responsive layout) */}
+      {/* Sleek Top Header Bar */}
       <header className="h-12 px-3 sm:px-4 border-b border-border/40 bg-background flex items-center justify-between shrink-0 z-20">
-        {/* Left Side: Mobile Menu Trigger + Brand Title + Workspace Pill */}
+        {/* Left Side */}
         <div className="flex items-center gap-2 sm:gap-3 min-w-0">
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setIsMobileMenuOpen(true)}
-            className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground shrink-0"
+            className="md:hidden h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg"
             title="Open navigation modules"
           >
             <Menu className="size-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
+            className="hidden md:flex h-8 w-8 text-muted-foreground hover:text-foreground shrink-0 rounded-lg"
+            title={isSidebarCollapsed ? "Expand module rail" : "Collapse module rail"}
+          >
+            {isSidebarCollapsed ? <PanelLeftOpen className="size-4 text-primary" /> : <PanelLeftClose className="size-4" />}
           </Button>
 
           <div className="flex items-center gap-2 shrink-0">
@@ -1056,7 +985,7 @@ function LecturerAIAssistantContent() {
           </button>
         </div>
 
-        {/* Right Side: Quick Actions & Controls */}
+        {/* Right Side */}
         <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
           <Button
             variant="ghost"
@@ -1102,9 +1031,9 @@ function LecturerAIAssistantContent() {
         </div>
       </header>
 
-      {/* Main Workspace Viewport */}
+      {/* Main Viewport */}
       <div className="flex-1 flex flex-row overflow-hidden min-h-0">
-        {/* Desktop Collapsible Module Sidebar */}
+        {/* Desktop Sidebar */}
         <aside
           className={cn(
             "hidden md:flex flex-col border-r border-border/40 bg-muted/10 transition-all duration-300 shrink-0 z-20 overflow-hidden",
@@ -1143,9 +1072,8 @@ function LecturerAIAssistantContent() {
                     <UITooltipTrigger asChild>
                       <button
                         onClick={() => {
-                          setActiveTab(tab.id as any);
+                          setActiveTab(tab.id as AIModule);
                           setGeneratedContent("");
-                          setIsConfigExpanded(true);
                         }}
                         className={cn(
                           "w-full flex items-center gap-2.5 px-2.5 py-2 text-xs font-medium rounded-lg transition-all text-left",
@@ -1171,7 +1099,7 @@ function LecturerAIAssistantContent() {
           </div>
         </aside>
 
-        {/* Mobile Module Navigation Drawer Sheet */}
+        {/* Mobile Navigation Drawer */}
         <Sheet open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
           <SheetContent side="left" className="w-[260px] p-0 flex flex-col">
             <SheetHeader className="p-4 border-b border-border/40 text-left">
@@ -1190,9 +1118,8 @@ function LecturerAIAssistantContent() {
                   <button
                     key={tab.id}
                     onClick={() => {
-                      setActiveTab(tab.id as any);
+                      setActiveTab(tab.id as AIModule);
                       setGeneratedContent("");
-                      setIsConfigExpanded(true);
                       setIsMobileMenuOpen(false);
                     }}
                     className={cn(
@@ -1211,9 +1138,9 @@ function LecturerAIAssistantContent() {
           </SheetContent>
         </Sheet>
 
-        {/* Right Main Module Workspace */}
+        {/* Right Main Content Area (5 Grounded Tools) */}
         <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-background">
-          {/* TAB 1: Chat Assistant */}
+          {/* TOOL 1: General Assistant Chat */}
           {activeTab === "chat" && (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
               <MessageScrollerProvider scrollPreviousItemPeek={64} scrollMargin={24}>
@@ -1228,7 +1155,7 @@ function LecturerAIAssistantContent() {
                           Lecturer Academic Copilot
                         </h2>
                         <p className="text-xs text-muted-foreground max-w-sm mx-auto">
-                          Co-create assessment items, evaluate open-ended submissions, synthesize handouts, or draft rubrics.
+                          Grounded assistant for curriculum synthesis, exam item drafting, Learning-Unit slide creation, and rubric refinement.
                         </p>
                       </div>
 
@@ -1258,7 +1185,10 @@ function LecturerAIAssistantContent() {
                       <MessageScrollerViewport className="scroll-fade">
                         <MessageScrollerContent
                           aria-busy={isGenerating}
-                          className="max-w-3xl mx-auto py-3 sm:py-4 px-3 sm:px-4 space-y-3 sm:space-y-4"
+                          className={cn(
+                            "mx-auto py-3 sm:py-4 px-3 sm:px-4 space-y-3 sm:space-y-4 transition-all duration-300 w-full",
+                            isSidebarCollapsed ? "max-w-4xl lg:max-w-5xl" : "max-w-3xl"
+                          )}
                         >
                           {history.map((msg, index) => {
                             const isLatestUserTurn =
@@ -1272,7 +1202,6 @@ function LecturerAIAssistantContent() {
                                 className="w-full"
                               >
                                 {msg.role === "user" ? (
-                                  /* User Turn */
                                   <div className="flex flex-col items-end max-w-[88%] sm:max-w-[85%] ml-auto group space-y-1">
                                     <div className="bg-primary text-primary-foreground px-3.5 py-2 rounded-2xl rounded-tr-xs shadow-2xs text-xs font-medium leading-relaxed">
                                       {msg.attachments && msg.attachments.length > 0 && (
@@ -1291,7 +1220,6 @@ function LecturerAIAssistantContent() {
                                       {msg.content && <div className="whitespace-pre-wrap">{msg.content}</div>}
                                     </div>
 
-                                    {/* User message quick actions outside bubble */}
                                     <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground pr-1">
                                       <button
                                         type="button"
@@ -1316,11 +1244,9 @@ function LecturerAIAssistantContent() {
                                     </div>
                                   </div>
                                 ) : (
-                                  /* AI Response Turn */
                                   <div className="group relative flex flex-col max-w-[92%] sm:max-w-[88%] space-y-2 p-3 sm:p-3.5 rounded-2xl bg-card border border-border/70 text-foreground mr-auto rounded-tl-xs text-left shadow-2xs leading-relaxed whitespace-pre-wrap animate-in fade-in slide-in-from-bottom-2 duration-300">
                                     <RichMessageRenderer content={msg.content} />
 
-                                    {/* Action Bar */}
                                     <div className="pt-1.5 border-t border-border/30 flex items-center justify-between text-muted-foreground">
                                       <div className="flex items-center gap-1">
                                         <Button
@@ -1382,7 +1308,10 @@ function LecturerAIAssistantContent() {
               </MessageScrollerProvider>
 
               {/* Composer */}
-              <div className="p-2 sm:p-3 border-t border-border/40 bg-background shrink-0 max-w-3xl mx-auto w-full">
+              <div className={cn(
+                "p-2 sm:p-3 border-t border-border/40 bg-background shrink-0 mx-auto w-full transition-all duration-300",
+                isSidebarCollapsed ? "max-w-4xl lg:max-w-5xl" : "max-w-3xl"
+              )}>
                 {isRwandaBlocked && (
                   <div className="p-2.5 mb-2 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-900 dark:text-amber-200 text-xs flex items-start gap-2">
                     <AlertTriangle className="size-4 text-amber-600 shrink-0 mt-0.5" />
@@ -1406,508 +1335,48 @@ function LecturerAIAssistantContent() {
                   placeholder={
                     isRwandaBlocked
                       ? "AI Assistant disabled for Kinyarwanda workspaces"
-                      : "Ask about curriculum design, exam questions, grading rubrics..."
+                      : "Ask about curriculum design, exam questions, teaching methods..."
                   }
                 />
               </div>
             </div>
           )}
 
-          {/* TAB 2: Assessment Generator */}
-          {activeTab === "assessment" && (
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <h3 className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <Layers className="size-4 text-primary" /> Assessment Draft Generator
-                </h3>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsConfigExpanded(!isConfigExpanded)}
-                  className="h-7 text-xs"
-                >
-                  {isConfigExpanded ? <ChevronUp className="size-3.5 mr-1" /> : <ChevronDown className="size-3.5 mr-1" />}
-                  {isConfigExpanded ? "Hide Settings" : "Configure Parameters"}
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                {isConfigExpanded && (
-                  <Card className="lg:col-span-4 p-3.5 space-y-3 bg-muted/20 border-border/60">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="asmt-topic" className="text-xs font-semibold">Topic Outline</Label>
-                      <Input
-                        id="asmt-topic"
-                        placeholder="e.g. Relational Normalization (1NF, 2NF, 3NF)"
-                        value={asmtTopic}
-                        onChange={(e) => setAsmtTopic(e.target.value)}
-                        className="h-8.5 text-xs bg-background"
-                      />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="asmt-style" className="text-xs font-semibold">Style</Label>
-                        <select
-                          id="asmt-style"
-                          value={asmtType}
-                          onChange={(e) => setAsmtType(e.target.value)}
-                          className="w-full h-8.5 rounded-lg border border-border text-xs px-2 bg-background text-foreground outline-none font-medium"
-                        >
-                          <option value="MCQ">Multiple Choice</option>
-                          <option value="True/False">True / False</option>
-                          <option value="Matching">Matching</option>
-                          <option value="Short Answer">Short Answer</option>
-                          <option value="Essay">Essay Question</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label htmlFor="asmt-bloom" className="text-xs font-semibold">Bloom&apos;s Level</Label>
-                        <select
-                          id="asmt-bloom"
-                          value={asmtBloomLevel}
-                          onChange={(e) => setAsmtBloomLevel(e.target.value)}
-                          className="w-full h-8.5 rounded-lg border border-border text-xs px-2 bg-background text-foreground outline-none font-medium"
-                        >
-                          <option value="Remembering">Remembering</option>
-                          <option value="Understanding">Understanding</option>
-                          <option value="Applying">Applying</option>
-                          <option value="Analyzing">Analyzing</option>
-                          <option value="Evaluating">Evaluating</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="asmt-diff" className="text-xs font-semibold">Difficulty</Label>
-                        <select
-                          id="asmt-diff"
-                          value={asmtDifficulty}
-                          onChange={(e) => setAsmtDifficulty(e.target.value)}
-                          className="w-full h-8.5 rounded-lg border border-border text-xs px-2 bg-background text-foreground outline-none font-medium"
-                        >
-                          <option value="Easy">Easy</option>
-                          <option value="Medium">Medium</option>
-                          <option value="Hard">Hard</option>
-                        </select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <Label htmlFor="asmt-count" className="text-xs font-semibold">Items Count</Label>
-                        <select
-                          id="asmt-count"
-                          value={asmtQuestionCount}
-                          onChange={(e) => setAsmtQuestionCount(e.target.value)}
-                          className="w-full h-8.5 rounded-lg border border-border text-xs px-2 bg-background text-foreground outline-none font-medium"
-                        >
-                          <option value="3">3 Items</option>
-                          <option value="5">5 Items</option>
-                          <option value="10">10 Items</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <Button
-                      onClick={handleGenerateAssessment}
-                      disabled={isGenerating || !asmtTopic}
-                      className="w-full h-8.5 text-xs font-semibold text-primary-foreground bg-primary"
-                    >
-                      {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                      Generate Draft
-                    </Button>
-                  </Card>
-                )}
-
-                <div className={cn("flex flex-col space-y-3", isConfigExpanded ? "lg:col-span-8" : "lg:col-span-12")}>
-                  <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex items-start gap-2 text-left">
-                    <ShieldCheck className="size-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div className="text-xs text-amber-900 dark:text-amber-200 font-medium leading-relaxed">
-                      AI draft items are advisory. Lecturers must review and validate questions before deploying them to question banks.
-                    </div>
-                  </div>
-
-                  <Card className="p-4 flex-1 min-h-[350px] border-border/60">
-                    <div className="flex items-center justify-between mb-2">
-                      <Label className="text-xs font-semibold">Generated Assessment Draft</Label>
-                      {generatedContent && (
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleCopyText(generatedContent, "copy-asmt-draft")}
-                            className="h-6 px-2 text-[10px] gap-1"
-                          >
-                            {copiedActionId === "copy-asmt-draft" ? (
-                              <Check className="size-3 text-emerald-500" />
-                            ) : (
-                              <Copy className="size-3" />
-                            )}
-                            <span>Copy</span>
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setExportModalOpen(true)}
-                            className="h-6 px-2 text-[10px] gap-1"
-                          >
-                            <Download className="size-3" />
-                            <span>Export</span>
-                          </Button>
-                        </div>
-                      )}
-                    </div>
-                    {isGenerating ? (
-                      <div className="py-12 flex flex-col items-center justify-center space-y-2">
-                        <Loader2 className="size-6 text-primary animate-spin" />
-                        <span className="text-xs text-muted-foreground font-medium">Drafting assessment items...</span>
-                      </div>
-                    ) : generatedContent ? (
-                      <RichMessageRenderer content={generatedContent} />
-                    ) : (
-                      <div className="text-xs text-muted-foreground py-12 text-center font-medium">
-                        Configure parameters on the left and click &ldquo;Generate Draft&rdquo;.
-                      </div>
-                    )}
-                  </Card>
-                </div>
-              </div>
-            </div>
+          {/* TOOL 2: Question Generator */}
+          {activeTab === "questions" && (
+            <QuestionGeneratorLauncher
+              workspaceId={selectedWorkspaceId}
+              workspaceName={activeWorkspaceName}
+              language={activeWorkspace?.language || activeWorkspaceDetail?.language || "EN"}
+              isRwandaBlocked={isRwandaBlocked}
+            />
           )}
 
-          {/* TAB 3: Learning Materials */}
-          {activeTab === "content" && (
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <h3 className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <BookOpen className="size-4 text-primary" /> Learning Material Assistant
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                <Card className="lg:col-span-4 p-3.5 space-y-3 bg-muted/20 border-border/60">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="content-topic" className="text-xs font-semibold">Topic Outline</Label>
-                    <Input
-                      id="content-topic"
-                      placeholder="e.g. Subnetting & CIDR Notation"
-                      value={contentTopic}
-                      onChange={(e) => setContentTopic(e.target.value)}
-                      className="h-8.5 text-xs bg-background"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="content-type" className="text-xs font-semibold">Material Type</Label>
-                    <select
-                      id="content-type"
-                      value={contentType}
-                      onChange={(e) => setContentType(e.target.value)}
-                      className="w-full h-8.5 rounded-lg border border-border text-xs px-2 bg-background text-foreground outline-none font-medium"
-                    >
-                      <option value="Summarize selected material">Summarize Selected Material</option>
-                      <option value="Create study guide">Create Study Guide</option>
-                      <option value="Create revision sheet">Create Revision Sheet</option>
-                      <option value="Extract learning outcomes">Extract Learning Outcomes</option>
-                    </select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="content-outcomes" className="text-xs font-semibold">Outcomes / Target Focus</Label>
-                    <Textarea
-                      id="content-outcomes"
-                      placeholder="e.g. Understand prefix lengths, broadcast addresses..."
-                      value={contentOutcomes}
-                      onChange={(e) => setContentOutcomes(e.target.value)}
-                      className="h-20 text-xs bg-background"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleGenerateContent}
-                    disabled={isGenerating || !contentTopic}
-                    className="w-full h-8.5 text-xs font-semibold text-primary-foreground bg-primary"
-                  >
-                    {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                    Generate Learning Material
-                  </Button>
-                </Card>
-
-                <Card className="lg:col-span-8 p-4 flex flex-col min-h-[350px] border-border/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-xs font-semibold">Generated Material Content</Label>
-                    {generatedContent && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyText(generatedContent, "copy-mat-draft")}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          {copiedActionId === "copy-mat-draft" ? (
-                            <Check className="size-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="size-3" />
-                          )}
-                          <span>Copy</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setExportModalOpen(true)}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          <Download className="size-3" />
-                          <span>Export</span>
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  {isGenerating ? (
-                    <div className="py-12 flex flex-col items-center justify-center space-y-2">
-                      <Loader2 className="size-6 text-primary animate-spin" />
-                      <span className="text-xs text-muted-foreground font-medium">Drafting material...</span>
-                    </div>
-                  ) : generatedContent ? (
-                    <RichMessageRenderer content={generatedContent} />
-                  ) : (
-                    <div className="text-xs text-muted-foreground py-12 text-center font-medium">
-                      Fill out topic specifications and click &ldquo;Generate Learning Material&rdquo;.
-                    </div>
-                  )}
-                </Card>
-              </div>
-            </div>
+          {/* TOOL 3: Slide Deck Generator (From Learning Unit) */}
+          {activeTab === "slides" && (
+            <SlideDeckGenerator
+              workspaceId={selectedWorkspaceId}
+              workspaceName={activeWorkspaceName}
+              isRwandaBlocked={isRwandaBlocked}
+            />
           )}
 
-          {/* TAB 4: Response Review */}
-          {activeTab === "review" && (
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <h3 className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <BookOpenCheck className="size-4 text-primary" /> Response Rubric Review
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                <Card className="lg:col-span-4 p-3.5 space-y-3 bg-muted/20 border-border/60">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="review-rubric" className="text-xs font-semibold">Grading Rubric / Criteria</Label>
-                    <Textarea
-                      id="review-rubric"
-                      placeholder="Paste target rubric criteria or reference solution..."
-                      value={gradingRubric}
-                      onChange={(e) => setGradingRubric(e.target.value)}
-                      className="h-20 text-xs bg-background"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="review-student" className="text-xs font-semibold">Student Open-Ended Response</Label>
-                    <Textarea
-                      id="review-student"
-                      placeholder="Paste the student's submission text here..."
-                      value={studentResponse}
-                      onChange={(e) => setStudentResponse(e.target.value)}
-                      className="h-28 text-xs bg-background"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleReviewSubmission}
-                    disabled={isGenerating || !studentResponse}
-                    className="w-full h-8.5 text-xs font-semibold text-primary-foreground bg-primary"
-                  >
-                    {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                    Analyze & Review Response
-                  </Button>
-                </Card>
-
-                <Card className="lg:col-span-8 p-4 flex flex-col min-h-[350px] border-border/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-xs font-semibold">Scoring Recommendation & Rubric Analysis</Label>
-                    {generatedContent && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyText(generatedContent, "copy-review-draft")}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          {copiedActionId === "copy-review-draft" ? (
-                            <Check className="size-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="size-3" />
-                          )}
-                          <span>Copy</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setExportModalOpen(true)}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          <Download className="size-3" />
-                          <span>Export</span>
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  {isGenerating ? (
-                    <div className="py-12 flex flex-col items-center justify-center space-y-2">
-                      <Loader2 className="size-6 text-primary animate-spin" />
-                      <span className="text-xs text-muted-foreground font-medium">Evaluating student response...</span>
-                    </div>
-                  ) : generatedContent ? (
-                    <RichMessageRenderer content={generatedContent} />
-                  ) : (
-                    <div className="text-xs text-muted-foreground py-12 text-center font-medium">
-                      Paste a student submission and click &ldquo;Analyze & Review Response&rdquo;.
-                    </div>
-                  )}
-                </Card>
-              </div>
-            </div>
+          {/* TOOL 4: Rubric Assistant */}
+          {activeTab === "rubric" && (
+            <RubricAssistant
+              workspaceId={selectedWorkspaceId}
+              isRwandaBlocked={isRwandaBlocked}
+            />
           )}
 
-          {/* TAB 5: Feedback Assistant */}
-          {activeTab === "feedback" && (
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <h3 className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <Award className="size-4 text-primary" /> Student Feedback Assistant
-                </h3>
-              </div>
-
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
-                <Card className="lg:col-span-4 p-3.5 space-y-3 bg-muted/20 border-border/60">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="feedback-perf" className="text-xs font-semibold">Student Performance Summary</Label>
-                    <Textarea
-                      id="feedback-perf"
-                      placeholder="e.g. Scored 14/20. Strong on database queries, needs improvement on normalization."
-                      value={feedbackPerformance}
-                      onChange={(e) => setFeedbackPerformance(e.target.value)}
-                      className="h-32 text-xs bg-background"
-                    />
-                  </div>
-
-                  <Button
-                    onClick={handleGenerateFeedback}
-                    disabled={isGenerating || !feedbackPerformance}
-                    className="w-full h-8.5 text-xs font-semibold text-primary-foreground bg-primary"
-                  >
-                    {isGenerating ? <RefreshCw className="size-3.5 animate-spin mr-1.5" /> : <Sparkles className="size-3.5 mr-1.5" />}
-                    Draft Student Feedback
-                  </Button>
-                </Card>
-
-                <Card className="lg:col-span-8 p-4 flex flex-col min-h-[350px] border-border/60">
-                  <div className="flex items-center justify-between mb-2">
-                    <Label className="text-xs font-semibold">Drafted Student Feedback</Label>
-                    {generatedContent && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyText(generatedContent, "copy-feedback-draft")}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          {copiedActionId === "copy-feedback-draft" ? (
-                            <Check className="size-3 text-emerald-500" />
-                          ) : (
-                            <Copy className="size-3" />
-                          )}
-                          <span>Copy</span>
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setExportModalOpen(true)}
-                          className="h-6 px-2 text-[10px] gap-1"
-                        >
-                          <Download className="size-3" />
-                          <span>Export</span>
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                  {isGenerating ? (
-                    <div className="py-12 flex flex-col items-center justify-center space-y-2">
-                      <Loader2 className="size-6 text-primary animate-spin" />
-                      <span className="text-xs text-muted-foreground font-medium">Drafting personalized feedback...</span>
-                    </div>
-                  ) : generatedContent ? (
-                    <RichMessageRenderer content={generatedContent} />
-                  ) : (
-                    <div className="text-xs text-muted-foreground py-12 text-center font-medium">
-                      Enter student performance summary and click &ldquo;Draft Student Feedback&rdquo;.
-                    </div>
-                  )}
-                </Card>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 6: Analytics & Insights */}
-          {(activeTab === "analytics" || activeTab === "insights") && (
-            <div className="flex-1 p-3 sm:p-4 overflow-y-auto space-y-4 max-w-5xl mx-auto w-full">
-              <div className="flex items-center justify-between border-b border-border/40 pb-2">
-                <h3 className="text-xs sm:text-sm font-semibold text-foreground flex items-center gap-1.5">
-                  <BarChart2 className="size-4 text-primary" /> Class Analytics & Insights
-                </h3>
-              </div>
-
-              <Card className="p-4 flex flex-col min-h-[350px] border-border/60">
-                <div className="flex items-center justify-between mb-2">
-                  <Label className="text-xs font-semibold">Class Performance Narrative</Label>
-                  {generatedContent && (
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyText(generatedContent, "copy-analytics-draft")}
-                        className="h-6 px-2 text-[10px] gap-1"
-                      >
-                        {copiedActionId === "copy-analytics-draft" ? (
-                          <Check className="size-3 text-emerald-500" />
-                        ) : (
-                          <Copy className="size-3" />
-                        )}
-                        <span>Copy</span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setExportModalOpen(true)}
-                        className="h-6 px-2 text-[10px] gap-1"
-                      >
-                        <Download className="size-3" />
-                        <span>Export</span>
-                      </Button>
-                    </div>
-                  )}
-                </div>
-                {isGenerating ? (
-                  <div className="py-12 flex flex-col items-center justify-center space-y-2">
-                    <Loader2 className="size-6 text-primary animate-spin" />
-                    <span className="text-xs text-muted-foreground font-medium">Synthesizing analytics insights...</span>
-                  </div>
-                ) : generatedContent ? (
-                  <RichMessageRenderer content={generatedContent} />
-                ) : (
-                  <div className="text-xs text-muted-foreground py-12 text-center font-medium">
-                    Select a workspace and use the Assistant Chat to query class cohort metrics and distributions.
-                  </div>
-                )}
-              </Card>
-            </div>
+          {/* TOOL 5: Class Digest */}
+          {activeTab === "digest" && (
+            <ClassDigest workspaceId={selectedWorkspaceId} />
           )}
         </main>
       </div>
 
-      {/* Context Panel Drawer Sheet */}
+      {/* Context Panel Drawer */}
       <Sheet open={isContextSheetOpen} onOpenChange={setIsContextSheetOpen}>
         <SheetContent side="right" className="w-full sm:max-w-md p-0 overflow-y-auto">
           <SheetHeader className="p-4 border-b border-border/40 text-left">
@@ -1985,7 +1454,7 @@ function LecturerAIAssistantContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Export Modal with Complete PDF, Markdown, and TXT options */}
+      {/* Export Modal */}
       <Dialog open={exportModalOpen} onOpenChange={setExportModalOpen}>
         <DialogContent className="sm:max-w-[440px]">
           <DialogHeader>

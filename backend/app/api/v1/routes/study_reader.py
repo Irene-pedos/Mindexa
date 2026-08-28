@@ -26,6 +26,7 @@ from app.schemas.study_reader import (
     KeyPointCreate,
     KeyPointResponse,
     KeyPointUpdate,
+    ReaderLearningUnitItem,
     ReaderMetadataResponse,
     ReadingProgressResponse,
     ReadingProgressUpdate,
@@ -53,6 +54,21 @@ async def get_reader_metadata(
 ) -> ReaderMetadataResponse:
     service = StudyReaderService(db)
     return await service.get_metadata(current_user.id, kind, resource_id)
+
+
+@router.get(
+    "/{kind}/{resource_id}/learning-units",
+    response_model=List[ReaderLearningUnitItem],
+    summary="Get segmented Learning Units for this specific document",
+)
+async def get_reader_learning_units(
+    kind: SourceKind,
+    resource_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> List[ReaderLearningUnitItem]:
+    service = StudyReaderService(db)
+    return await service.get_learning_units(current_user.id, kind, resource_id)
 
 
 # ── Progress ─────────────────────────────────────────────────────────────────

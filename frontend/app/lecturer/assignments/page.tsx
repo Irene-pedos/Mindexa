@@ -82,7 +82,7 @@ export default function LecturerAssignmentsPage() {
   }, [loadAssignments]);
 
   const filteredAndSortedAssignments = useMemo(() => {
-    let result = assignments.filter((assignment) => {
+    const result = assignments.filter((assignment) => {
       const q = searchTerm.toLowerCase().trim();
       const matchesSearch =
         !q ||

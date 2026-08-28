@@ -38,6 +38,7 @@ from app.schemas.study_reader import (AnnotationCreate, AnnotationResponse,
                                       PageCheckResponse,
                                       PageCheckSubmitRequest,
                                       PageCheckSubmitResponse, PageHeatItem,
+                                      ReaderLearningUnitItem,
                                       ReaderMetadataResponse,
                                       ReadingProgressResponse,
                                       ReadingProgressUpdate,
@@ -158,6 +159,42 @@ class StudyReaderService:
     ) -> ReaderMetadataResponse:
         _, meta = await self.assert_access(student_id, kind, source_id)
         return ReaderMetadataResponse(**meta)
+
+    async def get_learning_units(
+        self, student_id: uuid.UUID, kind: str, source_id: uuid.UUID
+    ) -> List[ReaderLearningUnitItem]:
+        """
+        Fetch ordered Learning Units for this specific document.
+        """
+        await self.assert_access(student_id, kind, source_id)
+        if kind != "lecturer_material":
+            return []
+
+        from app.db.models.learning_unit import LearningUnit
+
+        stmt = select(LearningUnit).where(
+            LearningUnit.source_material_id == source_id,
+            LearningUnit.is_active == True,
+            LearningUnit.is_deleted == False,
+        ).order_by(LearningUnit.order_index.asc())
+
+        res = await self.db.execute(stmt)
+        units = list(res.scalars().all())
+
+        return [
+            ReaderLearningUnitItem(
+                id=u.id,
+                order_index=u.order_index,
+                title=u.title,
+                summary=u.summary,
+                learning_outcomes=u.learning_outcomes or [],
+                start_page=u.start_page,
+                end_page=u.end_page,
+                chunk_count=len(u.source_chunk_ids or []),
+                estimated_study_minutes=u.estimated_study_minutes,
+            )
+            for u in units
+        ]
 
     # ── Reading Progress ─────────────────────────────────────────────────────
 

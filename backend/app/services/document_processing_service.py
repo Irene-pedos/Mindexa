@@ -87,6 +87,19 @@ class DocumentProcessingService:
                 db=db,
             )
 
+            # 10. Automatically segment lecturer materials into Learning Units
+            try:
+                await self._auto_segment_learning_units(
+                    academic_resource_id=resource.id,
+                    db=db,
+                )
+            except Exception as lu_err:
+                logger.warning(
+                    "Automatic Learning Unit segmentation failed (non-blocking)",
+                    resource_id=str(resource.id),
+                    error=str(lu_err),
+                )
+
             logger.info("Resource processed successfully", resource_id=resource.id)
 
         except Exception as e:
@@ -350,3 +363,129 @@ class DocumentProcessingService:
                 academic_resource_id=academic_resource_id,
                 error=str(e),
             )
+
+    async def _auto_segment_learning_units(
+        self,
+        academic_resource_id: uuid.UUID,
+        db: AsyncSession,
+    ) -> None:
+        """
+        Background single-trigger segmentation: automatically extract Learning Units
+        for LecturerMaterial after chunking and embedding finish.
+        """
+        from app.agents.study_planner_agent import StudyPlannerAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.language_policy import assert_ai_allowed
+        from app.core.ai.provider_factory import (
+            get_ai_providers,
+            get_embedding_providers,
+        )
+        from app.db.models.academic import TeachingWorkspace
+        from app.db.models.learning_unit import LearningUnit
+        from app.db.models.resource import LecturerMaterial
+        from app.db.models.resource_chunk import ResourceChunk
+
+        mat_stmt = select(LecturerMaterial).where(
+            LecturerMaterial.academic_resource_id == academic_resource_id,
+            LecturerMaterial.is_deleted == False,
+        )
+        material = (await db.execute(mat_stmt)).scalar_one_or_none()
+        if not material or not material.teaching_workspace_id:
+            return
+
+        # 1. Check workspace and language policy
+        workspace = await db.get(TeachingWorkspace, material.teaching_workspace_id)
+        if not workspace:
+            return
+
+        try:
+            assert_ai_allowed(
+                getattr(workspace, "language", None),
+                action="segment_learning_units",
+                context={"material_id": str(material.id), "workspace_id": str(workspace.id)},
+            )
+        except Exception as lang_err:
+            logger.info("Skipping LU segmentation due to language policy", error=str(lang_err))
+            return
+
+        # 2. Check Idempotency: skip if active LUs already exist for this material
+        existing_stmt = select(LearningUnit.id).where(
+            LearningUnit.source_material_id == material.id,
+            LearningUnit.is_active == True,
+            LearningUnit.is_deleted == False,
+        )
+        has_existing = (await db.execute(existing_stmt)).first()
+        if has_existing:
+            logger.info("Learning Units already exist for material; skipping generation", material_id=str(material.id))
+            return
+
+        # 3. Retrieve extracted chunks
+        chunks_stmt = select(ResourceChunk).where(
+            ResourceChunk.resource_id == academic_resource_id
+        ).order_by(ResourceChunk.chunk_index.asc())
+        chunks = list((await db.execute(chunks_stmt)).scalars().all())
+        if not chunks:
+            logger.warning("No resource chunks found for material segmentation", academic_resource_id=str(academic_resource_id))
+            return
+
+        # 4. Invoke extraction agent
+        gateway = AIGateway(db, get_ai_providers(), get_embedding_providers())
+        agent = StudyPlannerAgent(gateway)
+
+        chunk_dicts = [
+            {
+                "chunk_index": c.chunk_index,
+                "content": c.content or "",
+                "metadata": c.metadata_json or {},
+            }
+            for c in chunks
+        ]
+
+        title = material.display_name or material.original_filename or "Material"
+        try:
+            segments = await agent.segment_into_learning_units(
+                title, chunk_dicts, actor_id=material.lecturer_id
+            )
+        except Exception as exc:
+            logger.exception("Learning unit segmentation agent failed", error=str(exc))
+            return
+
+        # 5. Determine deterministic page ranges and persist
+        created_units = []
+        for i, seg in enumerate(segments):
+            assigned_chunks = [chunks[c_idx] for c_idx in seg.chunk_indices if 0 <= c_idx < len(chunks)]
+            pages = [
+                c.metadata_json.get("page")
+                for c in assigned_chunks
+                if c.metadata_json and isinstance(c.metadata_json.get("page"), int)
+            ]
+            start_page = min(pages) if pages else None
+            end_page = max(pages) if pages else None
+            chunk_ids = [str(c.id) for c in assigned_chunks]
+
+            lu = LearningUnit(
+                teaching_workspace_id=material.teaching_workspace_id,
+                source_material_id=material.id,
+                order_index=i + 1,
+                title=seg.title,
+                summary=seg.summary,
+                learning_outcomes=seg.learning_outcomes or [],
+                start_page=start_page,
+                end_page=end_page,
+                source_chunk_ids=chunk_ids,
+                estimated_study_minutes=seg.estimated_minutes,
+                is_active=True,
+            )
+            db.add(lu)
+            created_units.append(lu)
+
+        try:
+            await db.commit()
+            logger.info(
+                "Successfully generated Learning Units for material",
+                material_id=str(material.id),
+                unit_count=len(created_units),
+            )
+        except Exception as exc:
+            logger.exception("Failed to persist Learning Units for material", error=str(exc))
+

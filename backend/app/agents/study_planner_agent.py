@@ -20,6 +20,7 @@ class LearningUnitSegment(BaseModel):
     """Schema for AI segmentation of material chunks into coherent Learning Units."""
     title: str = Field(..., description="Coherent title of the learning unit")
     summary: str = Field(default="", description="Short abstract of the unit content")
+    learning_outcomes: List[str] = Field(default_factory=list, description="2 to 4 concise, measurable learning outcomes for this unit")
     chunk_indices: List[int] = Field(default_factory=list, description="0-indexed chunk indices included in this unit")
     estimated_minutes: int = Field(default=45, description="Estimated study duration in minutes")
 
@@ -811,10 +812,10 @@ class StudyPlannerAgent(BaseAgent):
             f"You are Mindexa's Curriculum Architect.\n"
             f"Document Title: '{material_title}'\n\n"
             f"Given these sequential document chunks, group them into 3 to 10 logically coherent Learning Units in the order they appear.\n"
-            f"Each unit should be teachable in one 30-60 minute study session.\n\n"
+            f"Each unit should be teachable in one 30-60 minute study session and must include 2 to 4 clear, concise learning outcomes.\n\n"
             f"Sequential Chunks:\n" + "\n".join(chunk_summaries) + "\n\n"
             f"Return ONLY a JSON list of objects matching this schema:\n"
-            f"[{{\"title\": \"LU 1: ...\", \"summary\": \"...\", \"chunk_indices\": [0, 1], \"estimated_minutes\": 45}}]"
+            f"[{{\"title\": \"LU 1: ...\", \"summary\": \"...\", \"learning_outcomes\": [\"Outcome 1\", \"Outcome 2\"], \"chunk_indices\": [0, 1], \"estimated_minutes\": 45}}]"
         )
 
         request = AICompletionRequest(
@@ -829,7 +830,7 @@ class StudyPlannerAgent(BaseAgent):
         try:
             response = await self.gateway.complete(
                 request,
-                action_type=AIActionType.GENERATE_STUDY_PLAN,
+                action_type=AIActionType.SEGMENT_LEARNING_UNITS,
                 actor_id=actor_id or uuid.UUID("00000000-0000-0000-0000-000000000000"),
                 actor_role="system",
                 subject_entity_type="lecturer_material",
@@ -849,6 +850,10 @@ class StudyPlannerAgent(BaseAgent):
                     LearningUnitSegment(
                         title=f"Learning Unit {u_num}: Core Concepts of {material_title}",
                         summary=f"Covers key principles in material sections {i+1} to {min(i+step, chunk_count)}.",
+                        learning_outcomes=[
+                            f"Understand core concepts in section {u_num}",
+                            f"Apply foundational methods from {material_title}",
+                        ],
                         chunk_indices=indices,
                         estimated_minutes=45,
                     )
@@ -857,6 +862,7 @@ class StudyPlannerAgent(BaseAgent):
                 LearningUnitSegment(
                     title=f"Learning Unit 1: Foundations of {material_title}",
                     summary=f"Comprehensive overview of {material_title}.",
+                    learning_outcomes=[f"Understand primary themes of {material_title}"],
                     chunk_indices=[0],
                     estimated_minutes=45,
                 )
