@@ -57,16 +57,29 @@ export function SessionNotesPanel({
     }, 2500);
   };
 
+  // Keep mutable refs to latest notes and lastSavedNotes to flush safely on unmount
+  const notesRef = useRef(notes);
+  const lastSavedNotesRef = useRef(lastSavedNotes);
+
+  useEffect(() => {
+    notesRef.current = notes;
+  }, [notes]);
+
+  useEffect(() => {
+    lastSavedNotesRef.current = lastSavedNotes;
+  }, [lastSavedNotes]);
+
+  // Flush unsaved notes strictly on true component unmount (or sessionId change)
   useEffect(() => {
     return () => {
       if (autoSaveTimerRef.current) {
         clearTimeout(autoSaveTimerRef.current);
-        if (notes !== lastSavedNotes) {
-          studyPlannerApi.saveSessionNotes(sessionId, notes).catch(() => {});
-        }
+      }
+      if (notesRef.current !== lastSavedNotesRef.current) {
+        studyPlannerApi.saveSessionNotes(sessionId, notesRef.current).catch(() => {});
       }
     };
-  }, [notes, lastSavedNotes, sessionId]);
+  }, [sessionId]);
 
   const saveNotesToBackend = async (textToSave: string, isAutoSave = false) => {
     if (textToSave === lastSavedNotes) return;

@@ -11,9 +11,13 @@ export interface QuizQuestion {
   question_text: string;
   question_type?: string;
   options: string[];
+  premises?: string[];
+  matches?: string[];
+  blank_answers?: Record<string, string>;
   correct_option_index?: number;
   correct_answer?: string;
   explanation: string;
+  generated_by?: "ai" | "fallback" | string;
 }
 
 export interface LessonSection {
@@ -365,6 +369,7 @@ export const studyPlannerApi = {
     options: string[];
     correct_option_index: number;
     explanation: string;
+    generated_by?: "ai" | "fallback" | string;
   }> => {
     return apiClient(`/students/study-plans/sessions/${sessionId}/guided/exercise`, {
       method: "POST",
@@ -373,26 +378,33 @@ export const studyPlannerApi = {
   },
   generateKnowledgeCheck: async (
     sessionId: string,
-    questionCount: number = 5
+    questionCount: number = 5,
+    forceRegenerate: boolean = false
   ): Promise<QuizQuestion[]> => {
     return apiClient(
       `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/generate`,
       {
         method: "POST",
-        body: JSON.stringify({ question_count: questionCount }),
+        body: JSON.stringify({
+          question_count: questionCount,
+          force_regenerate: forceRegenerate,
+        }),
       }
     );
   },
   generateQuiz: async (
-    planId: string,
     sessionId: string,
-    questionCount: number = 5
+    questionCount: number = 5,
+    forceRegenerate: boolean = false
   ): Promise<QuizQuestion[]> => {
     return apiClient(
       `/students/study-plans/sessions/${sessionId}/guided/knowledge-check/generate`,
       {
         method: "POST",
-        body: JSON.stringify({ question_count: questionCount }),
+        body: JSON.stringify({
+          question_count: questionCount,
+          force_regenerate: forceRegenerate,
+        }),
       }
     );
   },

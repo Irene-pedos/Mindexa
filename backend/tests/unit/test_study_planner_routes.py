@@ -85,7 +85,23 @@ async def test_all_study_planner_service_methods():
          patch.object(service.repo, "get_plan_by_id", new_callable=AsyncMock) as mock_get_plan, \
          patch.object(service.repo, "get_session_by_id", new_callable=AsyncMock) as mock_get_session, \
          patch.object(service.repo, "list_upcoming_sessions_for_student", new_callable=AsyncMock) as mock_list_upcoming, \
+         patch.object(service.repo, "update_session", new_callable=AsyncMock) as mock_update_session, \
+         patch("app.agents.study_planner_agent.StudyPlannerAgent.generate_knowledge_check", new_callable=AsyncMock) as mock_gen_kc, \
          patch("app.db.repositories.assessment_repo.AssessmentRepository.list_available_for_student", new_callable=AsyncMock) as mock_list_ass:
+
+        from app.agents.study_planner_agent import KnowledgeCheckQuestion
+        mock_gen_kc.return_value = [
+            KnowledgeCheckQuestion(
+                id="q1",
+                question_text="Sample Q",
+                question_type="MCQ",
+                options=["A", "B", "C", "D"],
+                correct_option_index=0,
+                correct_answer="A",
+                explanation="Exp",
+                generated_by="ai",
+            )
+        ]
 
         mock_list_plans.return_value = [mock_plan]
         mock_get_plan.return_value = mock_plan
@@ -105,6 +121,7 @@ async def test_all_study_planner_service_methods():
         # Test generate_session_quiz
         quiz = await service.generate_session_quiz(session_id, student_id, 5)
         assert len(quiz) >= 1
+        assert quiz[0]["generated_by"] == "ai"
 
         # Test reschedule_session
         resched = await service.reschedule_session(session_id, student_id, datetime.now(UTC) + timedelta(days=1), 45)
@@ -203,7 +220,9 @@ async def test_source_citation_contract_and_guided_ask_ai():
 
     mock_session = MagicMock()
     mock_session.id = session_id
+    mock_session.study_plan_id = None
     mock_session.topic = "Database Normalization"
+    mock_session.tutor_chat_history = []
 
     mock_output = MagicMock()
     mock_output.answer = "BCNF is a stricter form of 3NF."
@@ -211,6 +230,7 @@ async def test_source_citation_contract_and_guided_ask_ai():
     mock_output.fallback_used = False
 
     with patch.object(service.repo, "get_session_by_id", new_callable=AsyncMock) as mock_get_session, \
+         patch.object(service.repo, "update_session", new_callable=AsyncMock) as mock_update_session, \
          patch("app.agents.student_support_agent.StudySupportAgent.answer", new_callable=AsyncMock) as mock_answer:
         mock_get_session.return_value = mock_session
         mock_answer.return_value = mock_output

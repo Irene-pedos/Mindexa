@@ -321,7 +321,10 @@ async def generate_guided_knowledge_check(
     service = StudyPlannerService(db)
     try:
         return await service.generate_session_quiz(
-            session_id, current_user.id, body.question_count
+            session_id,
+            current_user.id,
+            body.question_count,
+            force_regenerate=body.force_regenerate,
         )
     except ValueError as err:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(err))

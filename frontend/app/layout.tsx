@@ -1,6 +1,5 @@
-// frontend/app/layout.tsx
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Outfit } from "next/font/google";
+import { Geist_Mono, Outfit } from "next/font/google";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,16 +10,18 @@ import { RoleGuard } from "@/components/mindexa/layout/role-guard";
 import { GuidedTourModal } from "@/components/mindexa/onboarding/guided-tour-modal";
 import { Toaster } from "@/components/ui/sonner";
 
-const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const outfit = Outfit({
   subsets: ["latin"],
+  variable: "--font-sans",
+  display: "swap",
+  preload: true,
 });
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
+  display: "swap",
+  preload: false,
 });
 
 export const metadata: Metadata = {
@@ -47,7 +48,6 @@ export default function RootLayout({
         suppressHydrationWarning
         className={cn(
           outfit.variable,
-          geistSans.variable,
           geistMono.variable,
           "antialiased bg-background text-foreground",
         )}

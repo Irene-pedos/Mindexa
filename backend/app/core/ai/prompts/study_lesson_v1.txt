@@ -57,7 +57,11 @@ TECHNIQUE SELECTION RULES (apply per section)
      - A system with named components and explicit relationships
      - A state machine or sequence of interactions
    For conceptual explanations, definitions, or analytical sections: OMIT.
-   Use valid Mermaid syntax: graph TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram.
+   Use valid Mermaid syntax: flowchart TD, flowchart LR, sequenceDiagram, classDiagram, stateDiagram.
+   STRICT MERMAID SYNTAX RULES:
+     - ALWAYS enclose all node text in double quotes: A["Step 1: Input Data"] --> B["Step 2: Validation (Rule Check)"]
+     - NEVER use unquoted parentheses, colons, brackets, or slashes inside node labels.
+     - NEVER wrap diagram_prompt in markdown code fences (```). Return raw mermaid syntax only.
    HARD LIMIT: at most ONE diagram across the entire lesson. If a diagram fits section 1,
    all subsequent sections must have diagram_prompt: null.
    Set technique_justification to name the process/hierarchy being visualised.

@@ -35,8 +35,8 @@ class SessionTopicPlan(BaseModel):
 
 class LessonSection(BaseModel):
     """Schema for individual sections within a guided lesson."""
-    section_title: str
-    content: str
+    section_title: str = ""   # soft default — truncated sections get empty title rather than hard-fail
+    content: str = ""         # soft default — same reason
     key_points: List[str] = Field(default_factory=list)
     diagram_prompt: Optional[str] = None
     estimated_minutes: Optional[int] = None
@@ -118,6 +118,36 @@ class LessonPlanOutput(BaseModel):
     glossary: List[Dict[str, str]] = Field(default_factory=list)
     references: List[str] = Field(default_factory=list)
     generated_by: str = Field(default="ai", description="ai or fallback")
+
+    @field_validator("sections", mode="before")
+    @classmethod
+    def _filter_sections(cls, v: Any) -> List[Any]:
+        """Filter out bare string items leaked into the sections array by truncation repair.
+
+        When the AI response is truncated mid-string inside a section's `content`
+        field, the truncation-repair logic can close the string at the wrong level,
+        causing the remaining prose to appear as bare strings in the sections array.
+        This validator silently drops those string fragments so that valid sections
+        (dicts or already-constructed LessonSection instances) still parse
+        successfully instead of the entire lesson failing validation.
+
+        Note: we reject *strings* specifically rather than allowing only *dicts*,
+        because Pydantic also passes pre-constructed LessonSection model instances
+        here (e.g. from _build_fallback_lesson_plan or tests), which are not dicts
+        but must not be dropped.
+        """
+        if not isinstance(v, list):
+            return v
+        filtered = [item for item in v if not isinstance(item, str)]
+        dropped = len(v) - len(filtered)
+        if dropped:
+            import structlog as _log
+            _log.get_logger().warning(
+                "LessonPlanOutput.sections: dropped string fragment items (likely truncation artifacts)",
+                dropped=dropped,
+                total_before=len(v),
+            )
+        return filtered
 
     @field_validator("objectives", "lecturer_references", "references", mode="before")
     @classmethod
@@ -518,7 +548,13 @@ class StudyPlannerAgent(BaseAgent):
                 ),
             ],
             temperature=0.4,
-            max_tokens=4000,
+            # max_tokens budget for lesson completion.
+            # Groq free-tier: 8 000 TPM. With Fix #1 capping RAG context to
+            # ~1 600 tokens and the template overhead at ~1 600 tokens, reserving
+            # 3 200 here gives: 3 200 + 1 600 + 1 600 = 6 400 total — 1 600 under
+            # the 8 000 limit. 2 500 was too small and caused mid-JSON truncation
+            # for lessons with 5+ sections.
+            max_tokens=3200,
         )
 
         response = await self.gateway.complete(
@@ -774,7 +810,7 @@ class StudyPlannerAgent(BaseAgent):
 
         response = await self.gateway.complete(
             request,
-            action_type=AIActionType.GENERATE_KNOWLEDGE_CHECK,
+            action_type=AIActionType.GENERATE_GUIDED_EXERCISE,
             actor_id=student_id,
             actor_role="student",
             subject_entity_type="study_session",

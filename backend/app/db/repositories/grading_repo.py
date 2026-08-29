@@ -397,10 +397,10 @@ class GradingRepository:
         # Enforce manual/AI grading eligibility: open-ended question types only
         from app.db.enums import QuestionType
         open_ended_types = [
-            QuestionType.SHORT_ANSWER.value,
-            QuestionType.ESSAY.value,
-            QuestionType.COMPUTATIONAL.value,
-            QuestionType.CASE_STUDY.value
+            QuestionType.SHORT_ANSWER,
+            QuestionType.ESSAY,
+            QuestionType.COMPUTATIONAL,
+            QuestionType.CASE_STUDY,
         ]
         filters.append(Question.question_type.in_(open_ended_types))
 
@@ -413,9 +413,17 @@ class GradingRepository:
         if priority:
             filters.append(GradingQueueItem.priority == priority)
         if class_section_id:
-            filters.append(StudentEnrollment.class_section_id == class_section_id)
+            # Only filter by class_section_id if it corresponds to an actual ClassSection entity
+            sec_exists_stmt = select(exists().where(ClassSection.id == class_section_id, ClassSection.is_deleted == False))
+            is_real_sec = (await self.db.execute(sec_exists_stmt)).scalar()
+            if is_real_sec:
+                filters.append(StudentEnrollment.class_section_id == class_section_id)
         if question_type:
-            filters.append(Question.question_type == question_type)
+            try:
+                qt_val = question_type.upper().replace("-", "_")
+                filters.append(Question.question_type == QuestionType(qt_val))
+            except Exception:
+                pass
         if search_query:
             filters.append(
                 or_(
@@ -457,8 +465,8 @@ class GradingRepository:
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
             .join(Assessment, GradingQueueItem.assessment_id == Assessment.id)
-            .join(Course, Assessment.course_id == Course.id)
-            .join(Institution, Course.institution_id == Institution.id)
+            .outerjoin(Course, Assessment.course_id == Course.id)
+            .outerjoin(Institution, Course.institution_id == Institution.id)
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             .outerjoin(StudentResponse, GradingQueueItem.response_id == StudentResponse.id)
@@ -498,8 +506,8 @@ class GradingRepository:
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
             .join(Assessment, GradingQueueItem.assessment_id == Assessment.id)
-            .join(Course, Assessment.course_id == Course.id)
-            .join(Institution, Course.institution_id == Institution.id)
+            .outerjoin(Course, Assessment.course_id == Course.id)
+            .outerjoin(Institution, Course.institution_id == Institution.id)
             .join(Question, GradingQueueItem.question_id == Question.id)
             .join(AssessmentAttempt, GradingQueueItem.attempt_id == AssessmentAttempt.id)
             .outerjoin(StudentEnrollment, and_(

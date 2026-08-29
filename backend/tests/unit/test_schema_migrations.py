@@ -162,6 +162,21 @@ def test_extend_learning_unit_and_outcomes_migration_exists():
     assert "uq_lu_workspace_material_order" in source
 
 
+def test_add_generate_guided_exercise_to_ai_action_type_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20260828_2330_add_generate_guided_exercise_action.py"
+    )
+    assert migration_path.exists(), "Add generate guided exercise action migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert "20260828_2330_guided_ex_action" in source
+    assert "20260827_2030_extend_lu" in source
+    assert "GENERATE_GUIDED_EXERCISE" in source
+
+
 def test_migration_chain_integrity():
     """Verify that every migration has a valid down_revision and there is exactly one head."""
     versions_dir = Path(__file__).resolve().parents[1] / ".." / "alembic" / "versions"
@@ -198,4 +213,4 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260827_2030_extend_lu"
+    assert heads[0] == "20260828_2330_guided_ex_action"

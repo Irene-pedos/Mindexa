@@ -8,10 +8,15 @@ import { Badge } from "@/components/ui/badge";
 import {
   Table as TableIcon,
   CheckCircle2,
+  XCircle,
+  Check,
+  X,
+  Layers,
   FileText,
   Download,
   AlertCircle,
   HelpCircle,
+  Sparkles,
 } from "lucide-react";
 
 export type CanonicalQuestionType =
@@ -66,6 +71,10 @@ export function resolveCanonicalQuestionType(
       return "ordering";
     case "fillblank":
     case "fillblanks":
+    case "fillintheblank":
+    case "fillintheblanks":
+    case "fillinblank":
+    case "fillinblanks":
       return "fill_blank";
     case "casestudy":
       return "case_study";
@@ -98,6 +107,10 @@ export function resolveCanonicalQuestionType(
       return "ordering";
     case "fillblanks":
     case "fillblank":
+    case "fillintheblank":
+    case "fillintheblanks":
+    case "fillinblank":
+    case "fillinblanks":
       return "fill_blank";
     case "casestudy":
       return "case_study";
@@ -736,49 +749,285 @@ function FillBlankRenderer({
   showCorrectAnswers: boolean;
   className?: string;
 }) {
-  const blanks: Record<string, any> =
-    submission.fill_blank_answers ||
-    answerContent.fill_blank_answers ||
-    (() => {
-      const raw =
-        submission.answer_text ||
-        answerContent.text ||
-        submission.student_answer;
-      if (typeof raw === "string" && raw.trim().startsWith("{")) {
-        try {
-          return JSON.parse(raw);
-        } catch {}
-      }
-      return {};
-    })();
+  // 1. Defensively resolve student blank answers from all possible payload shapes
+  const studentBlanks: Record<string, string> = useMemo(() => {
+    const rawMap: Record<string, any> = {};
 
-  const keys = Object.keys(blanks);
-  if (keys.length === 0) {
-    return (
-      <span className="italic text-muted-foreground/60 text-xs">
-        No fill-blank answers recorded.
-      </span>
+    const sources = [
+      submission?.fill_blank_answers,
+      answerContent?.fill_blank_answers,
+      submission?.student_answer_json,
+      answerContent?.student_answer_json,
+      submission?.blanks,
+      answerContent?.blanks,
+      typeof answerContent === "object" && !Array.isArray(answerContent) ? answerContent : null,
+    ];
+
+    for (const src of sources) {
+      if (src && typeof src === "object") {
+        if (Array.isArray(src)) {
+          src.forEach((val, idx) => {
+            if (val !== undefined && val !== null) {
+              rawMap[String(idx)] = String(val);
+            }
+          });
+        } else {
+          Object.entries(src).forEach(([k, val]) => {
+            if (val !== undefined && val !== null) {
+              const numMatch = k.match(/\d+/);
+              const normalizedKey = numMatch ? String(Number(numMatch[0])) : k;
+              rawMap[normalizedKey] = String(val);
+              rawMap[k] = String(val);
+            }
+          });
+        }
+      }
+    }
+
+    // Text parsing fallback
+    const rawText =
+      submission?.answer_text ||
+      answerContent?.text ||
+      submission?.student_answer ||
+      (typeof answerContent === "string" ? answerContent : "");
+
+    if (typeof rawText === "string" && rawText.trim().length > 0) {
+      const trimmed = rawText.trim();
+      if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((val, idx) => {
+              rawMap[String(idx)] = String(val);
+            });
+          } else if (typeof parsed === "object" && parsed !== null) {
+            Object.entries(parsed).forEach(([k, val]) => {
+              const numMatch = k.match(/\d+/);
+              const normalizedKey = numMatch ? String(Number(numMatch[0])) : k;
+              rawMap[normalizedKey] = String(val);
+            });
+          }
+        } catch {}
+      } else if (trimmed.includes(";") || trimmed.includes(",")) {
+        const parts = trimmed.split(/[,;]/).map((p) => p.trim()).filter(Boolean);
+        parts.forEach((val, idx) => {
+          const clean = val.replace(/^blank\s*\d+\s*:\s*/i, "");
+          if (!rawMap[String(idx)]) {
+            rawMap[String(idx)] = clean;
+          }
+        });
+      } else if (Object.keys(rawMap).length === 0) {
+        rawMap["0"] = trimmed;
+      }
+    }
+
+    return rawMap;
+  }, [submission, answerContent]);
+
+  const questionText =
+    question?.question_text ||
+    question?.text ||
+    question?.content ||
+    "";
+
+  // Split question text on [blank] or ___ markers
+  const textParts = useMemo(() => {
+    if (!questionText) return [];
+    return questionText.split(/(?:_{3,}|\[blank\]|\{\{blank\}\})/gi);
+  }, [questionText]);
+
+  const blankCount = Math.max(1, textParts.length > 1 ? textParts.length - 1 : 1);
+
+  // 2. Resolve accepted / correct answers per blank index
+  const acceptedAnswersPerBlank = useMemo(() => {
+    const map: Record<number, string[]> = {};
+
+    // Source A: question.blanks (from DB list_blanks)
+    if (question?.blanks && Array.isArray(question.blanks)) {
+      question.blanks.forEach((b: any, i: number) => {
+        const idx = b.blank_index !== undefined && b.blank_index !== null ? Number(b.blank_index) : i;
+        if (Array.isArray(b.accepted_answers) && b.accepted_answers.length > 0) {
+          map[idx] = b.accepted_answers.map(String);
+        }
+      });
+    }
+
+    // Source B: question.options with is_correct: true
+    if (question?.options && Array.isArray(question.options)) {
+      const correctOpts = question.options.filter((o: any) => o.is_correct === true);
+      correctOpts.forEach((o: any, i: number) => {
+        const optText = o.content || o.text || o.option_text || "";
+        const idx = o.order_index !== undefined && o.order_index !== null ? Number(o.order_index) : i;
+        if (optText) {
+          map[idx] = [...(map[idx] || []), optText];
+        }
+      });
+    }
+
+    // Source C: question.correct_answer or submission.correct_answer
+    const rawCorrect = question?.correct_answer || submission?.correct_answer;
+    if (typeof rawCorrect === "string" && rawCorrect.trim().length > 0) {
+      if (rawCorrect.includes(";")) {
+        const parts = rawCorrect.split(";").map((p) => p.trim()).filter(Boolean);
+        parts.forEach((p, idx) => {
+          const clean = p.replace(/^blank\s*\d+\s*:\s*/i, "");
+          const subParts = clean.split("|").map((s) => s.trim()).filter(Boolean);
+          map[idx] = Array.from(new Set([...(map[idx] || []), ...subParts]));
+        });
+      } else if (!map[0]) {
+        map[0] = [rawCorrect.trim()];
+      }
+    }
+
+    return map;
+  }, [question, submission]);
+
+  // Check correctness of a student answer for a specific blank index
+  const getBlankStatus = (idx: number) => {
+    const studentVal = (
+      studentBlanks[String(idx)] ??
+      studentBlanks[String(idx + 1)] ??
+      studentBlanks[`blank_${idx}`] ??
+      studentBlanks[`blank_${idx + 1}`] ??
+      ""
+    ).trim();
+
+    if (!studentVal) {
+      return { isAnswered: false, isCorrect: false, studentVal: "", expected: acceptedAnswersPerBlank[idx] || [] };
+    }
+
+    const accepted = acceptedAnswersPerBlank[idx] || [];
+    if (accepted.length === 0) {
+      return { isAnswered: true, isCorrect: true, studentVal, expected: [] };
+    }
+
+    const isCorrect = accepted.some(
+      (acc) => acc.trim().toLowerCase() === studentVal.toLowerCase()
     );
-  }
+
+    return { isAnswered: true, isCorrect, studentVal, expected: accepted };
+  };
+
+  const poolOptions = question?.options || [];
 
   return (
-    <div className={cn("space-y-2 text-xs", className)}>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">
-        Submitted Blanks
-      </p>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-        {keys.map((k) => (
-          <div
-            key={k}
-            className="p-2.5 rounded-xl border bg-muted/20 flex items-center justify-between"
-          >
-            <span className="font-medium text-muted-foreground">Blank {k}</span>
-            <span className="font-mono font-medium text-foreground">
-              {renderRichMathText(String(blanks[k]))}
-            </span>
+    <div className={cn("space-y-4 text-xs", className)}>
+      {/* ── A. Inline Question Sentence with Styled Answer Pills ── */}
+      {textParts.length > 1 && (
+        <div className="p-4 rounded-xl border border-border/70 bg-muted/10 space-y-2 leading-relaxed text-foreground">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1 flex items-center gap-1.5">
+            <Layers className="size-3 text-primary" />
+            <span>Interactive Sentence Evaluation</span>
+          </p>
+          <div className="text-sm font-medium leading-loose text-foreground/90">
+            {textParts.map((part: string, idx: number) => {
+              const status = idx < blankCount ? getBlankStatus(idx) : null;
+              const expectedLabel = status?.expected?.[0] || "";
+
+              return (
+                <React.Fragment key={idx}>
+                  <span>{renderRichMathText(part)}</span>
+                  {status && (
+                    <span className="inline-flex items-center align-middle mx-1 my-0.5">
+                      {status.isAnswered ? (
+                        status.isCorrect ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg border border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 font-semibold text-xs shadow-2xs">
+                            <CheckCircle2 className="size-3 text-emerald-600 shrink-0" />
+                            <span>{renderRichMathText(status.studentVal)}</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex flex-wrap items-center gap-1">
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg border border-rose-500/40 bg-rose-500/10 text-rose-700 dark:text-rose-300 font-semibold text-xs shadow-2xs">
+                              <XCircle className="size-3 text-rose-600 shrink-0" />
+                              <span className="line-through opacity-85">{renderRichMathText(status.studentVal)}</span>
+                            </span>
+                            {showCorrectAnswers && expectedLabel && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 font-medium text-[11px]">
+                                <Check className="size-2.5 text-emerald-600" />
+                                <span>{renderRichMathText(expectedLabel)}</span>
+                              </span>
+                            )}
+                          </span>
+                        )
+                      ) : (
+                        <span className="inline-flex flex-wrap items-center gap-1">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg border border-dashed border-muted-foreground/40 bg-muted/20 text-muted-foreground font-medium text-xs">
+                            [Blank {idx + 1}: Unanswered]
+                          </span>
+                          {showCorrectAnswers && expectedLabel && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-300 font-medium text-[11px]">
+                              <Check className="size-2.5 text-emerald-600" />
+                              <span>{renderRichMathText(expectedLabel)}</span>
+                            </span>
+                          )}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
-        ))}
-      </div>
+        </div>
+      )}
+
+      {/* ── B. Options Pool & Distractors Reference ── */}
+      {poolOptions.length > 0 && (
+        <div className="p-3.5 rounded-xl border border-border/60 bg-muted/5 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+              <Sparkles className="size-3 text-primary" />
+              <span>Available Choices & Distractors Pool</span>
+            </span>
+            <Badge variant="outline" className="text-[9px] py-0 px-1.5 text-muted-foreground border-border/60">
+              {poolOptions.length} total options
+            </Badge>
+          </div>
+          <div className="flex flex-wrap gap-2 pt-1">
+            {poolOptions.map((opt: any, i: number) => {
+              const optText = opt.content || opt.text || opt.option_text || "";
+              const isSelected = Object.values(studentBlanks).some(
+                (val) => val.trim().toLowerCase() === optText.trim().toLowerCase()
+              );
+              const isCorrectOpt = opt.is_correct === true;
+
+              return (
+                <div
+                  key={opt.id || `opt-${i}`}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border font-medium transition-all",
+                    isSelected
+                      ? isCorrectOpt
+                        ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-700 dark:text-emerald-300 font-semibold shadow-2xs"
+                        : "bg-rose-500/10 border-rose-500/40 text-rose-700 dark:text-rose-300 font-semibold shadow-2xs"
+                      : isCorrectOpt && showCorrectAnswers
+                        ? "bg-emerald-500/5 border-emerald-500/25 text-emerald-600/90 border-dashed"
+                        : "bg-background border-border/70 text-foreground/80"
+                  )}
+                >
+                  <span>{renderRichMathText(optText)}</span>
+                  {isSelected && (
+                    <Badge
+                      variant="secondary"
+                      className={cn(
+                        "text-[8px] h-3.5 px-1 py-0 font-bold uppercase",
+                        isCorrectOpt ? "bg-emerald-500/20 text-emerald-700" : "bg-rose-500/20 text-rose-700"
+                      )}
+                    >
+                      Selected
+                    </Badge>
+                  )}
+                  {!isSelected && isCorrectOpt && showCorrectAnswers && (
+                    <Badge variant="outline" className="text-[8px] h-3.5 px-1 py-0 text-emerald-600 border-emerald-500/30">
+                      Key
+                    </Badge>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

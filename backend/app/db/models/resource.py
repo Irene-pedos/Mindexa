@@ -283,6 +283,11 @@ class LecturerMaterial(BaseModel, table=True):
     display_name: str | None = Field(default=None, nullable=True, max_length=255)
     description: str | None = Field(default=None, nullable=True)
 
+    @property
+    def title(self) -> str:
+        """Convenience alias for display_name or original_filename."""
+        return self.display_name or self.original_filename or "Material"
+
     # ── Access control ────────────────────────────────────────────────────────
 
     is_student_visible: bool = Field(default=False, nullable=False)

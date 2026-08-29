@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import random
+import re
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from app.core.exceptions import ConflictError
 from app.core.logging import get_logger
@@ -13,6 +15,7 @@ logger = get_logger(__name__)
 from app.db.enums import NotificationChannel, NotificationType
 from app.db.models.academic import Course, TeachingWorkspace
 from app.db.models.assessment import Assessment
+from app.db.models.learning_unit import LearningUnit, StudentLearningUnitProgress
 from app.db.models.notification import Notification
 from app.db.models.resource import LecturerMaterial
 from app.db.models.study_plan import (DEFAULT_INITIAL_READINESS_SCORE,
@@ -20,6 +23,7 @@ from app.db.models.study_plan import (DEFAULT_INITIAL_READINESS_SCORE,
 from app.db.repositories.study_planner_repo import StudyPlannerRepository
 from app.schemas.study_planner import (CreateStudyPlanRequest,
                                        GeneratePlanFromAssessmentRequest,
+                                       LearningUnitResponse,
                                        MaterialCoverageItem,
                                        ReadinessTimelinePoint,
                                        ScheduleConflictWarning,
@@ -58,6 +62,219 @@ class StudyPlannerService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.repo = StudyPlannerRepository(db)
+
+    @staticmethod
+    def _sanitize_mermaid(code: Optional[str]) -> Optional[str]:
+        """Sanitize and repair Mermaid syntax to ensure browser compatibility."""
+        if not code or not isinstance(code, str):
+            return None
+        cleaned = code.strip()
+        # Strip markdown fences
+        cleaned = re.sub(r"^```(?:mermaid)?\s*", "", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+        cleaned = cleaned.strip()
+        if not cleaned:
+            return None
+
+        # Ensure it starts with a valid diagram keyword
+        valid_prefixes = (
+            "graph", "flowchart", "sequencediagram", "classdiagram",
+            "statediagram", "erdiagram", "pie", "gantt", "gitgraph", "journey", "mindmap"
+        )
+        first_line = cleaned.splitlines()[0].strip().lower()
+        if not any(first_line.startswith(p) for p in valid_prefixes):
+            cleaned = "flowchart TD\n" + cleaned
+
+        return cleaned
+
+    @classmethod
+    def _is_valid_mermaid(cls, code: Optional[str]) -> bool:
+        """Structural sanity check for Mermaid diagram syntax."""
+        if not code or not isinstance(code, str):
+            return False
+        sanitized = cls._sanitize_mermaid(code)
+        if not sanitized or len(sanitized) < 8:
+            return False
+        first_line = sanitized.splitlines()[0].strip().lower()
+        valid_prefixes = (
+            "graph", "flowchart", "sequencediagram", "classdiagram",
+            "statediagram", "erdiagram", "pie", "gantt", "gitgraph", "journey", "mindmap"
+        )
+        return any(first_line.startswith(p) for p in valid_prefixes)
+
+    async def get_workspace_learning_units(
+        self, workspace_id: uuid.UUID, student_id: uuid.UUID
+    ) -> List[LearningUnitResponse]:
+        """Fetch ordered learning units for a workspace or synthesize units from course materials."""
+        # 1. Resolve workspace_id (support both TeachingWorkspace.id and Course.id)
+        tw_id: uuid.UUID = workspace_id
+        ws_stmt = select(TeachingWorkspace).where(
+            TeachingWorkspace.id == workspace_id,
+            TeachingWorkspace.is_deleted == False,
+        )
+        ws_res = await self.db.execute(ws_stmt)
+        ws = ws_res.scalar_one_or_none()
+
+        if not ws:
+            # Check if workspace_id was passed as a course_id
+            course_stmt = select(TeachingWorkspace).where(
+                TeachingWorkspace.course_id == workspace_id,
+                TeachingWorkspace.is_deleted == False,
+            )
+            c_ws = (await self.db.execute(course_stmt)).scalars().first()
+            if c_ws:
+                tw_id = c_ws.id
+                ws = c_ws
+
+        # 2. Query persisted LearningUnit records
+        lu_stmt = (
+            select(LearningUnit)
+            .where(
+                LearningUnit.teaching_workspace_id == tw_id,
+                LearningUnit.is_active == True,
+                LearningUnit.is_deleted == False,
+            )
+            .order_by(LearningUnit.order_index.asc())
+        )
+        units = list((await self.db.execute(lu_stmt)).scalars().all())
+
+        # 3. If persisted LUs exist, attach student progress and return
+        if units:
+            lu_ids = [u.id for u in units]
+            prog_stmt = select(StudentLearningUnitProgress).where(
+                StudentLearningUnitProgress.student_id == student_id,
+                StudentLearningUnitProgress.learning_unit_id.in_(lu_ids),
+                StudentLearningUnitProgress.is_deleted == False,
+            )
+            progress_rows = list((await self.db.execute(prog_stmt)).scalars().all())
+            prog_map = {p.learning_unit_id: p for p in progress_rows}
+
+            return [
+                LearningUnitResponse(
+                    id=u.id,
+                    teaching_workspace_id=u.teaching_workspace_id,
+                    source_material_id=u.source_material_id,
+                    order_index=u.order_index,
+                    title=u.title,
+                    summary=u.summary,
+                    learning_outcomes=u.learning_outcomes or [],
+                    start_page=u.start_page,
+                    end_page=u.end_page,
+                    source_chunk_ids=u.source_chunk_ids or [],
+                    estimated_study_minutes=u.estimated_study_minutes or 45,
+                    is_active=u.is_active,
+                    status=prog_map.get(u.id).status if u.id in prog_map else "NOT_STARTED",
+                    confidence_score=prog_map.get(u.id).confidence_score if u.id in prog_map else None,
+                )
+                for u in units
+            ]
+
+        # 4. Fallback: Synthesize learning units from LecturerMaterial
+        mat_stmt = (
+            select(LecturerMaterial)
+            .where(
+                LecturerMaterial.teaching_workspace_id == tw_id,
+                LecturerMaterial.is_deleted == False,
+            )
+            .order_by(LecturerMaterial.created_at.asc())
+        )
+        materials = list((await self.db.execute(mat_stmt)).scalars().all())
+
+        if materials:
+            synthetic_units: List[LearningUnitResponse] = []
+            for i, mat in enumerate(materials):
+                display_title = (
+                    mat.display_name
+                    or mat.original_filename
+                    or f"Module {i + 1}"
+                )
+                if "." in display_title:
+                    display_title = display_title.rsplit(".", 1)[0]
+
+                synthetic_units.append(
+                    LearningUnitResponse(
+                        id=mat.id,
+                        teaching_workspace_id=tw_id,
+                        source_material_id=mat.id,
+                        order_index=i + 1,
+                        title=f"Unit {i + 1}: {display_title}",
+                        summary=f"Key concepts and lecture materials from {display_title}.",
+                        learning_outcomes=[
+                            f"Master foundational concepts of {display_title}",
+                            f"Review practice problems and practical applications for {display_title}",
+                        ],
+                        start_page=1,
+                        end_page=mat.page_count if hasattr(mat, "page_count") else None,
+                        source_chunk_ids=[],
+                        estimated_study_minutes=45,
+                        is_active=True,
+                        status="NOT_STARTED",
+                        confidence_score=None,
+                    )
+                )
+            return synthetic_units
+
+        # 5. Course-level curriculum fallback
+        course_name = ws.title if ws and hasattr(ws, "title") and ws.title else "Course Curriculum"
+        return [
+            LearningUnitResponse(
+                id=uuid.uuid5(tw_id, "unit_1"),
+                teaching_workspace_id=tw_id,
+                source_material_id=None,
+                order_index=1,
+                title=f"Unit 1: Foundations & Core Concepts",
+                summary=f"Foundational topics, key terminology, and theoretical background for {course_name}.",
+                learning_outcomes=[
+                    "Understand key principles and definitions",
+                    "Establish core conceptual frameworks",
+                ],
+                start_page=1,
+                end_page=None,
+                source_chunk_ids=[],
+                estimated_study_minutes=45,
+                is_active=True,
+                status="NOT_STARTED",
+                confidence_score=None,
+            ),
+            LearningUnitResponse(
+                id=uuid.uuid5(tw_id, "unit_2"),
+                teaching_workspace_id=tw_id,
+                source_material_id=None,
+                order_index=2,
+                title=f"Unit 2: Practical Applications & Analysis",
+                summary=f"Problem solving, analysis, and intermediate domain techniques for {course_name}.",
+                learning_outcomes=[
+                    "Apply core methods to practical problem scenarios",
+                    "Analyze and evaluate domain-specific workflows",
+                ],
+                start_page=1,
+                end_page=None,
+                source_chunk_ids=[],
+                estimated_study_minutes=45,
+                is_active=True,
+                status="NOT_STARTED",
+                confidence_score=None,
+            ),
+            LearningUnitResponse(
+                id=uuid.uuid5(tw_id, "unit_3"),
+                teaching_workspace_id=tw_id,
+                source_material_id=None,
+                order_index=3,
+                title=f"Unit 3: Advanced Topics & Exam Mastery",
+                summary=f"Comprehensive review, synthesis, and exam-readiness preparation for {course_name}.",
+                learning_outcomes=[
+                    "Synthesize advanced course topics",
+                    "Achieve assessment readiness through active recall",
+                ],
+                start_page=1,
+                end_page=None,
+                source_chunk_ids=[],
+                estimated_study_minutes=45,
+                is_active=True,
+                status="NOT_STARTED",
+                confidence_score=None,
+            ),
+        ]
 
     async def create_manual_plan(
         self, student_id: uuid.UUID, data: CreateStudyPlanRequest
@@ -178,7 +395,10 @@ class StudyPlannerService:
         )
         mat_res = await self.db.execute(materials_stmt)
         materials = list(mat_res.scalars().all())
-        material_titles = [m.title for m in materials] if materials else ["Course Core Concepts", "Practice Problems", "Past Questions"]
+        material_titles = [
+            (m.display_name or m.original_filename or getattr(m, "title", "Course Material"))
+            for m in materials
+        ] if materials else ["Course Core Concepts", "Practice Problems", "Past Questions"]
 
         title = f"AI Study Prep: {assessment.title}"
         plan = StudyPlan(
@@ -655,56 +875,121 @@ class StudyPlannerService:
         return warnings
 
     async def generate_session_quiz(
-        self, session_id: uuid.UUID, student_id: uuid.UUID, question_count: int = 5
+        self,
+        session_id: uuid.UUID,
+        student_id: uuid.UUID,
+        question_count: int = 5,
+        force_regenerate: bool = False,
     ) -> List[Dict[str, Any]]:
         """Generate post-session AI practice quiz questions based on topic & course materials using StudyPlannerAgent."""
         session = await self.repo.get_session_by_id(session_id, student_id)
         if not session:
             raise ValueError("Session not found")
 
-        try:
-            from app.agents.study_planner_agent import StudyPlannerAgent
-            from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import (get_ai_provider,
-                                                      get_embedding_provider)
+        # Idempotency guard: Return existing questions if already generated and valid, unless force_regenerate=True
+        if not force_regenerate and session.quiz_questions and len(session.quiz_questions) > 0:
+            return session.quiz_questions
 
-            chat_provider = get_ai_provider()
-            embed_provider = get_embedding_provider()
-            gateway = AIGateway(self.db, chat_provider, embed_provider)
-            agent = StudyPlannerAgent(gateway)
+        # Check language policy before AI quiz generation
+        plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
+        if plan and plan.teaching_workspace_id:
+            from app.db.models.academic import TeachingWorkspace
+            from app.core.ai.language_policy import assert_ai_allowed
 
-            questions_output = await agent.generate_knowledge_check(
-                session=session,
-                lesson_content=session.topic,
-                question_count=question_count,
+            ws = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+            if ws:
+                assert_ai_allowed(
+                    getattr(ws, "language", None),
+                    action="generate_knowledge_check",
+                    context={"session_id": str(session.id), "workspace_id": str(ws.id)},
+                )
+
+        from app.agents.study_planner_agent import StudyPlannerAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import (get_ai_provider,
+                                                  get_embedding_provider)
+        from app.core.exceptions import AITemporarilyUnavailableError
+
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudyPlannerAgent(gateway)
+
+        # Ground quiz questions in actual delivered lesson content (session.lesson_sections_json)
+        # and scoped Learning Unit / workspace course materials
+        rag_context, _ = await self._get_session_rag_context(
+            session=session,
+            plan=plan,
+            student_id=student_id,
+            topic_or_query=session.topic,
+            top_k=5,
+        )
+
+        lesson_content_parts = []
+        for sec in (session.lesson_sections_json or []):
+            if isinstance(sec, dict):
+                title = sec.get("section_title", "")
+                kp = sec.get("key_points") or []
+                kp_str = "; ".join(kp) if isinstance(kp, list) else str(kp)
+                body = sec.get("content", "")
+                part_lines = []
+                if title:
+                    part_lines.append(f"Section: {title}")
+                if kp_str:
+                    part_lines.append(f"Key Points: {kp_str}")
+                if body:
+                    part_lines.append(f"Content: {body}")
+                if part_lines:
+                    lesson_content_parts.append("\n".join(part_lines))
+
+        if rag_context:
+            lesson_content_parts.append(f"Course Material & Learning Unit Context:\n{rag_context[:1500]}")
+
+        lesson_content = "\n\n".join(lesson_content_parts) if lesson_content_parts else session.topic
+
+        max_attempts = 2
+        last_error: Optional[Exception] = None
+        questions: List[Dict[str, Any]] = []
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                questions_output = await agent.generate_knowledge_check(
+                    session=session,
+                    lesson_content=lesson_content,
+                    question_count=question_count,
+                )
+                if questions_output:
+                    questions = [q.model_dump() for q in questions_output]
+                    for q in questions:
+                        q["generated_by"] = "ai"
+                    break
+                else:
+                    logger.warning(
+                        "Empty questions list generated by AI agent",
+                        attempt=attempt,
+                        session_id=str(session_id),
+                    )
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "AI quiz generation attempt failed",
+                    attempt=attempt,
+                    error=str(exc),
+                    session_id=str(session_id),
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
+
+        if not questions:
+            logger.error(
+                "AI quiz generation failed after retries",
+                error=str(last_error),
+                session_id=str(session_id),
             )
-            questions = [q.model_dump() for q in questions_output]
-        except Exception as exc:
-            logger.warning("AI quiz generation failed, using topic quiz fallback", error=str(exc))
-            questions = []
-            import random
-            topic = session.topic
-            for i in range(question_count):
-                raw_opts = [
-                    f"Primary requirement of {topic}",
-                    f"Alternative implementation of {topic}",
-                    f"Secondary constraint in {topic}",
-                    f"Invalid assumption regarding {topic}",
-                ]
-                shuffled = list(enumerate(raw_opts))
-                random.shuffle(shuffled)
-                opts = [opt for _, opt in shuffled]
-                correct_idx = next(idx for idx, (old_i, _) in enumerate(shuffled) if old_i == 0)
-                questions.append({
-                    "id": str(uuid.uuid4()),
-                    "question_text": f"Question {i+1}: What is a critical principle regarding {topic}?",
-                    "question_type": "MCQ",
-                    "options": opts,
-                    "correct_option_index": correct_idx,
-                    "correct_answer": opts[correct_idx],
-                    "explanation": f"The primary requirement of {topic} forms the foundation of this academic module.",
-                    "generated_by": "fallback",
-                })
+            raise AITemporarilyUnavailableError(
+                detail="AI question generation is temporarily unavailable. Please try again.",
+                code="AI_TEMPORARILY_UNAVAILABLE",
+            )
 
         session.quiz_questions = questions
         await self.repo.update_session(session)
@@ -1432,6 +1717,148 @@ class StudyPlannerService:
             generated_by="fallback",
         )
 
+    async def _get_session_rag_context(
+        self,
+        session: Any,
+        plan: Optional[Any],
+        student_id: uuid.UUID,
+        topic_or_query: str,
+        top_k: int = 5,
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """Retrieve grounded RAG context for a study session.
+
+        If session.learning_unit_id is present and has source_chunk_ids, hard-scopes strictly
+        to those ResourceChunk rows.
+        Otherwise falls back to vector search in the teaching workspace.
+        """
+        rag_context = ""
+        rag_citations: List[Dict[str, Any]] = []
+
+        # 1. Hard RAG scoping if session is bound to a specific Learning Unit
+        if getattr(session, "learning_unit_id", None):
+            try:
+                from app.db.models.learning_unit import LearningUnit
+                from app.db.models.resource_chunk import ResourceChunk
+
+                lu = await self.db.get(LearningUnit, session.learning_unit_id)
+                if lu and lu.source_chunk_ids:
+                    chunk_uuids = []
+                    for cid in lu.source_chunk_ids:
+                        try:
+                            chunk_uuids.append(uuid.UUID(str(cid)))
+                        except (ValueError, TypeError):
+                            continue
+                    if chunk_uuids:
+                        chunk_stmt = select(ResourceChunk).where(
+                            ResourceChunk.id.in_(chunk_uuids)
+                        )
+                        lu_chunks = list((await self.db.execute(chunk_stmt)).scalars().all())
+                        if lu_chunks:
+                            rag_context_lines = []
+                            for c in lu_chunks:
+                                pg = c.metadata_json.get("page") if c.metadata_json else 1
+                                rag_context_lines.append(
+                                    f"--- Learning Unit: {lu.title} (Page {pg}) ---\n{c.content[:1000]}"
+                                )
+                                rag_citations.append({
+                                    "resource_id": str(c.resource_id),
+                                    "resource_name": lu.title,
+                                    "title": lu.title,
+                                    "snippet": c.content[:300],
+                                    "chunk_index": c.chunk_index,
+                                    "page_number": pg,
+                                })
+                            rag_context = "\n\n".join(rag_context_lines)
+            except Exception as lu_rag_err:
+                logger.warning(
+                    "Learning unit hard RAG scoping error, falling back to general retrieval",
+                    error=str(lu_rag_err),
+                )
+
+        # 2. General RAG vector retrieval if no LU context was loaded
+        if not rag_context:
+            try:
+                from app.services.rag_service import RAGService
+
+                rag_service = RAGService(self.db)
+                if plan and getattr(plan, "teaching_workspace_id", None):
+                    rag_res = await rag_service.retrieve_context_for_lecturer(
+                        topic=topic_or_query,
+                        teaching_workspace_id=plan.teaching_workspace_id,
+                        top_k=top_k,
+                    )
+                    if rag_res and rag_res.context_string:
+                        rag_context = rag_res.context_string
+                        if hasattr(rag_res, "citations") and rag_res.citations:
+                            rag_citations = [c.model_dump() for c in rag_res.citations]
+
+                if not rag_context:
+                    rag_res = await rag_service.retrieve_context(
+                        question=topic_or_query,
+                        student_id=student_id,
+                        teaching_workspace_id=getattr(plan, "teaching_workspace_id", None) if plan else None,
+                        top_k=top_k,
+                    )
+                    if rag_res and rag_res.context_string:
+                        rag_context = rag_res.context_string
+                        if hasattr(rag_res, "citations") and rag_res.citations:
+                            rag_citations = [c.model_dump() for c in rag_res.citations]
+            except Exception as exc:
+                logger.warning("General RAG retrieval failed for study session", error=str(exc))
+
+        # 3. Lexical matching fallback across visible LecturerMaterials if vector RAG yielded nothing
+        if not rag_context and plan and getattr(plan, "teaching_workspace_id", None):
+            try:
+                from app.db.models.resource import LecturerMaterial, LecturerMaterialChunk
+                topic_keywords = [w for w in topic_or_query.replace("-", " ").split() if len(w) > 3]
+                m_stmt = select(LecturerMaterial).where(
+                    LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
+                    LecturerMaterial.is_student_visible == True,
+                    LecturerMaterial.is_deleted == False,
+                )
+                if topic_keywords:
+                    m_stmt = m_stmt.where(
+                        or_(*[LecturerMaterial.display_name.ilike(f"%{kw}%") for kw in topic_keywords] +
+                            [LecturerMaterial.original_filename.ilike(f"%{kw}%") for kw in topic_keywords])
+                    )
+                m_stmt = m_stmt.limit(5)
+                m_res = await self.db.execute(m_stmt)
+                mats = list(m_res.scalars().all()) if hasattr(m_res, "scalars") else []
+                if not mats:
+                    m_stmt_all = select(LecturerMaterial).where(
+                        LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
+                        LecturerMaterial.is_student_visible == True,
+                        LecturerMaterial.is_deleted == False,
+                    ).limit(5)
+                    m_res_all = await self.db.execute(m_stmt_all)
+                    mats = list(m_res_all.scalars().all()) if hasattr(m_res_all, "scalars") else []
+
+                if mats:
+                    mat_ids = [m.id for m in mats]
+                    c_stmt = select(LecturerMaterialChunk).where(
+                        LecturerMaterialChunk.lecturer_material_id.in_(mat_ids),
+                        LecturerMaterialChunk.is_deleted == False,
+                    ).limit(10)
+                    c_res = await self.db.execute(c_stmt)
+                    chunks = list(c_res.scalars().all()) if hasattr(c_res, "scalars") else []
+                    if chunks:
+                        rag_context_lines = []
+                        for c in chunks:
+                            mat_name = next((m.display_name or m.original_filename for m in mats if m.id == c.lecturer_material_id), "Lecturer Material")
+                            rag_context_lines.append(f"--- Document: {mat_name} (Chunk {c.chunk_index}) ---\n{c.content[:1000]}")
+                            rag_citations.append({
+                                "resource_id": str(c.lecturer_material_id),
+                                "resource_name": mat_name,
+                                "title": mat_name,
+                                "snippet": c.content[:300],
+                                "chunk_index": c.chunk_index,
+                            })
+                        rag_context = "\n\n".join(rag_context_lines)
+            except Exception as lex_err:
+                logger.warning("Lexical RAG fallback failed", error=str(lex_err))
+
+        return rag_context, rag_citations
+
     async def start_guided_session(
         self, session_id: uuid.UUID, student_id: uuid.UUID
     ) -> StudySessionResponse:
@@ -1441,7 +1868,7 @@ class StudyPlannerService:
             raise ValueError("Study session not found")
 
         if session.lesson_status == "NOT_GENERATED":
-            plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
+            plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
             course_id = plan.course_id if plan else None
 
             # Retrieve student learning profile for personalization
@@ -1467,125 +1894,29 @@ class StudyPlannerService:
                 await self.repo.update_session(session)
                 return StudySessionResponse.model_validate(session)
 
-            # Retrieve RAG context grounded in vector embeddings / Learning Unit hard scope
-            rag_context = ""
-            rag_citations = []
+            # Retrieve grounded RAG context with hard Learning Unit scoping.
+            # top_k=5: 5 chunks are enough context for one lesson and keeps the
+            # retrieved text below ~3 000 tokens before template overhead is added.
+            rag_context, rag_citations = await self._get_session_rag_context(
+                session=session,
+                plan=plan,
+                student_id=student_id,
+                topic_or_query=session.topic,
+                top_k=5,
+            )
 
-            # 1. Hard RAG scoping if session is bound to a specific Learning Unit
-            if session.learning_unit_id:
-                try:
-                    from app.db.models.learning_unit import LearningUnit
-                    from app.db.models.resource_chunk import ResourceChunk
-                    lu = await self.db.get(LearningUnit, session.learning_unit_id)
-                    if lu and lu.source_chunk_ids:
-                        chunk_uuids = []
-                        for cid in lu.source_chunk_ids:
-                            try:
-                                chunk_uuids.append(uuid.UUID(str(cid)))
-                            except (ValueError, TypeError):
-                                continue
-                        if chunk_uuids:
-                            chunk_stmt = select(ResourceChunk).where(
-                                ResourceChunk.id.in_(chunk_uuids)
-                            )
-                            lu_chunks = list((await self.db.execute(chunk_stmt)).scalars().all())
-                            if lu_chunks:
-                                rag_context_lines = []
-                                for c in lu_chunks:
-                                    pg = c.metadata_json.get("page") if c.metadata_json else 1
-                                    rag_context_lines.append(f"--- Learning Unit: {lu.title} (Page {pg}) ---\n{c.content[:1000]}")
-                                    rag_citations.append({
-                                        "resource_id": str(c.resource_id),
-                                        "resource_name": lu.title,
-                                        "title": lu.title,
-                                        "snippet": c.content[:300],
-                                        "chunk_index": c.chunk_index,
-                                        "page_number": pg,
-                                    })
-                                rag_context = "\n\n".join(rag_context_lines)
-                except Exception as lu_rag_err:
-                    logger.warning("Learning unit hard RAG scoping error, falling back to general retrieval", error=str(lu_rag_err))
-
-            # 2. General RAG vector retrieval if no LU context was loaded
-            if not rag_context:
-                try:
-                    from app.services.rag_service import RAGService
-                    rag_service = RAGService(self.db)
-                    if plan and plan.teaching_workspace_id:
-                        rag_res = await rag_service.retrieve_context_for_lecturer(
-                            topic=session.topic,
-                            teaching_workspace_id=plan.teaching_workspace_id,
-                            top_k=8,
-                        )
-                        if rag_res and rag_res.context_string:
-                            rag_context = rag_res.context_string
-                            if hasattr(rag_res, "citations") and rag_res.citations:
-                                rag_citations = [c.model_dump() for c in rag_res.citations]
-
-                    if not rag_context:
-                        rag_res = await rag_service.retrieve_context(
-                            question=session.topic,
-                            student_id=student_id,
-                            top_k=8,
-                        )
-                        if rag_res and rag_res.context_string:
-                            rag_context = rag_res.context_string
-                            if hasattr(rag_res, "citations") and rag_res.citations:
-                                rag_citations = [c.model_dump() for c in rag_res.citations]
-                except Exception as exc:
-                    logger.warning(
-                        "Guided lesson RAG vector retrieval failed, attempting fallback",
-                        error=str(exc),
-                    )
-
-            if not rag_context and plan and plan.teaching_workspace_id:
-                topic_keywords = [w for w in session.topic.replace("-", " ").split() if len(w) > 3]
-                m_stmt = select(LecturerMaterial).where(
-                    LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
-                    LecturerMaterial.is_student_visible == True,
-                    LecturerMaterial.is_deleted == False,
-                )
-                if topic_keywords:
-                    m_stmt = m_stmt.where(
-                        or_(*[LecturerMaterial.display_name.ilike(f"%{kw}%") for kw in topic_keywords] +
-                            [LecturerMaterial.original_filename.ilike(f"%{kw}%") for kw in topic_keywords])
-                    )
-                m_stmt = m_stmt.limit(5)
-                m_res = await self.db.execute(m_stmt)
-                mats = list(m_res.scalars().all()) if hasattr(m_res, "scalars") else []
-                if not mats:
-                    m_stmt_all = select(LecturerMaterial).where(
-                        LecturerMaterial.teaching_workspace_id == plan.teaching_workspace_id,
-                        LecturerMaterial.is_student_visible == True,
-                        LecturerMaterial.is_deleted == False,
-                    ).limit(5)
-                    m_res_all = await self.db.execute(m_stmt_all)
-                    mats = list(m_res_all.scalars().all()) if hasattr(m_res_all, "scalars") else []
-
-                if mats:
-                    mat_ids = [m.id for m in mats]
-                    from app.db.models.resource import LecturerMaterialChunk
-                    c_stmt = select(LecturerMaterialChunk).where(
-                        LecturerMaterialChunk.lecturer_material_id.in_(mat_ids),
-                        LecturerMaterialChunk.is_deleted == False,
-                    ).limit(10)
-                    c_res = await self.db.execute(c_stmt)
-                    chunks = list(c_res.scalars().all()) if hasattr(c_res, "scalars") else []
-                    if chunks:
-                        rag_context_lines = []
-                        for c in chunks:
-                            mat_name = next((m.display_name or m.original_filename for m in mats if m.id == c.lecturer_material_id), "Lecturer Material")
-                            rag_context_lines.append(f"--- Document: {mat_name} (Chunk {c.chunk_index}) ---\n{c.content[:1000]}")
-                            rag_citations.append({
-                                "resource_id": str(c.lecturer_material_id),
-                                "resource_name": mat_name,
-                                "title": mat_name,
-                                "snippet": c.content[:300],
-                                "chunk_index": c.chunk_index,
-                            })
-                        rag_context = "\n\n".join(rag_context_lines)
-                    else:
-                        rag_context = ""
+            # Fix #1 — Cap RAG context to fit within provider token budgets.
+            # Groq free-tier: 8 000 TPM; we reserve 2 500 for the completion,
+            # ~1 600 for the prompt template, leaving ≤3 900 for RAG content.
+            # trim_rag_context does accurate tiktoken counting when available and
+            # falls back to a char-ratio heuristic otherwise — so this is robust
+            # across environments and provider switches.
+            from app.core.ai.token_budget import trim_rag_context as _trim_rag
+            rag_context = _trim_rag(
+                rag_context=rag_context,
+                max_tokens_budget=7_500,   # conservative: 8 000 TPM with 500 safety margin
+                reserved_for_completion=2_500,
+            )
 
             try:
                 from app.agents.study_planner_agent import StudyPlannerAgent
@@ -1663,6 +1994,22 @@ class StudyPlannerService:
         if not session:
             raise ValueError("Study session not found")
 
+        plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
+        teaching_ws_id = plan.teaching_workspace_id if plan else None
+
+        # Check language policy before AI tutor Q&A
+        if teaching_ws_id:
+            from app.db.models.academic import TeachingWorkspace
+            from app.core.ai.language_policy import assert_ai_allowed
+
+            ws = await self.db.get(TeachingWorkspace, teaching_ws_id)
+            if ws:
+                assert_ai_allowed(
+                    getattr(ws, "language", None),
+                    action="ask_guided_session_question",
+                    context={"session_id": str(session.id), "workspace_id": str(ws.id)},
+                )
+
         from app.agents.student_support_agent import StudySupportAgent
         from app.core.ai.gateway import AIGateway
         from app.core.ai.provider_factory import (get_ai_provider,
@@ -1680,20 +2027,43 @@ class StudyPlannerService:
             if isinstance(item, dict) and "role" in item and "content" in item
         ]
 
-        prompt_with_context = (
-            f"[CURRENT GUIDED LESSON CONTEXT: Topic='{session.topic}', Section Context='{section_context}']\n\n{question}"
+        lu_source_material_id = None
+        if getattr(session, "learning_unit_id", None):
+            try:
+                from app.db.models.learning_unit import LearningUnit
+                lu = await self.db.get(LearningUnit, session.learning_unit_id)
+                if lu:
+                    lu_source_material_id = lu.source_material_id
+            except Exception:
+                pass
+
+        rag_context, rag_citations = await self._get_session_rag_context(
+            session=session,
+            plan=plan,
+            student_id=student_id,
+            topic_or_query=f"{session.topic} {question}",
+            top_k=4,
         )
+
+        prompt_with_context_parts = [
+            f"[CURRENT GUIDED LESSON CONTEXT: Topic='{session.topic}', Section Context='{section_context}']"
+        ]
+        if rag_context:
+            prompt_with_context_parts.append(f"[SOURCE MATERIAL CONTEXT:\n{rag_context[:1500]}]")
+        prompt_with_context_parts.append(question)
+        prompt_with_context = "\n\n".join(prompt_with_context_parts)
 
         output = await agent.answer(
             question=prompt_with_context,
             student_id=student_id,
             conversation_history=conv_history,
-            selected_resource_id=None,
+            selected_resource_id=lu_source_material_id,
+            teaching_workspace_id=teaching_ws_id,
             db=self.db,
             log_to_global_history=False,  # Guided-lesson panel must not pollute the global Study AI Tutor history
         )
 
-        citations_data = [c.model_dump() for c in output.citations]
+        citations_data = [c.model_dump() for c in output.citations] if output.citations else rag_citations
         now_iso = datetime.now(UTC).isoformat()
 
         user_msg = {"role": "user", "content": question, "timestamp": now_iso}
@@ -1730,89 +2100,93 @@ class StudyPlannerService:
         sections = session.lesson_sections_json or []
         sec_item = sections[section_index] if section_index < len(sections) else {}
         sec_title = sec_item.get("section_title", session.topic)
-        sec_content = sec_item.get("content", "")
+        sec_kp = sec_item.get("key_points") or []
+        sec_kp_str = "; ".join(sec_kp) if isinstance(sec_kp, list) else str(sec_kp)
+        sec_raw_content = sec_item.get("content", "")
+        sec_content_parts = []
+        if sec_kp_str:
+            sec_content_parts.append(f"Key Points: {sec_kp_str}")
+        if sec_raw_content:
+            sec_content_parts.append(sec_raw_content)
+        sec_content = "\n\n".join(sec_content_parts) if sec_content_parts else f"Section on {sec_title}"
 
-        plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id)
-        rag_context = ""
-        try:
-            from app.services.rag_service import RAGService
-            rag_service = RAGService(self.db)
-            if plan and plan.teaching_workspace_id:
-                rag_res = await rag_service.retrieve_context_for_lecturer(
-                    topic=sec_title,
-                    teaching_workspace_id=plan.teaching_workspace_id,
-                    top_k=3,
+        plan = await self.repo.get_plan_by_id(session.study_plan_id, student_id) if getattr(session, "study_plan_id", None) else None
+
+        # Check language policy before AI practice exercise generation
+        if plan and plan.teaching_workspace_id:
+            from app.db.models.academic import TeachingWorkspace
+            from app.core.ai.language_policy import assert_ai_allowed
+
+            ws = await self.db.get(TeachingWorkspace, plan.teaching_workspace_id)
+            if ws:
+                assert_ai_allowed(
+                    getattr(ws, "language", None),
+                    action="generate_guided_exercise",
+                    context={"session_id": str(session.id), "workspace_id": str(ws.id)},
                 )
-                if rag_res and rag_res.context_string:
-                    rag_context = rag_res.context_string
-            if not rag_context:
-                rag_res = await rag_service.retrieve_context(
-                    question=sec_title,
+
+        # Retrieve RAG context grounded in Learning Unit hard chunk scope or workspace
+        rag_context, _ = await self._get_session_rag_context(
+            session=session,
+            plan=plan,
+            student_id=student_id,
+            topic_or_query=sec_title,
+            top_k=3,
+        )
+
+        from app.agents.study_planner_agent import StudyPlannerAgent
+        from app.core.ai.gateway import AIGateway
+        from app.core.ai.provider_factory import (get_ai_provider,
+                                                  get_embedding_provider)
+        from app.core.exceptions import AITemporarilyUnavailableError
+
+        chat_provider = get_ai_provider()
+        embed_provider = get_embedding_provider()
+        gateway = AIGateway(self.db, chat_provider, embed_provider)
+        agent = StudyPlannerAgent(gateway)
+
+        max_attempts = 2
+        last_error: Optional[Exception] = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                ex_output = await agent.generate_guided_exercise(
                     student_id=student_id,
-                    top_k=3,
+                    session_id=session_id,
+                    topic=session.topic,
+                    section_title=sec_title,
+                    section_content=sec_content,
+                    rag_context=rag_context,
                 )
-                if rag_res and rag_res.context_string:
-                    rag_context = rag_res.context_string
-        except Exception as exc:
-            logger.warning("RAG context retrieval for guided exercise failed", error=str(exc))
+                return {
+                    "id": str(uuid.uuid4()),
+                    "section_index": section_index,
+                    "section_title": sec_title,
+                    "question_text": ex_output.question_text,
+                    "question_type": "MCQ",
+                    "options": ex_output.options,
+                    "correct_option_index": ex_output.correct_option_index,
+                    "explanation": ex_output.explanation,
+                    "generated_by": "ai",
+                }
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "AI guided exercise generation attempt failed",
+                    attempt=attempt,
+                    error=str(exc),
+                )
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
 
-        try:
-            from app.agents.study_planner_agent import StudyPlannerAgent
-            from app.core.ai.gateway import AIGateway
-            from app.core.ai.provider_factory import (get_ai_provider,
-                                                      get_embedding_provider)
-
-            chat_provider = get_ai_provider()
-            embed_provider = get_embedding_provider()
-            gateway = AIGateway(self.db, chat_provider, embed_provider)
-            agent = StudyPlannerAgent(gateway)
-
-            ex_output = await agent.generate_guided_exercise(
-                student_id=student_id,
-                session_id=session_id,
-                topic=session.topic,
-                section_title=sec_title,
-                section_content=sec_content,
-                rag_context=rag_context,
-            )
-            return {
-                "id": str(uuid.uuid4()),
-                "section_index": section_index,
-                "section_title": sec_title,
-                "question_text": ex_output.question_text,
-                "question_type": "MCQ",
-                "options": ex_output.options,
-                "correct_option_index": ex_output.correct_option_index,
-                "explanation": ex_output.explanation,
-            }
-        except Exception as exc:
-            logger.warning(
-                "AI guided exercise generation failed, using topic section fallback",
-                error=str(exc),
-            )
-            # Dynamic topic fallback with randomized option positions
-            raw_options = [
-                f"Core principle of {sec_title} applies directly to solve this scenario.",
-                f"The guidelines of {sec_title} provide alternative implementation steps.",
-                f"Applying {sec_title} reduces logic errors in this context.",
-                f"None of the above statements are accurate.",
-            ]
-            import random
-            shuffled = list(enumerate(raw_options))
-            random.shuffle(shuffled)
-            options = [opt for _, opt in shuffled]
-            correct_idx = next(i for i, (old_i, _) in enumerate(shuffled) if old_i == 0)
-
-            return {
-                "id": str(uuid.uuid4()),
-                "section_index": section_index,
-                "section_title": sec_title,
-                "question_text": f"Quick Check: Which statement best reflects the key principle of {sec_title}?",
-                "question_type": "MCQ",
-                "options": options,
-                "correct_option_index": correct_idx,
-                "explanation": f"Core principle of {sec_title} governs the correct approach for this module.",
-            }
+        logger.error(
+            "AI guided exercise generation failed after retries",
+            error=str(last_error),
+        )
+        raise AITemporarilyUnavailableError(
+            detail="Practice exercise generation is temporarily unavailable. Please try again.",
+            code="AI_TEMPORARILY_UNAVAILABLE",
+        )
 
     async def submit_guided_knowledge_check(
         self,

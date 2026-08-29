@@ -485,3 +485,15 @@ class ServiceUnavailableError(MindexaError):
     default_message = "An external service is currently unavailable. Please try again later."
     default_code = "service_unavailable"
 
+
+class AITemporarilyUnavailableError(ServiceUnavailableError):
+    """
+    Raised when AI generation fails after retries (e.g. rate limit, network, malformed output).
+    Maps to HTTP 503 Service Unavailable.
+    """
+
+    status_code = 503
+    default_message = "AI service is temporarily unavailable. Please try again."
+    default_code = "AI_TEMPORARILY_UNAVAILABLE"
+
+

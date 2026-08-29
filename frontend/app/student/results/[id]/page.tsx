@@ -452,15 +452,29 @@ function QuestionCard({
     !Array.isArray(parsedAnswer)
       ? (parsedAnswer as Record<string, any>)
       : {};
+
+  const isFillBlank = isFillBlankType(item.question_type);
+  const isMatching = isMatchingType(item.question_type);
+  const isOrdering = isOrderingType(item.question_type);
+
+  const fillBlankAnswers =
+    answerObject.fill_blank_answers ??
+    (isFillBlank && parsedAnswer && typeof parsedAnswer === "object" && !Array.isArray(parsedAnswer)
+      ? parsedAnswer
+      : undefined);
+
   const normalizedSubmission = {
     ...item,
     answer_content: answerObject,
     selected_option_ids:
       answerObject.selected_option_ids ??
       (Array.isArray(parsedAnswer) ? parsedAnswer : undefined),
-    match_pairs_json: answerObject.match_pairs_json,
-    ordered_option_ids: answerObject.ordered_option_ids,
-    fill_blank_answers: answerObject.fill_blank_answers,
+    match_pairs_json:
+      answerObject.match_pairs_json ?? (isMatching && typeof parsedAnswer === "object" ? parsedAnswer : undefined),
+    ordered_option_ids:
+      answerObject.ordered_option_ids ?? (isOrdering && Array.isArray(parsedAnswer) ? parsedAnswer : undefined),
+    fill_blank_answers: fillBlankAnswers,
+    student_answer_json: item.student_answer_json ?? parsedAnswer,
     answer_text:
       typeof parsedAnswer === "string" ? parsedAnswer : item.student_answer,
   };

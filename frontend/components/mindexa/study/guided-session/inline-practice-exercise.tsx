@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { Sparkles, CheckCircle2, XCircle, RefreshCw, ChevronRight, HelpCircle, Loader2 } from "lucide-react";
+import { Sparkles, CheckCircle2, XCircle, RefreshCw, ChevronRight, HelpCircle, Loader2, AlertTriangle } from "lucide-react";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -24,18 +24,25 @@ export function InlinePracticeExercise({
 }: InlinePracticeExerciseProps) {
   const [exercise, setExercise] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedOption, setSelectedOption] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   const fetchExercise = React.useCallback(async () => {
     setLoading(true);
+    setError(null);
     setSelectedOption(null);
     setSubmitted(false);
     try {
       const data = await studyPlannerApi.generateGuidedExercise(sessionId, sectionIndex);
+      if (!data) {
+        throw new Error("No practice exercise generated.");
+      }
       setExercise(data);
     } catch (err: any) {
-      toast.error("Could not load practice exercise");
+      const msg = err?.message || "Could not load practice exercise";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -52,19 +59,82 @@ export function InlinePracticeExercise({
 
   if (loading) {
     return (
-      <Card className="border-border/70 bg-card p-8 rounded-2xl flex flex-col items-center justify-center min-h-[300px] space-y-4 text-center">
-        <Loader2 className="size-8 animate-spin text-primary" />
-        <p className="text-xs text-muted-foreground font-medium">Generating practice exercise for {sectionTitle}...</p>
+      <Card className="border-border/70 bg-card p-10 rounded-2xl flex flex-col items-center justify-center min-h-[300px] space-y-4 text-center">
+        <div className="relative flex items-center justify-center">
+          <div className="size-12 rounded-full bg-primary/10 animate-ping absolute" />
+          <div className="size-12 rounded-full bg-primary/20 flex items-center justify-center text-primary relative">
+            <Sparkles className="size-6 animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-foreground">Generating Practice Exercise...</p>
+          <p className="text-xs text-muted-foreground font-medium max-w-sm mx-auto">
+            AI is creating an active-recall exercise tailored to {sectionTitle}.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-full border border-border/40">
+          <Loader2 className="size-3 animate-spin text-primary" />
+          <span>Grounded in section concepts and course materials</span>
+        </div>
       </Card>
     );
   }
 
-  if (!exercise) return null;
+  if (!exercise) {
+    return (
+      <Card className="border-border/70 bg-card p-8 rounded-2xl flex flex-col items-center justify-center min-h-[300px] space-y-4 text-center">
+        <div className="size-12 rounded-full bg-destructive/10 text-destructive flex items-center justify-center">
+          <AlertTriangle className="size-6" />
+        </div>
+        <div className="space-y-1">
+          <CardTitle className="text-base font-bold text-foreground">
+            {error ? "Practice Exercise Unavailable" : "No Practice Exercise Available"}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+            {error || "Could not generate an exercise for this section. You can retry or skip to the checkpoint quiz."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <Button
+            variant="outline"
+            onClick={fetchExercise}
+            className="text-xs font-semibold px-4 gap-1.5"
+          >
+            <RefreshCw className="size-3.5" /> Try Generating Again
+          </Button>
+          <Button
+            onClick={onProceedToKnowledgeCheck}
+            className="text-xs font-semibold px-4 gap-1.5 bg-primary text-primary-foreground"
+          >
+            Skip to Knowledge Check <ChevronRight className="size-3.5" />
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   const isCorrect = selectedOption === exercise.correct_option_index;
 
   return (
     <Card className="border-border/70 bg-card shadow-lg rounded-2xl overflow-hidden">
+      {exercise.generated_by === "fallback" && (
+        <div className="mx-6 mt-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase shrink-0">
+              Offline Mode
+            </Badge>
+            <span className="text-xs">AI exercise generation was unavailable. Showing standard review questions.</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={fetchExercise}
+            className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 h-7 px-2.5 gap-1 shrink-0"
+          >
+            <Sparkles className="size-3" /> Retry AI
+          </Button>
+        </div>
+      )}
       <CardHeader className="border-b border-border/50 bg-muted/20 px-6 py-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">

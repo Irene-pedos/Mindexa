@@ -17,6 +17,7 @@ class GeneratedQuestionOption(BaseModel):
     text: str = Field(..., min_length=1, max_length=1000)
     is_correct: bool
     explanation: str | None = Field(default=None, max_length=2000)
+    match_key: str | None = Field(default=None, max_length=100)
 
 
 class GeneratedQuestion(BaseModel):
@@ -366,10 +367,11 @@ class AssessmentGeneratorAgent(BaseAgent):
                                 "text": str(option_text or ""),
                                 "is_correct": bool(opt.get("is_correct", False)),
                                 "explanation": opt.get("explanation") or opt.get("reason"),
+                                "match_key": str(opt.get("match_key")) if opt.get("match_key") is not None else None,
                             }
                         )
                 elif isinstance(opt, str):
-                    normalized_options.append({"text": opt, "is_correct": False, "explanation": None})
+                    normalized_options.append({"text": opt, "is_correct": False, "explanation": None, "match_key": None})
 
         # Defensively normalize True/False questions so they always contain both options
         q_type_str = str(question_type or item.get("question_type") or "").lower()
@@ -413,6 +415,11 @@ class AssessmentGeneratorAgent(BaseAgent):
                     {"text": "False", "is_correct": False, "explanation": "The statement is false."},
                 ]
 
+        # Defensively normalize fill_blank questions: convert any ___ to [blank]
+        clean_question_text = str(question_text)
+        if q_type_str in ("fill_blank", "fillblank", "fill_blanks", "fillblanks"):
+            clean_question_text = re.sub(r"_{2,}", "[blank]", clean_question_text)
+
         explanation = (
             item.get("explanation")
             or item.get("model_answer")
@@ -422,7 +429,7 @@ class AssessmentGeneratorAgent(BaseAgent):
         )
 
         return {
-            "question": str(question_text),
+            "question": clean_question_text,
             "options": normalized_options,
             "explanation": explanation,
             "difficulty": item.get("difficulty") or item.get("level"),
@@ -477,23 +484,22 @@ class AssessmentGeneratorAgent(BaseAgent):
                 )
             ),
             "fill_blank": (
-                "Use '___' in the question text for each blank. "
-                "In the 'options' array, provide the correct answer for each blank in order. All options should have is_correct: true. "
-                + (
-                    "Blanks must target key terms, definitions, or values from the course material."
-                    if is_rag else
-                    "Blanks must target key terms, definitions, or values related to this topic."
-                )
+                "Use '[blank]' placeholder (NOT '___') in the question text for each blank. "
+                "In the 'options' array: "
+                "1. First provide the exact correct answers for each [blank] in sequence with is_correct: true. "
+                "2. Next provide 2 to 3 plausible extra pool distractors with is_correct: false and a brief distractor explanation. "
+                "This creates a complete word pool with challenging distractors."
             ),
             "case_study": (
-                "Write a realistic, detailed scenario (150-250 words) in the question stem. "
-                "In the options array, generate 1 to 3 specific analytical sub-questions. "
+                "Write a realistic, detailed scenario (150-300 words) in the question stem. "
+                "In the options array, generate 2 to 4 specific analytical sub-questions. "
                 "For each option (sub-question): "
                 "- 'text' is the sub-question text. "
                 "- 'explanation' is the answer guidance / grading criteria for this sub-question. "
                 "- 'is_correct' should be true. "
-                "- 'match_key' should be the point allocation for this sub-question (e.g. 5). "
-                "Set the top-level 'explanation' field to null or empty string — do not summarize an answer at the top level."
+                "- 'match_key' is the point allocation for this specific sub-question (e.g. '5'). "
+                "The sum of match_key across all sub-questions MUST be equal to {{marks_per_question}}. "
+                "Set the top-level 'explanation' field to null or empty string."
             ),
             "computational": (
                 "Set options to []. "

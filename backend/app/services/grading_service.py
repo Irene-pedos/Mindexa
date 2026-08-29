@@ -511,19 +511,39 @@ class GradingService:
         if not assessment_id:
             raise NotFoundError("Assessment not found for this response.")
 
-        # Authorization: Verify lecturer is assigned to this assessment's course
+        # Authorization: Verify lecturer is assigned to this assessment, created it, or owns the workspace
         from app.core.exceptions import AuthorizationError
-        from app.db.models.academic import Course, TeachingAssignment
-        from app.db.models.assessment import Assessment
+        from app.db.models.academic import Course, TeachingAssignment, TeachingWorkspace
+        from app.db.models.assessment import Assessment, AssessmentSupervisor
+        from sqlalchemy import or_
 
         auth_stmt = (
-            select(TeachingAssignment.id)
-            .join(Course, Course.id == TeachingAssignment.course_id)
-            .join(Assessment, Assessment.course_id == Course.id)
+            select(Assessment.id)
             .where(
-                TeachingAssignment.lecturer_id == lecturer_id,
                 Assessment.id == assessment_id,
-                TeachingAssignment.is_active == True
+                or_(
+                    Assessment.created_by_id == lecturer_id,
+                    Assessment.teaching_workspace_id.in_(
+                        select(TeachingWorkspace.id)
+                        .outerjoin(TeachingAssignment, TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
+                        .where(
+                            or_(
+                                TeachingWorkspace.created_by_id == lecturer_id,
+                                TeachingAssignment.lecturer_id == lecturer_id,
+                            ),
+                            TeachingWorkspace.is_deleted == False,
+                        )
+                    ),
+                    Assessment.course_id.in_(
+                        select(TeachingAssignment.course_id).where(
+                            TeachingAssignment.lecturer_id == lecturer_id,
+                            TeachingAssignment.is_active == True,
+                        )
+                    ),
+                    Assessment.id.in_(
+                        select(AssessmentSupervisor.assessment_id).where(AssessmentSupervisor.supervisor_id == lecturer_id)
+                    ),
+                )
             )
         )
         auth_res = await self.db.execute(auth_stmt)
@@ -1192,19 +1212,43 @@ class GradingService:
             2. Find all assessments belonging to those courses.
             3. Filter the queue by those assessment IDs.
         """
-        from app.db.models.academic import Course, TeachingAssignment
-        from app.db.models.assessment import Assessment
-        from sqlalchemy import select
+        from app.db.models.academic import Course, TeachingAssignment, TeachingWorkspace
+        from app.db.models.assessment import Assessment, AssessmentSupervisor
+        from sqlalchemy import or_, select
 
-        # 1. Find lecturer's assessment IDs
-        stmt = (
-            select(Assessment.id)
-            .join(Course, Course.id == Assessment.course_id)
-            .join(TeachingAssignment, TeachingAssignment.course_id == Course.id)
-            .where(TeachingAssignment.lecturer_id == lecturer_id)
+        # 1. Find lecturer's assessment IDs (created, workspace owner, assigned course, or supervisor)
+        workspace_subq = (
+            select(TeachingWorkspace.id)
+            .outerjoin(TeachingAssignment, TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
+            .where(
+                or_(
+                    TeachingWorkspace.created_by_id == lecturer_id,
+                    TeachingAssignment.lecturer_id == lecturer_id,
+                ),
+                TeachingWorkspace.is_deleted == False,
+            )
+        )
+        course_subq = select(TeachingAssignment.course_id).where(
+            TeachingAssignment.lecturer_id == lecturer_id,
+            TeachingAssignment.is_active == True,
+            TeachingAssignment.is_deleted == False,
+        )
+        supervisor_subq = select(AssessmentSupervisor.assessment_id).where(
+            AssessmentSupervisor.supervisor_id == lecturer_id,
+            AssessmentSupervisor.is_deleted == False,
+        )
+
+        stmt = select(Assessment.id).where(
+            Assessment.is_deleted == False,
+            or_(
+                Assessment.created_by_id == lecturer_id,
+                Assessment.teaching_workspace_id.in_(workspace_subq),
+                Assessment.course_id.in_(course_subq),
+                Assessment.id.in_(supervisor_subq),
+            ),
         )
         res = await self.db.execute(stmt)
-        allowed_assessment_ids = res.scalars().all()
+        allowed_assessment_ids = list(res.scalars().all())
 
         if not allowed_assessment_ids:
             return [], 0
@@ -1218,7 +1262,7 @@ class GradingService:
             GradingQueueStatus.PENDING,
             GradingQueueStatus.ASSIGNED,
             GradingQueueStatus.IN_PROGRESS,
-            GradingQueueStatus.AI_SUGGESTED, # Added this state from prompt
+            GradingQueueStatus.AI_SUGGESTED,
         ]
 
         items, total = await self.grading_repo.list_queue(
@@ -1244,8 +1288,7 @@ class GradingService:
     ) -> dict[str, Any]:
         """
         Compute class-level grading statistics for an assessment.
-        Uses explicit joins instead of ORM relationships (SQLModel Relationship
-        is not compatible with SQLAlchemy selectinload).
+        Uses explicit joins and fallbacks so lecturers always see their submissions.
         """
         from app.db.enums import EnrollmentStatus, GradingQueueStatus
         from app.db.models.academic import ClassSection, StudentEnrollment, TeachingWorkspace
@@ -1253,9 +1296,9 @@ class GradingService:
                                               AssessmentTargetSection)
         from app.db.models.attempt import AssessmentAttempt, GradingQueueItem
         from app.db.models.result import AssessmentResult
-        from sqlalchemy import func, select, join
+        from sqlalchemy import func, select
 
-        # 1. Load assessment (without ORM relationship — use plain get)
+        # 1. Load assessment
         assessment = await self.db.get(Assessment, assessment_id)
         if not assessment:
              raise NotFoundError("Assessment", str(assessment_id))
@@ -1273,10 +1316,50 @@ class GradingService:
                 ClassSection,
                 ClassSection.id == AssessmentTargetSection.class_section_id
             )
-            .where(AssessmentTargetSection.assessment_id == assessment_id)
+            .where(
+                AssessmentTargetSection.assessment_id == assessment_id,
+                ClassSection.is_deleted == False,
+            )
         )
         targets_res = await self.db.execute(targets_stmt)
-        targets = targets_res.all()  # list of (class_section_id, class_name)
+        targets = list(targets_res.all())  # list of (class_section_id, class_name)
+
+        # Fallback 1: If no explicit TargetSection, check sections for this workspace/course via TeachingWorkspace
+        if not targets:
+            ws_filter = []
+            if assessment.teaching_workspace_id:
+                ws_filter.append(TeachingWorkspace.id == assessment.teaching_workspace_id)
+            if assessment.course_id:
+                ws_filter.append(TeachingWorkspace.course_id == assessment.course_id)
+
+            if ws_filter:
+                from sqlalchemy import or_
+                course_sec_stmt = (
+                    select(ClassSection.id, ClassSection.name)
+                    .join(TeachingWorkspace, TeachingWorkspace.class_section_id == ClassSection.id)
+                    .where(
+                        or_(*ws_filter),
+                        ClassSection.is_deleted == False,
+                        TeachingWorkspace.is_deleted == False,
+                    )
+                    .distinct()
+                )
+                targets = list((await self.db.execute(course_sec_stmt)).all())
+
+        # Fallback 2: Check sections of students who have submitted attempts for this assessment
+        if not targets:
+            sub_sec_stmt = (
+                select(ClassSection.id, ClassSection.name)
+                .join(StudentEnrollment, StudentEnrollment.class_section_id == ClassSection.id)
+                .join(AssessmentAttempt, AssessmentAttempt.student_id == StudentEnrollment.student_id)
+                .where(
+                    AssessmentAttempt.assessment_id == assessment_id,
+                    ClassSection.is_deleted == False,
+                    StudentEnrollment.is_deleted == False,
+                )
+                .distinct()
+            )
+            targets = list((await self.db.execute(sub_sec_stmt)).all())
 
         classes_stats = []
         for section_id, section_name in targets:
@@ -1337,6 +1420,54 @@ class GradingService:
                 "total_students": total_students,
                 "submitted_count": submitted_count,
                 "not_submitted_count": max(0, total_students - submitted_count),
+                "pending_review_count": pending_count,
+                "reviewed_count": reviewed_count,
+                "released_count": released_count,
+                "latest_submission_at": latest_at
+            })
+
+        # Fallback 3: If no section rows exist at all, generate an "All Assessment Submissions" cohort
+        if not classes_stats:
+            total_students_stmt = select(func.count(func.distinct(AssessmentAttempt.student_id))).where(
+                AssessmentAttempt.assessment_id == assessment_id
+            )
+            total_attempt_students = (await self.db.execute(total_students_stmt)).scalar_one() or 0
+
+            submitted_stmt = select(func.count(func.distinct(AssessmentAttempt.student_id))).where(
+                AssessmentAttempt.assessment_id == assessment_id,
+                AssessmentAttempt.submitted_at.is_not(None),
+            )
+            submitted_count = (await self.db.execute(submitted_stmt)).scalar_one() or 0
+
+            pending_review_stmt = select(func.count(func.distinct(GradingQueueItem.student_id))).where(
+                GradingQueueItem.assessment_id == assessment_id,
+                GradingQueueItem.status != GradingQueueStatus.COMPLETED,
+            )
+            pending_count = (await self.db.execute(pending_review_stmt)).scalar_one() or 0
+
+            reviewed_count = max(0, submitted_count - pending_count)
+
+            released_stmt = select(func.count(AssessmentResult.id)).where(
+                AssessmentResult.assessment_id == assessment_id,
+                AssessmentResult.is_released == True,
+            )
+            released_count = (await self.db.execute(released_stmt)).scalar_one() or 0
+
+            latest_sub_stmt = select(func.max(AssessmentAttempt.submitted_at)).where(
+                AssessmentAttempt.assessment_id == assessment_id,
+            )
+            latest_at = (await self.db.execute(latest_sub_stmt)).scalar()
+
+            synthetic_class_id = assessment.teaching_workspace_id or assessment.id
+
+            classes_stats.append({
+                "class_id": synthetic_class_id,
+                "class_name": "All Assessment Submissions",
+                "workspace_id": assessment.teaching_workspace_id,
+                "workspace_title": workspace_title,
+                "total_students": max(total_attempt_students, submitted_count),
+                "submitted_count": submitted_count,
+                "not_submitted_count": max(0, total_attempt_students - submitted_count),
                 "pending_review_count": pending_count,
                 "reviewed_count": reviewed_count,
                 "released_count": released_count,

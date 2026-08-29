@@ -2136,10 +2136,15 @@ const mapCandidateToQuestion = (
   optionsOverride?: any[],
 ): Question => {
   const qType = mapBackendToFrontendType(candidate.question_type);
-  const text =
+  let text =
     questionTextOverride !== undefined
       ? questionTextOverride
-      : candidate.parsed_question_text || "";
+      : candidate.parsed_question_text || candidate.question || "";
+
+  if (qType === "fillblank" || (qType as string) === "fill_blank") {
+    text = text.replace(/_{2,}/g, "[blank]");
+  }
+
   const explanation =
     explanationOverride !== undefined
       ? explanationOverride
@@ -2250,6 +2255,19 @@ const mapCandidateToQuestion = (
       text;
     const shortText =
       "Analyze the following case scenario and answer the sub-questions below.";
+
+    // Distribute marksPerQuestion evenly across sub-questions so the sum equals marksPerQuestion
+    const numSubQuestions = mappedOptions.length;
+    const targetMarks = marksPerQuestion > 0 ? marksPerQuestion : 10;
+    if (numSubQuestions > 0) {
+      const basePoints = Math.floor(targetMarks / numSubQuestions);
+      const remainder = targetMarks % numSubQuestions;
+      mappedOptions = mappedOptions.map((opt: any, idx: number) => ({
+        ...opt,
+        match_key: String(basePoints + (idx < remainder ? 1 : 0)),
+      }));
+    }
+
     const computedMarks = mappedOptions.reduce(
       (sum: number, o: QuestionOption) =>
         sum + (parseInt(o.match_key || "5") || 0),
@@ -2260,7 +2278,7 @@ const mapCandidateToQuestion = (
       sectionId: targetSecId,
       text: shortText,
       type: qType as any,
-      marks: computedMarks,
+      marks: computedMarks || targetMarks,
       options: mappedOptions,
       aiGenerated: true,
       is_required: true,

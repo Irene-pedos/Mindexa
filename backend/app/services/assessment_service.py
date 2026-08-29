@@ -1332,11 +1332,19 @@ class AssessmentService:
 
         if not teaching_workspace_id and course_id:
             # Find a workspace for this lecturer and this course
+            from app.db.models.academic import TeachingAssignment
+            from sqlalchemy import or_
             res = await self.db.execute(
-                select(TeachingWorkspace).where(
+                select(TeachingWorkspace)
+                .outerjoin(TeachingAssignment, TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
+                .where(
                     TeachingWorkspace.course_id == course_id,
-                    TeachingWorkspace.lecturer_id == current_user.id,
-                    TeachingWorkspace.is_active == True
+                    or_(
+                        TeachingWorkspace.created_by_id == current_user.id,
+                        TeachingAssignment.lecturer_id == current_user.id,
+                    ),
+                    TeachingWorkspace.is_active == True,
+                    TeachingWorkspace.is_deleted == False,
                 )
             )
             workspace = res.scalars().first()

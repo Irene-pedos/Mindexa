@@ -202,6 +202,7 @@ class CompleteSessionRequest(BaseModel):
 
 class GenerateQuizRequest(BaseModel):
     question_count: int = Field(default=5, ge=1, le=10)
+    force_regenerate: bool = Field(default=False)
 
 
 class RescheduleSessionRequest(BaseModel):

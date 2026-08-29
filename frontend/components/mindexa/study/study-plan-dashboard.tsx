@@ -66,13 +66,14 @@ export function StudyPlanDashboard({
   const [upcomingExpanded, setUpcomingExpanded] = useState(true);
 
   useEffect(() => {
-    if (activePlan?.teaching_workspace_id) {
+    const wsId = activePlan?.teaching_workspace_id || activePlan?.course_id;
+    if (wsId) {
       studyPlannerApi
-        .getLearningUnits(activePlan.teaching_workspace_id)
+        .getLearningUnits(wsId)
         .then(setLearningUnits)
         .catch(() => setLearningUnits([]));
     }
-  }, [activePlan?.teaching_workspace_id]);
+  }, [activePlan?.teaching_workspace_id, activePlan?.course_id]);
 
   const totalSessions =
     activePlan?.sessions?.length ?? summary?.total_sessions_count ?? 0;

@@ -46,26 +46,35 @@ export function KnowledgeCheckFlow({
   const [currentIdx, setCurrentIdx] = useState(0);
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
 
-  useEffect(() => {
-    async function loadQuestions() {
-      setLoading(true);
-      try {
-        const qList = await studyPlannerApi.generateKnowledgeCheck(
-          sessionId,
-          5,
-        );
-        setQuestions(qList);
-      } catch (err: any) {
-        toast.error("Failed to load knowledge check questions");
-      } finally {
-        setLoading(false);
+  const loadQuestions = React.useCallback(async (forceRegenerate: boolean = false) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const qList = await studyPlannerApi.generateKnowledgeCheck(
+        sessionId,
+        5,
+        forceRegenerate,
+      );
+      if (!qList || qList.length === 0) {
+        throw new Error("No knowledge check questions were generated.");
       }
+      setQuestions(qList);
+    } catch (err: any) {
+      const msg = err?.message || "Failed to load knowledge check questions";
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setLoading(false);
     }
-    loadQuestions();
   }, [sessionId]);
+
+  useEffect(() => {
+    loadQuestions(false);
+  }, [loadQuestions]);
 
   const handleSelect = (questionId: string, val: any) => {
     setAnswers((prev) => ({ ...prev, [questionId]: val }));
@@ -92,10 +101,24 @@ export function KnowledgeCheckFlow({
   if (loading) {
     return (
       <Card className="border-border/70 bg-card p-12 rounded-2xl flex flex-col items-center justify-center min-h-[350px] space-y-4 text-center">
-        <Loader2 className="size-8 animate-spin text-primary" />
-        <p className="text-xs text-muted-foreground font-medium">
-          Preparing personalized Knowledge Check questions for {topic}...
-        </p>
+        <div className="relative flex items-center justify-center">
+          <div className="size-12 rounded-full bg-primary/10 animate-ping absolute" />
+          <div className="size-12 rounded-full bg-primary/20 flex items-center justify-center text-primary relative">
+            <Sparkles className="size-6 animate-pulse" />
+          </div>
+        </div>
+        <div className="space-y-1">
+          <p className="text-sm font-bold text-foreground">
+            Generating AI Knowledge Check...
+          </p>
+          <p className="text-xs text-muted-foreground font-medium max-w-sm mx-auto">
+            Personalizing active-recall questions based on {topic} and your lesson notes.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground bg-muted/40 px-3 py-1.5 rounded-full border border-border/40">
+          <Loader2 className="size-3 animate-spin text-primary" />
+          <span>Analyzing lesson concepts & formulating questions</span>
+        </div>
       </Card>
     );
   }
@@ -293,7 +316,38 @@ export function KnowledgeCheckFlow({
     );
   }
 
-  if (questions.length === 0) return null;
+  if (questions.length === 0) {
+    return (
+      <Card className="border-border/70 bg-card p-8 rounded-2xl flex flex-col items-center justify-center min-h-[350px] space-y-4 text-center">
+        <div className="size-12 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+          <AlertTriangle className="size-6" />
+        </div>
+        <div className="space-y-1.5">
+          <CardTitle className="text-base font-bold text-foreground">
+            {error ? "Knowledge Check Unavailable" : "No Questions Generated"}
+          </CardTitle>
+          <p className="text-xs text-muted-foreground max-w-md mx-auto leading-relaxed">
+            {error || "We couldn't generate questions for this session topic. You can retry AI generation or proceed directly to your session summary."}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+          <Button
+            variant="outline"
+            onClick={() => onCompleteKnowledgeCheck(null as any)}
+            className="text-xs font-semibold px-4"
+          >
+            Skip & View Summary
+          </Button>
+          <Button
+            onClick={() => loadQuestions(true)}
+            className="text-xs font-semibold px-4 gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
+          >
+            <Sparkles className="size-3.5" /> Try Generating Again
+          </Button>
+        </div>
+      </Card>
+    );
+  }
 
   const currentQ = questions[currentIdx];
   const qType = (currentQ.question_type || "MCQ").toUpperCase();
@@ -308,6 +362,24 @@ export function KnowledgeCheckFlow({
 
   return (
     <Card className="border-border/70 bg-card shadow-lg rounded-2xl overflow-hidden">
+      {questions.some((q) => q.generated_by === "fallback") && (
+        <div className="mx-6 mt-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/20 text-amber-700 dark:text-amber-300 text-[10px] font-bold uppercase shrink-0">
+              Offline Review Mode
+            </Badge>
+            <span className="text-xs">AI question generation was temporarily unavailable. Showing standard review questions.</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => loadQuestions(true)}
+            className="text-[11px] font-bold text-amber-700 dark:text-amber-300 hover:bg-amber-500/20 h-7 px-2.5 gap-1 shrink-0"
+          >
+            <Sparkles className="size-3" /> Retry AI
+          </Button>
+        </div>
+      )}
       <CardHeader className="border-b border-border/50 bg-muted/20 px-6 py-5 space-y-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -345,10 +417,10 @@ export function KnowledgeCheckFlow({
         {/* 1. MATCHING Question Type */}
         {qType === "MATCHING" && (
           <SharedMatchingDnd
-            options={((currentQ as any).premises || []).map((premiseText: string, idx: number) => ({
+            options={(currentQ.premises || []).map((premiseText: string, idx: number) => ({
               id: `opt-${idx}`,
               text: premiseText,
-              match_value: (currentQ as any).matches?.[idx] ?? "",
+              match_value: currentQ.matches?.[idx] ?? "",
             }))}
             questionId={currentQ.id}
             attemptId={sessionId}

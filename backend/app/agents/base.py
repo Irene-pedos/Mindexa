@@ -13,6 +13,46 @@ from app.core.exceptions import ValidationError
 T = TypeVar("T", bound=BaseModel)
 
 
+def _repair_truncated_json(text: str) -> str:
+    """Attempt to close an LLM-truncated JSON string into valid JSON.
+
+    Strategy (in order):
+    1. Use ``json_repair`` library if installed (most robust).
+    2. Strip trailing comma artifacts.
+    3. Count unmatched open braces/brackets and append matching closers.
+       Handles mid-string-literal truncation by checking quote parity
+       *after* stripping known JSON string escape sequences so that
+       escaped quotes inside values don't confuse the count.
+    """
+    # Strategy 1 — json_repair (pip install json-repair)
+    try:
+        import json_repair  # type: ignore
+        return json_repair.repair_json(text)  # type: ignore[no-any-return]
+    except ImportError:
+        pass
+
+    # Strategy 2 — strip trailing commas
+    repaired = re.sub(r",\s*([\]\}])", r"\1", text)
+
+    # Strategy 3 — close unclosed structures
+    open_braces = repaired.count("{") - repaired.count("}")
+    open_brackets = repaired.count("[") - repaired.count("]")
+
+    if open_braces > 0 or open_brackets > 0:
+        suffix = repaired.rstrip().rstrip(",")
+        # Count unescaped quotes to detect mid-string truncation.
+        # Strip \\" (escaped quote inside string) before counting so they
+        # don't skew parity — a naive count would misfire on long prose.
+        unescaped = re.sub(r'\\"', "", suffix)
+        if unescaped.count('"') % 2 == 1:
+            # We're inside an open string literal — close it first
+            suffix += '"'
+        suffix += ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
+        return suffix
+
+    return repaired
+
+
 class BaseAgent:
     """Base contract for all Mindexa AI Agents."""
 
@@ -73,24 +113,9 @@ class BaseAgent:
             try:
                 data = json.loads(clean_content, strict=False)
             except json.JSONDecodeError:
-                # Robust recovery for common LLM JSON syntax anomalies
-                # 1. Strip trailing commas before closing braces or brackets
-                repaired = re.sub(r",\s*([\]\}])", r"\1", clean_content)
-                try:
-                    data = json.loads(repaired, strict=False)
-                except json.JSONDecodeError:
-                    # 2. Attempt recovery for truncated JSON (e.g. output token budget reached)
-                    open_braces = repaired.count("{") - repaired.count("}")
-                    open_brackets = repaired.count("[") - repaired.count("]")
-                    if open_braces > 0 or open_brackets > 0:
-                        repaired_truncated = repaired.rstrip().rstrip(",")
-                        # If an odd number of quotes exists, close the pending string literal
-                        if repaired_truncated.count('"') % 2 == 1:
-                            repaired_truncated += '"'
-                        repaired_truncated += ("]" * max(0, open_brackets)) + ("}" * max(0, open_braces))
-                        data = json.loads(repaired_truncated, strict=False)
-                    else:
-                        raise
+                # Attempt robust recovery for truncated / malformed LLM output
+                repaired = _repair_truncated_json(clean_content)
+                data = json.loads(repaired, strict=False)
 
             if extract_list:
                 if not isinstance(data, list):

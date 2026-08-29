@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { Loader2, Sparkles, BookOpen, ChevronRight, CheckCircle2, Trophy, ArrowLeft } from "lucide-react";
+import { Loader2, Sparkles, BookOpen, ChevronRight, CheckCircle2, Trophy, ArrowLeft, AlertTriangle, X, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardHeader, CardTitle, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +26,7 @@ export default function GuidedStudySessionPage() {
   const [stage, setStage] = useState<GuidedStage>("intro");
   const [currentSectionIdx, setCurrentSectionIdx] = useState(0);
   const [report, setReport] = useState<KnowledgeCheckReport | null>(null);
+  const [showFallbackBanner, setShowFallbackBanner] = useState(true);
   const mainRef = useRef<HTMLElement>(null);
 
   // Reset scroll to top on every section/stage transition
@@ -141,6 +142,45 @@ export default function GuidedStudySessionPage() {
         <main className="w-full px-4 py-5 md:px-6 space-y-5">
           {/* STAGE 1: INTRO / OVERVIEW */}
           {stage === "intro" && (
+            <>
+              {/* Fix #5 — Prominent dismissible fallback banner */}
+              {session.lesson_plan_json?.generated_by === "fallback" && showFallbackBanner && (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex items-start gap-3 animate-in fade-in duration-300">
+                  <AlertTriangle className="size-5 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
+                  <div className="flex-1 space-y-1.5">
+                    <p className="text-sm font-bold text-amber-800 dark:text-amber-300">
+                      General Study Outline — Not From Your Course Materials
+                    </p>
+                    <p className="text-xs text-amber-700 dark:text-amber-400 leading-relaxed max-w-2xl">
+                      We couldn&apos;t generate an AI-personalized lesson from your course materials this time (the AI service was temporarily unavailable). This session is showing a general study outline instead.{" "}
+                      <strong>Try starting this session again in a few minutes</strong> for a lesson grounded in your actual lecture notes and course uploads.
+                    </p>
+                    <div className="flex items-center gap-2 pt-1">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-[11px] font-bold border-amber-500/50 text-amber-700 dark:text-amber-300 hover:bg-amber-500/15 gap-1"
+                        onClick={() => window.location.reload()}
+                      >
+                        <RefreshCw className="size-3" /> Retry AI Lesson
+                      </Button>
+                      <button
+                        className="text-[11px] text-amber-600 dark:text-amber-400 underline hover:no-underline"
+                        onClick={() => setShowFallbackBanner(false)}
+                      >
+                        Continue anyway
+                      </button>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowFallbackBanner(false)}
+                    className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-300 shrink-0"
+                    aria-label="Dismiss"
+                  >
+                    <X className="size-4" />
+                  </button>
+                </div>
+              )}
             <Card className="border-border/60 bg-card shadow-xs rounded-xl overflow-hidden animate-in fade-in duration-300">
               <CardHeader className="border-b border-border/60 bg-card p-5 md:p-6 space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -210,6 +250,7 @@ export default function GuidedStudySessionPage() {
                 </Button>
               </CardFooter>
             </Card>
+            </>
           )}
 
           {/* STAGE 2: LESSON CONTENT */}
