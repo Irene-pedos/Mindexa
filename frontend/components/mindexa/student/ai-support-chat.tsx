@@ -791,17 +791,39 @@ export function AISupportChat({
       let teachingWorkspaceId: string | undefined = undefined;
 
       if (selectedResource) {
+        // First, check if the selectedResource ID belongs to a known course workspace.
         const directWs = workspaces.find((w) => w.id === selectedResource);
         if (directWs) {
+          // Course-level scope: use teaching_workspace_id for broad RAG retrieval across all materials.
           teachingWorkspaceId = directWs.id;
         } else {
-          selectedResourceId = selectedResource;
-          const lecturerMat = lecturerMaterials.find(
-            (m) => m.id === selectedResource
-          );
+          // Check if it's a known lecturer material or personal resource.
+          const lecturerMat = lecturerMaterials.find((m) => m.id === selectedResource);
+          const personalRes = resources.find((r) => r.id === selectedResource);
+
           if (lecturerMat) {
+            // Specific lecturer material: scope RAG to that resource AND its parent workspace.
+            selectedResourceId = selectedResource;
             teachingWorkspaceId =
               lecturerMat.workspace_id || lecturerMat.teaching_workspace_id;
+          } else if (personalRes) {
+            // Personal resource: scope RAG to that resource only.
+            selectedResourceId = selectedResource;
+          } else if (!loadingResources) {
+            // The ID is in localStorage/URL but not found in any known list after loading completed.
+            // Clear the stale scope to avoid sending an invalid ID to the backend.
+            console.warn(
+              "[AISupportChat] selectedResource ID not found in any known list after load; clearing stale scope.",
+              selectedResource
+            );
+            setSelectedResource(null);
+            // Do not set selectedResourceId or teachingWorkspaceId so the backend
+            // can answer from general knowledge and the UI reflects "No context selected".
+          } else {
+            // Resources are still loading — optimistically pass the ID as selectedResourceId
+            // so the backend can attempt RAG retrieval and avoid the race condition where a
+            // fast-typing user sends before workspace materials are fully fetched.
+            selectedResourceId = selectedResource;
           }
         }
       }

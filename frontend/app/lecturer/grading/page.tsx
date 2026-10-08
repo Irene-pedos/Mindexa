@@ -3,14 +3,12 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,33 +33,24 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
-import { useDebounce } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import {
   Search,
   Users,
-  RefreshCcw,
   Clock,
   ChevronRight,
   ChevronLeft,
   ChevronDown,
   ChevronUp,
-  Scale,
   Loader2,
-  User,
   Check,
   X,
-  History,
   AlertTriangle,
-  TrendingUp,
-  Calendar,
   Unlock,
   CheckCircle2,
   School,
-  FolderOpen,
-  Menu,
   ShieldAlert,
   Sparkles,
   Award,
@@ -72,8 +61,6 @@ import {
   Focus,
   Sliders,
   Flag,
-  CheckSquare,
-  Square,
   CheckCheck,
   AlignLeft,
   Activity,
@@ -90,13 +77,7 @@ import {
   PanelRightOpen,
   Maximize2,
   Minimize2,
-  Table as TableIcon,
-  HelpCircle,
-  Hash,
   RotateCcw,
-  Copy,
-  Plus,
-  MessageSquare,
 } from "lucide-react";
 import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 import { renderRichMathText } from "@/components/mindexa/common/math-renderer";
@@ -117,7 +98,6 @@ import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import {
-  StudentAnswerCanvas,
   SpeedGraderStudentAnswerCanvas,
 } from "@/components/mindexa/grading/student-answer-canvas";
 import {
@@ -148,6 +128,8 @@ import {
   normalizeQuestionType,
   getQuestionTypeLabel,
   isOpenEnded,
+  formatAttemptDuration,
+  buildGradeSavePayload,
 } from "@/lib/grading-utils";
 
 function safeJson(value: unknown) {
@@ -161,34 +143,9 @@ function safeJson(value: unknown) {
 
 /**
  * Format Time Spent helper with fallback strategies.
- * Guarantees a meaningful duration is displayed rather than "N/A".
+ * Delegates to shared formatAttemptDuration utility.
  */
-function formatTimeSpent(attempt?: any, submission?: any): string {
-  if (attempt?.time_taken_seconds && attempt.time_taken_seconds > 0) {
-    const mins = Math.floor(attempt.time_taken_seconds / 60);
-    const secs = attempt.time_taken_seconds % 60;
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  }
-  if (attempt?.started_at && attempt?.submitted_at) {
-    const start = new Date(attempt.started_at).getTime();
-    const end = new Date(attempt.submitted_at).getTime();
-    if (!isNaN(start) && !isNaN(end) && end > start) {
-      const diffSecs = Math.floor((end - start) / 1000);
-      const mins = Math.floor(diffSecs / 60);
-      const secs = diffSecs % 60;
-      return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-    }
-  }
-  if (submission?.time_spent_seconds && submission.time_spent_seconds > 0) {
-    const mins = Math.floor(submission.time_spent_seconds / 60);
-    const secs = submission.time_spent_seconds % 60;
-    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-  }
-  if (attempt?.duration_minutes && attempt.duration_minutes > 0) {
-    return `${attempt.duration_minutes}m`;
-  }
-  return "Standard session";
-}
+const formatTimeSpent = formatAttemptDuration;
 
 function ManualOnlyLanguageBanner({
   language = "Kinyarwanda",
@@ -321,9 +278,17 @@ function LecturerGradingQueueContent() {
     useState<number>(80);
 
   // Tab switcher in Step D: "queue" | "release"
+  const tabParam = searchParams?.get("tab");
   const [activeStepDView, setActiveStepDView] = useState<"queue" | "release">(
-    "queue",
+    tabParam === "release" ? "release" : "queue",
   );
+
+  useEffect(() => {
+    const currentTab = searchParams?.get("tab");
+    if (currentTab === "release" || currentTab === "queue") {
+      setActiveStepDView(currentTab);
+    }
+  }, [searchParams]);
 
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [hasMore, setHasMore] = useState<boolean>(false);
@@ -552,7 +517,9 @@ function LecturerGradingQueueContent() {
           classId || "",
         );
         setReleaseQueue(res?.items || res || []);
-        setReleaseQueueClassFullyGraded(Boolean(res?.is_class_fully_graded));
+        setReleaseQueueClassFullyGraded(
+          Boolean(res?.class_fully_graded ?? res?.is_class_fully_graded),
+        );
       } catch {
         setReleaseQueue([]);
       } finally {
@@ -715,12 +682,17 @@ function LecturerGradingQueueContent() {
             ai.score !== null &&
             (ai.confidence || 100) >= threshold
           ) {
-            await gradingApi.saveGrade(item.id || item.response_id, {
-              score: ai.score,
-              feedback: ai.feedbackDraft || ai.rationale || undefined,
-              is_final: true,
-              accept_ai_suggestion: true,
-            });
+            const responseId = item.response_id || item.id;
+            if (!responseId) continue;
+            await gradingApi.saveGrade(
+              responseId,
+              buildGradeSavePayload({
+                score: ai.score,
+                feedback: ai.feedbackDraft || ai.rationale || undefined,
+                isFinal: true,
+                acceptAiSuggestion: true,
+              }),
+            );
             applied++;
           }
         }
@@ -1167,7 +1139,7 @@ function LecturerGradingQueueContent() {
   };
 
   // ── GROUP SPEEDGRADER LOGIC ──────────────────────────────────────────────────
-  const handleOpenGroupGrader = (sub: any) => {
+  const handleOpenGroupGrader = async (sub: any) => {
     setSelectedGroupSubmission(sub);
     setGroupGraderActiveQuestionIndex(0);
     setGroupScore(
@@ -1179,6 +1151,35 @@ function LecturerGradingQueueContent() {
     );
     setGroupFeedback(sub.feedback_comments || sub.feedback || "");
     setMobileWorkspaceTab("canvas");
+
+    try {
+      const workspace: any = await gradingApi.getGroupSubmissionWorkspace(sub.id);
+      if (workspace) {
+        setSelectedGroupSubmission((prev: any) => {
+          if (!prev || prev.id !== sub.id) return prev;
+          return {
+            ...prev,
+            ...workspace,
+            id: sub.id,
+            group_name: workspace.group_name || prev.group_name,
+            members: workspace.members || workspace.group?.members || prev.members,
+            questions:
+              workspace.questions ||
+              workspace.assessment?.questions ||
+              prev.questions ||
+              [],
+            answers: workspace.answers || prev.answers || [],
+            activity_logs:
+              workspace.activity_log ||
+              workspace.activities ||
+              prev.activity_logs ||
+              [],
+          };
+        });
+      }
+    } catch (err) {
+      console.error("Failed to load full group submission workspace:", err);
+    }
   };
 
   const handleCloseGroupWorkspace = () => {
@@ -3919,9 +3920,17 @@ function LecturerGradingQueueContent() {
                   {/* View Tab Switcher */}
                   <Tabs
                     value={activeStepDView}
-                    onValueChange={(v) =>
-                      setActiveStepDView(v as "queue" | "release")
-                    }
+                    onValueChange={(v) => {
+                      const nextTab = v as "queue" | "release";
+                      setActiveStepDView(nextTab);
+                      const params = new URLSearchParams(
+                        searchParams ? searchParams.toString() : "",
+                      );
+                      params.set("tab", nextTab);
+                      router.replace(`${pathname}?${params.toString()}`, {
+                        scroll: false,
+                      });
+                    }}
                   >
                     <TabsList className="h-8 p-0.5 rounded-xl">
                       <TabsTrigger

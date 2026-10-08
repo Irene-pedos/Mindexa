@@ -210,13 +210,6 @@ export function StudyPlanWizard({
             setSelectedAssessmentId("");
           }
 
-          if (workspaces && workspaces.length > 0) {
-            const wsId = workspaces[0].id;
-            studyPlannerApi
-              .getLearningUnits(wsId)
-              .then(setLearningUnits)
-              .catch(() => {});
-          }
         } catch (err) {
           console.error("Failed to load data for study plan wizard", err);
         } finally {
@@ -550,8 +543,10 @@ export function StudyPlanWizard({
 
                     {/* Coverage Mode Selection */}
                     <div className="grid grid-cols-2 gap-2 pt-0.5">
-                      <div
+                      <button
+                        type="button"
                         onClick={() => setTargetMode("full_assessment_coverage")}
+                        aria-pressed={targetMode === "full_assessment_coverage"}
                         className={cn(
                           "p-2.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center justify-between gap-1.5",
                           targetMode === "full_assessment_coverage"
@@ -570,10 +565,12 @@ export function StudyPlanWizard({
                         {targetMode === "full_assessment_coverage" && (
                           <Check className="size-3 text-primary shrink-0" />
                         )}
-                      </div>
+                      </button>
 
-                      <div
+                      <button
+                        type="button"
                         onClick={() => setTargetMode("up_to_learning_unit")}
+                        aria-pressed={targetMode === "up_to_learning_unit"}
                         className={cn(
                           "p-2.5 rounded-lg border text-xs transition-all cursor-pointer flex items-center justify-between gap-1.5",
                           targetMode === "up_to_learning_unit"
@@ -592,7 +589,7 @@ export function StudyPlanWizard({
                         {targetMode === "up_to_learning_unit" && (
                           <Check className="size-3 text-primary shrink-0" />
                         )}
-                      </div>
+                      </button>
                     </div>
 
                     {targetMode === "up_to_learning_unit" && (
@@ -630,9 +627,11 @@ export function StudyPlanWizard({
                   {INTENSITY_OPTIONS.map((opt) => {
                     const active = preferredDifficulty === opt.value;
                     return (
-                      <div
+                      <button
                         key={opt.value}
+                        type="button"
                         onClick={() => setPreferredDifficulty(opt.value)}
+                        aria-pressed={active}
                         className={cn(
                           "p-2 rounded-lg border text-left transition-all cursor-pointer space-y-0.5",
                           active
@@ -651,7 +650,7 @@ export function StudyPlanWizard({
                         <p className="text-[9px] text-muted-foreground leading-tight line-clamp-2">
                           {opt.description}
                         </p>
-                      </div>
+                      </button>
                     );
                   })}
                 </div>

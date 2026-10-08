@@ -135,6 +135,33 @@ class StudySupportAgent(BaseAgent):
         top_k_count = 16 if deep_search_mode else 5
         rag_query = f"{question} {selected_text}" if selected_text else question
 
+        # If question asks broad or overview questions about the course/material (e.g. "what is in that course?"),
+        # augment the RAG query with the workspace or resource title for accurate embedding alignment.
+        scope_hint = ""
+        if teaching_workspace_id:
+            try:
+                from app.db.models.academic import TeachingWorkspace
+                ws = await db.get(TeachingWorkspace, teaching_workspace_id)
+                if ws and (ws.title or getattr(ws, "course", None)):
+                    scope_hint = ws.title or (ws.course.name if getattr(ws, "course", None) else "")
+            except Exception:
+                pass
+        elif selected_resource_id:
+            try:
+                from app.db.models.resource import LecturerMaterial, StudentResource
+                mat = await db.get(LecturerMaterial, selected_resource_id)
+                if mat:
+                    scope_hint = mat.display_name or mat.original_filename or ""
+                else:
+                    sres = await db.get(StudentResource, selected_resource_id)
+                    if sres:
+                        scope_hint = sres.display_name or sres.original_filename or ""
+            except Exception:
+                pass
+
+        if scope_hint and any(kw in question.lower() for kw in ["course", "material", "notes", "syllabus", "overview", "interesting", "interested", "learn", "topic", "cover"]):
+            rag_query = f"{rag_query} ({scope_hint})"
+
         # If no specific resource or workspace is selected, answer directly from general knowledge without un-scoped cross-course search
         if not selected_resource_id and not selected_resource_ids and not teaching_workspace_id:
             logger.info(
@@ -230,7 +257,7 @@ class StudySupportAgent(BaseAgent):
                 "1. DIRECT ANSWER FIRST: Begin immediately with a clear and concise explanation to the student's question. Do not start with introductory filler like 'According to the provided course material context...'.\n"
                 "2. VISUAL & STRUCTURAL CLARITY: Use clean Markdown formatting with section headings (e.g. ### Key Concepts), concise paragraphs, bold key terms (**term**), and bullet points.\n"
                 "3. NO INLINE CITATION CLUTTER: Do NOT insert raw text markers or bracketed references like '[Source: ...]' into your response body text. Structured citations are attached automatically.\n"
-                "4. SCOPE BOUNDARIES: If the context only partially answers the question, explain what can be answered from notes first, then provide academic concepts.\n"
+                "4. SCOPE BOUNDARIES & GENERAL KNOWLEDGE: If the provided course material context does NOT contain information to answer the student's question (e.g. asking about biology when the context is mathematics, or asking about unrelated topics not covered in the context), you MUST start your response with the exact string: '**General Knowledge:** This response is not based on your provided course material context.' and then answer accurately using general academic knowledge.\n"
                 "5. ACADEMIC INTEGRITY: Never reveal exam answer keys or materials from unassigned courses.\n"
                 "6. OFF-TOPIC REDIRECTION: If the student asks something entirely unrelated to their studies or academic coursework (not identity questions — those are handled separately), briefly and kindly redirect them to academic coursework without being preachy."
             )

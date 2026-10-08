@@ -1,26 +1,10 @@
-import { apiClient } from "./client";
+import { apiClient, buildQueryString } from "./client";
 
 export const gradingApi = {
-  getGradingQueue: (params: Record<string, string | number | boolean>) => {
-    const searchParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, val]) => {
-      if (val !== undefined && val !== null) {
-        searchParams.append(key, String(val));
-      }
-    });
-    const queryString = searchParams.toString();
-    return apiClient(`/grading/queue${queryString ? `?${queryString}` : ""}`);
-  },
-  getGroupGradingQueue: (params: Record<string, string | number | boolean>) => {
-    const searchParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, val]) => {
-      if (val !== undefined && val !== null) {
-        searchParams.append(key, String(val));
-      }
-    });
-    const queryString = searchParams.toString();
-    return apiClient(`/grading/group-queue${queryString ? `?${queryString}` : ""}`);
-  },
+  getGradingQueue: (params: Record<string, string | number | boolean>) =>
+    apiClient(`/grading/queue${buildQueryString(params)}`),
+  getGroupGradingQueue: (params: Record<string, string | number | boolean>) =>
+    apiClient(`/grading/group-queue${buildQueryString(params)}`),
   getGroupSubmissionWorkspace: (submissionId: string) => apiClient(`/grading/group-submission/${submissionId}`),
   getGradeDetail: (responseId: string) => apiClient(`/grading/response/${responseId}`),
   saveGrade: (responseId: string, data: Record<string, unknown>) => {
@@ -57,15 +41,14 @@ export const gradingApi = {
   getClassAiSummary: (assessmentId: string, classId: string) => 
     apiClient(`/grading/assessment/${assessmentId}/class/${classId}/ai-summary`),
   getAssessmentAnalytics: (assessmentId: string, classSectionId?: string, regenerate?: boolean) => {
-    const params = new URLSearchParams();
+    const params: Record<string, unknown> = {};
     if (classSectionId && classSectionId !== "all") {
-      params.append("class_section_id", classSectionId);
+      params.class_section_id = classSectionId;
     }
     if (regenerate) {
-      params.append("regenerate", "true");
+      params.regenerate = "true";
     }
-    const queryStr = params.toString();
-    return apiClient(`/analytics/assessment/${assessmentId}/ai-insights${queryStr ? `?${queryStr}` : ""}`);
+    return apiClient(`/analytics/assessment/${assessmentId}/ai-insights${buildQueryString(params)}`);
   },
   verifyAttemptGrades: (attemptId: string) => 
     apiClient(`/grading/attempt/${attemptId}/verify`),

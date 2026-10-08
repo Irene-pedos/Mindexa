@@ -637,7 +637,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                 rag_res = await rag.retrieve_context_for_lecturer(
                     topic=rag_topic,
                     teaching_workspace_id=workspace_id,
-                    top_k=8,
+                    top_k=4,
                 )
                 course_material_context = rag_res.context_string
                 logger.info(
@@ -696,7 +696,7 @@ async def _process_ai_generation_async(batch_id: str) -> dict[str, Any]:
                         sec_rag_res = await rag.retrieve_context_for_lecturer(
                             topic=sec_topic,
                             teaching_workspace_id=workspace_id,
-                            top_k=6,
+                            top_k=4,
                         )
                         sec_context = sec_rag_res.context_string
                     except Exception:

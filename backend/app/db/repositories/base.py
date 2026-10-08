@@ -25,6 +25,14 @@ from app.core.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 from app.core.exceptions import NotFoundError
 from app.db.base import BaseModel
 
+def escape_like(value: str) -> str:
+    """
+    Escape special LIKE/ILIKE metacharacters so they are treated literally.
+    Escapes: %, _, \\
+    """
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 ModelType = TypeVar("ModelType", bound=BaseModel)
 
 

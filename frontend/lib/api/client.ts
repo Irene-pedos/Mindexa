@@ -1,5 +1,21 @@
 // frontend/lib/api/client.ts
 
+/**
+ * Builds a clean query string from an object, skipping undefined, null, and empty string values.
+ * Returns the query string prefixed with '?' or an empty string if there are no params.
+ */
+export function buildQueryString(params?: Record<string, unknown> | null): string {
+  if (!params) return "";
+  const searchParams = new URLSearchParams();
+  for (const [key, val] of Object.entries(params)) {
+    if (val !== undefined && val !== null && val !== "") {
+      searchParams.append(key, String(val));
+    }
+  }
+  const qs = searchParams.toString();
+  return qs ? `?${qs}` : "";
+}
+
 export function resolveApiUrl() {
   const configuredUrl = process.env.NEXT_PUBLIC_API_URL?.trim();
   if (configuredUrl) {
@@ -30,25 +46,19 @@ export function resolveApiUrl() {
 export let accessToken: string | null = null;
 
 /**
- * Syncs the access token with memory and localStorage.
+ * Syncs the access token in memory.
  */
 export function setAccessToken(token: string | null) {
   // Normalize token values
   const validToken =
     token && token !== "null" && token !== "undefined" ? token : null;
 
-  console.log(
-    "[apiClient] setAccessToken:",
-    validToken ? "(token present)" : "null",
-  );
   accessToken = validToken;
 
   if (typeof window !== "undefined") {
-    if (validToken) {
-      localStorage.setItem("accessToken", validToken);
-    } else {
-      localStorage.removeItem("accessToken");
-    }
+    // Clean up any legacy tokens stored in localStorage
+    localStorage.removeItem("accessToken");
+    localStorage.removeItem("refreshToken");
   }
 }
 
@@ -64,7 +74,11 @@ function notifySessionInvalidated() {
 // Track active refresh promise to prevent multiple concurrent refreshes
 let refreshPromise: Promise<string | null> | null = null;
 
-export async function refreshToken() {
+interface RefreshOptions {
+  silent?: boolean;
+}
+
+export async function refreshToken(options: RefreshOptions = {}) {
   if (refreshPromise) {
     return refreshPromise;
   }
@@ -75,57 +89,39 @@ export async function refreshToken() {
         throw new Error("Cannot refresh token on server-side");
       }
 
-      const storedRefreshToken = localStorage.getItem("refreshToken");
-      console.log("[apiClient] refreshToken: retrieved from localStorage:", storedRefreshToken ? "(present)" : "null");
-
-      if (
-        !storedRefreshToken ||
-        storedRefreshToken === "null" ||
-        storedRefreshToken === "undefined"
-      ) {
-      console.warn(
-          "[apiClient] No valid refresh token found in storage",
-        );
-        throw new Error("No refresh token available");
-      }
-
       const apiUrl = resolveApiUrl();
-      console.log("[apiClient] Attempting token refresh with:", storedRefreshToken.substring(0, 10) + "...");
       const res = await fetch(`${apiUrl}/auth/refresh`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
         credentials: "include",
-        body: JSON.stringify({ refresh_token: storedRefreshToken }),
       });
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
-        console.error(
-          "[apiClient] Refresh failed with status:",
-          res.status,
-          errorData,
-        );
+        if (!options.silent) {
+          console.error(
+            "[apiClient] Refresh failed with status:",
+            res.status,
+            errorData,
+          );
+        }
         throw new Error(errorData.message || "Refresh failed");
       }
 
       const data = await res.json();
-      console.log("[apiClient] Refresh successful. New access token received.");
-
       setAccessToken(data.access_token);
-      if (data.refresh_token && typeof window !== "undefined") {
-        localStorage.setItem("refreshToken", data.refresh_token);
-      }
       return data.access_token;
     } catch (error) {
-      console.error("[apiClient] Refresh process encountered an error:", error);
       setAccessToken(null);
       if (typeof window !== "undefined") {
         localStorage.removeItem("user");
         localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
-        notifySessionInvalidated();
+        if (!options.silent) {
+          notifySessionInvalidated();
+        }
       }
       throw error;
     } finally {
@@ -144,17 +140,7 @@ interface FetchOptions extends RequestInit {
  * Helper to get current token from memory or storage.
  */
 export const getToken = () => {
-  // 1. Check memory first (fastest and most up-to-date in current session)
-  if (accessToken) return accessToken;
-
-  // 2. Fallback to localStorage if in browser
-  if (typeof window !== "undefined") {
-    const token = localStorage.getItem("accessToken");
-    if (token && token !== "null" && token !== "undefined") {
-      return token;
-    }
-  }
-  return null;
+  return accessToken;
 };
 
 export async function apiClient(endpoint: string, options: FetchOptions = {}) {

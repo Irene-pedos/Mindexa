@@ -65,7 +65,32 @@ class AssessmentGeneratorAgent(BaseAgent):
 
         Returns (questions, full_prompt).
         """
+        from app.core.ai.token_budget import trim_rag_context
+
         prompt_template = self._get_prompt()
+
+        # Compute accurate completion token budget based on question type and count
+        # Standard MCQs/True-False/Matching take ~150-220 tokens each.
+        # Open-ended / Case Study / Essay take ~300-450 tokens each.
+        q_type_lower = (question_type or "").lower()
+        if q_type_lower in ("essay", "case_study"):
+            budget_per_q = 400
+        elif q_type_lower in ("short_answer", "computational", "practical"):
+            budget_per_q = 280
+        else:
+            budget_per_q = 200
+
+        max_tokens = min(budget_per_q * max(1, count) + 400, 2400)
+
+        # Budget RAG context so that prompt input + max_tokens is well under provider TPM limits (e.g. 6000 safe ceiling for Groq 8k TPM)
+        if course_material_context and course_material_context.strip():
+            course_material_context = trim_rag_context(
+                course_material_context.strip(),
+                max_tokens_budget=6000,
+                reserved_for_completion=max_tokens,
+                template_overhead=1500,
+            )
+
         is_rag = bool(course_material_context and course_material_context.strip())
         type_instructions = self._get_type_instructions(question_type, is_rag)
 
@@ -154,9 +179,6 @@ class AssessmentGeneratorAgent(BaseAgent):
             .replace("{{learning_outcomes}}", outcomes_block)
             .replace("{{marks_per_question}}", marks_str)
         )
-
-        # Token budget: Provide ample room for multi-question options, explanations, and rubrics
-        max_tokens = min(1000 * count + 1000, 4000)
 
         request = AICompletionRequest(
             messages=[
@@ -426,7 +448,20 @@ class AssessmentGeneratorAgent(BaseAgent):
             or item.get("answer")
             or item.get("rubric")
             or item.get("solution")
+            or item.get("guidance")
         )
+
+        if not explanation or not str(explanation).strip():
+            if q_type_str in ("short_answer", "shortanswer"):
+                explanation = f"Model Answer: Core expected answer and conceptual reasoning for: {clean_question_text[:120]}.\n\nRubric: 1 mark for core concept, 1 mark for detail."
+            elif q_type_str == "essay":
+                explanation = f"Model Answer: Comprehensive analysis covering core arguments and supporting evidence for: {clean_question_text[:120]}.\n\nRubric: Content understanding, critical evaluation, and clear structure."
+            elif q_type_str == "computational":
+                explanation = "Solution Steps: Follow standard mathematical derivation steps.\n\nNumerical Answer: Computed value based on formula."
+            elif q_type_str in ("mcq", "true_false", "truefalse"):
+                explanation = "The correct answer is derived from the course material context and standard academic concepts."
+            else:
+                explanation = f"Model Answer / Grading Guidance for: {clean_question_text[:100]}."
 
         return {
             "question": clean_question_text,

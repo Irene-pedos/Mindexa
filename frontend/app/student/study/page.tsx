@@ -3,7 +3,6 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { StudyPlanDashboard } from "@/components/mindexa/study/study-plan-dashboard";
 import { StudyPlanWizard } from "@/components/mindexa/study/study-plan-wizard";
-import { SessionCompletionModal } from "@/components/mindexa/study/session-completion-modal";
 import { PlanAdjustmentModal } from "@/components/mindexa/study/plan-adjustment-modal";
 import { RescheduleModal } from "@/components/mindexa/study/reschedule-modal";
 import {
@@ -23,7 +22,6 @@ import { SparklesIcon } from "@/components/ui/sparkles-icon";
 import {
   Sparkles,
   Calendar as CalendarIcon,
-  CheckCircle2,
   Clock,
   Plus,
   BookOpen,
@@ -31,16 +29,15 @@ import {
   ListChecks,
   SlidersHorizontal,
   Play,
-  AlertTriangle,
   RotateCcw,
   ChevronDown,
   ChevronUp,
-  Target,
   Check,
 } from "lucide-react";
 import { ContextualExplainer } from "@/components/mindexa/common/contextual-explainer";
 import { HelpPopover } from "@/components/mindexa/common/help-popover";
-import { format, parseISO, isBefore, isToday, isTomorrow } from "date-fns";
+import { formatSessionRelativeTime } from "@/lib/date-utils";
+import { isBefore } from "date-fns";
 import { cn } from "@/lib/utils";
 
 export default function StudentStudyPage() {
@@ -54,8 +51,6 @@ export default function StudentStudyPage() {
   const [initialAssessmentForWizard, setInitialAssessmentForWizard] = useState<
     string | undefined
   >(undefined);
-  const [completeModalSession, setCompleteModalSession] =
-    useState<StudySession | null>(null);
   const [adjustModalPlan, setAdjustModalPlan] = useState<StudyPlan | null>(null);
   const [rescheduleSession, setRescheduleSession] =
     useState<StudySession | null>(null);
@@ -176,20 +171,7 @@ export default function StudentStudyPage() {
     return categorizedSessions.all;
   }, [sessionFilter, categorizedSessions]);
 
-  const formatSessionTime = (dateStr: string) => {
-    try {
-      const d = parseISO(dateStr);
-      if (isToday(d)) {
-        return `Today at ${format(d, "HH:mm")}`;
-      }
-      if (isTomorrow(d)) {
-        return `Tomorrow at ${format(d, "HH:mm")}`;
-      }
-      return format(d, "EEE, MMM d · HH:mm");
-    } catch {
-      return dateStr;
-    }
-  };
+  const formatSessionTime = formatSessionRelativeTime;
 
   return (
     <div
@@ -281,9 +263,6 @@ export default function StudentStudyPage() {
               <StudyPlanDashboard
                 summary={summary}
                 onOpenWizard={handleOpenWizardWithAssessment}
-                onOpenCompleteModal={(session) =>
-                  setCompleteModalSession(session)
-                }
                 onOpenAdjustModal={(plan) => setAdjustModalPlan(plan)}
                 onSelectTab={handleSelectTabWithTopic}
               />
@@ -771,14 +750,6 @@ export default function StudentStudyPage() {
         onOpenChange={setWizardOpen}
         onSuccess={loadData}
         initialAssessmentId={initialAssessmentForWizard}
-      />
-      <SessionCompletionModal
-        session={completeModalSession}
-        open={!!completeModalSession}
-        onOpenChange={(open) => {
-          if (!open) setCompleteModalSession(null);
-        }}
-        onCompleted={loadData}
       />
       <PlanAdjustmentModal
         plan={adjustModalPlan}

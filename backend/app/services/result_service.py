@@ -25,8 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import select
 
+from app.core.constants import UserRole
 from app.core.exceptions import AuthorizationError, ConflictError, NotFoundError
 from app.db.enums import AttemptStatus, ResultLetterGrade
+from app.db.models.auth import User
 from app.db.models.result import AssessmentResult
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.attempt_repo import AttemptRepository
@@ -145,6 +147,8 @@ class ResultService:
         attempt_id: uuid.UUID,
         allow_partial: bool = False,
         is_post_release_correction: bool = False,
+        current_user: User | None = None,
+        lecturer_id: uuid.UUID | None = None,
     ) -> tuple[AssessmentResult, bool]:
         """
         Compute the AssessmentResult for an attempt.
@@ -158,6 +162,13 @@ class ResultService:
         attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
         if not attempt:
             raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+
+        if current_user is not None or lecturer_id is not None:
+            await self.assert_lecturer_assessment_access(
+                attempt.assessment_id,
+                user=current_user,
+                lecturer_id=lecturer_id,
+            )
 
         if attempt.status not in (AttemptStatus.SUBMITTED, AttemptStatus.AUTO_SUBMITTED):
             raise ConflictError(
@@ -317,6 +328,7 @@ class ResultService:
         released_by_id: uuid.UUID | None = None,
         attempt_ids: list[uuid.UUID] | None = None,
         class_section_id: uuid.UUID | None = None,
+        current_user: User | None = None,
     ) -> dict:
         """
         Release results to students.
@@ -340,22 +352,40 @@ class ResultService:
                 message: str,
             }
         """
+        if current_user is not None or released_by_id is not None:
+            await self.assert_lecturer_assessment_access(
+                assessment_id,
+                user=current_user,
+                lecturer_id=released_by_id,
+            )
+
         from sqlalchemy import select
 
         # Total question count for assessment
         total_questions = await self.assessment_repo.count_assessment_questions(assessment_id)
 
+        if class_section_id:
+            await self.assert_class_section_belongs_to_assessment(
+                assessment_id=assessment_id,
+                class_section_id=class_section_id,
+            )
+
         if attempt_ids:
-            # Load specific results
-            results = await self.result_repo.list_by_attempt_ids(attempt_ids)
+            # Load specific results and ensure they strictly belong to this assessment
+            results = [
+                r for r in await self.result_repo.list_by_attempt_ids(attempt_ids)
+                if r.assessment_id == assessment_id
+            ]
             existing_attempt_ids = {r.attempt_id for r in results}
             missing_attempt_ids = [aid for aid in attempt_ids if aid not in existing_attempt_ids]
 
-            # For missing results, attempt calculation
+            # For missing results, attempt calculation only if attempt belongs to this assessment
             for aid in missing_attempt_ids:
                 try:
-                    calc_res, _ = await self.calculate_result(attempt_id=aid)
-                    results.append(calc_res)
+                    att = await self.attempt_repo.get_by_id_simple(aid)
+                    if att and att.assessment_id == assessment_id:
+                        calc_res, _ = await self.calculate_result(attempt_id=aid)
+                        results.append(calc_res)
                 except Exception:
                     pass
         elif class_section_id:
@@ -481,19 +511,215 @@ class ResultService:
         
         return await self._enrich_result_response(result)
 
+    async def assert_lecturer_assessment_access(
+        self,
+        assessment_id: uuid.UUID,
+        user: User | None = None,
+        lecturer_id: uuid.UUID | None = None,
+    ) -> None:
+        """
+        Verify that the user/lecturer has permission to view or manage results
+        for this assessment.
+
+        Access is granted if:
+        - The user is an ADMIN (or superuser).
+        - The lecturer created the assessment (Assessment.created_by_id).
+        - The lecturer is an assigned supervisor (AssessmentSupervisor).
+        - The lecturer is the creator or assigned lecturer of the assessment's TeachingWorkspace.
+        - The lecturer has an active TeachingAssignment for the assessment's course.
+        """
+        if user is not None:
+            user_role = getattr(user.role, "value", user.role)
+            if user_role == UserRole.ADMIN.value or user_role == "admin" or getattr(user, "is_superuser", False):
+                return
+            target_lecturer_id = user.id
+        elif lecturer_id is not None:
+            u = await self.db.get(User, lecturer_id)
+            if u:
+                u_role = getattr(u.role, "value", u.role)
+                if u_role == UserRole.ADMIN.value or u_role == "admin" or getattr(u, "is_superuser", False):
+                    return
+            target_lecturer_id = lecturer_id
+        else:
+            return
+
+        from sqlalchemy import and_, or_, select
+        from app.db.models.academic import TeachingAssignment, TeachingWorkspace
+        from app.db.models.assessment import Assessment, AssessmentSupervisor
+
+        ass = await self.assessment_repo.get_by_id_simple(assessment_id)
+        if not ass:
+            raise NotFoundError("Assessment not found", code="ASSESSMENT_NOT_FOUND")
+
+        auth_stmt = (
+            select(Assessment.id)
+            .where(
+                Assessment.id == assessment_id,
+                or_(
+                    Assessment.created_by_id == target_lecturer_id,
+                    Assessment.teaching_workspace_id.in_(
+                        select(TeachingWorkspace.id)
+                        .outerjoin(TeachingAssignment, TeachingWorkspace.teaching_assignment_id == TeachingAssignment.id)
+                        .where(
+                            or_(
+                                TeachingWorkspace.created_by_id == target_lecturer_id,
+                                and_(
+                                    TeachingAssignment.lecturer_id == target_lecturer_id,
+                                    TeachingAssignment.is_active == True,
+                                    TeachingAssignment.is_deleted == False,
+                                ),
+                            ),
+                            TeachingWorkspace.is_deleted == False,
+                        )
+                    ),
+                    Assessment.course_id.in_(
+                        select(TeachingAssignment.course_id).where(
+                            TeachingAssignment.lecturer_id == target_lecturer_id,
+                            TeachingAssignment.is_active == True,
+                            TeachingAssignment.is_deleted == False,
+                        )
+                    ),
+                    Assessment.id.in_(
+                        select(AssessmentSupervisor.assessment_id).where(
+                            AssessmentSupervisor.supervisor_id == target_lecturer_id,
+                            AssessmentSupervisor.is_deleted == False,
+                        )
+                    ),
+                    Assessment.teaching_workspace_id.in_(
+                        select(TeachingWorkspace.id)
+                        .join(
+                            TeachingAssignment,
+                            TeachingAssignment.class_section_id == TeachingWorkspace.class_section_id,
+                        )
+                        .where(
+                            TeachingAssignment.lecturer_id == target_lecturer_id,
+                            TeachingAssignment.is_active == True,
+                            TeachingAssignment.is_deleted == False,
+                            TeachingWorkspace.is_deleted == False,
+                        )
+                    ),
+                ),
+            )
+        )
+        auth_res = await self.db.execute(auth_stmt)
+        if not auth_res.scalars().first():
+            raise AuthorizationError(
+                "You are not authorized to view or manage results for this assessment",
+                code="ASSESSMENT_ACCESS_DENIED",
+            )
+
+    async def assert_class_section_belongs_to_assessment(
+        self,
+        assessment_id: uuid.UUID,
+        class_section_id: uuid.UUID,
+    ) -> None:
+        """
+        Verify that a class section is actually targeted or associated with this assessment.
+        Prevents unauthorized enumeration of unrelated class sections / rosters.
+        """
+        from sqlalchemy import and_, or_, select
+        from app.db.models.academic import (
+            ClassSection,
+            StudentEnrollment,
+            TeachingAssignment,
+            TeachingWorkspace,
+        )
+        from app.db.models.assessment import Assessment, AssessmentTargetSection
+        from app.db.models.attempt import AssessmentAttempt
+
+        sec = await self.db.get(ClassSection, class_section_id)
+        if not sec or sec.is_deleted:
+            raise NotFoundError("Class Section not found", code="CLASS_SECTION_NOT_FOUND")
+
+        ass = await self.assessment_repo.get_by_id_simple(assessment_id)
+        if not ass:
+            raise NotFoundError("Assessment not found", code="ASSESSMENT_NOT_FOUND")
+
+        # Check 1: Explicit target section
+        target_stmt = select(AssessmentTargetSection.id).where(
+            AssessmentTargetSection.assessment_id == assessment_id,
+            AssessmentTargetSection.class_section_id == class_section_id,
+            AssessmentTargetSection.is_deleted == False,
+        )
+        if (await self.db.execute(target_stmt)).scalars().first():
+            return
+
+        # Check 2: TeachingWorkspace associated with the assessment or section
+        if ass.teaching_workspace_id:
+            ws = await self.db.get(TeachingWorkspace, ass.teaching_workspace_id)
+            if ws and not ws.is_deleted:
+                if ws.class_section_id == class_section_id:
+                    return
+                if ws.teaching_assignment_id:
+                    ta = await self.db.get(TeachingAssignment, ws.teaching_assignment_id)
+                    if ta and ta.class_section_id == class_section_id:
+                        return
+
+        # Check 3: Workspace via course_id
+        if ass.course_id:
+            ws_course_stmt = select(TeachingWorkspace.id).where(
+                TeachingWorkspace.course_id == ass.course_id,
+                TeachingWorkspace.class_section_id == class_section_id,
+                TeachingWorkspace.is_deleted == False,
+            )
+            if (await self.db.execute(ws_course_stmt)).scalars().first():
+                return
+
+        # Check 4: Any submitted attempt for this assessment by a student in this class section
+        attempt_stmt = select(AssessmentAttempt.id).join(
+            StudentEnrollment,
+            StudentEnrollment.student_id == AssessmentAttempt.student_id,
+        ).where(
+            AssessmentAttempt.assessment_id == assessment_id,
+            StudentEnrollment.class_section_id == class_section_id,
+            StudentEnrollment.is_deleted == False,
+            AssessmentAttempt.is_deleted == False,
+        )
+        if (await self.db.execute(attempt_stmt)).scalars().first():
+            return
+
+        raise AuthorizationError(
+            "The specified class section is not associated with this assessment",
+            code="SECTION_ASSESSMENT_MISMATCH",
+        )
+
     async def get_result_for_lecturer(
         self,
         *,
-        attempt_id: uuid.UUID,
+        attempt_id: uuid.UUID | None = None,
+        result_id: uuid.UUID | None = None,
+        current_user: User | None = None,
+        lecturer_id: uuid.UUID | None = None,
     ) -> dict:
         """
         Return a result for a lecturer/admin — no release check.
-        Supports lookup by attempt_id OR direct result.id.
+        Supports lookup by attempt_id OR direct result_id.
+        Enforces lecturer scoping: verifies that the caller owns or is authorized
+        for the assessment.
         """
-        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(attempt_id)
-        if not result:
+        target_id = result_id or attempt_id
+        if not target_id:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
-        
+
+        result = await self.result_repo.get_by_attempt_or_id_with_breakdowns(target_id)
+        if not result:
+            if attempt_id:
+                attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
+                if attempt and (current_user is not None or lecturer_id is not None):
+                    await self.assert_lecturer_assessment_access(
+                        attempt.assessment_id,
+                        user=current_user,
+                        lecturer_id=lecturer_id,
+                    )
+            raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
+
+        if current_user is not None or lecturer_id is not None:
+            await self.assert_lecturer_assessment_access(
+                result.assessment_id,
+                user=current_user,
+                lecturer_id=lecturer_id,
+            )
+
         return await self._enrich_result_response(result)
 
     async def _enrich_result_response(self, result: AssessmentResult) -> dict:
@@ -977,6 +1203,7 @@ class ResultService:
         *,
         result_id: uuid.UUID,
         cleared_by_id: uuid.UUID,
+        current_user: User | None = None,
     ) -> None:
         """
         Clear the integrity hold on a result, making it releasable.
@@ -985,6 +1212,13 @@ class ResultService:
         result = await self.result_repo.get_by_id(result_id)
         if not result:
             raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
+
+        await self.assert_lecturer_assessment_access(
+            result.assessment_id,
+            user=current_user,
+            lecturer_id=cleared_by_id,
+        )
+
         if not result.integrity_hold:
             raise ConflictError(
                 "This result does not have an integrity hold",

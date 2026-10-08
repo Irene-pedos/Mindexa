@@ -159,3 +159,51 @@ async def test_rag_service_retrieve_context_batch_success():
     service._embed_questions.assert_called_once_with(questions, student_id=student_id)
     assert db.execute.call_count == 2
 
+
+@pytest.mark.asyncio
+async def test_rag_service_retrieve_context_broad_question_preserves_course_chunks():
+    """Verify that questions matching course content (similarity >= 0.30) keep chunks and do not trigger fallback."""
+    db = AsyncMock()
+    service = RAGService(db)
+    service._embed_question = AsyncMock(return_value=[0.1] * 1536)
+    service._get_allowed_resource_ids = AsyncMock(return_value=[uuid.uuid4()])
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        (uuid.uuid4(), "Course Overview: Hands-on robotics and machine vision labs.", 1, {"page": 1}, uuid.uuid4(), "Syllabus", 0.58),
+        (uuid.uuid4(), "Module 4 includes an autonomous navigation project.", 2, {"page": 5}, uuid.uuid4(), "Syllabus", 0.52),
+    ]
+    db.execute.return_value = mock_result
+
+    student_id = uuid.uuid4()
+    res = await service.retrieve_context("what is interested thing do we have in that course? (Robotics)", student_id)
+
+    assert isinstance(res, RAGRetrievalResult)
+    assert not res.fallback_used
+    assert "Hands-on robotics" in res.context_string
+    assert "autonomous navigation" in res.context_string
+    assert len(res.citations) == 2
+
+
+@pytest.mark.asyncio
+async def test_rag_service_retrieve_context_below_threshold_triggers_fallback():
+    """Verify that unrelated subject queries (e.g. asking about biology when in discrete math, similarity ~0.22 < 0.30) trigger fallback."""
+    db = AsyncMock()
+    service = RAGService(db)
+    service._embed_question = AsyncMock(return_value=[0.1] * 1536)
+    service._get_allowed_resource_ids = AsyncMock(return_value=[uuid.uuid4()])
+
+    mock_result = MagicMock()
+    mock_result.fetchall.return_value = [
+        (uuid.uuid4(), "Irrelevant text.", 1, {"page": 1}, uuid.uuid4(), "Syllabus", 0.22),
+    ]
+    db.execute.return_value = mock_result
+
+    student_id = uuid.uuid4()
+    res = await service.retrieve_context("what is biology?", student_id)
+
+    assert isinstance(res, RAGRetrievalResult)
+    assert res.fallback_used
+    assert res.context_string == ""
+    assert len(res.citations) == 0
+

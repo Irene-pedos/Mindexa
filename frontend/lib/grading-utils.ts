@@ -2,7 +2,7 @@
 // Shared utilities for grading pages and components.
 // Previously these were incorrectly exported from the page component.
 
-import { formatDistanceToNow } from "date-fns";
+
 export {
   isQuestionAutoGraded,
   isClosedQuestionType,
@@ -20,20 +20,12 @@ export {
   OPEN_QUESTION_TYPES,
 } from "./grading-architecture";
 
-/**
- * Safely formats a date string as a relative time string (e.g. "2 hours ago").
- * Returns "N/A" if the date is missing or invalid.
- */
-export const formatDistanceSafe = (dateStr?: string | null): string => {
-  if (!dateStr) return "N/A";
-  try {
-    const parsed = Date.parse(dateStr);
-    if (isNaN(parsed)) return "N/A";
-    return formatDistanceToNow(new Date(parsed), { addSuffix: true });
-  } catch {
-    return "N/A";
-  }
-};
+export {
+  formatDurationSeconds,
+  formatAttemptDuration,
+  formatSessionRelativeTime,
+  formatDistanceSafe,
+} from "./date-utils";
 
 /**
  * Returns Tailwind CSS class strings for GradingQueueStatus enum values
@@ -154,3 +146,48 @@ export const getStatusStyles = (status: string): string => {
   }
   return "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20";
 };
+
+/**
+ * Validates and clamps a numerical score between 0 and maxMarks.
+ */
+export function validateAndClampScore(
+  rawScore: number | string | undefined | null,
+  maxMarks: number = 10,
+): number {
+  const num = typeof rawScore === "number" ? rawScore : Number(rawScore);
+  if (isNaN(num) || num < 0) return 0;
+  return Math.min(Math.max(0, num), maxMarks);
+}
+
+/**
+ * Normalizes grade save parameters into the shape expected by gradingApi.saveGrade,
+ * abstracting away whether manual score or AI override_score is needed.
+ */
+export interface GradeSaveOptions {
+  score: number;
+  feedback?: string;
+  isFinal?: boolean;
+  acceptAiSuggestion?: boolean;
+  rubricScores?: Array<{ criterion_id: string; score: number; comment?: string }>;
+}
+
+export function buildGradeSavePayload(options: GradeSaveOptions): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    feedback: options.feedback,
+    is_final: options.isFinal ?? true,
+  };
+
+  if (options.rubricScores && options.rubricScores.length > 0) {
+    payload.rubric_scores = options.rubricScores;
+  }
+
+  if (options.acceptAiSuggestion) {
+    payload.accept_ai_suggestion = true;
+    payload.override_score = options.score;
+  } else {
+    payload.score = options.score;
+  }
+
+  return payload;
+}
+

@@ -41,7 +41,7 @@ class RAGService:
         teaching_workspace_id: Optional[uuid.UUID] = None,
         workspace_id: Optional[uuid.UUID] = None,
         material_ids: Optional[List[uuid.UUID]] = None,
-        top_k: int = 8,
+        top_k: int = 4,
     ) -> RAGRetrievalResult:
         """
         Retrieve relevant text chunks from lecturer-uploaded materials for a given topic.
@@ -282,6 +282,7 @@ class RAGService:
             resolved_ids = set()
             for rid in resource_id_list:
                 res_id = None
+                # 1. Student personal resource
                 stmt_own = select(StudentResource.academic_resource_id).where(
                     and_(
                         StudentResource.id == rid,
@@ -291,6 +292,7 @@ class RAGService:
                 )
                 res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
 
+                # 2. Lecturer material by ID
                 if not res_id:
                     stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
                         and_(
@@ -301,10 +303,39 @@ class RAGService:
                     )
                     res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
 
-                if res_id and res_id in allowed_resource_ids:
+                # 3. Direct academic resource ID
+                if not res_id:
+                    stmt_ar = select(AcademicResource.id).where(
+                        and_(
+                            AcademicResource.id == rid,
+                            AcademicResource.is_deleted == False,
+                        )
+                    )
+                    res_id = (await self.db.execute(stmt_ar)).scalar_one_or_none()
+
+                # 4. Teaching workspace ID (if passed as selected_resource_id)
+                if not res_id:
+                    stmt_ws_mat = select(LecturerMaterial.academic_resource_id).where(
+                        and_(
+                            LecturerMaterial.teaching_workspace_id == rid,
+                            LecturerMaterial.is_student_visible == True,
+                            LecturerMaterial.is_deleted == False,
+                        )
+                    )
+                    ws_res = await self.db.execute(stmt_ws_mat)
+                    for ws_ar_id in ws_res.scalars().all():
+                        if ws_ar_id:
+                            resolved_ids.add(ws_ar_id)
+
+                if res_id:
                     resolved_ids.add(res_id)
 
-            allowed_resource_ids = list(resolved_ids)
+            if resolved_ids:
+                if allowed_resource_ids:
+                    valid_intersect = [rid for rid in resolved_ids if rid in allowed_resource_ids]
+                    allowed_resource_ids = valid_intersect if valid_intersect else list(resolved_ids)
+                else:
+                    allowed_resource_ids = list(resolved_ids)
 
         if not allowed_resource_ids:
             logger.warning(
@@ -359,6 +390,9 @@ class RAGService:
 
         for row in rows:
             chunk_id, content, chunk_index, metadata, res_id, res_name, similarity = row
+            if similarity is not None and float(similarity) < 0.30:
+                continue
+
             logger.debug("Chunk retrieved", resource=res_name, chunk_index=chunk_index, similarity=round(float(similarity), 4))
             chunks.append({
                 "content": content,
@@ -366,7 +400,7 @@ class RAGService:
                 "metadata": metadata
             })
             chunk_ids.append(chunk_id)
-            total_similarity += similarity
+            total_similarity += float(similarity) if similarity is not None else 0.0
 
             citations.append(SourceCitation(
                 resource_name=res_name,
@@ -376,13 +410,13 @@ class RAGService:
                 excerpt=content[:120]
             ))
 
-        avg_similarity = total_similarity / len(rows) if rows else 0.0
-        fallback_used = avg_similarity < settings.RAG_SIMILARITY_THRESHOLD or not rows
+        avg_similarity = total_similarity / len(chunks) if chunks else 0.0
+        fallback_used = not chunks or avg_similarity < 0.30
 
         logger.info(
             "RAG decision",
             avg_similarity=round(avg_similarity, 4),
-            threshold=settings.RAG_SIMILARITY_THRESHOLD,
+            threshold=0.30,
             fallback_used=fallback_used,
             chunks_used=len(chunks),
         )
@@ -459,6 +493,8 @@ class RAGService:
         if resource_id_list:
             resolved_ids = set()
             for rid in resource_id_list:
+                res_id = None
+                # 1. Student personal resource
                 stmt_own = select(StudentResource.academic_resource_id).where(
                     and_(
                         StudentResource.id == rid,
@@ -468,6 +504,7 @@ class RAGService:
                 )
                 res_id = (await self.db.execute(stmt_own)).scalar_one_or_none()
 
+                # 2. Lecturer material by ID
                 if not res_id:
                     stmt_lecturer = select(LecturerMaterial.academic_resource_id).where(
                         and_(
@@ -478,10 +515,39 @@ class RAGService:
                     )
                     res_id = (await self.db.execute(stmt_lecturer)).scalar_one_or_none()
 
-                if res_id and res_id in allowed_resource_ids:
+                # 3. Direct academic resource ID
+                if not res_id:
+                    stmt_ar = select(AcademicResource.id).where(
+                        and_(
+                            AcademicResource.id == rid,
+                            AcademicResource.is_deleted == False,
+                        )
+                    )
+                    res_id = (await self.db.execute(stmt_ar)).scalar_one_or_none()
+
+                # 4. Teaching workspace ID (if passed as selected_resource_id)
+                if not res_id:
+                    stmt_ws_mat = select(LecturerMaterial.academic_resource_id).where(
+                        and_(
+                            LecturerMaterial.teaching_workspace_id == rid,
+                            LecturerMaterial.is_student_visible == True,
+                            LecturerMaterial.is_deleted == False,
+                        )
+                    )
+                    ws_res = await self.db.execute(stmt_ws_mat)
+                    for ws_ar_id in ws_res.scalars().all():
+                        if ws_ar_id:
+                            resolved_ids.add(ws_ar_id)
+
+                if res_id:
                     resolved_ids.add(res_id)
 
-            allowed_resource_ids = list(resolved_ids)
+            if resolved_ids:
+                if allowed_resource_ids:
+                    valid_intersect = [rid for rid in resolved_ids if rid in allowed_resource_ids]
+                    allowed_resource_ids = valid_intersect if valid_intersect else list(resolved_ids)
+                else:
+                    allowed_resource_ids = list(resolved_ids)
 
         if not allowed_resource_ids:
             logger.warning(
@@ -537,13 +603,16 @@ class RAGService:
 
             for row in rows:
                 chunk_id, content, chunk_index, metadata, res_id, res_name, similarity = row
+                if similarity is not None and float(similarity) < 0.30:
+                    continue
+
                 chunks.append({
                     "content": content,
                     "resource_name": res_name,
                     "metadata": metadata,
                 })
                 chunk_ids.append(chunk_id)
-                total_similarity += similarity
+                total_similarity += float(similarity) if similarity is not None else 0.0
 
                 citations.append(
                     SourceCitation(
@@ -555,8 +624,8 @@ class RAGService:
                     )
                 )
 
-            avg_similarity = total_similarity / len(rows) if rows else 0.0
-            fallback_used = avg_similarity < settings.RAG_SIMILARITY_THRESHOLD or not rows
+            avg_similarity = total_similarity / len(chunks) if chunks else 0.0
+            fallback_used = not chunks or avg_similarity < 0.30
 
             context_string = self._build_context_string(chunks) if not fallback_used else ""
             results.append(

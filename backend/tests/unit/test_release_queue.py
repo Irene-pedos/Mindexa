@@ -1,11 +1,13 @@
 import pytest
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from app.api.v1.routes.result import get_release_readiness_queue
 from app.schemas.result import ReleaseQueueResponse
 
 @pytest.mark.asyncio
-async def test_get_release_readiness_queue_empty():
+@patch("app.api.v1.routes.result.ResultService.assert_lecturer_assessment_access", new_callable=AsyncMock)
+@patch("app.api.v1.routes.result.ResultService.assert_class_section_belongs_to_assessment", new_callable=AsyncMock)
+async def test_get_release_readiness_queue_empty(mock_sec, mock_access):
     db = AsyncMock()
     # Mock return value for students query - empty class section
     mock_res = MagicMock()
@@ -29,7 +31,9 @@ async def test_get_release_readiness_queue_empty():
 
 
 @pytest.mark.asyncio
-async def test_get_release_readiness_queue_with_null_display_name():
+@patch("app.api.v1.routes.result.ResultService.assert_lecturer_assessment_access", new_callable=AsyncMock)
+@patch("app.api.v1.routes.result.ResultService.assert_class_section_belongs_to_assessment", new_callable=AsyncMock)
+async def test_get_release_readiness_queue_with_null_display_name(mock_sec, mock_access):
     db = AsyncMock()
     student_id = uuid.uuid4()
     
@@ -77,7 +81,9 @@ async def test_get_release_readiness_queue_with_null_display_name():
 
 
 @pytest.mark.asyncio
-async def test_unsubmitted_student_does_not_block_graded_student_release():
+@patch("app.api.v1.routes.result.ResultService.assert_lecturer_assessment_access", new_callable=AsyncMock)
+@patch("app.api.v1.routes.result.ResultService.assert_class_section_belongs_to_assessment", new_callable=AsyncMock)
+async def test_unsubmitted_student_does_not_block_graded_student_release(mock_sec, mock_access):
     """Verify that absent/unsubmitted students do not block graded students from being released."""
     db = AsyncMock()
     s1_id = uuid.uuid4()  # Completed & graded student

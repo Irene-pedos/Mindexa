@@ -8,9 +8,9 @@ import React, {
   useEffect,
   useCallback,
 } from "react";
-import { authApi } from "@/lib/api/auth";
 import { useRouter } from "next/navigation";
-import { setAccessToken } from "@/lib/api/client";
+import { authApi } from "@/lib/api/auth";
+import { getToken, refreshToken, setAccessToken } from "@/lib/api/client";
 import { toast } from "sonner";
 
 export type AuthUser = {
@@ -90,25 +90,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const checkAuth = useCallback(async () => {
     if (typeof window === "undefined") return;
 
-    const storedUser = localStorage.getItem("user");
-    const storedToken = localStorage.getItem("accessToken");
-    const storedRefreshToken = localStorage.getItem("refreshToken");
+    try {
+      let token = getToken();
+      if (!token) {
+        // Silently attempt token refresh using HttpOnly cookie
+        token = await refreshToken({ silent: true }).catch(() => null);
+      }
 
-    if (
-      storedToken &&
-      storedToken !== "null" &&
-      storedToken !== "undefined" &&
-      storedRefreshToken &&
-      storedRefreshToken !== "null" &&
-      storedRefreshToken !== "undefined"
-    ) {
-      try {
-        setAccessToken(storedToken);
-
+      if (token) {
         // Validate the current session before treating the user as authenticated.
         const currentUser = await authApi.getCurrentUser();
         const serializedCurrentUser = JSON.stringify(currentUser);
-        const serializedStoredUser = storedUser ?? "";
+        const storedUser = localStorage.getItem("user");
 
         setUser((prevUser) => {
           if (JSON.stringify(prevUser) === serializedCurrentUser) {
@@ -118,17 +111,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return currentUser;
         });
 
-        if (serializedStoredUser !== serializedCurrentUser) {
+        if (storedUser !== serializedCurrentUser) {
           localStorage.setItem("user", serializedCurrentUser);
         }
-      } catch (err) {
-        console.error("[AuthProvider] Failed to validate stored session!", err);
+      } else {
         clearSession();
       }
-    } else {
+    } catch (err) {
+      console.error("[AuthProvider] Failed to validate session:", err);
       clearSession();
+    } finally {
+      setIsInitializing(false);
     }
-    setIsInitializing(false);
   }, [clearSession]);
 
   const handleSessionInvalidated = useCallback(() => {
@@ -168,9 +162,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Add event listener for cross-tab logout/login
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "accessToken" || e.key === "user") {
+      if (e.key === "user") {
         if (!e.newValue) {
-          // Token or user removed in another tab -> logout
+          // User removed in another tab -> logout
           clearSession();
           router.push("/login");
         } else {

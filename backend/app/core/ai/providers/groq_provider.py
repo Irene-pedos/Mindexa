@@ -49,13 +49,11 @@ class GroqProvider(BaseProvider):
                 response.raise_for_status()
         except httpx.HTTPStatusError as exc:
             detail = exc.response.text[:500]
-            if exc.response.status_code == 429:
-                # Groq always returns a `retry-after` header with the exact
-                # seconds to wait.  Forward it so the gateway's backoff logic
-                # can use the precise value instead of guessing.
+            if exc.response.status_code in (429, 413) or "rate_limit_exceeded" in detail or "Request too large" in detail:
+                # Groq returns 429 or 413 when token limits (TPM) or request payload limits are exceeded.
                 retry_after = exc.response.headers.get("retry-after", "")
                 raise RateLimitError(
-                    f"Groq rate limit exceeded: {detail}",
+                    f"Groq rate limit exceeded ({exc.response.status_code}): {detail}",
                     code="AI_PROVIDER_RATE_LIMITED",
                     retry_after=float(retry_after) if retry_after else None,
                 ) from exc

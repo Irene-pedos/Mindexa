@@ -2256,10 +2256,14 @@ const mapCandidateToQuestion = (
     const shortText =
       "Analyze the following case scenario and answer the sub-questions below.";
 
-    // Distribute marksPerQuestion evenly across sub-questions so the sum equals marksPerQuestion
+    // Distribute marksPerQuestion evenly across sub-questions so the sum equals marksPerQuestion,
+    // but only when no sub-question already carries an explicit mark from the edit form.
     const numSubQuestions = mappedOptions.length;
     const targetMarks = marksPerQuestion > 0 ? marksPerQuestion : 10;
-    if (numSubQuestions > 0) {
+    const hasExplicitMarks = mappedOptions.some(
+      (opt: any) => opt.match_key !== undefined && opt.match_key !== null && opt.match_key !== "",
+    );
+    if (numSubQuestions > 0 && !hasExplicitMarks) {
       const basePoints = Math.floor(targetMarks / numSubQuestions);
       const remainder = targetMarks % numSubQuestions;
       mappedOptions = mappedOptions.map((opt: any, idx: number) => ({
@@ -2278,7 +2282,7 @@ const mapCandidateToQuestion = (
       sectionId: targetSecId,
       text: shortText,
       type: qType as any,
-      marks: computedMarks || targetMarks,
+      marks: mappedOptions.length > 0 ? (computedMarks || targetMarks) : 0,
       options: mappedOptions,
       aiGenerated: true,
       is_required: true,
@@ -7081,7 +7085,7 @@ export default function EditAssessmentPage() {
                           size="icon"
                           onClick={() => {
                             setEditingCandidateId(cand.id);
-                            setEditingText(cand.parsed_question_text || "");
+                            setEditingText(cand.parsed_question_text || cand.question || "");
                             setEditingExplanation(
                               cand.parsed_explanation || "",
                             );
@@ -7328,7 +7332,7 @@ export default function EditAssessmentPage() {
                     ) : (
                       <div className="space-y-2">
                         <p className="text-sm font-semibold">
-                          {cand.parsed_question_text}
+                          {cand.parsed_question_text || cand.question}
                         </p>
                         {(() => {
                           const opts = cand.options || cand._options || [];

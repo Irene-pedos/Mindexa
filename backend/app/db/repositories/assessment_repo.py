@@ -79,6 +79,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
 
+from app.db.repositories.base import escape_like
 from app.db.enums import (
     AssessmentStatus,
     AssessmentType,
@@ -323,13 +324,14 @@ class AssessmentRepository:
         if workspace_id:
             filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
         if search and search.strip():
-            term = f"%{search.strip()}%"
+            escaped_term = escape_like(search.strip())
+            term = f"%{escaped_term}%"
             filters.append(
                 or_(
-                    col(Assessment.title).ilike(term),
-                    col(Assessment.instructions).ilike(term),
-                    col(Assessment.course_name).ilike(term),
-                    col(Assessment.course_code).ilike(term),
+                    col(Assessment.title).ilike(term, escape="\\"),
+                    col(Assessment.instructions).ilike(term, escape="\\"),
+                    col(Assessment.course_name).ilike(term, escape="\\"),
+                    col(Assessment.course_code).ilike(term, escape="\\"),
                 )
             )
 
@@ -394,13 +396,14 @@ class AssessmentRepository:
         if workspace_id:
             filters.append(col(Assessment.teaching_workspace_id) == workspace_id)
         if search and search.strip():
-            term = f"%{search.strip()}%"
+            escaped_term = escape_like(search.strip())
+            term = f"%{escaped_term}%"
             filters.append(
                 or_(
-                    col(Assessment.title).ilike(term),
-                    col(Assessment.instructions).ilike(term),
-                    col(Assessment.course_name).ilike(term),
-                    col(Assessment.course_code).ilike(term),
+                    col(Assessment.title).ilike(term, escape="\\"),
+                    col(Assessment.instructions).ilike(term, escape="\\"),
+                    col(Assessment.course_name).ilike(term, escape="\\"),
+                    col(Assessment.course_code).ilike(term, escape="\\"),
                 )
             )
 

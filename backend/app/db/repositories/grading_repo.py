@@ -16,6 +16,7 @@ from app.db.enums import (AIGradeDecision, GradingQueuePriority,
 from app.db.models.assessment import Assessment
 from app.db.models.attempt import GradingQueueItem, SubmissionGrade
 from app.db.models.auth import User, UserProfile
+from app.db.repositories.base import escape_like
 from sqlalchemy import and_, exists, func, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -425,12 +426,13 @@ class GradingRepository:
             except Exception:
                 pass
         if search_query:
+            escaped_search = escape_like(search_query)
             filters.append(
                 or_(
-                    UserProfile.first_name.ilike(f"%{search_query}%"),
-                    UserProfile.last_name.ilike(f"%{search_query}%"),
-                    UserProfile.display_name.ilike(f"%{search_query}%"),
-                    Assessment.title.ilike(f"%{search_query}%"),
+                    UserProfile.first_name.ilike(f"%{escaped_search}%", escape="\\"),
+                    UserProfile.last_name.ilike(f"%{escaped_search}%", escape="\\"),
+                    UserProfile.display_name.ilike(f"%{escaped_search}%", escape="\\"),
+                    Assessment.title.ilike(f"%{escaped_search}%", escape="\\"),
                 )
             )
 

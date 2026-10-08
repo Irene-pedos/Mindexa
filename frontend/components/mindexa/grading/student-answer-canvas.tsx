@@ -879,16 +879,54 @@ function FillBlankRenderer({
       }
     }
 
+    // Source D: question.correct_answer_json — used when question.blanks is absent
+    if (!question?.blanks && question?.correct_answer_json) {
+      try {
+        const caj =
+          typeof question.correct_answer_json === "string"
+            ? JSON.parse(question.correct_answer_json)
+            : question.correct_answer_json;
+        if (caj && typeof caj === "object" && !Array.isArray(caj)) {
+          Object.entries(caj).forEach(([k, val]) => {
+            const numMatch = k.match(/\d+/);
+            const idx = numMatch ? Number(numMatch[0]) : 0;
+            const answers = Array.isArray(val)
+              ? (val as any[]).map(String)
+              : [String(val)];
+            if (answers.length > 0) {
+              map[idx] = Array.from(new Set([...(map[idx] || []), ...answers]));
+            }
+          });
+        }
+      } catch {
+        // Malformed JSON — skip this source
+      }
+    }
+
     return map;
   }, [question, submission]);
 
   // Check correctness of a student answer for a specific blank index
   const getBlankStatus = (idx: number) => {
+    // Detect whether studentBlanks uses zero-based ("0","1",...) or one-based ("1","2",...) keys.
+    // Count populated entries under each convention for the known blank count, then pick the
+    // majority convention so every blank reads from a consistent offset.
+    const isOneBased = (() => {
+      let zeroPop = 0;
+      let onePop = 0;
+      for (let i = 0; i < blankCount; i++) {
+        if (studentBlanks[String(i)] !== undefined) zeroPop++;
+        if (studentBlanks[String(i + 1)] !== undefined) onePop++;
+      }
+      // Prefer one-based only when it has strictly more hits (blank_1 → "1", blank_2 → "2")
+      return onePop > zeroPop;
+    })();
+
+    const key = isOneBased ? String(idx + 1) : String(idx);
+    const blankKey = isOneBased ? `blank_${idx + 1}` : `blank_${idx}`;
     const studentVal = (
-      studentBlanks[String(idx)] ??
-      studentBlanks[String(idx + 1)] ??
-      studentBlanks[`blank_${idx}`] ??
-      studentBlanks[`blank_${idx + 1}`] ??
+      studentBlanks[key] ??
+      studentBlanks[blankKey] ??
       ""
     ).trim();
 

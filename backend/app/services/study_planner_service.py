@@ -89,7 +89,14 @@ class StudyPlannerService:
 
     @classmethod
     def _is_valid_mermaid(cls, code: Optional[str]) -> bool:
-        """Structural sanity check for Mermaid diagram syntax."""
+        """Structural sanity check for Mermaid diagram syntax.
+
+        Sanitizes the input first (strips markdown fences, repairs missing
+        diagram-type prefix) then verifies the result starts with a recognised
+        Mermaid keyword *and* contains at least one node definition or edge,
+        so prose and truncated AI output are rejected before persisting.
+        """
+        import re
         if not code or not isinstance(code, str):
             return False
         sanitized = cls._sanitize_mermaid(code)
@@ -100,7 +107,12 @@ class StudyPlannerService:
             "graph", "flowchart", "sequencediagram", "classdiagram",
             "statediagram", "erdiagram", "pie", "gantt", "gitgraph", "journey", "mindmap"
         )
-        return any(first_line.startswith(p) for p in valid_prefixes)
+        if not any(first_line.startswith(p) for p in valid_prefixes):
+            return False
+        # Must contain at least one node definition (NodeId[Label]) or arrow edge
+        has_node = bool(re.search(r"\w+\s*[\[\(\{]", sanitized))
+        has_edge = bool(re.search(r"-->|->>|--|\.\.\.>", sanitized))
+        return has_node or has_edge
 
     async def get_workspace_learning_units(
         self, workspace_id: uuid.UUID, student_id: uuid.UUID
@@ -1523,37 +1535,6 @@ class StudyPlannerService:
         await self.db.commit()
         return self._format_session(session)
 
-    @staticmethod
-    def _is_valid_mermaid(diagram: str | None) -> bool:
-        """
-        Lightweight structural validation for Mermaid diagram strings.
-
-        A diagram is considered valid if it:
-        1. Starts with a recognised Mermaid diagram-type keyword.
-        2. Contains at least one proper node declaration (NodeID[Label]) or
-           a labelled edge (A --> B), indicating a real graph was produced.
-
-        If the AI emits prose, a plain label with no syntax, or a truncated
-        string, this returns False and the caller should null out the field
-        rather than storing something guaranteed to render badly.
-        """
-        import re
-        if not diagram or not isinstance(diagram, str):
-            return False
-        trimmed = diagram.strip()
-        _VALID_PREFIXES = (
-            "graph ", "graph\n",
-            "flowchart ", "flowchart\n",
-            "sequenceDiagram", "classDiagram",
-            "stateDiagram", "erDiagram",
-            "gantt", "pie", "mindmap",
-        )
-        if not any(trimmed.lower().startswith(p.lower()) for p in _VALID_PREFIXES):
-            return False
-        # Must contain at least one node definition (NodeId[Label]) or arrow edge
-        has_node = bool(re.search(r"\w+\s*[\[\(\{]", trimmed))
-        has_edge = bool(re.search(r"-->|->>|--|\.\.\.>", trimmed))
-        return has_node or has_edge
 
     def _build_fallback_lesson_plan(
         self, session: StudySession, rag_citations: List[Dict[str, Any]]
@@ -1757,14 +1738,15 @@ class StudyPlannerService:
                             rag_context_lines = []
                             for c in lu_chunks:
                                 pg = c.metadata_json.get("page") if c.metadata_json else 1
+                                chunk_text = c.content or ""
                                 rag_context_lines.append(
-                                    f"--- Learning Unit: {lu.title} (Page {pg}) ---\n{c.content[:1000]}"
+                                    f"--- Learning Unit: {lu.title} (Page {pg}) ---\n{chunk_text[:1000]}"
                                 )
                                 rag_citations.append({
                                     "resource_id": str(c.resource_id),
                                     "resource_name": lu.title,
                                     "title": lu.title,
-                                    "snippet": c.content[:300],
+                                    "snippet": chunk_text[:300],
                                     "chunk_index": c.chunk_index,
                                     "page_number": pg,
                                 })
@@ -1892,7 +1874,8 @@ class StudyPlannerService:
                 session.lesson_plan_json = lesson_output.model_dump()
                 session.lesson_status = "GENERATED"
                 await self.repo.update_session(session)
-                return StudySessionResponse.model_validate(session)
+                await self.db.commit()
+                return self._format_session(session)
 
             # Retrieve grounded RAG context with hard Learning Unit scoping.
             # top_k=5: 5 chunks are enough context for one lesson and keeps the
@@ -2587,49 +2570,4 @@ class StudyPlannerService:
         await self.db.commit()
         return created_units
 
-    async def get_workspace_learning_units(
-        self, workspace_id: uuid.UUID, student_id: uuid.UUID
-    ) -> List[LearningUnitResponse]:
-        """Fetch ordered Learning Units for workspace with student progress (5d)."""
-        from app.db.models.learning_unit import LearningUnit, StudentLearningUnitProgress
-        stmt = select(LearningUnit).where(
-            LearningUnit.teaching_workspace_id == workspace_id,
-            LearningUnit.is_active == True,
-            LearningUnit.is_deleted == False,
-        ).order_by(LearningUnit.order_index.asc())
-        res = await self.db.execute(stmt)
-        lus = list(res.scalars().all())
 
-        if not lus:
-            return []
-
-        lu_ids = [lu.id for lu in lus]
-        prog_stmt = select(StudentLearningUnitProgress).where(
-            StudentLearningUnitProgress.student_id == student_id,
-            StudentLearningUnitProgress.learning_unit_id.in_(lu_ids),
-        )
-        prog_res = await self.db.execute(prog_stmt)
-        prog_map = {p.learning_unit_id: p for p in prog_res.scalars().all()}
-
-        output = []
-        for lu in lus:
-            p = prog_map.get(lu.id)
-            output.append(
-                LearningUnitResponse(
-                    id=lu.id,
-                    teaching_workspace_id=lu.teaching_workspace_id,
-                    source_material_id=lu.source_material_id,
-                    order_index=lu.order_index,
-                    title=lu.title,
-                    summary=lu.summary,
-                    learning_outcomes=lu.learning_outcomes or [],
-                    start_page=lu.start_page,
-                    end_page=lu.end_page,
-                    source_chunk_ids=lu.source_chunk_ids or [],
-                    estimated_study_minutes=lu.estimated_study_minutes,
-                    is_active=lu.is_active,
-                    status=p.status if p else "NOT_STARTED",
-                    confidence_score=p.confidence_score if p else None,
-                )
-            )
-        return output

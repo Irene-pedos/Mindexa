@@ -1,10 +1,9 @@
 "use client";
 
 import React, { Suspense } from "react";
-import { useSearchParams, useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { AISupportChat } from "@/components/mindexa/student/ai-support-chat";
-import { Button } from "@/components/ui/button";
-import { ChevronLeft, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 
 import {
@@ -19,7 +18,6 @@ import Link from "next/link";
 
 function TutorContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
   const topic = searchParams.get("topic") || "";
   const tab = (searchParams.get("tab") as "support" | "revision") || undefined;
 

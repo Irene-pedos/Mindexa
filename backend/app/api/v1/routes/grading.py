@@ -68,7 +68,11 @@ async def get_assessment_classes_stats(
     Used to track grading progress (Pending, Reviewed, Released) per class section.
     """
     service = GradingService(db)
-    data = await service.get_assessment_class_stats(assessment_id)
+    data = await service.get_assessment_class_stats(
+        assessment_id=assessment_id,
+        current_user=current_user,
+        lecturer_id=current_user.id,
+    )
     return AssessmentClassStatsResponse.model_validate(data)
 
 
@@ -88,7 +92,12 @@ async def get_class_ai_summary_endpoint(
     Used by lecturers to review overall performance before individual grading.
     """
     service = GradingService(db)
-    data = await service.get_class_ai_summary(assessment_id, class_id)
+    data = await service.get_class_ai_summary(
+        assessment_id=assessment_id,
+        class_id=class_id,
+        current_user=current_user,
+        lecturer_id=current_user.id,
+    )
     return ClassAiSummaryResponse.model_validate(data)
 
 

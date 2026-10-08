@@ -36,6 +36,7 @@ USAGE (in main.py):
 
 from __future__ import annotations
 
+import asyncio
 import math
 import time
 
@@ -61,6 +62,9 @@ _ROUTE_TIERS: list[tuple[str, str]] = [
     ("/api/v1/auth/refresh", "refresh"),
     # AI — quota protection
     ("/api/v1/student/ai/support", "student_ai_support"),
+    ("/api/v1/ai/generate", "ai_heavy"),
+    ("/api/v1/student/ai", "ai_heavy"),
+    ("/api/v1/lecturer/ai", "ai_heavy"),
     # Health / metrics — exempt
     ("/health", "exempt"),
     ("/metrics", "exempt"),
@@ -75,6 +79,15 @@ def _resolve_tier(path: str) -> str:
     for prefix, tier in _ROUTE_TIERS:
         if path.startswith(prefix):
             return tier
+
+    # AI guided study sessions & generation under study-plans
+    if "/students/study-plans" in path:
+        if "/guided" in path or "/generate" in path or "/knowledge-check" in path:
+            return "ai_heavy"
+
+    if "/study-reader" in path and ("/generate" in path or "/ai" in path):
+        return "ai_heavy"
+
     return _DEFAULT_TIER
 
 
@@ -92,6 +105,8 @@ def _limit_for_tier(tier: str) -> int:
         return settings.RATE_LIMIT_REFRESH_PER_MINUTE
     if tier == "student_ai_support":
         return settings.RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR
+    if tier == "ai_heavy":
+        return settings.RATE_LIMIT_AI_PER_MINUTE
     return settings.RATE_LIMIT_DEFAULT_PER_MINUTE
 
 
@@ -153,13 +168,31 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 window_seconds=window_seconds,
             )
         except Exception as exc:
-            # Redis unavailable — fail open, log a warning
             logger.warning(
-                "Rate limiter Redis error (fail-open): %s",
+                "Rate limiter Redis error (using in-memory fallback): %s",
                 str(exc),
                 extra={"client_ip": client_ip, "tier": tier},
             )
-            return await call_next(request)
+            if getattr(settings, "RATE_LIMIT_FAIL_CLOSED_ON_AI", False) and tier == "ai_heavy":
+                return JSONResponse(
+                    status_code=503,
+                    content={
+                        "error": {
+                            "code": "SERVICE_UNAVAILABLE",
+                            "message": "AI services temporarily rate-limited due to capacity protection.",
+                        }
+                    },
+                )
+            try:
+                current_count, window_remaining = await _check_in_memory_rate_limit(
+                    ip=client_ip,
+                    tier=tier,
+                    limit=limit,
+                    window_seconds=window_seconds,
+                )
+            except Exception as fallback_exc:
+                logger.error("Rate limiter fallback failed: %s", str(fallback_exc))
+                return await call_next(request)
 
         # Add rate limit headers to every response
         headers = {
@@ -238,5 +271,40 @@ async def _check_rate_limit(
     # Set TTL on first increment so the key auto-expires
     if count == 1:
         await redis.expire(key, window_seconds + 5)
+
+    return count, window_remaining
+
+
+# ---------------------------------------------------------------------------
+# IN-MEMORY FALLBACK COUNTER LOGIC (WHEN REDIS IS UNAVAILABLE)
+# ---------------------------------------------------------------------------
+
+_fallback_lock = asyncio.Lock()
+_fallback_store: dict[str, tuple[int, float]] = {}
+_MAX_FALLBACK_KEYS = 10000
+
+
+async def _check_in_memory_rate_limit(
+    ip: str, tier: str, limit: int, window_seconds: int = 60
+) -> tuple[int, int]:
+    """
+    In-memory fallback sliding window counter when Redis is degraded or down.
+    Ensures that rate limits are still strictly enforced locally.
+    """
+    now = time.time()
+    window_bucket = math.floor(now / window_seconds)
+    window_start = window_bucket * window_seconds
+    window_remaining = max(1, int(window_seconds - (now - window_start)))
+    key = f"rl:{tier}:{ip}:{window_bucket}"
+
+    async with _fallback_lock:
+        if len(_fallback_store) > _MAX_FALLBACK_KEYS:
+            expired = [k for k, (_, exp) in _fallback_store.items() if exp < now]
+            for k in expired:
+                _fallback_store.pop(k, None)
+
+        count, _ = _fallback_store.get(key, (0, 0.0))
+        count += 1
+        _fallback_store[key] = (count, now + window_seconds + 5)
 
     return count, window_remaining

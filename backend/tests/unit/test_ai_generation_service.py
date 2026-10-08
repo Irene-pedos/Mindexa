@@ -301,3 +301,48 @@ async def test_generate_questions_batch_with_aliases_and_no_workspace():
         res2 = await service.generate_questions_batch(req_with_aliases, current_user)
         assert res2 is not None
         service._repo.create_batch.assert_called()
+
+
+@pytest.mark.asyncio
+async def test_assessment_generator_agent_trims_large_rag_and_sizes_tokens():
+    from app.agents.assessment_generator_agent import AssessmentGeneratorAgent
+    from app.core.ai.providers import AICompletionResponse
+
+    gateway = AsyncMock()
+    gateway.complete = AsyncMock(
+        return_value=AICompletionResponse(
+            content='[{"question": "What is P = NP?", "options": [{"text": "A", "is_correct": true}, {"text": "B", "is_correct": false}, {"text": "C", "is_correct": false}, {"text": "D", "is_correct": false}], "explanation": "Explanation here", "difficulty": "hard", "bloom_level": "Analyze", "source_reference": "Notes"}]',
+            provider="groq",
+            model="openai/gpt-oss-120b",
+            prompt_tokens=1500,
+            completion_tokens=200,
+            total_tokens=1700,
+        )
+    )
+
+    agent = AssessmentGeneratorAgent(gateway)
+    # Huge course material context (e.g., 50,000 characters)
+    huge_context = "Discrete Mathematics notes content with logic and graphs. " * 1000
+
+    questions, prompt = await agent.generate(
+        lecturer_id=uuid.uuid4(),
+        question_type="mcq",
+        difficulty="hard",
+        count=3,
+        subject="Discrete Mathematics",
+        topic="Complexity",
+        course_material_context=huge_context,
+    )
+
+    assert len(questions) == 1
+    assert questions[0].question == "What is P = NP?"
+
+    # Verify that the completion request sent to gateway had safely bounded max_tokens and trimmed RAG context
+    call_args = gateway.complete.call_args[0]
+    completion_req = call_args[0]
+    # For 3 MCQs: 200 * 3 + 400 = 1000 max_tokens (<= 2400)
+    assert completion_req.max_tokens <= 1200
+    # The prompt sent in system message should not contain 50k chars of unconstrained text
+    system_msg = completion_req.messages[0].content
+    assert len(system_msg) < 30000
+

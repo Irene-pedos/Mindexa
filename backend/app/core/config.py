@@ -95,7 +95,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_REFRESH_PER_MINUTE: int = 20
     RATE_LIMIT_DEFAULT_PER_MINUTE: int = 120
+    RATE_LIMIT_AI_PER_MINUTE: int = 20
     RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR: int = 30
+    RATE_LIMIT_FAIL_CLOSED_ON_AI: bool = False
 
     # ─── Database ─────────────────────────────────────────────────────────────
     POSTGRES_SERVER: str = "localhost"

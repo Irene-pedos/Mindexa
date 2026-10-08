@@ -288,12 +288,31 @@ async def test_page_check_submission_and_scoring():
 
 
 @pytest.mark.asyncio
-async def test_generate_page_check_student_resource():
+async def test_generate_page_check_student_resource(monkeypatch):
     mock_db = AsyncMock()
     # Mock db.execute returning empty chunks
     mock_result = MagicMock()
     mock_result.scalars.return_value.all.return_value = []
     mock_db.execute = AsyncMock(return_value=mock_result)
+
+    from app.schemas.study_reader import PageCheckQuestion, PageCheckResponse
+    mock_agent = AsyncMock()
+    mock_agent.generate_page_check.return_value = PageCheckResponse(
+        page_number=2,
+        questions=[
+            PageCheckQuestion(
+                id="q1",
+                question="What is page paging?",
+                options=["Memory mapping", "Disk swap", "Cache", "Thread"],
+                correct_option_index=0,
+                explanation="Page text explanation.",
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "app.services.study_reader_service.StudyReaderAgent",
+        lambda *args, **kwargs: mock_agent,
+    )
 
     service = StudyReaderService(mock_db)
     source_id = uuid.uuid4()

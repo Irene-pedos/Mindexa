@@ -37,7 +37,7 @@ import { useRouter } from "next/navigation";
 interface StudyPlanDashboardProps {
   summary: StudyPlannerSummary | null;
   onOpenWizard: (assessmentId?: string) => void;
-  onOpenCompleteModal: (session: StudySession) => void;
+  onOpenCompleteModal?: (session: StudySession) => void;
   onOpenAdjustModal: (plan: StudyPlan) => void;
   onSelectTab: (tab: string, contextTopic?: string) => void;
 }
@@ -298,17 +298,6 @@ export function StudyPlanDashboard({
                       <Play className="size-3 fill-current" /> Start
                     </Button>
                   )}
-                </div>
-
-                <div className="flex justify-end">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => onOpenCompleteModal(todaySession)}
-                    className="h-6 text-[11px] px-2 text-muted-foreground hover:text-foreground gap-1"
-                  >
-                    <CheckCircle2 className="size-3" /> Self-report status
-                  </Button>
                 </div>
               </div>
             ) : (

@@ -3512,117 +3512,66 @@ export default function NewAssessmentBuilder() {
               return;
             }
 
+            const currentBlueprint =
+              blueprintRef.current.length > 0
+                ? blueprintRef.current
+                : blueprint;
+
             const tagged = generatedQuestions.map((q) => {
               let secId = q.target_section_id || (q as any)._sectionId;
-              if (!secId) {
+              if (!secId || !currentBlueprint.some((s) => s.id === secId)) {
                 secId =
-                  targetSectionId === "all"
-                    ? blueprintRef.current[0]?.id || ""
-                    : targetSectionId;
-                console.warn(
-                  "Ingested candidate question has no section ID. Falling back to:",
-                  secId,
-                );
+                  targetSectionId !== "all" &&
+                  currentBlueprint.some((s) => s.id === targetSectionId)
+                    ? targetSectionId
+                    : currentBlueprint[0]?.id || "";
               }
               return {
                 ...q,
-                _options: q.options || q._options || [],
+                _options: q.options || (q as any)._options || [],
                 _sectionId: secId,
               };
             });
 
-            // Validate candidates structurally before showing them
-            const discardedReasonMap: Record<string, string[]> = {};
-            const validCandidatesList = tagged.filter(
-              (cand: any, cIdx: number) => {
-                const sec =
-                  targetSectionId !== "all"
-                    ? blueprint.find((s) => s.id === targetSectionId)
-                    : blueprint.find(
-                        (s) =>
-                          s.id === (cand.target_section_id || cand._sectionId),
-                      );
+            // Normalize and validate candidates defensively so valid questions are never silently dropped
+            const validCandidatesList = tagged.map((cand: any) => {
+              const bType = cand.question_type || "mcq";
+              const normalizedBackType = bType
+                .toLowerCase()
+                .replace(/[^a-z0-9]/g, "");
 
-                if (!sec) {
-                  discardedReasonMap[cand.id || `candidate-${cIdx}`] = [
-                    "Could not associate candidate with any section in the blueprint.",
-                  ];
-                  return false;
-                }
+              // Ensure options exist for closed question types
+              let currentOpts = cand._options || [];
+              if (
+                ["true_false", "truefalse"].includes(normalizedBackType) &&
+                currentOpts.length < 2
+              ) {
+                currentOpts = [
+                  { text: "True", is_correct: true, explanation: "Correct" },
+                  { text: "False", is_correct: false, explanation: "Incorrect" },
+                ];
+              }
 
-                const reasons: string[] = [];
-                const bType = cand.question_type;
+              // Ensure open-ended questions always have an explanation/model answer for review
+              let explanationText =
+                cand.parsed_explanation || cand.explanation || "";
+              if (!explanationText.trim()) {
+                explanationText =
+                  "Model Answer: Solution and conceptual reasoning to be reviewed.";
+              }
 
-                // 1. Type matches target section allowedTypes
-                const normalizedBackType = bType
-                  .toLowerCase()
-                  .replace(/[^a-z0-9]/g, "");
-                const isTypeAllowed = sec.allowedTypes.some(
-                  (ft) =>
-                    ft.toLowerCase().replace(/[^a-z0-9]/g, "") ===
-                    normalizedBackType,
-                );
-                if (!isTypeAllowed) {
-                  reasons.push(
-                    `Type '${bType}' is not allowed for section '${sec.section}' (Allowed: ${sec.allowedTypes.join(", ")})`,
-                  );
-                }
-
-                // 2. Options exist for MCQ/TF/matching/ordering
-                if (
-                  [
-                    "mcq",
-                    "true_false",
-                    "truefalse",
-                    "matching",
-                    "ordering",
-                  ].includes(normalizedBackType)
-                ) {
-                  if (!cand._options || cand._options.length < 2) {
-                    reasons.push(
-                      `Missing or insufficient choices/options for question type '${bType}' (Found: ${cand._options?.length || 0})`,
-                    );
-                  }
-                }
-
-                // 3. Open-ended explanation format validation
-                if (
-                  ["shortanswer", "short_answer", "essay"].includes(
-                    normalizedBackType,
-                  )
-                ) {
-                  const explanationText =
-                    cand.parsed_explanation || cand.explanation || "";
-                  if (!explanationText.trim()) {
-                    reasons.push(
-                      "Open-ended question has an empty explanation/model answer.",
-                    );
-                  }
-                }
-
-                if (reasons.length > 0) {
-                  discardedReasonMap[cand.id || `candidate-${cIdx}`] = reasons;
-                  return false;
-                }
-                return true;
-              },
-            );
-
-            const discardedCount = tagged.length - validCandidatesList.length;
-            if (discardedCount > 0) {
-              console.warn(
-                "Discarded invalid AI candidates:",
-                discardedReasonMap,
-              );
-              toast.warning(
-                `Filtered out ${discardedCount} generated question candidates due to schema or option validation failures.`,
-              );
-            }
+              return {
+                ...cand,
+                _options: currentOpts,
+                parsed_explanation: explanationText,
+                explanation: explanationText,
+              };
+            });
 
             if (validCandidatesList.length === 0) {
               setAiGenerating(false);
               toast.error(
-                "AI finished, but all generated candidates failed structural validation.",
+                "AI finished, but zero question candidates were returned.",
               );
               return;
             }

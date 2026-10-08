@@ -515,7 +515,7 @@ class GradingService:
         from app.core.exceptions import AuthorizationError
         from app.db.models.academic import Course, TeachingAssignment, TeachingWorkspace
         from app.db.models.assessment import Assessment, AssessmentSupervisor
-        from sqlalchemy import or_
+        from sqlalchemy import and_, or_
 
         auth_stmt = (
             select(Assessment.id)
@@ -529,7 +529,11 @@ class GradingService:
                         .where(
                             or_(
                                 TeachingWorkspace.created_by_id == lecturer_id,
-                                TeachingAssignment.lecturer_id == lecturer_id,
+                                and_(
+                                    TeachingAssignment.lecturer_id == lecturer_id,
+                                    TeachingAssignment.is_active == True,
+                                    TeachingAssignment.is_deleted == False,
+                                ),
                             ),
                             TeachingWorkspace.is_deleted == False,
                         )
@@ -538,10 +542,14 @@ class GradingService:
                         select(TeachingAssignment.course_id).where(
                             TeachingAssignment.lecturer_id == lecturer_id,
                             TeachingAssignment.is_active == True,
+                            TeachingAssignment.is_deleted == False,
                         )
                     ),
                     Assessment.id.in_(
-                        select(AssessmentSupervisor.assessment_id).where(AssessmentSupervisor.supervisor_id == lecturer_id)
+                        select(AssessmentSupervisor.assessment_id).where(
+                            AssessmentSupervisor.supervisor_id == lecturer_id,
+                            AssessmentSupervisor.is_deleted == False,
+                        )
                     ),
                 )
             )
@@ -1214,7 +1222,7 @@ class GradingService:
         """
         from app.db.models.academic import Course, TeachingAssignment, TeachingWorkspace
         from app.db.models.assessment import Assessment, AssessmentSupervisor
-        from sqlalchemy import or_, select
+        from sqlalchemy import and_, or_, select
 
         # 1. Find lecturer's assessment IDs (created, workspace owner, assigned course, or supervisor)
         workspace_subq = (
@@ -1223,7 +1231,11 @@ class GradingService:
             .where(
                 or_(
                     TeachingWorkspace.created_by_id == lecturer_id,
-                    TeachingAssignment.lecturer_id == lecturer_id,
+                    and_(
+                        TeachingAssignment.lecturer_id == lecturer_id,
+                        TeachingAssignment.is_active == True,
+                        TeachingAssignment.is_deleted == False,
+                    ),
                 ),
                 TeachingWorkspace.is_deleted == False,
             )
@@ -1284,11 +1296,15 @@ class GradingService:
     # -----------------------------------------------------------------------
 
     async def get_assessment_class_stats(
-        self, assessment_id: uuid.UUID
+        self,
+        assessment_id: uuid.UUID,
+        current_user: Any = None,
+        lecturer_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """
         Compute class-level grading statistics for an assessment.
         Uses explicit joins and fallbacks so lecturers always see their submissions.
+        Enforces lecturer scoping check on the assessment.
         """
         from app.db.enums import EnrollmentStatus, GradingQueueStatus
         from app.db.models.academic import ClassSection, StudentEnrollment, TeachingWorkspace
@@ -1296,7 +1312,16 @@ class GradingService:
                                               AssessmentTargetSection)
         from app.db.models.attempt import AssessmentAttempt, GradingQueueItem
         from app.db.models.result import AssessmentResult
+        from app.services.result_service import ResultService
         from sqlalchemy import func, select
+
+        if current_user is not None or lecturer_id is not None:
+            res_service = ResultService(self.db)
+            await res_service.assert_lecturer_assessment_access(
+                assessment_id=assessment_id,
+                user=current_user,
+                lecturer_id=lecturer_id,
+            )
 
         # 1. Load assessment
         assessment = await self.db.get(Assessment, assessment_id)
@@ -1318,6 +1343,7 @@ class GradingService:
             )
             .where(
                 AssessmentTargetSection.assessment_id == assessment_id,
+                AssessmentTargetSection.is_deleted == False,
                 ClassSection.is_deleted == False,
             )
         )
@@ -1481,11 +1507,16 @@ class GradingService:
         }
 
     async def get_class_ai_summary(
-        self, assessment_id: uuid.UUID, class_id: uuid.UUID
+        self,
+        assessment_id: uuid.UUID,
+        class_id: uuid.UUID,
+        current_user: Any = None,
+        lecturer_id: uuid.UUID | None = None,
     ) -> dict[str, Any]:
         """
         Generate/Fetch an AI-powered summary for a class's performance in an assessment.
         Computes dynamic pedagogical insights based on actual student result breakdown and integrity risk scores.
+        Enforces lecturer scoping check and section association check.
         """
         import uuid as std_uuid
         from datetime import UTC, datetime
@@ -1497,11 +1528,25 @@ class GradingService:
         from app.db.models.auth import User, UserProfile
         from app.db.models.question import Question
         from app.db.models.result import AssessmentResult, ResultBreakdown
+        from app.services.result_service import ResultService
         from sqlalchemy import func, or_, select
+
+        res_service = ResultService(self.db)
+        if current_user is not None or lecturer_id is not None:
+            await res_service.assert_lecturer_assessment_access(
+                assessment_id=assessment_id,
+                user=current_user,
+                lecturer_id=lecturer_id,
+            )
 
         section = await self.db.get(ClassSection, class_id)
         if not section:
             raise NotFoundError("Class Section", str(class_id))
+
+        await res_service.assert_class_section_belongs_to_assessment(
+            assessment_id=assessment_id,
+            class_section_id=class_id,
+        )
 
         # Get assessment and course details
         asmt = await self.db.get(Assessment, assessment_id)

@@ -44,12 +44,12 @@ export const authApi = {
     });
     
     if (data.access_token) {
-      // Sync memory and localStorage via client.ts helper
       setAccessToken(data.access_token);
       
       if (typeof window !== "undefined") {
         localStorage.setItem("user", JSON.stringify(data.user));
-        localStorage.setItem("refreshToken", data.refresh_token);
+        localStorage.removeItem("refreshToken");
+        localStorage.removeItem("accessToken");
       }
     }
     return data;
@@ -73,6 +73,7 @@ export const authApi = {
       setAccessToken(null);
       if (typeof window !== "undefined") {
         localStorage.removeItem("user");
+        localStorage.removeItem("accessToken");
         localStorage.removeItem("refreshToken");
       }
     }

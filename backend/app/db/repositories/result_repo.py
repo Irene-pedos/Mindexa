@@ -291,10 +291,13 @@ class ResultRepository:
         count_result = await self.db.execute(count_query.where(*filters))
         total = count_result.scalar_one()
 
+        from app.db.models.assessment import Assessment
+
         select_query = (
-            select(AssessmentResult, UserProfile.display_name)
+            select(AssessmentResult, UserProfile.display_name, Assessment.title, Assessment.academic_year)
             .join(User, User.id == AssessmentResult.student_id)
-            .join(UserProfile, UserProfile.user_id == User.id)
+            .outerjoin(UserProfile, UserProfile.user_id == User.id)
+            .outerjoin(Assessment, Assessment.id == AssessmentResult.assessment_id)
         )
         if class_section_id:
             select_query = select_query.join(
@@ -311,15 +314,15 @@ class ResultRepository:
         )
         
         items = []
-        for r, name in result.all():
+        for r, name, title, year in result.all():
             r_dict = {
                 "id": r.id,
                 "attempt_id": r.attempt_id,
                 "student_id": r.student_id,
                 "student_name": name,
                 "assessment_id": r.assessment_id,
-                "assessment_title": r.assessment_title,
-                "academic_year": r.academic_year,
+                "assessment_title": title,
+                "academic_year": year,
                 "total_score": r.total_score,
                 "max_score": r.max_score,
                 "percentage": r.percentage,

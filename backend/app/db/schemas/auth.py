@@ -117,7 +117,10 @@ class RefreshRequest(MindexaSchema):
     Both modes are supported at the route level.
     """
 
-    refresh_token: str = Field(description="Valid JWT refresh token.")
+    refresh_token: str | None = Field(
+        default=None,
+        description="Valid JWT refresh token (optional if provided via HttpOnly cookie).",
+    )
 
 
 class LogoutRequest(MindexaSchema):

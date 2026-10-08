@@ -195,6 +195,11 @@ class AIGateway:
                         errors.append(f"{provider.name}: Rate limit exceeded after {attempt} retries ({exc})")
                         break  # Fallback to next provider
                     attempt += 1
+                    
+                    # If error was caused by single-request TPM overflow, dynamically reduce completion tokens
+                    if ("Request too large" in str(exc) or "TPM" in str(exc) or "413" in str(exc)) and request.max_tokens and request.max_tokens > 800:
+                        request.max_tokens = max(800, int(request.max_tokens * 0.75))
+
                     # Prefer the provider's own Retry-After value; fall back to
                     # exponential back-off with a small jitter.
                     if exc.retry_after is not None:

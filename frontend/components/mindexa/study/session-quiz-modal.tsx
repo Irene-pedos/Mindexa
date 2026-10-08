@@ -109,8 +109,13 @@ export function SessionQuizModal({
   const HAS_BLANK_MARKER = /_{2,}/;
   const rawFillBlank =
     qType === "FILL_BLANKS" ||
+    qType === "FILL_BLANK" ||
+    qType === "FILL_IN_BLANK" ||
     (currentQ?.question_text ? HAS_BLANK_MARKER.test(currentQ.question_text) : false);
-  const isFillBlank = Boolean(rawFillBlank);
+  // isFillBlank gates the DnD renderer — only true when the question text actually has __ markers
+  const isFillBlank = Boolean(
+    currentQ?.question_text && HAS_BLANK_MARKER.test(currentQ.question_text),
+  );
 
   const handleModalClose = (isOpen: boolean) => {
     if (!isOpen) {
@@ -214,7 +219,7 @@ export function SessionQuizModal({
                   Question {currentIdx + 1} of {questions.length}
                 </Badge>
                 <Badge variant="secondary" className="text-[10px] uppercase font-bold text-muted-foreground">
-                  {qType.replace("_", " ")}
+                  {qType.replaceAll("_", " ")}
                 </Badge>
               </div>
               <span className="text-muted-foreground text-[11px]">

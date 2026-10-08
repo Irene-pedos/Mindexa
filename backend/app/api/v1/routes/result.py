@@ -17,10 +17,17 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import func, not_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.exceptions import NotFoundError
-from app.db.models.auth import User
+from app.core.exceptions import NotFoundError, ValidationError
+from app.db.enums import AttemptStatus, ResultReleaseMode
+from app.db.models.academic import StudentEnrollment
+from app.db.models.assessment import Assessment
+from app.db.models.attempt import AssessmentAttempt, StudentResponse, SubmissionGrade
+from app.db.models.auth import User, UserProfile
+from app.db.models.result import AssessmentResult
 from app.db.repositories.result_repo import ResultRepository
 from app.db.session import get_db
 from app.dependencies.auth import require_lecturer_or_admin, require_student
@@ -83,14 +90,6 @@ async def list_my_results(
     also includes submitted attempts whose marks are still under review or
     held for integrity audit, without exposing unreleased scores.
     """
-    from sqlalchemy import func, not_, select
-    from sqlalchemy.orm import selectinload
-
-    from app.db.models.assessment import Assessment
-    from app.db.models.attempt import AssessmentAttempt
-    from app.db.models.result import AssessmentResult
-    from app.db.enums import AttemptStatus
-
     if not include_pending:
         stmt = (
             select(AssessmentResult)
@@ -267,9 +266,14 @@ async def get_result_for_lecturer(
     """
     Lecturers and admins can view results regardless of release status.
     Includes per-question breakdown and integrity hold status.
+    Scoped to the lecturer's own assessments (or institutional admin access).
     """
     service = ResultService(db)
-    result = await service.get_result_for_lecturer(attempt_id=attempt_id)
+    result = await service.get_result_for_lecturer(
+        attempt_id=attempt_id,
+        current_user=current_user,
+        lecturer_id=current_user.id,
+    )
     return AssessmentResultResponse.model_validate(result)
 
 
@@ -290,6 +294,12 @@ async def list_results_for_assessment(
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ResultListResponse:
+    service = ResultService(db)
+    await service.assert_lecturer_assessment_access(
+        assessment_id=assessment_id,
+        user=current_user,
+        lecturer_id=current_user.id,
+    )
     repo = ResultRepository(db)
     items, total = await repo.list_by_assessment(
         assessment_id=assessment_id,
@@ -331,8 +341,15 @@ async def calculate_result(
     result, created = await service.calculate_result(
         attempt_id=attempt_id,
         allow_partial=allow_partial,
+        current_user=current_user,
+        lecturer_id=current_user.id,
     )
-    enriched = await service.get_result_for_lecturer(attempt_id=result.id)
+    enriched = await service.get_result_for_lecturer(
+        result_id=result.id,
+        attempt_id=attempt_id,
+        current_user=current_user,
+        lecturer_id=current_user.id,
+    )
     return AssessmentResultResponse.model_validate(enriched)
 
 
@@ -358,11 +375,17 @@ async def release_results(
     Results with integrity_hold=True are skipped and reported in the response.
     """
     service = ResultService(db)
+    await service.assert_lecturer_assessment_access(
+        assessment_id=body.assessment_id,
+        user=current_user,
+        lecturer_id=current_user.id,
+    )
     release_data = await service.release_results(
         assessment_id=body.assessment_id,
         released_by_id=current_user.id,
         attempt_ids=body.attempt_ids,
         class_section_id=body.class_section_id,
+        current_user=current_user,
     )
     return ResultReleaseResponse(**release_data)
 
@@ -382,10 +405,16 @@ async def trigger_immediate_release(
     Used by the immediate release workflow in the lecturer UI.
     """
     service = ResultService(db)
+    await service.assert_lecturer_assessment_access(
+        assessment_id=assessment_id,
+        user=current_user,
+        lecturer_id=current_user.id,
+    )
     release_data = await service.release_results(
         assessment_id=assessment_id,
         released_by_id=current_user.id,
         attempt_ids=None, # None means all eligible
+        current_user=current_user,
     )
     return ResultReleaseResponse(**release_data)
 
@@ -404,9 +433,12 @@ async def update_release_policy(
     """
     Update the release policy (manual, immediate, scheduled) for an assessment.
     """
-    from app.core.exceptions import ValidationError
-    from app.db.enums import ResultReleaseMode
-    from app.db.models.assessment import Assessment
+    service = ResultService(db)
+    await service.assert_lecturer_assessment_access(
+        assessment_id=assessment_id,
+        user=current_user,
+        lecturer_id=current_user.id,
+    )
 
     # 1. Fetch assessment
     assessment = await db.get(Assessment, assessment_id)
@@ -469,6 +501,7 @@ async def clear_integrity_hold(
     await service.clear_integrity_hold(
         result_id=result_id,
         cleared_by_id=current_user.id,
+        current_user=current_user,
     )
     return {
         "message": "Integrity hold cleared. Result is now eligible for release.",
@@ -488,23 +521,28 @@ async def get_release_readiness_queue(
     current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> ReleaseQueueResponse:
-    from app.db.models.academic import StudentEnrollment
-    from app.db.models.auth import User as DBUser, UserProfile
-    from app.db.models.attempt import AssessmentAttempt, StudentResponse, SubmissionGrade
-    from app.db.models.result import AssessmentResult
-    from sqlalchemy import select, func
+    service = ResultService(db)
+    await service.assert_lecturer_assessment_access(
+        assessment_id=assessment_id,
+        user=current_user,
+        lecturer_id=current_user.id,
+    )
+    await service.assert_class_section_belongs_to_assessment(
+        assessment_id=assessment_id,
+        class_section_id=class_section_id,
+    )
 
     # 1. Fetch active enrollments with user display names
     stmt = (
         select(
-            DBUser.id,
-            DBUser.email,
+            User.id,
+            User.email,
             UserProfile.display_name,
             UserProfile.first_name,
             UserProfile.last_name,
         )
-        .outerjoin(UserProfile, UserProfile.user_id == DBUser.id)
-        .join(StudentEnrollment, StudentEnrollment.student_id == DBUser.id)
+        .outerjoin(UserProfile, UserProfile.user_id == User.id)
+        .join(StudentEnrollment, StudentEnrollment.student_id == User.id)
         .where(
             StudentEnrollment.class_section_id == class_section_id,
             StudentEnrollment.is_deleted == False
@@ -612,7 +650,11 @@ async def get_release_readiness_queue(
         total_score = result.total_score if result else None
         max_score = result.max_score if result else None
         percentage = result.percentage if result else None
-        letter_grade = result.letter_grade.value if (result and result.letter_grade) else None
+        letter_grade = (
+            getattr(result.letter_grade, "value", result.letter_grade)
+            if (result and result.letter_grade)
+            else None
+        )
 
         # This student's OWN grading completeness — independent of classmates.
         is_individually_fully_graded = has_submission and (
