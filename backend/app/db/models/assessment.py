@@ -45,7 +45,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, UniqueConstraint, Enum as SA_Enum
+from sqlalchemy import Column, DateTime, ForeignKey, Text, UniqueConstraint, Enum as SA_Enum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -58,9 +58,12 @@ from app.db.enums import (
     GroupAssignmentMode,
     GradingMode,
     LanguageEnum,
+    OverAnswerPolicy,
     QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
+    ScheduleState,
+    SectionKind,
     SupervisorRole,
 )
 from app.db.mixins import (
@@ -77,9 +80,10 @@ from app.db.models.integrity import SupervisionSession
 ASSESSMENT_WIZARD_STEPS: int = 6
 
 if TYPE_CHECKING:
-    from app.db.models.academic import ClassSection, Course
+    from app.db.models.academic import ClassSection, Course, Subject, TeachingWorkspace
     from app.db.models.attempt import (
         AssessmentAttempt,
+        AttemptSectionSelection,
         GroupAssessmentMaterial,
         GroupSubmission,
         StudentGroup,
@@ -88,6 +92,13 @@ if TYPE_CHECKING:
         SupervisionSession,
     )
     from app.db.models.question import AIGenerationBatch, AssessmentQuestion
+    from app.db.models.authoring import AssessmentCollaborator, AuthorDelegation
+    from app.db.models.moderation import (
+        AssessmentSeal,
+        AssessmentVersion,
+        ExamPrintJob,
+        ModerationReview,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -184,6 +195,24 @@ class Assessment(AuditedBaseModel, table=True):
         default=AssessmentStatus.DRAFT,
         nullable=False,
     )
+    over_answer_policy: OverAnswerPolicy = Field(
+        default=OverAnswerPolicy.FIRST_N,
+        sa_column=Column(
+            SA_Enum(OverAnswerPolicy, name="over_answer_policy", create_type=False),
+            nullable=False,
+            server_default="FIRST_N",
+            index=True,
+        ),
+    )
+    schedule_state: ScheduleState = Field(
+        default=ScheduleState.ON_TRACK,
+        sa_column=Column(
+            SA_Enum(ScheduleState, name="schedule_state", create_type=False),
+            nullable=False,
+            server_default="ON_TRACK",
+            index=True,
+        ),
+    )
 
     # ── Scoring ───────────────────────────────────────────────────────────────
 
@@ -230,6 +259,7 @@ class Assessment(AuditedBaseModel, table=True):
 
     # ── Assessment mode flags ─────────────────────────────────────────────────
 
+    anonymous_marking: bool = Field(default=False, nullable=False)
     ai_assistance_allowed: bool = Field(default=False, nullable=False)
     is_open_book: bool = Field(default=False, nullable=False)
     fullscreen_required: bool = Field(default=True, nullable=False)
@@ -389,15 +419,21 @@ class Assessment(AuditedBaseModel, table=True):
     )
 
     supervision_sessions: List["SupervisionSession"] = Relationship(
-    back_populates="assessment"
-)
+        back_populates="assessment"
+    )
+    collaborators: List["AssessmentCollaborator"] = Relationship(
+        back_populates="assessment"
+    )
+    delegations: List["AuthorDelegation"] = Relationship(
+        back_populates="assessment"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ASSESSMENT TARGET SECTION (junction)
 # ─────────────────────────────────────────────────────────────────────────────
 
-class AssessmentTargetSection(BaseModel, table=True):
+class AssessmentTargetSection(AuditedBaseModel, table=True):
     """
     Junction table: Assessment ↔ ClassSection (many-to-many).
 
@@ -580,12 +616,44 @@ class AssessmentSection(BaseModel, table=True):
 )
     ai_generation_prompt_hint: Optional[str] = Field(default=None, nullable=True)
 
+    # Phase 2 Choice Section fields
+    section_kind: SectionKind = Field(
+        default=SectionKind.MIXED,
+        sa_column=Column(
+            SA_Enum(SectionKind, name="section_kind", create_type=False),
+            nullable=False,
+            server_default="MIXED",
+            index=True,
+        ),
+    )
+    questions_to_answer: Optional[int] = Field(default=None, nullable=True)
+
+    @property
+    def pool_size(self) -> int:
+        """Derived count of non-deleted questions in the section (never stored)."""
+        from sqlalchemy import inspect
+        try:
+            insp = inspect(self)
+            if insp is not None and "assessment_questions" in insp.unloaded:
+                return 0
+        except Exception:
+            pass
+        try:
+            if self.assessment_questions:
+                return len([aq for aq in self.assessment_questions if not getattr(aq, "is_deleted", False)])
+        except Exception:
+            pass
+        return 0
+
     # ── Relationships ─────────────────────────────────────────────────────────
     assessment: Optional["Assessment"] = Relationship(back_populates="sections")
     blueprint_rules: List["AssessmentBlueprintRule"] = Relationship(
         back_populates="assessment_section"
     )
     assessment_questions: List["AssessmentQuestion"] = Relationship(
+        back_populates="assessment_section"
+    )
+    selections: List["AttemptSectionSelection"] = Relationship(
         back_populates="assessment_section"
     )
 
@@ -1016,3 +1084,32 @@ class RubricCriterionLevel(BaseModel, table=True):
 
     # ── Relationships ─────────────────────────────────────────────────────────
     criterion: Optional["RubricCriterion"] = Relationship(back_populates="levels")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# EXAM STRUCTURE TEMPLATE (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ExamStructureTemplate(BaseModel, table=True):
+    """
+    Pre-defined structure template for assessments (e.g. RP Summative 3-Section).
+    Provides blueprint configurations for summative and formative workflows.
+    """
+
+    __tablename__ = "exam_structure_template"
+
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_exam_structure_template_name"),
+    )
+
+    name: str = Field(nullable=False, max_length=255, index=True)
+    description: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    rules_json: dict = Field(
+        default_factory=dict,
+        sa_column=Column(JSONB, nullable=False),
+    )
+    is_default: bool = Field(default=False, nullable=False, index=True)
+    is_active: bool = Field(default=True, nullable=False, index=True)

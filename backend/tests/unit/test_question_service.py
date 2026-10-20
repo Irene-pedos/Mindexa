@@ -76,6 +76,7 @@ async def test_question_repo_create_with_table_and_ai_fields():
     from app.db.repositories.question_repo import QuestionRepository
     
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
     repo = QuestionRepository(mock_db)
     
     user_id = uuid.uuid4()

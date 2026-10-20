@@ -98,10 +98,34 @@ class AssessmentType(str, Enum):
 class AssessmentStatus(str, Enum):
     """Assessment lifecycle status."""
     DRAFT = "DRAFT"
+    PENDING_MODERATION = "PENDING_MODERATION"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    APPROVED = "APPROVED"
+    SEALED = "SEALED"
     PUBLISHED = "PUBLISHED"
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
     ARCHIVED = "ARCHIVED"
+
+
+class SectionKind(str, Enum):
+    """Assessment section question type composition."""
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
+    MIXED = "MIXED"
+
+
+class OverAnswerPolicy(str, Enum):
+    """Policy for grading when student answers more than N choice questions."""
+    FIRST_N = "FIRST_N"
+    BEST_N = "BEST_N"
+
+
+class ScheduleState(str, Enum):
+    """Assessment timeline tracking state."""
+    ON_TRACK = "ON_TRACK"
+    AT_RISK = "AT_RISK"
+    SHIFT_REQUIRED = "SHIFT_REQUIRED"
 
 
 class QuestionType(str, Enum):
@@ -213,3 +237,22 @@ class AIOutputStatus(str, Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     EDITED_AND_APPROVED = "EDITED_AND_APPROVED"
+
+
+class Duty(str, Enum):
+    """Institutional duty assignments (Phase 1)."""
+    MODERATOR = "MODERATOR"
+    EXAM_OFFICER = "EXAM_OFFICER"
+    DEPARTMENT_HEAD = "DEPARTMENT_HEAD"
+
+
+class PostApprovalEditMode(str, Enum):
+    """How post-approval assessment edits are handled."""
+    NOTIFY = "NOTIFY"
+    REQUIRE_REAPPROVAL = "REQUIRE_REAPPROVAL"
+
+
+class PostStartEditMode(str, Enum):
+    """How content edits are handled after student attempts have started."""
+    BLOCK = "BLOCK"
+    ALLOW_WITH_NOTICE = "ALLOW_WITH_NOTICE"

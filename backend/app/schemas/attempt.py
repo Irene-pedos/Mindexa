@@ -194,6 +194,21 @@ class AttemptSupervisorView(BaseModel):
     is_flagged: bool = False
     ip_address: Optional[str] = None
 
+
+class QuestionSelectRequest(BaseModel):
+    question_id: uuid.UUID
+
+
+class AttemptSectionSelectionResponse(BaseModel):
+    id: uuid.UUID
+    attempt_id: uuid.UUID
+    assessment_section_id: uuid.UUID
+    question_id: uuid.UUID
+    selected_order: int
+    selected_at: datetime
+
+    model_config = {"from_attributes": True}
+
 # Rebuild models to resolve deferred type evaluation
 AttemptQuestionOption.model_rebuild()
 AttemptQuestionResponse.model_rebuild()
@@ -202,3 +217,5 @@ AttemptListResponse.model_rebuild()
 AttemptStartResponse.model_rebuild()
 AttemptSummary.model_rebuild()
 AttemptSupervisorView.model_rebuild()
+AttemptSectionSelectionResponse.model_rebuild()
+

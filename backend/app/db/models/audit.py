@@ -195,6 +195,11 @@ class AuditLog(AppendOnlyModel, table=True):
         nullable=True,
         max_length=300,
     )
+    # Phase 4: Authoring delegation tracking
+    acting_under_delegation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        nullable=True,
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.enums import AttemptStatus, GradingMode
-from app.db.models.attempt import AssessmentAttempt
+from app.db.models.attempt import AssessmentAttempt, AttemptSectionSelection
 
 
 def _utcnow() -> datetime:
@@ -334,3 +334,83 @@ class AttemptRepository:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    # -----------------------------------------------------------------------
+    # AttemptSectionSelection (Phase 2 Choice Sections)
+    # -----------------------------------------------------------------------
+
+    async def get_selection(
+        self, attempt_id: uuid.UUID, question_id: uuid.UUID
+    ) -> AttemptSectionSelection | None:
+        from app.db.models.attempt import AttemptSectionSelection
+
+        result = await self.db.execute(
+            select(AttemptSectionSelection).where(
+                AttemptSectionSelection.attempt_id == attempt_id,
+                AttemptSectionSelection.question_id == question_id,
+                AttemptSectionSelection.is_deleted.is_(False),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_selections_for_attempt(
+        self, attempt_id: uuid.UUID, section_id: uuid.UUID | None = None
+    ) -> list[AttemptSectionSelection]:
+        from app.db.models.attempt import AttemptSectionSelection
+
+        q = select(AttemptSectionSelection).where(
+            AttemptSectionSelection.attempt_id == attempt_id,
+            AttemptSectionSelection.is_deleted.is_(False),
+        )
+        if section_id is not None:
+            q = q.where(AttemptSectionSelection.assessment_section_id == section_id)
+        q = q.order_by(AttemptSectionSelection.selected_order.asc())
+        result = await self.db.execute(q)
+        return list(result.scalars().all())
+
+    async def count_selections_for_section(
+        self, attempt_id: uuid.UUID, section_id: uuid.UUID
+    ) -> int:
+        from app.db.models.attempt import AttemptSectionSelection
+
+        result = await self.db.execute(
+            select(func.count(AttemptSectionSelection.id)).where(
+                AttemptSectionSelection.attempt_id == attempt_id,
+                AttemptSectionSelection.assessment_section_id == section_id,
+                AttemptSectionSelection.is_deleted.is_(False),
+            )
+        )
+        return result.scalar() or 0
+
+    async def create_selection(
+        self,
+        *,
+        attempt_id: uuid.UUID,
+        assessment_section_id: uuid.UUID,
+        question_id: uuid.UUID,
+        selected_order: int,
+    ) -> AttemptSectionSelection:
+        from app.db.models.attempt import AttemptSectionSelection
+
+        selection = AttemptSectionSelection(
+            attempt_id=attempt_id,
+            assessment_section_id=assessment_section_id,
+            question_id=question_id,
+            selected_order=selected_order,
+        )
+        self.db.add(selection)
+        await self.db.flush()
+        return selection
+
+    async def delete_selection(
+        self, attempt_id: uuid.UUID, question_id: uuid.UUID
+    ) -> bool:
+        from app.db.models.attempt import AttemptSectionSelection
+
+        selection = await self.get_selection(attempt_id, question_id)
+        if not selection:
+            return False
+        await self.db.delete(selection)
+        await self.db.flush()
+        return True
+

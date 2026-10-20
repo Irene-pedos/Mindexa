@@ -76,12 +76,14 @@ from app.db.models.assessment import (
     AssessmentSection,
     AssessmentSupervisor,
     AssessmentTargetSection,
+    ExamStructureTemplate,
     Rubric,
     RubricCriterion,
     RubricCriterionLevel,
 )
 from app.db.models.attempt import (
     AssessmentAttempt,
+    AttemptSectionSelection,
     GroupActivityLog,
     GroupAppeal,
     GroupAppealApproval,
@@ -135,8 +137,39 @@ from app.db.models.study_reader import (
     StudentMaterialAnnotation,
     StudentMaterialKeyPoint,
 )
+from app.db.models.duty import UserDutyAssignment
+from app.db.models.policy import ApprovalPolicy
+from app.db.models.moderation import (
+    AssessmentSeal,
+    AssessmentVersion,
+    ExamPrintJob,
+    ModerationComment,
+    ModerationReview,
+)
+from app.db.models.authoring import (
+    AssessmentCollaborator,
+    AuthorDelegation,
+)
+from app.db.models.marking import (
+    AIGradeSampleCheck,
+    GradingDelegation,
+    MarkingScheme,
+    MaterialKeyPoint,
+    QuestionKeyPoint,
+    QuestionMarkStep,
+)
+
 
 __all__: list[str] = [
+    # ── Authoring ──────────────────────────────────────────────────────────────
+    "AssessmentCollaborator",
+    "AuthorDelegation",
+    # ── Moderation ─────────────────────────────────────────────────────────────
+    "AssessmentSeal",
+    "AssessmentVersion",
+    "ExamPrintJob",
+    "ModerationComment",
+    "ModerationReview",
     # ── Audit ──────────────────────────────────────────────────────────────────
     "AuditLog",
     "SecurityEvent",
@@ -164,6 +197,7 @@ __all__: list[str] = [
     "AssessmentDraftProgress",
     "AssessmentAutosave",
     "AssessmentPublishValidation",
+    "ExamStructureTemplate",
     "Rubric",
     "RubricCriterion",
     "RubricCriterionLevel",
@@ -178,6 +212,7 @@ __all__: list[str] = [
     "QuestionBankEntry",
     # ── Attempt & submission ───────────────────────────────────────────────────
     "AssessmentAttempt",
+    "AttemptSectionSelection",
     "StudentGroup",
     "StudentGroupMember",
     "GroupSubmission",
@@ -229,4 +264,20 @@ __all__: list[str] = [
     "StudentReadingProgress",
     "StudentMaterialAnnotation",
     "StudentMaterialKeyPoint",
+    # ── Workflow Duties & Policies (Phase 1) ──────────────────────────────────
+    "UserDutyAssignment",
+    "ApprovalPolicy",
+    # ── Moderation & Exam Office (Phase 3) ────────────────────────────────────
+    "AssessmentVersion",
+    "ModerationReview",
+    "ModerationComment",
+    "AssessmentSeal",
+    "ExamPrintJob",
+    # ── Marking & Schemes (Phase 5) ──────────────────────────────────────────
+    "MarkingScheme",
+    "QuestionMarkStep",
+    "MaterialKeyPoint",
+    "QuestionKeyPoint",
+    "AIGradeSampleCheck",
+    "GradingDelegation",
 ]

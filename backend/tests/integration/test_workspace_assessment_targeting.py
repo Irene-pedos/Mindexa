@@ -311,7 +311,7 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
         course_id=course.id,
         academic_year="2026",
         audience_type="all",
-        total_marks=10,
+        total_marks=100,
     )
     db.add(ass_draft)
     await db.flush()
@@ -324,7 +324,7 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
         assessment_id=ass_draft.id,
         title="Section 1",
         order_index=0,
-        allocated_marks=10,
+        allocated_marks=100,
         question_count_target=1,
     )
     db.add(sec)
@@ -338,7 +338,7 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
         assessment_id=ass_draft.id,
         assessment_section_id=sec.id,
         question_id=q.id,
-        marks_override=10,
+        marks_override=100,
         order_index=0,
     )
     db.add(aq)

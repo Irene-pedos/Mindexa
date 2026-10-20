@@ -44,6 +44,7 @@ from app.schemas.assessment import (
     AssessmentSecuritySettingsUpdate,
     BulkAssessmentPublishRequest,
     FinalizeAssessmentResponse,
+    MarksSummaryResponse,
     ReorderQuestionsRequest,
 )
 from app.services.assessment_service import AssessmentService
@@ -343,6 +344,23 @@ async def update_section(
     return AssessmentSectionResponse.model_validate(section)
 
 
+@router.patch(
+    "/{assessment_id}/sections/{section_id}",
+    summary="Patch update a section",
+)
+async def patch_section(
+    assessment_id: uuid.UUID,
+    section_id: uuid.UUID,
+    body: AssessmentSectionUpdate,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> AssessmentSectionResponse:
+    svc = _service(db)
+    section = await svc.update_section(assessment_id, section_id, current_user, body)
+    return AssessmentSectionResponse.model_validate(section)
+
+
+
 @router.delete(
     "/{assessment_id}/sections/{section_id}",
     status_code=status.HTTP_204_NO_CONTENT,
@@ -439,3 +457,47 @@ async def reorder_questions(
     svc = _service(db)
     await svc.reorder_questions(assessment_id, current_user, body)
     return {"message": "Questions reordered successfully."}
+
+
+# ---------------------------------------------------------------------------
+# MARKS SUMMARY (Phase 2)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/{assessment_id}/marks-summary",
+    response_model=MarksSummaryResponse,
+    summary="Get assessment marks summary, choice pools, and structure warnings",
+)
+async def get_marks_summary(
+    assessment_id: uuid.UUID,
+    current_user: User = Depends(require_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> MarksSummaryResponse:
+    svc = _service(db)
+    summary = await svc.get_marks_summary(assessment_id, current_user)
+    return MarksSummaryResponse.model_validate(summary)
+
+
+lecturer_assessment_router = APIRouter(tags=["Lecturer Assessments"])
+
+
+@lecturer_assessment_router.get(
+    "/lecturer/assessments/{assessment_id}/marks-summary",
+    response_model=MarksSummaryResponse,
+    summary="Get assessment marks summary for lecturer",
+)
+@lecturer_assessment_router.get(
+    "/lecturers/assessments/{assessment_id}/marks-summary",
+    response_model=MarksSummaryResponse,
+    summary="Get assessment marks summary for lecturer",
+)
+async def get_lecturer_assessment_marks_summary(
+    assessment_id: uuid.UUID,
+    current_user: User = Depends(require_active_user),
+    db: AsyncSession = Depends(get_db),
+) -> MarksSummaryResponse:
+    svc = _service(db)
+    summary = await svc.get_marks_summary(assessment_id, current_user)
+    return MarksSummaryResponse.model_validate(summary)
+

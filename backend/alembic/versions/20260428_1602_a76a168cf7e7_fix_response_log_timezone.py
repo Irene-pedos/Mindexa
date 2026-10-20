@@ -45,5 +45,6 @@ def downgrade() -> None:
     op.alter_column('resource_chunk', 'embedding',
                existing_type=pgvector.sqlalchemy.vector.VECTOR(dim=1536),
                type_=postgresql.JSONB(astext_type=sa.Text()),
-               existing_nullable=True)
+               existing_nullable=True,
+               postgresql_using='embedding::text::jsonb')
     # ### end Alembic commands ###

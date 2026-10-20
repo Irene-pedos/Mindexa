@@ -21,8 +21,11 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
-from app.core.exceptions import (AuthorizationError, ConflictError,
+import structlog
+
+from app.core.exceptions import (AuthorizationError, BadRequestError, ConflictError,
                                  NotFoundError, ValidationError)
 from app.db.enums import (AssessmentStatus, AssessmentType, AttemptStatus,
                           StudentGroupStatus)
@@ -33,6 +36,8 @@ from app.db.repositories.auth import UserRepository
 from app.db.repositories.group_repo import GroupRepository
 from app.db.repositories.submission_repo import SubmissionRepository
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = structlog.get_logger(__name__)
 
 
 def _utcnow() -> datetime:
@@ -500,8 +505,11 @@ class AttemptService:
                 await self._auto_submit(attempt)
                 count += 1
             except Exception:
-                # Log and continue — don't let one failure block others
-                pass
+                await self.db.rollback()
+                logger.exception(
+                    "Failed to auto-submit expired assessment attempt",
+                    attempt_id=str(attempt.id),
+                )
         return count
 
     async def _auto_submit(self, attempt: AssessmentAttempt) -> None:
@@ -623,3 +631,133 @@ class AttemptService:
                 previous_value=None,
                 new_value=audit_payload,
             )
+
+    # ─── Choice-Based Section Selection (Phase 2) ─────────────────────────────
+
+    async def select_question(
+        self,
+        *,
+        attempt_id: uuid.UUID,
+        section_id: uuid.UUID,
+        question_id: uuid.UUID,
+        current_user: Any,
+    ) -> Any:
+        """
+        Record a student's question selection within a choice section.
+        Enforces:
+        - Ownership (only the attempt student can select)
+        - Attempt state (IN_PROGRESS, not expired)
+        - Section belongs to this assessment
+        - Question belongs to this section
+        - Choice limit N (CHOICE_LIMIT_EXCEEDED)
+        """
+        attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
+        if not attempt:
+            raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+
+        # 1. Ownership check (IDOR prevention)
+        if str(attempt.student_id) != str(current_user.id):
+            raise AuthorizationError("You do not own this attempt", code="FORBIDDEN")
+
+        # 2. Attempt active state check
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            raise ValidationError(
+                f"Cannot select questions when attempt status is {attempt.status.value}",
+                code="ATTEMPT_NOT_ACTIVE",
+            )
+        now = _utcnow()
+        if attempt.expires_at and now > attempt.expires_at:
+            raise ValidationError("Attempt has expired", code="ATTEMPT_EXPIRED")
+
+        # 3. Section exists and belongs to assessment
+        section = await self.assessment_repo.get_section(section_id)
+        if not section or str(section.assessment_id) != str(attempt.assessment_id):
+            raise NotFoundError("Section not found in this assessment", code="SECTION_NOT_FOUND")
+
+        # 4. Question exists in this section
+        from sqlmodel import select, col
+        from app.db.models.question import AssessmentQuestion
+        aq_res = await self.db.execute(
+            select(AssessmentQuestion).where(
+                col(AssessmentQuestion.assessment_id) == attempt.assessment_id,
+                col(AssessmentQuestion.assessment_section_id) == section_id,
+                col(AssessmentQuestion.question_id) == question_id,
+                col(AssessmentQuestion.is_deleted) == False,  # noqa: E712
+            )
+        )
+        aq = aq_res.scalar_one_or_none()
+        if not aq:
+            raise ValidationError("Question does not belong to this section", code="QUESTION_NOT_IN_SECTION")
+
+        # 5. Check if already selected (idempotent)
+        existing = await self.attempt_repo.get_selection(attempt_id, question_id)
+        if existing:
+            return existing
+
+        # 6. Check choice limit N
+        n = getattr(section, "questions_to_answer", None)
+        if n is not None:
+            current_count = await self.attempt_repo.count_selections_for_section(attempt_id, section_id)
+            if current_count >= int(n):
+                raise BadRequestError(
+                    f"Cannot select more than {n} questions in section '{section.title}'",
+                    code="CHOICE_LIMIT_EXCEEDED",
+                )
+            selected_order = current_count + 1
+        else:
+            current_count = await self.attempt_repo.count_selections_for_section(attempt_id, section_id)
+            selected_order = current_count + 1
+
+        selection = await self.attempt_repo.create_selection(
+            attempt_id=attempt_id,
+            assessment_section_id=section_id,
+            question_id=question_id,
+            selected_order=selected_order,
+        )
+        await self.db.commit()
+        await self.db.refresh(selection)
+        return selection
+
+    async def deselect_question(
+        self,
+        *,
+        attempt_id: uuid.UUID,
+        question_id: uuid.UUID,
+        current_user: Any,
+    ) -> None:
+        """
+        Deselect a previously chosen question in a choice section.
+        """
+        attempt = await self.attempt_repo.get_by_id_simple(attempt_id)
+        if not attempt:
+            raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+
+        # 1. Ownership check (IDOR prevention)
+        if str(attempt.student_id) != str(current_user.id):
+            raise AuthorizationError("You do not own this attempt", code="FORBIDDEN")
+
+        # 2. Attempt active state check
+        if attempt.status != AttemptStatus.IN_PROGRESS:
+            raise ValidationError(
+                f"Cannot deselect questions when attempt status is {attempt.status.value}",
+                code="ATTEMPT_NOT_ACTIVE",
+            )
+        now = _utcnow()
+        if attempt.expires_at and now > attempt.expires_at:
+            raise ValidationError("Attempt has expired", code="ATTEMPT_EXPIRED")
+
+        selection = await self.attempt_repo.get_selection(attempt_id, question_id)
+        if not selection:
+            raise NotFoundError("Selection not found for this question", code="SELECTION_NOT_FOUND")
+
+        sec_id = selection.assessment_section_id
+        await self.attempt_repo.delete_selection(attempt_id, question_id)
+
+        # Re-index remaining selections for this section
+        remaining = await self.attempt_repo.list_selections_for_attempt(attempt_id, sec_id)
+        for idx, sel in enumerate(remaining, start=1):
+            sel.selected_order = idx
+            self.db.add(sel)
+
+        await self.db.commit()
+

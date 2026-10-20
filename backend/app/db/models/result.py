@@ -95,7 +95,7 @@ class AssessmentResult(BaseModel, table=True):
         default=None,
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("assessment_attempt.id", ondelete="SET NULL"),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
             nullable=True,
         ),
     )

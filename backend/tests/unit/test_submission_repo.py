@@ -41,6 +41,7 @@ async def test_upsert_response_updates_existing_response():
 @pytest.mark.asyncio
 async def test_upsert_response_handles_concurrent_race_condition():
     db = AsyncMock()
+    db.add = MagicMock()
     
     # In SQLAlchemy, session.begin_nested() returns an async context manager
     nested_cm = MagicMock()

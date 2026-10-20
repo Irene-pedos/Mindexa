@@ -81,10 +81,34 @@ from app.db.models import (  # noqa: F401
     SupervisionSession,
     User,
     UserProfile,
+    UserDutyAssignment,
+    ApprovalPolicy,
+    AssessmentCollaborator,
+    AuthorDelegation,
 )
 
 # Autogenerate target — SQLModel metadata contains all registered models
 target_metadata = SQLModel.metadata
+
+
+def compare_server_default(
+    context,
+    inspected_column,
+    metadata_column,
+    rendered_column_default,
+    metadata_column_default,
+    rendered_metadata_default,
+):
+    """Compare only defaults the model explicitly owns.
+
+    Legacy migrations install database defaults for compatibility with direct
+    SQL writers. A Python-side ``Field(default=...)`` does not declare that
+    those database defaults should be removed, so preserve them when the model
+    has no ``server_default``. Explicit model server defaults remain checked.
+    """
+    if metadata_column_default is None:
+        return False
+    return None
 
 # ---------------------------------------------------------------------------
 # Database URL — pulled from app settings (never from alembic.ini)
@@ -92,10 +116,13 @@ target_metadata = SQLModel.metadata
 # ---------------------------------------------------------------------------
 
 def get_url() -> str:
-    from app.core.config import settings
+    import os
 
-    # Use the sync URL for Alembic (asyncpg not supported by Alembic directly)
-    url = settings.DATABASE_URL
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        from app.core.config import settings
+
+        url = settings.DATABASE_URL
     print(f"[alembic] Using URL: {url}")
     # Normalize postgres:// → postgresql://
     if url.startswith("postgres://"):
@@ -119,7 +146,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
-        compare_server_default=True,
+        compare_server_default=compare_server_default,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -134,7 +161,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         compare_type=True,
-        compare_server_default=True,
+        compare_server_default=compare_server_default,
         # Render column-level defaults in autogenerate
         render_as_batch=False,
         # Include schemas
@@ -146,11 +173,25 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Create an async engine and run migrations through a sync adapter."""
-    from app.core.config import settings
+    import os
 
-    # Use async URL for the engine
+    async_url = os.environ.get("DATABASE_ASYNC_URL")
+    if not async_url:
+        sync_url = os.environ.get("DATABASE_URL")
+        if sync_url:
+            if sync_url.startswith("postgresql://"):
+                async_url = sync_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+            elif sync_url.startswith("postgres://"):
+                async_url = sync_url.replace("postgres://", "postgresql+asyncpg://", 1)
+            else:
+                async_url = sync_url
+        else:
+            from app.core.config import settings
+
+            async_url = settings.DATABASE_ASYNC_URL
+
     connectable = create_async_engine(
-        settings.DATABASE_ASYNC_URL,
+        async_url,
         poolclass=pool.NullPool,
         echo=False,
     )

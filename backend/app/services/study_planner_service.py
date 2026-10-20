@@ -29,7 +29,7 @@ from app.schemas.study_planner import (CreateStudyPlanRequest,
                                        ScheduleConflictWarning,
                                        StudyPlannerDashboardSummary,
                                        StudyPlanResponse, StudySessionResponse)
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -589,7 +589,11 @@ class StudyPlannerService:
             except Exception as exc:
                 logger.warning("Failed to load workspace materials for topic resolution", error=str(exc))
 
-        material_titles = [m.title for m in materials if getattr(m, "title", None)]
+        material_titles = [
+            title
+            for material in materials
+            if (title := (material.display_name or material.original_filename))
+        ]
         material_ids = [str(m.id) for m in materials if getattr(m, "id", None)]
 
         try:
@@ -1870,7 +1874,7 @@ class StudyPlannerService:
                     ws_lang = getattr(ws, "language", None)
 
             if not is_ai_allowed(ws_lang):
-                lesson_output = self._generate_fallback_lesson(session, plan, duration=session.duration_minutes or 60)
+                lesson_output = self._build_fallback_lesson_plan(session, [])
                 session.lesson_plan_json = lesson_output.model_dump()
                 session.lesson_status = "GENERATED"
                 await self.repo.update_session(session)

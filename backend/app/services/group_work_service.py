@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import uuid
 from datetime import UTC, datetime
+from typing import Any, TYPE_CHECKING
 
 from app.core.constants import UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
@@ -14,7 +15,7 @@ from app.db.enums import (GroupActivityType, GroupAppealStatus,
                           GroupApprovalStatus, GroupSubmissionStatus,
                           NotificationType, QuestionDistributionMode,
                           QuestionType, StudentGroupStatus)
-from app.db.models.attempt import GroupSubmissionAnswer
+from app.db.models.attempt import GroupSubmission, GroupSubmissionAnswer
 from app.db.models.auth import User, UserProfile
 from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
@@ -25,6 +26,7 @@ from app.db.repositories.group_submission_repo import GroupSubmissionRepository
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.repositories.question_repo import QuestionRepository
 from app.db.repositories.result_repo import ResultRepository
+from app.db.models.assessment import Assessment
 from app.schemas.group_work import (AddGroupCommentRequest,
                                     ApproveGroupAppealRequest,
                                     ApproveGroupSubmissionRequest,
@@ -52,6 +54,7 @@ from app.schemas.group_work import (AddGroupCommentRequest,
                                     ResolveGroupAppealRequest,
                                     SaveGroupAnswerRequest,
                                     StudentGroupResponse)
+from app.schemas.grading import GroupSubmissionSummary
 from app.services.result_service import _compute_letter_grade
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1867,7 +1870,9 @@ class GroupWorkService:
                 all_final = False
 
         submission.total_score = total_score
-        max_score = float(assessment.total_marks or 100.0)
+        from app.services.assessment_marks import required_marks
+        req_marks = required_marks(assessment) if assessment else 0
+        max_score = float(req_marks) if req_marks > 0 else (float(assessment.total_marks or 100.0) if assessment else 100.0)
         submission.max_score = max_score
 
         is_sub_final = bool(data.is_final and all_final)

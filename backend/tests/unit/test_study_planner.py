@@ -13,6 +13,7 @@ from app.schemas.study_planner import (
 async def test_create_manual_plan_success():
     db_mock = AsyncMock()
     db_mock.add = MagicMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
     
     student_id = uuid.uuid4()
@@ -75,6 +76,7 @@ async def test_create_manual_plan_success():
 async def test_generate_session_quiz():
     db_mock = AsyncMock()
     db_mock.add = MagicMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -122,6 +124,7 @@ async def test_generate_session_quiz_fails_loudly_after_retries():
 
     db_mock = AsyncMock()
     db_mock.add = MagicMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -149,6 +152,7 @@ async def test_generate_session_quiz_fails_loudly_after_retries():
 @pytest.mark.asyncio
 async def test_start_guided_session_depth_and_full_output():
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     db_mock.execute = AsyncMock()
     db_mock.commit = AsyncMock()
     service = StudyPlannerService(db_mock)
@@ -223,6 +227,7 @@ async def test_start_guided_session_depth_and_full_output():
 @pytest.mark.asyncio
 async def test_submit_guided_knowledge_check_fails_loudly_on_empty_questions():
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -247,6 +252,7 @@ async def test_submit_guided_knowledge_check_fails_loudly_on_empty_questions():
 @pytest.mark.asyncio
 async def test_grade_knowledge_check_uses_log_action_without_llm_call():
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     from app.agents.study_planner_agent import StudyPlannerAgent
     from app.core.ai.gateway import AIGateway
     gateway = AIGateway(db_mock, MagicMock())
@@ -274,6 +280,7 @@ async def test_grade_knowledge_check_uses_log_action_without_llm_call():
 @pytest.mark.asyncio
 async def test_generate_guided_exercise_calls_ai_agent():
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -436,6 +443,7 @@ async def test_guided_session_language_policy_blocking():
     from app.db.models.academic import TeachingWorkspace
 
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -485,6 +493,7 @@ async def test_guided_session_learning_unit_hard_rag_scoping():
     from app.db.models.resource_chunk import ResourceChunk
 
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()
@@ -569,6 +578,7 @@ async def test_guided_session_learning_unit_hard_rag_scoping():
 @pytest.mark.asyncio
 async def test_generate_session_quiz_idempotency_and_force_regenerate():
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = StudyPlannerService(db_mock)
 
     session_id = uuid.uuid4()

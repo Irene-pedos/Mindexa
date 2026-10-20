@@ -148,7 +148,6 @@ class AILanguageAuditService:
             .where(
                 AIActionLog.action_type == AIActionType.ANALYZE_INTEGRITY,
                 Assessment.language == LanguageEnum.RW,
-                AIActionLog.is_deleted == False,
             )
             .order_by(desc(AIActionLog.created_at))
             .limit(limit)
@@ -185,7 +184,6 @@ class AILanguageAuditService:
                     AIActionType.SUGGEST_FEEDBACK,
                     AIActionType.NARRATE_ANALYTICS,
                 ]),
-                AIActionLog.is_deleted == False,
             )
             .order_by(desc(AIActionLog.created_at))
             .limit(limit)

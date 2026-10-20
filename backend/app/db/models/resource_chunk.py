@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, List, Optional
 
 from app.core.config import settings
 from app.db.base import BaseModel
-from sqlalchemy import Column, DateTime, ForeignKey, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Column as SMColumn
 from sqlmodel import Field, Relationship
@@ -14,6 +14,14 @@ if TYPE_CHECKING:
 
 class ResourceChunk(BaseModel, table=True):
     __tablename__ = "resource_chunks"
+    __table_args__ = (
+        Index(
+            "resource_chunks_embedding_idx",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     resource_id: uuid.UUID = Field(
         sa_column=Column(

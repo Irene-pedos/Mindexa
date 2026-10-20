@@ -60,11 +60,22 @@ _ROUTE_TIERS: list[tuple[str, str]] = [
     # Auth — strict
     ("/api/v1/auth/login", "login"),
     ("/api/v1/auth/refresh", "refresh"),
-    # AI — quota protection
+    # Seal verification — public endpoint protection (Phase 3, Spec 7.7)
+    ("/api/v1/public/verify-seal", "verify_seal"),
+    ("/public/verify-seal", "verify_seal"),
+    ("/api/v1/assessments/verify", "verify_seal"),
+    ("/assessments/verify", "verify_seal"),
+    # AI — quota protection & AI grading endpoints (Spec 3.3)
     ("/api/v1/student/ai/support", "student_ai_support"),
     ("/api/v1/ai/generate", "ai_heavy"),
     ("/api/v1/student/ai", "ai_heavy"),
     ("/api/v1/lecturer/ai", "ai_heavy"),
+    ("/api/v1/grading/grade-attempt", "ai_heavy"),
+    ("/grading/grade-attempt", "ai_heavy"),
+    ("/api/v1/grading/confirm-ai", "ai_heavy"),
+    ("/grading/confirm-ai", "ai_heavy"),
+    ("/api/v1/grading/feedback-ai", "ai_heavy"),
+    ("/grading/feedback-ai", "ai_heavy"),
     # Health / metrics — exempt
     ("/health", "exempt"),
     ("/metrics", "exempt"),
@@ -105,6 +116,8 @@ def _limit_for_tier(tier: str) -> int:
         return settings.RATE_LIMIT_REFRESH_PER_MINUTE
     if tier == "student_ai_support":
         return settings.RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR
+    if tier == "verify_seal":
+        return settings.RATE_LIMIT_VERIFY_SEAL_PER_MINUTE
     if tier == "ai_heavy":
         return settings.RATE_LIMIT_AI_PER_MINUTE
     return settings.RATE_LIMIT_DEFAULT_PER_MINUTE

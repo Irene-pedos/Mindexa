@@ -606,8 +606,8 @@ export default function AssessmentDetailsPage() {
     return (
       <div className="flex flex-col items-center justify-center py-20 text-center space-y-3">
         <AlertTriangle className="size-12 text-destructive" />
-        <h2 className="text-base font-bold text-zinc-800">Assessment Not Found</h2>
-        <p className="text-xs text-zinc-500 font-medium">This assessment does not exist or has been deleted.</p>
+        <h2 className="text-base font-bold text-foreground">Assessment Not Found</h2>
+        <p className="text-xs text-muted-foreground font-medium">This assessment does not exist or has been deleted.</p>
         <Button size="sm" className="h-8 text-xs rounded-lg" onClick={() => router.push("/lecturer/assessments")}>Back to Assessments</Button>
       </div>
     );
@@ -625,12 +625,12 @@ export default function AssessmentDetailsPage() {
             variant="outline"
             size="icon"
             onClick={() => router.push("/lecturer/assessments")}
-            className="h-8 w-8 rounded-lg shrink-0 border-zinc-200 bg-white hover:bg-zinc-50"
+            className="h-8 w-8 rounded-lg shrink-0 border-border/60 bg-card hover:bg-muted/50"
           >
-            <ArrowLeft className="size-4 text-zinc-600" />
+            <ArrowLeft className="size-4 text-foreground" />
           </Button>
           <div className="min-w-0">
-            <h1 className="text-2xl font-bold tracking-tight text-zinc-900 truncate">{assessment.title}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground truncate">{assessment.title}</h1>
             <p className="text-sm text-muted-foreground mt-1 font-medium">
               {assessment.course_name || "Course Not Linked"} · Created {format(new Date(assessment.created_at), "PPP")}
             </p>
@@ -643,7 +643,7 @@ export default function AssessmentDetailsPage() {
             disabled={!isDraft && assessment.status !== "PUBLISHED" && assessment.status !== "SCHEDULED"}
             variant="outline"
             size="sm"
-            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
+            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-border/60 bg-card hover:bg-muted/50"
           >
             <Pencil className="size-3.5 mr-1.5" />
             Edit Settings
@@ -653,11 +653,11 @@ export default function AssessmentDetailsPage() {
           <Badge
             className={cn(
               "h-9 px-4 font-bold uppercase tracking-wider text-[11px] rounded-lg",
-              assessment.status === "DRAFT" && "bg-slate-100 text-slate-700 border border-slate-300",
-              assessment.status === "PUBLISHED" && "bg-blue-50 text-blue-700 border border-blue-200",
-              assessment.status === "SCHEDULED" && "bg-amber-50 text-amber-700 border border-amber-200",
-              assessment.status === "ACTIVE" && "bg-emerald-50 text-emerald-700 border border-emerald-200 animate-pulse",
-              assessment.status === "CLOSED" && "bg-rose-50 text-rose-700 border border-rose-200"
+              assessment.status === "DRAFT" && "bg-muted text-muted-foreground border border-border/60",
+              assessment.status === "PUBLISHED" && "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+              assessment.status === "SCHEDULED" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
+              assessment.status === "ACTIVE" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 animate-pulse",
+              assessment.status === "CLOSED" && "bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20"
             )}
           >
             {assessment.status}

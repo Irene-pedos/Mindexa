@@ -14,6 +14,7 @@ from app.db.enums import IntegrityEventType
 @pytest.mark.asyncio
 async def test_evaluate_risk_tab_switch_warning():
     db = AsyncMock()
+    db.add = MagicMock()
     service = IntegrityService(db)
 
     # Mock assessment and profile
@@ -28,6 +29,7 @@ async def test_evaluate_risk_tab_switch_warning():
         "tab_switching": {"category": "Non-Tolerated", "action": "WARNING_AUTO_SUBMIT"}
     }
     service.integrity_repo.get_profile_by_code = AsyncMock(return_value=mock_profile)
+    service.integrity_repo.count_event_type = AsyncMock(return_value=1)
     service.integrity_repo.list_warnings_for_attempt = AsyncMock(return_value=[])
     service.issue_warning = AsyncMock(return_value=MagicMock())
 
@@ -45,6 +47,7 @@ async def test_evaluate_risk_tab_switch_warning():
 @pytest.mark.asyncio
 async def test_evaluate_risk_refresh_auto_submits_immediately():
     db = AsyncMock()
+    db.add = MagicMock()
     service = IntegrityService(db)
 
     mock_assessment = MagicMock()
@@ -58,6 +61,7 @@ async def test_evaluate_risk_refresh_auto_submits_immediately():
         "browser_refresh": {"category": "Non-Tolerated", "action": "AUTO_SUBMIT"}
     }
     service.integrity_repo.get_profile_by_code = AsyncMock(return_value=mock_profile)
+    service.integrity_repo.count_event_type = AsyncMock(return_value=1)
     service.raise_flag = AsyncMock()
     service.attempt_repo.set_status = AsyncMock()
 
@@ -75,6 +79,7 @@ async def test_evaluate_risk_refresh_auto_submits_immediately():
 @pytest.mark.asyncio
 async def test_evaluate_risk_homework_and_practice_have_no_warnings():
     db = AsyncMock()
+    db.add = MagicMock()
     service = IntegrityService(db)
 
     for asmt_type in ["HOMEWORK", "PRACTICE"]:

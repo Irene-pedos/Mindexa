@@ -213,4 +213,110 @@ def test_migration_chain_integrity():
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
     assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20260828_2330_guided_ex_action"
+    assert heads[0] == "20261015_p5_marking"
+
+
+def test_phase1_duties_and_policies_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261011_1200_phase1_duties_and_policies.py"
+    )
+    assert migration_path.exists(), "Phase 1 migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261011_p1_duties_policies"' in source
+    assert 'down_revision: Union[str, None] = "20261011_p0_align"' in source
+    assert '"user_duty_assignment"' in source
+    assert '"approval_policy"' in source
+    assert '"uq_duty_assignment_dept_active"' in source
+    assert '"uq_duty_assignment_campus_active"' in source
+    assert '"uq_duty_assignment_inst_active"' in source
+    assert '"uq_approval_policy_inst_type"' in source
+
+
+def test_phase2_choice_sections_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261012_0900_phase2_choice_sections.py"
+    )
+    assert migration_path.exists(), "Phase 2 migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261012_p2_choice_sections"' in source
+    assert 'down_revision: Union[str, None] = "20261011_p1_duties_policies"' in source
+    assert '"exam_structure_template"' in source
+    assert '"attempt_section_selection"' in source
+    assert '"section_kind"' in source
+    assert '"over_answer_policy"' in source
+    assert '"schedule_state"' in source
+    assert '"is_counted"' in source
+    assert '"uq_attempt_section_selection_attempt_question"' in source
+
+
+def test_phase3_moderation_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261013_0900_phase3_moderation.py"
+    )
+    assert migration_path.exists(), "Phase 3 migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261013_p3_moderation"' in source
+    assert 'down_revision: Union[str, None] = "20261012_p2_choice_sections"' in source
+    assert '"assessment_version"' in source
+    assert '"moderation_review"' in source
+    assert '"moderation_comment"' in source
+    assert '"assessment_seal"' in source
+    assert '"exam_print_job"' in source
+
+
+def test_phase4_authoring_and_delegation_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261014_0900_phase4_authoring.py"
+    )
+    assert migration_path.exists(), "Phase 4 migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261014_p4_authoring"' in source
+    assert 'down_revision: Union[str, None] = "20261013_p3_moderation"' in source
+    assert '"assessment_collaborator"' in source
+    assert '"author_delegation"' in source
+    assert '"is_superseded"' in source
+    assert '"acting_under_delegation_id"' in source
+    assert '"uq_assessment_collaborator_assessment_lecturer"' in source
+
+
+def test_phase5_marking_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261015_0900_phase5_marking.py"
+    )
+    assert migration_path.exists(), "Phase 5 migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261015_p5_marking"' in source
+    assert 'down_revision: Union[str, None] = "20261014_p4_authoring"' in source
+    assert '"marking_scheme"' in source
+    assert '"question_mark_step"' in source
+    assert '"material_key_point"' in source
+    assert '"question_key_point"' in source
+    assert '"ai_grade_sample_check"' in source
+    assert '"grading_delegation"' in source
+    assert '"anonymous_marking"' in source
+    assert '"graded_by_id"' in source
+    assert '"delegation_id"' in source
+
+
+
+

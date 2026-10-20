@@ -387,6 +387,19 @@ class ValidationError(MindexaError):
     default_code = "validation_error"
 
 
+class BadRequestError(MindexaError):
+    """
+    Raised when a request is malformed, has invalid parameters,
+    or violates prerequisite conditions.
+
+    Maps to HTTP 400.
+    """
+
+    status_code = 400
+    default_message = "The request is invalid."
+    default_code = "bad_request"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # RATE LIMIT  (429)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ class AssessmentSectionCreate(BaseModel):
     instructions: str | None = None
     order_index: int = Field(default=0, ge=0)
     allocated_marks: int | None = Field(default=None, ge=0)
+    section_kind: str = Field(default="MIXED")
+    questions_to_answer: int | None = Field(default=None, ge=1)
 
 
 class AssessmentSectionUpdate(BaseModel):
@@ -36,6 +38,8 @@ class AssessmentSectionUpdate(BaseModel):
     instructions: str | None = None
     order_index: int | None = Field(default=None, ge=0)
     allocated_marks: int | None = Field(default=None, ge=0)
+    section_kind: str | None = None
+    questions_to_answer: int | None = Field(default=None, ge=1)
 
 
 class AssessmentSectionResponse(BaseModel):
@@ -46,6 +50,9 @@ class AssessmentSectionResponse(BaseModel):
     instructions: str | None
     order_index: int
     allocated_marks: int | None
+    section_kind: str = "MIXED"
+    questions_to_answer: int | None = None
+    pool_size: int = 0
     question_count_target: int | None = None
     allowed_question_types: dict | list | None = None
     difficulty_distribution: dict | None = None
@@ -54,6 +61,7 @@ class AssessmentSectionResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
 
 
 # ─── Assessment Question Link Schemas ─────────────────────────────────────────
@@ -162,6 +170,8 @@ class AssessmentCreateRequest(BaseModel):
     peer_evaluation_weight_percent: int | None = None
     individual_weighting_enabled: bool = False
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
+    over_answer_policy: str = "FIRST_N"
+    schedule_state: str = "ON_TRACK"
 
     @field_validator("assessment_type")
     @classmethod
@@ -292,6 +302,8 @@ class AssessmentGeneralUpdate(BaseModel):
     peer_evaluation_weight_percent: int | None = None
     individual_weighting_enabled: bool | None = None
     appeal_window_days: int | None = Field(default=None, ge=1, le=365)
+    over_answer_policy: str | None = None
+    schedule_state: str | None = None
     show_marks_per_question: bool | None = None
     show_feedback_after_submit: bool | None = None
     is_ai_generation_enabled: bool | None = None
@@ -367,6 +379,8 @@ class AssessmentSummaryResponse(BaseModel):
     window_start: datetime | None
     window_end: datetime | None
     max_attempts: int = 1
+    over_answer_policy: str = "FIRST_N"
+    schedule_state: str = "ON_TRACK"
     is_group_assessment: bool
     is_finalized: bool
     draft_step: int | None
@@ -456,6 +470,8 @@ class AssessmentDetailResponse(BaseModel):
     grading_mode: str
     result_release_mode: str
     total_marks: int
+    over_answer_policy: str = "FIRST_N"
+    schedule_state: str = "ON_TRACK"
     passing_marks: int | None
     duration_minutes: int | None
     window_start: datetime | None
@@ -723,3 +739,34 @@ class BulkAssessmentPublishRequest(BaseModel):
     rules: BulkAssessmentRules
     groups: list[BulkAssessmentGroup] | None = []
     draft_step: int | None = Field(default=None, ge=1, le=6)
+
+
+# ─── Marks Summary Schemas (Phase 2) ──────────────────────────────────────────
+
+
+class ChoicePoolIssueResponse(BaseModel):
+    section_id: uuid.UUID | None = None
+    section_title: str | None = None
+    code: str
+    message: str
+
+
+class StructureViolationResponse(BaseModel):
+    code: str
+    message: str
+    is_blocking: bool
+
+
+class MarksSummaryResponse(BaseModel):
+    assessment_id: uuid.UUID
+    required_marks: int
+    total_required_marks: int
+    max_possible_score: int
+    configured_total_marks: int
+    is_summative: bool
+    is_valid_structure: bool
+    choice_pool_issues: list[ChoicePoolIssueResponse] = []
+    hard_violations: list[StructureViolationResponse] = []
+    soft_warnings: list[StructureViolationResponse] = []
+    structure_violations: list[StructureViolationResponse] = []
+

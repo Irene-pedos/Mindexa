@@ -5,9 +5,9 @@ from datetime import datetime
 
 from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
                                ai_generation, analytics, assessment, attempt,
-                               auth, blueprint, gemini, grading, group_work,
-                               health, integrity, lecturer, notification,
-                               question, resource, result, student, student_ai, student_resources,
+                               auth, authoring, blueprint, gemini, grading, group_work,
+                               health, integrity, lecturer, me, moderation, notification,
+                               question, resource, result, seal, student, student_ai, student_resources,
                                study_planner, study_reader, submission)
 from app.core.config import settings
 from app.core.handlers import register_exception_handlers
@@ -62,9 +62,9 @@ def create_app() -> FastAPI:
                                    admin_ai_audit, ai_generation, analytics,
                                    assessment, attempt, auth, blueprint,
                                    gemini, grading, group_work, health,
-                                   integrity, lecturer, lecturer_ai, notification, question,
-                                   resource, result, student, student_ai,
-                                   student_resources, study_planner, study_reader, submission)
+                                   integrity, lecturer, lecturer_ai, marking, me, moderation, notification, question,
+                                   resource, result, seal, student, student_ai,
+                                   student_resources, study_planner, study_reader, submission, authoring)
 
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
     app.include_router(admin_ai_audit.router, prefix=settings.API_V1_STR)
@@ -72,6 +72,9 @@ def create_app() -> FastAPI:
     app.include_router(auth.router, prefix=settings.API_V1_STR)
     app.include_router(academic.router, prefix=settings.API_V1_STR)
     app.include_router(admin.router, prefix=settings.API_V1_STR)
+    app.include_router(admin.router)
+    app.include_router(me.router, prefix=settings.API_V1_STR)
+    app.include_router(me.router)
     app.include_router(admin_academic.router, prefix=settings.API_V1_STR)
     app.include_router(student.router, prefix=settings.API_V1_STR)
     app.include_router(student_resources.router, prefix=settings.API_V1_STR)
@@ -83,7 +86,11 @@ def create_app() -> FastAPI:
     app.include_router(resource.router, prefix=settings.API_V1_STR)
     app.include_router(question.router, prefix=settings.API_V1_STR)
     app.include_router(assessment.router, prefix=settings.API_V1_STR)
+    app.include_router(assessment.lecturer_assessment_router, prefix=settings.API_V1_STR)
+    app.include_router(assessment.lecturer_assessment_router)
     app.include_router(attempt.router, prefix=settings.API_V1_STR)
+    app.include_router(attempt.student_attempt_router, prefix=settings.API_V1_STR)
+    app.include_router(attempt.student_attempt_router)
     app.include_router(group_work.router, prefix=settings.API_V1_STR)
     app.include_router(notification.router, prefix=settings.API_V1_STR)
     app.include_router(result.router, prefix=settings.API_V1_STR)
@@ -94,6 +101,14 @@ def create_app() -> FastAPI:
     app.include_router(blueprint.router, prefix=settings.API_V1_STR)
     app.include_router(gemini.router, prefix=settings.API_V1_STR)
     app.include_router(health.router, prefix=settings.API_V1_STR)
+    app.include_router(moderation.router, prefix=settings.API_V1_STR)
+    app.include_router(moderation.router)
+    app.include_router(seal.router, prefix=settings.API_V1_STR)
+    app.include_router(seal.router)
+    app.include_router(authoring.router, prefix=settings.API_V1_STR)
+    app.include_router(authoring.router)
+    app.include_router(marking.router, prefix=settings.API_V1_STR)
+    app.include_router(marking.router)
 
     # ── EXCEPTION HANDLERS ───────────────────────────────────────────────────
     register_exception_handlers(app)

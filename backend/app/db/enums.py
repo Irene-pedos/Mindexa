@@ -84,6 +84,23 @@ class AssessmentType(str, Enum):
     REASSESSMENT = "REASSESSMENT"
 
 
+class SectionKind(str, Enum):
+    CLOSED = "CLOSED"
+    OPEN = "OPEN"
+    MIXED = "MIXED"
+
+
+class OverAnswerPolicy(str, Enum):
+    FIRST_N = "FIRST_N"
+    BEST_N = "BEST_N"
+
+
+class ScheduleState(str, Enum):
+    ON_TRACK = "ON_TRACK"
+    AT_RISK = "AT_RISK"
+    SHIFT_REQUIRED = "SHIFT_REQUIRED"
+
+
 class GroupAssignmentMode(str, Enum):
     MANUAL = "MANUAL"
     AUTOMATIC = "AUTOMATIC"
@@ -146,10 +163,52 @@ class GroupActivityType(str, Enum):
 
 class AssessmentStatus(str, Enum):
     DRAFT = "DRAFT"
+    PENDING_MODERATION = "PENDING_MODERATION"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    APPROVED = "APPROVED"
+    SEALED = "SEALED"
     PUBLISHED = "PUBLISHED"
     ACTIVE = "ACTIVE"
     CLOSED = "CLOSED"
     ARCHIVED = "ARCHIVED"
+
+
+class ModerationReviewStatus(str, Enum):
+    OPEN = "OPEN"
+    CHANGES_REQUESTED = "CHANGES_REQUESTED"
+    APPROVED = "APPROVED"
+
+
+class ModerationCommentCategory(str, Enum):
+    MARKS = "MARKS"
+    DISTRIBUTION = "DISTRIBUTION"
+    WORDING = "WORDING"
+    STRUCTURE = "STRUCTURE"
+    OTHER = "OTHER"
+
+
+class ModerationCommentTarget(str, Enum):
+    ASSESSMENT = "ASSESSMENT"
+    SECTION = "SECTION"
+    QUESTION = "QUESTION"
+
+
+class PrintJobStatus(str, Enum):
+    REQUESTED = "REQUESTED"
+    PRINTED = "PRINTED"
+    STORED = "STORED"
+    DISTRIBUTED = "DISTRIBUTED"
+
+
+class CollaboratorRole(str, Enum):
+    OWNER = "OWNER"
+    CO_AUTHOR = "CO_AUTHOR"
+
+
+class DelegationStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    REVOKED = "REVOKED"
+    EXPIRED = "EXPIRED"
 
 
 class GradingMode(str, Enum):
@@ -272,6 +331,8 @@ class AIActionType(str, Enum):
     ASSESSMENT_DRAFT = "ASSESSMENT_DRAFT"
     FEEDBACK_DRAFT = "FEEDBACK_DRAFT"
     EMBEDDING = "EMBEDDING"
+    # Phase 3: AI wording review for moderation checklist
+    REVIEW_ASSESSMENT_WORDING = "REVIEW_ASSESSMENT_WORDING"
 
 
 class AIActionStatus(str, Enum):
@@ -524,6 +585,20 @@ class NotificationType(str, Enum):
     GROUP_REASSESSMENT_ASSIGNED = "GROUP_REASSESSMENT_ASSIGNED"
     SYSTEM_ANNOUNCEMENT = "SYSTEM_ANNOUNCEMENT"
     TEACHING_ASSIGNMENT_CREATED = "TEACHING_ASSIGNMENT_CREATED"
+    # Phase 3: Moderation and exam office workflow
+    MODERATION_SUBMITTED = "MODERATION_SUBMITTED"
+    MODERATION_CHANGES_REQUESTED = "MODERATION_CHANGES_REQUESTED"
+    MODERATION_APPROVED = "MODERATION_APPROVED"
+    ASSESSMENT_SEALED = "ASSESSMENT_SEALED"
+    PRINT_JOB_UPDATED = "PRINT_JOB_UPDATED"
+    SCHEDULE_AT_RISK = "SCHEDULE_AT_RISK"
+    SCHEDULE_SHIFT_REQUIRED = "SCHEDULE_SHIFT_REQUIRED"
+    # Phase 4: Authoring, delegation, and post-approval edits
+    COLLABORATOR_ADDED = "COLLABORATOR_ADDED"
+    DELEGATION_CREATED = "DELEGATION_CREATED"
+    POST_APPROVAL_EDIT = "POST_APPROVAL_EDIT"
+    SEAL_SUPERSEDED = "SEAL_SUPERSEDED"
+    ASSESSMENT_UPDATE_NOTICE = "ASSESSMENT_UPDATE_NOTICE"
 
 
 class ScheduledEventType(str, Enum):
@@ -614,3 +689,44 @@ class LocationType(str, Enum):
     ONLINE = "ONLINE"
     HYBRID = "HYBRID"
     NOT_APPLICABLE = "NOT_APPLICABLE"
+
+
+class Duty(str, Enum):
+    MODERATOR = "MODERATOR"
+    EXAM_OFFICER = "EXAM_OFFICER"
+    DEPARTMENT_HEAD = "DEPARTMENT_HEAD"
+
+
+class PostApprovalEditMode(str, Enum):
+    NOTIFY = "NOTIFY"
+    REQUIRE_REAPPROVAL = "REQUIRE_REAPPROVAL"
+
+
+class PostStartEditMode(str, Enum):
+    BLOCK = "BLOCK"
+    ALLOW_WITH_NOTICE = "ALLOW_WITH_NOTICE"
+
+
+class StepKind(str, Enum):
+    METHOD = "METHOD"
+    ACCURACY = "ACCURACY"
+    PRESENTATION = "PRESENTATION"
+
+
+class KeyPointImportance(str, Enum):
+    CORE = "CORE"
+    SUPPORTING = "SUPPORTING"
+
+
+class SampleCheckStatus(str, Enum):
+    PENDING = "PENDING"
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+
+
+class GradingDelegationScope(str, Enum):
+    WHOLE = "WHOLE"
+    SECTION = "SECTION"
+    SELECTED_STUDENTS = "SELECTED_STUDENTS"
+
+

@@ -68,6 +68,7 @@ class AnalyticsService:
             if cached_res:
                 row = cached_res.fetchone()
                 if inspect.iscoroutine(row):
+                    row.close()
                     row = None
                 if row and row[0]:
                     raw = row[0]

@@ -137,17 +137,17 @@ export default function StudentResourcesPage() {
 
   if (loading) {
     return (
-      <div className="space-y-6">
-        <div className="flex justify-between items-center">
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-64" />
-            <Skeleton className="h-4 w-96 opacity-60" />
+      <div className="space-y-5">
+        <div className="flex justify-between items-center pb-3 border-b border-border/25">
+          <div className="space-y-1">
+            <Skeleton className="h-7 w-52 sm:w-64" />
+            <Skeleton className="h-4 w-72 sm:w-96 opacity-60" />
           </div>
-          <Skeleton className="h-12 w-32 rounded-lg" />
+          <Skeleton className="h-8.5 w-28 rounded-lg" />
         </div>
-        <div className="grid grid-cols-1 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:gap-3.5">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-24 w-full rounded-xl" />
+            <Skeleton key={i} className="h-20 w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -184,16 +184,16 @@ export default function StudentResourcesPage() {
 
       {/* Uploading Files */}
       {uploadingFiles.length > 0 && (
-        <Card className="border-primary/20 bg-primary/5">
-          <CardHeader className="py-4">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <div className="size-4 rounded-full bg-primary/20 animate-pulse" />
+        <Card className="border-primary/20 bg-primary/5 shadow-xs">
+          <CardHeader className="p-3.5 sm:p-4 pb-2">
+            <CardTitle className="text-sm flex items-center gap-2 font-medium">
+              <div className="size-3.5 rounded-full bg-primary/20 animate-pulse" />
               Uploading ({uploadingFiles.length})
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4 pb-6">
+          <CardContent className="p-3.5 sm:p-4 pt-1 space-y-3">
             {uploadingFiles.map((file) => (
-              <div key={file.id} className="space-y-2">
+              <div key={file.id} className="space-y-1.5">
                 <div className="flex justify-between text-xs font-medium">
                   <span className="truncate max-w-[80%]">{file.name}</span>
                   <span>{file.progress.toFixed(0)}%</span>
@@ -205,18 +205,29 @@ export default function StudentResourcesPage() {
         </Card>
       )}
 
-      {/* Resources List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>All Resources ({resources.length})</CardTitle>
-          <CardDescription>Private study materials only. These are never visible to lecturers.</CardDescription>
+      {/* Resources List / Grid Card */}
+      <Card className="border border-border/70 shadow-xs">
+        <CardHeader className="p-4 sm:p-5 sm:pb-3.5 border-b border-border/40">
+          <div className="flex items-center justify-between">
+            <div className="space-y-0.5">
+              <CardTitle className="text-base sm:text-lg font-semibold tracking-tight">
+                All Resources ({resources.length})
+              </CardTitle>
+              <CardDescription className="text-xs text-muted-foreground">
+                Private study materials only. These are never visible to lecturers.
+              </CardDescription>
+            </div>
+          </div>
         </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
+        <CardContent className="p-3.5 sm:p-5">
+          <div className="grid grid-cols-1 gap-2.5 sm:gap-3">
             {resources.length === 0 ? (
-              <div className="text-center py-20 border-2 border-dashed rounded-xl">
-                <FileText className="size-12 text-muted-foreground mx-auto mb-4 opacity-20" />
-                <p className="text-muted-foreground">No resources uploaded yet.</p>
+              <div className="text-center py-12 sm:py-16 border-2 border-dashed rounded-xl bg-muted/10">
+                <FileText className="size-10 sm:size-12 text-muted-foreground mx-auto mb-3 opacity-25" />
+                <p className="text-sm text-muted-foreground font-medium">No resources uploaded yet.</p>
+                <p className="text-xs text-muted-foreground/80 mt-1">
+                  Upload study guides, PDF textbooks, or notes above to read and query with AI.
+                </p>
               </div>
             ) : (
               resources.map((resource) => {
@@ -224,40 +235,42 @@ export default function StudentResourcesPage() {
                 return (
                   <div
                     key={resource.id}
-                    className="flex items-center justify-between rounded-xl border p-5 hover:bg-muted/50 group transition-all cursor-pointer"
+                    className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border/70 bg-card p-3.5 sm:p-4 hover:border-primary/40 hover:bg-muted/40 group transition-all cursor-pointer shadow-2xs"
                     onClick={() => handleOpenReader(resource.id)}
                   >
-                    <div className="flex items-center gap-4">
-                      <div className="h-12 w-12 rounded-xl bg-muted flex items-center justify-center shrink-0">
-                        <FileText className="size-6 text-muted-foreground" />
+                    <div className="flex items-center gap-3 sm:gap-3.5 min-w-0">
+                      <div className="size-10 sm:size-11 rounded-lg bg-muted flex items-center justify-center shrink-0 border border-border/40">
+                        <FileText className="size-5 text-muted-foreground group-hover:text-primary transition-colors" />
                       </div>
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <div className="font-medium text-foreground group-hover:text-primary transition-colors">
+                          <span className="font-medium text-sm text-foreground group-hover:text-primary transition-colors truncate">
                             {resource.display_name || resource.original_filename}
-                          </div>
+                          </span>
                           {savedPage && (
                             <Badge
                               variant="secondary"
-                              className="text-[10px] h-4 px-1.5 font-normal bg-primary/10 text-primary border-primary/20 flex items-center gap-1"
+                              className="text-[10px] h-4.5 px-1.5 font-normal bg-primary/10 text-primary border-primary/20 flex items-center gap-1"
                             >
                               <Bookmark className="size-2.5" />
                               <span>Continue: p. {savedPage}</span>
                             </Badge>
                           )}
                         </div>
-                        <div className="text-sm text-muted-foreground flex items-center gap-3 mt-0.5">
-                          <Badge variant="outline" className="text-[10px] uppercase font-bold px-1.5 h-5">
+                        <div className="text-xs text-muted-foreground flex items-center gap-2 sm:gap-2.5 mt-1 flex-wrap">
+                          <Badge variant="outline" className="text-[10px] uppercase font-semibold px-1.5 h-4.5 border-border/70">
                             {resource.file_extension}
                           </Badge>
-                          <span>{resource.subject_tag || "General"}</span> •{" "}
-                          <span>{(resource.file_size_bytes / (1024 * 1024)).toFixed(1)} MB</span> •{" "}
+                          <span>{resource.subject_tag || "General"}</span>
+                          <span className="text-muted-foreground/60">•</span>
+                          <span>{(resource.file_size_bytes / (1024 * 1024)).toFixed(1)} MB</span>
+                          <span className="text-muted-foreground/60">•</span>
                           <span>{format(new Date(resource.created_at), "MMM d, yyyy")}</span>
                         </div>
                         {/* Status Badge */}
                         {resource.processing_status !== "PROCESSED" && (
-                          <div className="mt-1 flex items-center gap-2">
-                            <Badge variant="secondary" className="text-[9px] h-4">
+                          <div className="mt-1.5 flex items-center gap-2">
+                            <Badge variant="secondary" className="text-[9px] h-4 font-medium">
                               {resource.processing_status === "PROCESSING" ||
                               resource.processing_status === "PENDING"
                                 ? "INDEXING FOR AI..."
@@ -271,12 +284,13 @@ export default function StudentResourcesPage() {
                     </div>
 
                     <div
-                      className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="flex items-center justify-end gap-1 sm:gap-1.5 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/30 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity shrink-0"
                       onClick={(e) => e.stopPropagation()}
                     >
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="size-8 text-muted-foreground hover:text-foreground"
                         onClick={() => handleOpenReader(resource.id)}
                         title="Open in Study Reader"
                       >
@@ -285,6 +299,7 @@ export default function StudentResourcesPage() {
                       <Button
                         variant="ghost"
                         size="icon"
+                        className="size-8 text-muted-foreground hover:text-foreground"
                         onClick={() => handleDownload(resource)}
                         title="Download file"
                       >
@@ -293,7 +308,7 @@ export default function StudentResourcesPage() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        className="text-destructive hover:bg-destructive/10"
+                        className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                         onClick={() => deleteResource(resource.id)}
                         title="Delete resource"
                       >

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
-from app.core.exceptions import NotFoundError
+from app.core.exceptions import NotFoundError, ValidationError
 from app.db.enums import (AIGradeDecision, GradingQueuePriority,
                           GradingQueueStatus)
 from app.db.models.assessment import Assessment
@@ -19,6 +19,9 @@ from app.db.models.auth import User, UserProfile
 from app.db.repositories.base import escape_like
 from sqlalchemy import and_, exists, func, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.db.models.ai import AIGradeReview
 
 
 def _utcnow() -> datetime:
@@ -249,6 +252,7 @@ class GradingRepository:
                 SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
+                SubmissionGrade.is_counted.is_(True),
                 SubmissionGrade.score.is_not(None),
             )
         )
@@ -261,6 +265,7 @@ class GradingRepository:
                 SubmissionGrade.is_current.is_(True),
                 SubmissionGrade.is_final.is_(True),
                 SubmissionGrade.is_deleted.is_(False),
+                SubmissionGrade.is_counted.is_(True),
             )
         )
         return float(result.scalar_one())
@@ -295,6 +300,8 @@ class GradingRepository:
         grading_mode: str | None = None,
         is_final: bool = True,
         feedback_author_basis: str | None = None,
+        graded_by_id: uuid.UUID | None = None,
+        delegation_id: uuid.UUID | None = None,
     ) -> None:
         values = {
             "score": score,
@@ -303,6 +310,10 @@ class GradingRepository:
             "updated_by_id": updated_by_id,
             "lecturer_override": lecturer_override,
         }
+        if graded_by_id is not None:
+            values["graded_by_id"] = graded_by_id
+        if delegation_id is not None:
+            values["delegation_id"] = delegation_id
         if feedback is not None:
             values["feedback"] = feedback
         if rubric_scores is not None:
@@ -463,6 +474,7 @@ class GradingRepository:
                 Course.name.label("workspace_title"),
                 StudentResponse.answer_text.label("student_answer_text"),
                 StudentResponse.submitted_content.label("student_submitted_content"),
+                Assessment.anonymous_marking.label("anonymous_marking"),
             )
             .join(User, GradingQueueItem.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
@@ -531,11 +543,14 @@ class GradingRepository:
             item = row[0]
 
             # Map extra columns from the row
-            student_name = (
-                " ".join(part for part in [row.student_first_name, row.student_last_name] if part).strip()
-                or row.student_display_name
-                or "Student"
-            )
+            if getattr(row, "anonymous_marking", False):
+                student_name = f"Candidate-{str(item.attempt_id)[:6].upper()}"
+            else:
+                student_name = (
+                    " ".join(part for part in [row.student_first_name, row.student_last_name] if part).strip()
+                    or row.student_display_name
+                    or "Student"
+                )
 
             student_ans = row.student_answer_text
             if not student_ans and row.student_submitted_content:
@@ -802,6 +817,7 @@ class GradingRepository:
         review_completed_at: datetime | None = None,
         review_duration_seconds: int | None = None,
         lecturer_notes: str | None = None,
+        delegation_id: uuid.UUID | None = None,
     ) -> "AIGradeReview":
         from app.db.models.ai import AIGradeReview
         review = AIGradeReview(
@@ -817,6 +833,7 @@ class GradingRepository:
             score_delta=score_delta,
             max_possible_score=max_possible_score,
             lecturer_id=lecturer_id,
+            delegation_id=delegation_id,
             review_started_at=review_started_at,
             review_completed_at=review_completed_at,
             review_duration_seconds=review_duration_seconds,

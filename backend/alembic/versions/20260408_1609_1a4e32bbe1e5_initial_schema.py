@@ -1911,4 +1911,21 @@ def downgrade() -> None:
     op.drop_index(op.f('ix_ai_action_log_actor_id'), table_name='ai_action_log')
     op.drop_index(op.f('ix_ai_action_log_action_type'), table_name='ai_action_log')
     op.drop_table('ai_action_log')
+    # PostgreSQL keeps native enum types after their last table is removed.
+    # At base, all application tables are gone, so remove the remaining enums
+    # created by this schema and its enum-value revisions.
+    op.execute("""
+        DO $$
+        DECLARE enum_type RECORD;
+        BEGIN
+            FOR enum_type IN
+                SELECT t.typname
+                FROM pg_type AS t
+                JOIN pg_namespace AS n ON n.oid = t.typnamespace
+                WHERE t.typtype = 'e' AND n.nspname = current_schema()
+            LOOP
+                EXECUTE format('DROP TYPE %I', enum_type.typname);
+            END LOOP;
+        END $$;
+    """)
     # ### end Alembic commands ###

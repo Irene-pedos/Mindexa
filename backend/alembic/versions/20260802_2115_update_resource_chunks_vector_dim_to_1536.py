@@ -28,4 +28,3 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS resource_chunks_embedding_idx")
     op.execute("ALTER TABLE resource_chunks ALTER COLUMN embedding TYPE vector(768) USING NULL")
-    op.execute("CREATE INDEX IF NOT EXISTS resource_chunks_embedding_idx ON resource_chunks USING hnsw (embedding vector_cosine_ops)")

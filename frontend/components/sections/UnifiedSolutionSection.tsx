@@ -64,7 +64,7 @@ export default function UnifiedSolutionSection() {
   return (
     <section id="solution" className="w-full lg:h-screen lg:min-h-0 flex flex-col justify-center py-12 md:py-20 lg:py-0 bg-background border-b border-border overflow-hidden relative">
       {/* Subtle ambient light gradient background */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_120%,rgba(30,50,90,0.03),transparent_70%)] dark:bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.05),transparent_70%)] pointer-events-none" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_120%,rgba(30,50,90,0.03),transparent_70%)] pointer-events-none" />
 
       <div className="container mx-auto px-6 max-w-7xl relative z-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">

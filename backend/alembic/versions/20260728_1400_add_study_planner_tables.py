@@ -97,11 +97,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(op.f('ix_study_session_is_deleted'), table_name='study_session')
-    op.drop_index(op.f('ix_study_session_student_id'), table_name='study_session')
-    op.drop_index(op.f('ix_study_session_study_plan_id'), table_name='study_session')
+    op.execute("DROP INDEX IF EXISTS ix_study_session_is_deleted")
+    op.execute("DROP INDEX IF EXISTS ix_study_session_student_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_session_study_plan_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_sessions_student_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_sessions_study_plan_id")
     op.drop_table('study_session')
-    op.drop_index(op.f('ix_study_plan_is_deleted'), table_name='study_plan')
-    op.drop_index(op.f('ix_study_plan_course_id'), table_name='study_plan')
-    op.drop_index(op.f('ix_study_plan_student_id'), table_name='study_plan')
+    op.execute("DROP INDEX IF EXISTS ix_study_plan_is_deleted")
+    op.execute("DROP INDEX IF EXISTS ix_study_plan_course_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_plan_student_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_plans_course_id")
+    op.execute("DROP INDEX IF EXISTS ix_study_plans_student_id")
     op.drop_table('study_plan')

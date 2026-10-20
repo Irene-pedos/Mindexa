@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import func, select, update, and_, or_, exists, not_
 from sqlalchemy.ext.asyncio import AsyncSession

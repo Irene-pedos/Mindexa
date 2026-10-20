@@ -18,6 +18,7 @@ from app.db.base import BaseModel
 
 if TYPE_CHECKING:
     from app.db.models.notification import Notification
+    from app.db.models.duty import UserDutyAssignment
 
 
 # ─── User ─────────────────────────────────────────────────────────────────────
@@ -131,6 +132,12 @@ class User(BaseModel, table=True):
     notifications: List["Notification"] = Relationship(
         back_populates="recipient",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"}
+    )
+    duty_assignments: List["UserDutyAssignment"] = Relationship(
+        sa_relationship_kwargs={
+            "cascade": "all, delete-orphan",
+            "foreign_keys": "[UserDutyAssignment.user_id]",
+        }
     )
 
 

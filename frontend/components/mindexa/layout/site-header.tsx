@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ModeToggle } from "@/components/ui/mode-toggle";
 import { Button } from "@/components/ui/button";
 import {
   Avatar,
@@ -243,6 +244,8 @@ export function SiteHeader() {
         <Badge variant="secondary" className="font-medium">
           {role}
         </Badge>
+
+        <ModeToggle />
 
         {/* Notifications Dropdown */}
         <DropdownMenu>

@@ -82,7 +82,7 @@ export default function CapabilitiesSection() {
   return (
     <section id="capabilities" className="py-20 md:py-28 bg-background overflow-hidden relative">
       {/* Subtle ambient light gradient background */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_-10%,rgba(30,50,90,0.02),transparent_70%)] dark:bg-[radial-gradient(circle_at_50%_-10%,rgba(120,119,198,0.04),transparent_70%)] pointer-events-none" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_-10%,rgba(30,50,90,0.02),transparent_70%)] pointer-events-none" />
 
       <div className="container mx-auto px-6 max-w-7xl relative z-10">
         

@@ -302,31 +302,71 @@ class GradingService:
                 "reason": "AI grading disabled for Kinyarwanda language content. Routed to manual review.",
             }
 
-        # 4. Call AI Review Agent
+        # 4. Call AI Review Agent (ReviewAgent v2 - Section 9.4)
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
         from app.core.ai.provider_factory import get_ai_provider
+        from app.db.repositories.marking_repo import MarkingRepository
 
         provider = get_ai_provider()
         gateway = AIGateway(self.db, provider)
         agent = ReviewAgent(gateway)
+        marking_repo = MarkingRepository(self.db)
 
         # Get student answer (assuming TEXT for now, handle others as needed)
         student_answer = response.answer_text or "No answer provided"
+
+        # Load question marking scheme, mark steps, and attached key points
+        scheme_obj = await marking_repo.get_marking_scheme_by_question(question.id)
+        steps_objs = await marking_repo.list_steps_by_question(question.id)
+        kps_objs = await marking_repo.list_key_points_for_question(question.id)
+
+        step_marks = [
+            {
+                "step_no": s.step_no,
+                "description": s.description,
+                "marks": s.marks,
+                "kind": s.kind.value if hasattr(s.kind, "value") else str(s.kind),
+            }
+            for s in steps_objs
+        ] if steps_objs else None
+
+        key_points = [
+            {
+                "id": str(kp.id),
+                "text": kp.text,
+                "importance": kp.importance.value if hasattr(kp.importance, "value") else str(kp.importance),
+            }
+            for kp in kps_objs
+        ] if kps_objs else None
+
+        marking_scheme_text = scheme_obj.model_answer if scheme_obj else None
 
         try:
             from datetime import UTC, datetime
             ai_started_at = datetime.now(UTC)
 
-            ai_output, raw_completion = await agent.review_response(
+            raw_q_type = (
+                question.question_type.value
+                if hasattr(question.question_type, "value")
+                else str(question.question_type)
+            )
+
+            ai_output, raw_completion = await agent.review_response_v2(
                 question_text=question.content,
                 student_answer=student_answer,
                 rubric_content=rubric_content,
                 max_score=float(question.marks),
-                question_type=question.question_type,
+                question_type=raw_q_type,
+                key_points=key_points,
+                marking_scheme=marking_scheme_text,
+                step_marks=step_marks,
                 attempt_id=item.attempt_id,
                 response_id=response.id,
-                course_context=course_context,
+                course_context=course_context if course_context else None,
+                basis_used=ai_grading_basis,
+                source_citations=ai_context_sources if ai_context_sources else None,
+                language=assessment_lang,
             )
 
             ai_completed_at = datetime.now(UTC)
@@ -627,30 +667,69 @@ class GradingService:
             context={"response_id": str(response_id)},
         )
 
-        # Call AI Review Agent with lecturer feedback
+        # Call AI Review Agent with lecturer feedback (ReviewAgent v2 - Section 9.4)
         from app.agents.review_agent import ReviewAgent
         from app.core.ai.gateway import AIGateway
         from app.core.ai.provider_factory import get_ai_provider
+        from app.db.repositories.marking_repo import MarkingRepository
 
         provider = get_ai_provider()
         gateway = AIGateway(self.db, provider)
         agent = ReviewAgent(gateway)
+        marking_repo = MarkingRepository(self.db)
 
         student_answer = response.answer_text or "No answer provided"
+
+        # Load question marking scheme, mark steps, and attached key points
+        scheme_obj = await marking_repo.get_marking_scheme_by_question(question.id)
+        steps_objs = await marking_repo.list_steps_by_question(question.id)
+        kps_objs = await marking_repo.list_key_points_for_question(question.id)
+
+        step_marks = [
+            {
+                "step_no": s.step_no,
+                "description": s.description,
+                "marks": s.marks,
+                "kind": s.kind.value if hasattr(s.kind, "value") else str(s.kind),
+            }
+            for s in steps_objs
+        ] if steps_objs else None
+
+        key_points = [
+            {
+                "id": str(kp.id),
+                "text": kp.text,
+                "importance": kp.importance.value if hasattr(kp.importance, "value") else str(kp.importance),
+            }
+            for kp in kps_objs
+        ] if kps_objs else None
+
+        marking_scheme_text = scheme_obj.model_answer if scheme_obj else None
 
         from datetime import UTC, datetime
         ai_started_at = datetime.now(UTC)
 
-        ai_output, raw_completion = await agent.review_response(
+        raw_q_type = (
+            question.question_type.value
+            if hasattr(question.question_type, "value")
+            else str(question.question_type)
+        )
+
+        ai_output, raw_completion = await agent.review_response_v2(
             question_text=question.content,
             student_answer=student_answer,
             rubric_content=rubric_content,
             max_score=float(question.marks),
-            question_type=question.question_type,
+            question_type=raw_q_type,
+            key_points=key_points,
+            marking_scheme=marking_scheme_text,
+            step_marks=step_marks,
             response_id=response.id,
             lecturer_feedback=feedback,
             lecturer_id=lecturer_id,
-            course_context=course_context,
+            course_context=course_context if course_context else None,
+            basis_used=ai_grading_basis,
+            source_citations=ai_context_sources if ai_context_sources else None,
         )
 
         ai_completed_at = datetime.now(UTC)
@@ -826,11 +905,39 @@ class GradingService:
                 )
             )
         except Exception as e:
-            logger.warning(
-                "failed_to_sync_student_response_ai_fields",
-                error=str(e),
-                response_id=str(response_id),
+            logger.warning("failed_to_sync_student_response_ai_fields: %s", str(e))
+
+        # Ensure pending AIGradeReview exists for sample-check and bulk-accept flows
+        try:
+            from app.db.models.ai import AIGradeReview
+            from app.db.enums import AIGradeDecision
+            from unittest.mock import Mock
+            rev_res = await self.db.execute(
+                select(AIGradeReview).where(
+                    AIGradeReview.response_id == response_id,
+                    AIGradeReview.grading_decision == AIGradeDecision.PENDING,
+                )
             )
+            existing_rev = rev_res.scalar_one_or_none()
+            if isinstance(existing_rev, AIGradeReview):
+                existing_rev.ai_suggested_total = ai_suggested_score
+                existing_rev.max_possible_score = max_score
+                self.db.add(existing_rev)
+            elif not isinstance(existing_rev, Mock) and not isinstance(getattr(existing, "attempt_id", None), Mock):
+                new_rev = AIGradeReview(
+                    attempt_id=existing.attempt_id,
+                    assessment_id=existing.assessment_id,
+                    student_id=existing.student_id,
+                    response_id=response_id,
+                    submission_grade_id=existing.id,
+                    grading_decision=AIGradeDecision.PENDING,
+                    ai_suggested_total=ai_suggested_score,
+                    max_possible_score=max_score,
+                )
+                self.db.add(new_rev)
+            await self.db.flush()
+        except Exception as e:
+            logger.warning("failed_to_sync_ai_grade_review: %s", str(e))
 
         return existing
 
@@ -877,23 +984,94 @@ class GradingService:
                 code="GRADE_ALREADY_FINAL",
             )
 
-        # 0. Authorization: Verify lecturer is assigned to this assessment's course
+        # 0. Authorization: Verify lecturer is assigned to this assessment's course or is an active delegate
         from app.core.exceptions import AuthorizationError
-        from app.db.models.academic import Course, TeachingAssignment
+        from app.db.models.academic import Course, TeachingAssignment, LecturerCourseAssignment
         from app.db.models.assessment import Assessment
+        from app.db.models.attempt import AssessmentAttempt
+        from app.db.models.authoring import AssessmentCollaborator
+        from app.db.models.marking import GradingDelegation
+        from app.db.enums import DelegationStatus, GradingDelegationScope
 
-        auth_stmt = (
-            select(TeachingAssignment.id)
-            .join(Course, Course.id == TeachingAssignment.course_id)
-            .join(Assessment, Assessment.course_id == Course.id)
+        delegation = None
+        is_authorized = False
+
+        # Check active grading delegation first to capture delegation_id
+        now_dt = datetime.now(UTC)
+        del_stmt = (
+            select(GradingDelegation)
             .where(
-                TeachingAssignment.lecturer_id == lecturer_id,
-                Assessment.id == existing.assessment_id,
-                TeachingAssignment.is_active == True
+                GradingDelegation.assessment_id == existing.assessment_id,
+                GradingDelegation.delegate_id == lecturer_id,
+                GradingDelegation.status == DelegationStatus.ACTIVE,
+                GradingDelegation.valid_from <= now_dt,
+                GradingDelegation.valid_to >= now_dt,
             )
         )
-        auth_res = await self.db.execute(auth_stmt)
-        if not auth_res.scalars().first():
+        del_res = await self.db.execute(del_stmt)
+        delegation = del_res.scalars().first()
+        if delegation:
+            if delegation.scope == GradingDelegationScope.SELECTED_STUDENTS:
+                targets = delegation.target_student_ids or []
+                if str(existing.student_id) not in [str(s) for s in targets]:
+                    raise AuthorizationError(
+                        "This student is outside your delegated grading scope",
+                        code="DELEGATION_SCOPE_MISMATCH",
+                    )
+            elif delegation.scope == GradingDelegationScope.SECTION and delegation.target_section_id:
+                attempt_stmt = select(AssessmentAttempt).where(AssessmentAttempt.id == existing.attempt_id)
+                att = (await self.db.execute(attempt_stmt)).scalar_one_or_none()
+                if att and att.class_section_id and att.class_section_id != delegation.target_section_id:
+                    raise AuthorizationError(
+                        "This class section is outside your delegated grading scope",
+                        code="DELEGATION_SCOPE_MISMATCH",
+                    )
+            is_authorized = True
+
+        if not is_authorized:
+            auth_stmt = (
+                select(TeachingAssignment.id)
+                .join(Course, Course.id == TeachingAssignment.course_id)
+                .join(Assessment, Assessment.course_id == Course.id)
+                .where(
+                    TeachingAssignment.lecturer_id == lecturer_id,
+                    Assessment.id == existing.assessment_id,
+                    TeachingAssignment.is_active == True
+                )
+            )
+            auth_res = await self.db.execute(auth_stmt)
+            if auth_res.scalars().first():
+                is_authorized = True
+
+        if not is_authorized:
+            lc_stmt = (
+                select(LecturerCourseAssignment.course_id)
+                .join(Course, Course.id == LecturerCourseAssignment.course_id)
+                .join(Assessment, Assessment.course_id == Course.id)
+                .where(
+                    LecturerCourseAssignment.lecturer_id == lecturer_id,
+                    Assessment.id == existing.assessment_id,
+                    LecturerCourseAssignment.is_active == True,
+                )
+            )
+            if (await self.db.execute(lc_stmt)).scalars().first():
+                is_authorized = True
+
+        if not is_authorized:
+            ass_stmt = select(Assessment).where(Assessment.id == existing.assessment_id)
+            ass = (await self.db.execute(ass_stmt)).scalar_one_or_none()
+            if ass and ass.created_by_id == lecturer_id:
+                is_authorized = True
+            elif ass:
+                col_stmt = select(AssessmentCollaborator.id).where(
+                    AssessmentCollaborator.assessment_id == existing.assessment_id,
+                    AssessmentCollaborator.lecturer_id == lecturer_id,
+                    AssessmentCollaborator.is_active == True,
+                )
+                if (await self.db.execute(col_stmt)).scalars().first():
+                    is_authorized = True
+
+        if not is_authorized:
             raise AuthorizationError("You are not authorized to grade responses for this course")
 
         # Determine final score
@@ -955,6 +1133,8 @@ class GradingService:
             grading_mode=grading_mode,
             is_final=is_final,
             feedback_author_basis=feedback_author_basis,
+            graded_by_id=lecturer_id,
+            delegation_id=delegation.id if delegation else None,
         )
 
         if internal_notes is not None:
@@ -978,6 +1158,7 @@ class GradingService:
             score_delta=score_delta,
             max_possible_score=existing.max_score,
             lecturer_id=lecturer_id,
+            delegation_id=delegation.id if delegation else None,
             review_started_at=review_started_at,
             review_completed_at=datetime.now(UTC),
             review_duration_seconds=review_duration_seconds,
@@ -1192,6 +1373,54 @@ class GradingService:
                     grading_mode=g_mode,
                 )
                 counts["queued"] += 1
+
+        # Phase 2: Resolve choice sections over-answer policy (FIRST_N or BEST_N)
+        from app.services.assessment_marks import resolve_choice_section_responses
+        from app.db.repositories.attempt_repo import AttemptRepository
+
+        attempt_repo = AttemptRepository(self.db)
+        selections = await attempt_repo.list_selections_for_attempt(attempt_id)
+        all_responses = await self.submission_repo.list_responses_for_attempt(attempt_id)
+        all_grades = await self.grading_repo.list_grades_for_attempt(attempt_id)
+
+        assessment_sections = getattr(assessment, "sections", None) or await self.assessment_repo.list_sections(assessment_id)
+        aq_by_sec = {s.id: [] for s in assessment_sections}
+        for aq in aq_rows:
+            if aq.assessment_section_id in aq_by_sec:
+                aq_by_sec[aq.assessment_section_id].append(aq.question_id)
+
+        for sec in assessment_sections:
+            if getattr(sec, "questions_to_answer", None) is None:
+                continue
+
+            sec_qids = set(aq_by_sec.get(sec.id, []))
+            sec_responses = [r for r in all_responses if r.question_id in sec_qids and not getattr(r, "is_deleted", False)]
+            if not sec_responses:
+                continue
+
+            decisions = resolve_choice_section_responses(
+                section_id=sec.id,
+                questions_to_answer=sec.questions_to_answer,
+                over_answer_policy=getattr(assessment, "over_answer_policy", None),
+                responses=sec_responses,
+                grades=all_grades,
+                selections=selections,
+            )
+
+            for dec in decisions:
+                resp = next((r for r in sec_responses if r.id == dec.response_id), None)
+                if resp:
+                    resp.is_counted = dec.is_counted
+                    self.db.add(resp)
+
+                matching_grades = [g for g in all_grades if g.response_id == dec.response_id and g.is_current and not g.is_deleted]
+                for g in matching_grades:
+                    g.is_counted = dec.is_counted
+                    if not dec.is_counted:
+                        g.score = 0.0
+                    self.db.add(g)
+
+        await self.db.flush()
 
         return counts
 

@@ -97,6 +97,7 @@ class Settings(BaseSettings):
     RATE_LIMIT_DEFAULT_PER_MINUTE: int = 120
     RATE_LIMIT_AI_PER_MINUTE: int = 20
     RATE_LIMIT_STUDENT_AI_SUPPORT_PER_HOUR: int = 30
+    RATE_LIMIT_VERIFY_SEAL_PER_MINUTE: int = 20
     RATE_LIMIT_FAIL_CLOSED_ON_AI: bool = False
 
     # ─── Database ─────────────────────────────────────────────────────────────
@@ -222,6 +223,7 @@ class Settings(BaseSettings):
     AI_MAX_RETRIES: int = 2
     AI_RETRY_BACKOFF_SECONDS: float = 0.5
     AI_STUDENT_SUPPORT_MAX_CONTEXT_SNIPPETS: int = 5
+    SAMPLE_CHECK_AGREEMENT_THRESHOLD: float = 0.80
 
     # ─── Google Gemini ────────────────────────────────────────────────────────
     GEMINI_API_KEY: str = ""

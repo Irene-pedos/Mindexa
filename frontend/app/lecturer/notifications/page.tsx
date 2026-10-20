@@ -27,7 +27,7 @@ export default function LecturerNotificationsPage() {
   async function loadNotifications() {
     try {
       const data = await notificationApi.getNotifications();
-      setNotifications(data.items);
+      setNotifications(data.items || []);
     } catch (err) {
       console.error("Failed to load notifications", err);
     } finally {
@@ -64,16 +64,16 @@ export default function LecturerNotificationsPage() {
     switch (type) {
       case "NEW_SUBMISSION":
       case "SUBMISSION_RECEIVED":
-        return <FileText className="size-4.5 text-blue-600" />;
+        return <FileText className="size-4 text-blue-600 dark:text-blue-400" />;
       case "GRADING_REMINDER":
-        return <Calendar className="size-4.5 text-amber-600" />;
+        return <Calendar className="size-4 text-amber-600 dark:text-amber-400" />;
       case "APPEAL_SUBMITTED":
       case "GROUP_APPEAL_REQUEST":
-        return <AlertTriangle className="size-4.5 text-red-600" />;
+        return <AlertTriangle className="size-4 text-rose-600 dark:text-rose-400" />;
       case "COURSE_UPDATE":
-        return <Users className="size-4.5 text-emerald-600" />;
+        return <Users className="size-4 text-emerald-600 dark:text-emerald-400" />;
       default:
-        return <Bell className="size-4.5 text-muted-foreground" />;
+        return <Bell className="size-4 text-primary" />;
     }
   };
 
@@ -91,30 +91,31 @@ export default function LecturerNotificationsPage() {
   });
 
   return (
-    <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div className="w-full max-w-full 2xl:max-w-[1800px] mx-auto min-w-0 space-y-4 sm:space-y-5 p-1 sm:p-2 lg:p-3 transition-all duration-300 font-sans pb-12">
       {/* Header Container */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 flex items-center gap-2">
-            <Bell className="size-5 text-primary shrink-0" /> Notifications
+          <h1 className="text-base sm:text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Bell className="size-4.5 text-primary shrink-0" />
+            Institutional Notifications
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 font-medium">
-            Registry Feed • Real-time Monitoring Active
+          <p className="text-xs text-muted-foreground mt-0.5 font-normal">
+            Real-time telemetry, assessment submissions, and appeal alerts.
           </p>
         </div>
         <Button
           variant="outline"
           size="sm"
           onClick={handleMarkAllRead}
-          disabled={notifications.every((n) => n.is_read)}
-          className="h-8 px-3.5 rounded-lg text-[10px] font-bold uppercase tracking-wide border-zinc-200 bg-white"
+          disabled={notifications.length === 0 || notifications.every((n) => n.is_read)}
+          className="h-8 px-3.5 rounded-xl text-xs font-semibold border-border/60 bg-card hover:bg-muted/50 text-foreground shadow-2xs gap-1.5"
         >
-          <CheckCheck className="mr-1.5 size-3.5" /> Mark all read
+          <CheckCheck className="size-3.5 text-primary" /> Mark all read
         </Button>
       </div>
 
       {/* Tabs Filter Bar */}
-      <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 border-b border-zinc-100 scrollbar-none">
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1.5 border-b border-border/40 scrollbar-none">
         {[
           {
             id: "all",
@@ -147,20 +148,20 @@ export default function LecturerNotificationsPage() {
             key={t.id}
             onClick={() => setFilter(t.id as any)}
             className={cn(
-              "px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all flex items-center gap-1.5 whitespace-nowrap",
+              "px-3 py-1.5 text-xs font-medium rounded-lg border transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer",
               filter === t.id
-                ? "border-primary bg-primary/5 text-primary shadow-sm"
-                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-zinc-100",
+                ? "border-primary/20 bg-primary/10 text-primary font-semibold shadow-2xs"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/40",
             )}
           >
             {t.label}
             {t.count > 0 && (
               <span
                 className={cn(
-                  "px-1.5 py-0.5 rounded-full text-[9px] font-bold leading-none",
+                  "px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none",
                   filter === t.id
-                    ? "bg-primary text-white"
-                    : "bg-zinc-100 text-muted-foreground border",
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted text-muted-foreground border border-border/60",
                 )}
               >
                 {t.count}
@@ -171,12 +172,12 @@ export default function LecturerNotificationsPage() {
       </div>
 
       {/* Feed list container */}
-      <div className="space-y-2">
+      <div className="space-y-2.5">
         {loading ? (
           [1, 2, 3].map((i) => (
             <div
               key={i}
-              className="flex gap-4 p-4 border rounded-xl bg-white animate-pulse"
+              className="flex gap-4 p-4 border border-border/60 rounded-xl bg-card animate-pulse"
             >
               <Skeleton className="size-9 rounded-lg" />
               <div className="space-y-2 flex-1">
@@ -186,10 +187,10 @@ export default function LecturerNotificationsPage() {
             </div>
           ))
         ) : filteredNotifications.length === 0 ? (
-          <div className="py-16 text-center bg-zinc-50/50 border border-dashed rounded-xl">
-            <Inbox className="mx-auto size-8 text-muted-foreground/20 mb-3" />
-            <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-widest">
-              Transmission Feed Empty
+          <div className="py-16 text-center bg-card/60 border border-dashed border-border/60 rounded-2xl">
+            <Inbox className="mx-auto size-8 text-muted-foreground/30 mb-3" />
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              No notifications in this category
             </p>
           </div>
         ) : (
@@ -198,41 +199,39 @@ export default function LecturerNotificationsPage() {
               key={notif.id}
               onClick={() => !notif.is_read && handleMarkRead(notif.id)}
               className={cn(
-                "group relative flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 border rounded-xl bg-white/70 hover:bg-white shadow-sm transition-all duration-200 cursor-pointer text-left",
+                "group relative flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 sm:p-4 border rounded-xl bg-card transition-all duration-200 cursor-pointer text-left shadow-2xs",
                 notif.is_read
-                  ? "border-zinc-200/50 opacity-75"
-                  : "border-primary/25 bg-white",
+                  ? "border-border/40 opacity-80 hover:border-border hover:opacity-100"
+                  : "border-primary/30 bg-primary/[0.02] hover:border-primary/50",
               )}
             >
               <div className="flex gap-3 flex-1 min-w-0">
                 <div
                   className={cn(
-                    "mt-0.5 shrink-0 size-9 rounded-lg flex items-center justify-center border transition-colors",
+                    "mt-0.5 shrink-0 size-8.5 rounded-lg flex items-center justify-center border transition-colors",
                     notif.is_read
-                      ? "bg-zinc-50 border-zinc-200"
-                      : "bg-primary/5 border-primary/10 text-primary",
+                      ? "bg-muted/40 border-border/60"
+                      : "bg-primary/10 border-primary/20 text-primary",
                   )}
                 >
                   {getIcon(notif.notification_type)}
                 </div>
 
                 <div className="min-w-0">
-                  <div className="text-xs font-bold text-zinc-950 flex items-center gap-2">
+                  <div className="text-xs font-semibold text-foreground flex items-center gap-2">
                     {notif.title}
                     {!notif.is_read && (
-                      <Badge className="bg-primary hover:bg-primary text-white text-[8px] font-bold leading-none h-4 px-1.5 rounded">
-                        NEW
-                      </Badge>
+                      <span className="size-2 rounded-full bg-emerald-500 shrink-0 inline-block" />
                     )}
                   </div>
-                  <p className="text-[11px] font-medium text-muted-foreground mt-1 leading-normal">
+                  <p className="text-xs font-normal text-muted-foreground mt-0.5 leading-normal">
                     {notif.body}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-zinc-100">
-                <div className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">
+              <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-border/40">
+                <div className="text-[10px] font-medium text-muted-foreground">
                   {formatDistanceToNow(new Date(notif.created_at), { addSuffix: true })}
                 </div>
               </div>

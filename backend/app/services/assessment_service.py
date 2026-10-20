@@ -29,6 +29,9 @@ FINALIZATION RULES (all must pass):
 
 import uuid
 from datetime import UTC, datetime
+from typing import Any, List, Optional, Tuple
+
+from sqlalchemy import select
 
 from app.core.constants import AssessmentStatus, UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
@@ -39,7 +42,7 @@ from app.db.enums import AssessmentType as DbAssessmentType
 from app.db.enums import (AttemptStatus, DifficultyLevel, GradingMode,
                           GroupAssignmentMode, GroupSubmissionStatus,
                           QuestionAddedVia, QuestionDistributionMode,
-                          QuestionSourceType)
+                          QuestionSourceType, ScheduleState)
 from app.db.enums import QuestionType as DbQuestionType
 from app.db.enums import ResultReleaseMode, SupervisorRole
 from app.db.models.assessment import Assessment, AssessmentSupervisor
@@ -86,6 +89,42 @@ class AssessmentService:
             return True
         return str(assessment.created_by_id) == str(current_user.id)
 
+    async def _async_assert_can_edit(self, assessment, current_user: User) -> Optional[uuid.UUID]:
+        """Verify user is admin, owner/author, active co-author, or active delegate."""
+        if current_user.role == UserRole.ADMIN.value:
+            return None
+        if str(assessment.created_by_id) == str(current_user.id):
+            return None
+
+        # Check active collaborator
+        from app.db.models.authoring import AssessmentCollaborator, AuthorDelegation
+        from app.db.enums import DelegationStatus
+        from app.db.base import utcnow
+        stmt_c = select(AssessmentCollaborator.id).where(
+            AssessmentCollaborator.assessment_id == assessment.id,
+            AssessmentCollaborator.lecturer_id == current_user.id,
+            AssessmentCollaborator.is_active == True,
+            AssessmentCollaborator.is_deleted == False,
+        )
+        if (await self.db.execute(stmt_c)).first():
+            return None
+
+        # Check active author delegation
+        now = utcnow()
+        stmt_d = select(AuthorDelegation.id).where(
+            AuthorDelegation.assessment_id == assessment.id,
+            AuthorDelegation.delegate_id == current_user.id,
+            AuthorDelegation.status == DelegationStatus.ACTIVE,
+            AuthorDelegation.is_deleted == False,
+            AuthorDelegation.valid_from <= now,
+            AuthorDelegation.valid_to >= now,
+        )
+        row = (await self.db.execute(stmt_d)).first()
+        if row:
+            return row[0]
+
+        raise AuthorizationError("You do not have permission to edit this assessment.")
+
     def _assert_can_edit(self, assessment, current_user: User) -> None:
         if not self._can_edit(assessment, current_user):
             raise AuthorizationError(
@@ -93,23 +132,37 @@ class AssessmentService:
             )
 
     def _assert_not_finalized(self, assessment) -> None:
-        """Block edits only when the assessment is truly immutable.
+        """Block regular wizard edits on post-approval, sealed, published, or undergoing moderation assessments.
 
-        DRAFT / PUBLISHED assessments are always editable by their creator.
-        ACTIVE, CLOSED, and ARCHIVED assessments cannot be structurally changed.
+        - APPROVED, SEALED, PUBLISHED: Must use audited post-approval edit workflow (POST_APPROVAL_EDIT_REQUIRED).
+        - PENDING_MODERATION: Under review by moderators (ASSESSMENT_UNDER_MODERATION).
+        - ACTIVE, CLOSED, ARCHIVED: Truly finalized / immutable (ASSESSMENT_FINALIZED).
+        - DRAFT, CHANGES_REQUESTED: Editable by author / co-author / delegate.
         """
         from app.db.enums import AssessmentStatus as _Status
-        locked_statuses = {_Status.ACTIVE, _Status.CLOSED, _Status.ARCHIVED}
         current_status = assessment.status
         if isinstance(current_status, str):
             try:
                 current_status = _Status(current_status)
             except ValueError:
                 current_status = None
-        if current_status in locked_statuses:
+
+        if current_status in {_Status.ACTIVE, _Status.CLOSED, _Status.ARCHIVED}:
             raise ConflictError(
                 f"This assessment is {current_status.value.lower()} and cannot be modified.",
                 code="ASSESSMENT_FINALIZED",
+            )
+
+        if current_status == _Status.PENDING_MODERATION:
+            raise ConflictError(
+                "Assessment is currently undergoing moderation review and cannot be modified directly.",
+                code="ASSESSMENT_UNDER_MODERATION",
+            )
+
+        if current_status in {_Status.APPROVED, _Status.SEALED, _Status.PUBLISHED}:
+            raise ConflictError(
+                f"Assessment is {current_status.value.lower()}; post-approval modifications must use the audited post-approval edit workflow.",
+                code="POST_APPROVAL_EDIT_REQUIRED",
             )
 
     # ─── Create ───────────────────────────────────────────────────────────────
@@ -317,7 +370,10 @@ class AssessmentService:
         # Timing fields
         if data.window_start is not None:
             update_fields["window_start"] = data.window_start
+            if assessment.status != DbAssessmentStatus.SEALED.value:
+                update_fields["schedule_state"] = ScheduleState.ON_TRACK
         if data.window_end is not None:
+
             update_fields["window_end"] = data.window_end
         if data.result_release_at is not None:
             update_fields["result_release_at"] = data.result_release_at
@@ -487,6 +543,19 @@ class AssessmentService:
             last_active_step=step,
         )
 
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            audit = AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment",
+                entity_id=assessment_id,
+                action="assessment_updated",
+                description=f"Assessment updated at wizard step {step} under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            )
+            self.db.add(audit)
+
         return await self._repo.get_by_id(assessment_id)
 
     # ─── Update Security Settings ─────────────────────────────────────────────
@@ -531,7 +600,10 @@ class AssessmentService:
 
         if data.window_start:
             update_fields["window_start"] = data.window_start
+            if assessment.status != DbAssessmentStatus.SEALED.value:
+                update_fields["schedule_state"] = ScheduleState.ON_TRACK
         if data.window_end:
+
             update_fields["window_end"] = data.window_end
 
         if data.is_password_protected and data.access_password:
@@ -553,6 +625,19 @@ class AssessmentService:
             last_active_step=2
         )
 
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            audit = AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment",
+                entity_id=assessment_id,
+                action="assessment_security_updated",
+                description="Assessment security settings updated under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            )
+            self.db.add(audit)
+
         return await self._repo.get_by_id(assessment_id)
 
     # ─── Sections ─────────────────────────────────────────────────────────────
@@ -571,6 +656,8 @@ class AssessmentService:
             order_index=data.order_index,
             instructions=data.instructions,
             allocated_marks=data.allocated_marks or 0,
+            section_kind=data.section_kind,
+            questions_to_answer=data.questions_to_answer,
         )
 
         # Advance wizard step if needed
@@ -580,6 +667,18 @@ class AssessmentService:
                 updated_by_id=current_user.id,
                 draft_step=3
             )
+
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment_section",
+                entity_id=section.id,
+                action="assessment_section_created",
+                description=f"Assessment section '{data.title}' created under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
 
         return section
 
@@ -595,9 +694,22 @@ class AssessmentService:
         if not section or str(section.assessment_id) != str(assessment_id):
             raise NotFoundError("Section not found in this assessment.")
 
-        update_fields = {k: v for k, v in data.model_dump().items() if v is not None}
+        update_fields = data.model_dump(exclude_unset=True)
         if update_fields:
             await self._repo.update_section(section_id, **update_fields)
+
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment_section",
+                entity_id=section_id,
+                action="assessment_section_updated",
+                description=f"Assessment section {section_id} updated under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
+
         return await self._repo.get_section(section_id)
 
     async def delete_section(
@@ -611,6 +723,18 @@ class AssessmentService:
         if not section or str(section.assessment_id) != str(assessment_id):
             raise NotFoundError("Section not found in this assessment.")
         await self._repo.soft_delete_section(section_id)
+
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment_section",
+                entity_id=section_id,
+                action="assessment_section_deleted",
+                description=f"Assessment section {section_id} deleted under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
 
     # ─── Questions ────────────────────────────────────────────────────────────
 
@@ -661,6 +785,18 @@ class AssessmentService:
                 draft_step=4
             )
 
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment_question",
+                entity_id=aq.id,
+                action="assessment_question_added",
+                description=f"Question {data.question_id} added to assessment {assessment_id} under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
+
         return aq
 
     async def remove_question_from_assessment(
@@ -671,6 +807,18 @@ class AssessmentService:
     ) -> None:
         assessment = await self._get_and_validate(assessment_id, current_user)
         await self._repo.remove_question(assessment_id, question_id)
+
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment_question",
+                entity_id=question_id,
+                action="assessment_question_removed",
+                description=f"Question {question_id} removed from assessment {assessment_id} under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
 
     async def reorder_questions(
         self,
@@ -698,6 +846,18 @@ class AssessmentService:
                 )
             await self._repo.update_question_order(aq.id, order_index)
 
+        if getattr(self, "_current_delegation_id", None):
+            from app.db.models.audit import AuditLog
+            self.db.add(AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment",
+                entity_id=assessment_id,
+                action="assessment_questions_reordered",
+                description=f"Questions reordered in assessment {assessment_id} under delegation.",
+                acting_under_delegation_id=self._current_delegation_id,
+            ))
+
     # ─── Finalize ─────────────────────────────────────────────────────────────
 
     async def finalize_assessment(
@@ -718,7 +878,25 @@ class AssessmentService:
         If all checks pass: sets is_finalized=True, status=SCHEDULED.
         If any blocking check fails: returns errors list without finalizing.
         """
-        assessment = await self._get_and_validate(assessment_id, current_user)
+        assessment = await self._repo.get_by_id(assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found.")
+        delegation_id = await self._async_assert_can_edit(assessment, current_user)
+        self._current_delegation_id = delegation_id
+
+        # Locked statuses check: only ACTIVE, CLOSED, ARCHIVED cannot be finalized
+        from app.db.enums import AssessmentStatus as _Status
+        current_status = assessment.status
+        if isinstance(current_status, str):
+            try:
+                current_status = _Status(current_status)
+            except ValueError:
+                current_status = None
+        if current_status in {_Status.ACTIVE, _Status.CLOSED, _Status.ARCHIVED}:
+            raise ConflictError(
+                f"This assessment is {current_status.value.lower()} and cannot be finalized.",
+                code="ASSESSMENT_FINALIZED",
+            )
 
         errors: list[str] = []
         warnings: list[str] = []
@@ -745,9 +923,15 @@ class AssessmentService:
         if question_count == 0:
             errors.append("Assessment must have at least 1 question before finalizing.")
 
-        # Check 4: Marks match
+        # Check 4: Marks match (using central required_marks)
         if question_count > 0:
-            marks_sum = await self._repo.sum_marks(assessment_id)
+            from app.services.assessment_marks import (
+                required_marks,
+                validate_choice_pools,
+                validate_summative_structure,
+            )
+
+            marks_sum = required_marks(assessment)
             if marks_sum != assessment.total_marks:
                 errors.append(
                     f"Question marks total ({marks_sum}) does not match "
@@ -755,18 +939,47 @@ class AssessmentService:
                     f"Adjust question marks or update total_marks."
                 )
 
+            # Check 4b: Choice pool validity
+            pool_issues = validate_choice_pools(assessment)
+            for issue in pool_issues:
+                errors.append(f"Choice pool: {issue.message}")
+
+            # Check 4c: Summative structure rules
+            policy_total = 100
+            inst_id = None
+            if assessment.course and getattr(assessment.course, "institution_id", None):
+                inst_id = assessment.course.institution_id
+            elif getattr(assessment, "course_id", None) and hasattr(self, "db") and self.db:
+                from app.db.models.academic import Course
+                course_obj = await self.db.get(Course, assessment.course_id)
+                if course_obj:
+                    inst_id = course_obj.institution_id
+
+            if inst_id and hasattr(self, "db") and self.db:
+                from app.core.constants import AssessmentType
+                from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+                policy_repo = ApprovalPolicyRepository(self.db)
+                policy = await policy_repo.get_by_institution_and_type(
+                    institution_id=inst_id,
+                    assessment_type=AssessmentType.SUMMATIVE,
+                )
+                if policy and policy.summative_total_marks is not None:
+                    policy_total = policy.summative_total_marks
+
+            struct_result = validate_summative_structure(assessment, policy_total=policy_total)
+            for v in struct_result.hard_violations:
+                errors.append(f"Structure: {v.message}")
+            for w in struct_result.soft_warnings:
+                warnings.append(f"Structure warning: {w.message}")
+
         # Check 5: Blueprint validation
-        try:
-            blueprint_result = await self._blueprint_service.validate_blueprint(
-                assessment_id
-            )
-            for v in blueprint_result.violations:
-                errors.append(f"Blueprint: {v.message}")
-            for w in blueprint_result.warnings:
-                warnings.append(f"Blueprint warning: {w.message}")
-        except Exception:
-            # No blueprint defined — that's allowed
-            pass
+        blueprint_result = await self._blueprint_service.validate_blueprint(
+            assessment_id
+        )
+        for v in blueprint_result.violations:
+            errors.append(f"Blueprint: {v.message}")
+        for w in blueprint_result.warnings:
+            warnings.append(f"Blueprint warning: {w.message}")
         # Check 5b: Fill-in-the-blank placeholder validation
         for aq in (assessment.assessment_questions or []):
             if aq.question and aq.question.question_type == DbQuestionType.FILL_BLANK:
@@ -822,6 +1035,41 @@ class AssessmentService:
                     if assessment.peer_evaluation_weight_percent is not None:
                         if not (0 < assessment.peer_evaluation_weight_percent <= 100):
                             errors.append("Peer evaluation weight percentage must be between 1 and 100.")
+
+        # Check 7: Moderation Policy & Exam Office Seal requirement (Phase 3 Spec 7.1)
+        mod_inst_id = None
+        if assessment.course and getattr(assessment.course, "institution_id", None):
+            mod_inst_id = assessment.course.institution_id
+        elif getattr(assessment, "course_id", None) and hasattr(self, "db") and self.db:
+            from app.db.models.academic import Course
+            course_rec = await self.db.get(Course, assessment.course_id)
+            if course_rec:
+                mod_inst_id = course_rec.institution_id
+
+        if mod_inst_id and hasattr(self, "db") and self.db:
+            from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+            mod_policy_repo = ApprovalPolicyRepository(self.db)
+            mod_policy = await mod_policy_repo.get_by_institution_and_type(
+                institution_id=mod_inst_id,
+                assessment_type=assessment.assessment_type,
+            )
+            if mod_policy and mod_policy.requires_moderation:
+                curr_status = assessment.status.value if hasattr(assessment.status, "value") else str(assessment.status)
+                if curr_status != DbAssessmentStatus.SEALED.value:
+                    errors.append(
+                        f"Assessment requires moderation approval and an active exam office seal before publish. "
+                        f"Current status is {curr_status}."
+                    )
+                else:
+                    from app.db.repositories.moderation_repo import ModerationRepository
+                    m_repo = ModerationRepository(self.db)
+                    active_seal = await m_repo.get_active_seal(assessment_id)
+                    if not active_seal:
+                        errors.append("No active exam office seal found for this assessment.")
+
+        # Check 8: Schedule state blocking (Spec 7.5)
+        if getattr(assessment, "schedule_state", None) == ScheduleState.SHIFT_REQUIRED:
+            errors.append("Assessment schedule state is SHIFT_REQUIRED; exam window must be updated before publishing.")
 
         # If any errors, don't finalize
         if errors:
@@ -963,6 +1211,20 @@ class AssessmentService:
                         reference_type="assessment",
                         action_url=f"/student/assessments/{assessment.id}/take",
                     )
+
+        if delegation_id:
+            from app.db.models.audit import AuditLog
+            audit = AuditLog(
+                actor_id=current_user.id,
+                actor_role=current_user.role,
+                entity_type="assessment",
+                entity_id=assessment.id,
+                action="assessment_finalized",
+                description=f"Assessment finalized and published under delegation {delegation_id}.",
+                acting_under_delegation_id=delegation_id,
+            )
+            self.db.add(audit)
+            await self.db.commit()
 
         return FinalizeAssessmentResponse(
             id=assessment.id,
@@ -1177,15 +1439,12 @@ class AssessmentService:
     # ─── Internal Helpers ─────────────────────────────────────────────────────
 
     async def _get_and_validate(self, assessment_id: uuid.UUID, current_user: User):
-        """Load assessment and validate edit permission.
-
-        Allows editing DRAFT and PUBLISHED assessments.
-        Blocks edits on ACTIVE, CLOSED, and ARCHIVED assessments.
-        """
+        """Load assessment and validate edit permission."""
         assessment = await self._repo.get_by_id_simple(assessment_id)
         if not assessment:
             raise NotFoundError("Assessment not found.")
-        self._assert_can_edit(assessment, current_user)
+        delegation_id = await self._async_assert_can_edit(assessment, current_user)
+        self._current_delegation_id = delegation_id
         self._assert_not_finalized(assessment)
         return assessment
 
@@ -1385,8 +1644,10 @@ class AssessmentService:
             if not assessment:
                 raise NotFoundError("Assessment to update not found.")
 
-            # Check permissions
-            self._assert_can_edit(assessment, current_user)
+            # Check permissions and prevent bypassing post-approval versioning
+            delegation_id = await self._async_assert_can_edit(assessment, current_user)
+            self._current_delegation_id = delegation_id
+            self._assert_not_finalized(assessment)
 
             # Update basic fields
             update_data = {
@@ -1431,6 +1692,18 @@ class AssessmentService:
 
             # Clear existing sections and questions to rebuild them
             await self._repo.clear_sections_and_questions(assessment.id)
+
+            if getattr(self, "_current_delegation_id", None):
+                from app.db.models.audit import AuditLog
+                self.db.add(AuditLog(
+                    actor_id=current_user.id,
+                    actor_role=current_user.role,
+                    entity_type="assessment",
+                    entity_id=assessment.id,
+                    action="assessment_updated",
+                    description="Assessment updated via bulk builder under delegation.",
+                    acting_under_delegation_id=self._current_delegation_id,
+                ))
         else:
             assessment = await self._repo.create(
                 title=data.metadata.title,
@@ -1921,3 +2194,123 @@ class AssessmentService:
             )
 
         return assessment
+
+    # ─── Marks Summary (Phase 2) ──────────────────────────────────────────────
+
+    async def get_marks_summary(
+        self,
+        assessment_id: uuid.UUID,
+        current_user: User,
+    ) -> dict[str, Any]:
+        """
+        Calculates and returns marks summary, choice pool issues, and summative structure validations.
+        Endpoint: GET /lecturer/assessments/{id}/marks-summary (Spec Section 6.5).
+        """
+        assessment = await self._repo.get_by_id(assessment_id)
+        if not assessment:
+            raise NotFoundError("Assessment not found", code="ASSESSMENT_NOT_FOUND")
+
+        # Access check
+        is_creator = str(assessment.created_by_id) == str(current_user.id)
+        is_admin = current_user.role == UserRole.ADMIN
+        is_supervisor = any(
+            str(s.supervisor_id) == str(current_user.id)
+            for s in (assessment.supervisors or [])
+            if not getattr(s, "is_deleted", False)
+        )
+
+        dept_id: uuid.UUID | None = None
+        inst_id: uuid.UUID | None = None
+        if assessment.course:
+            dept_id = getattr(assessment.course, "department_id", None)
+            inst_id = getattr(assessment.course, "institution_id", None)
+        elif getattr(assessment, "course_id", None) and hasattr(self, "db") and self.db:
+            from app.db.models.academic import Course
+            course_obj = await self.db.get(Course, assessment.course_id)
+            if course_obj:
+                dept_id = course_obj.department_id
+                inst_id = course_obj.institution_id
+
+        is_moderator = False
+        if dept_id and hasattr(self, "db") and self.db:
+            from app.core.permissions import is_moderator_for
+            is_moderator = await is_moderator_for(self.db, current_user.id, department_id=dept_id)
+
+        if not (is_creator or is_admin or is_supervisor or is_moderator):
+            raise AuthorizationError("Not authorized to view marks summary for this assessment")
+
+        policy_total = 100
+        if inst_id and hasattr(self, "db") and self.db:
+            from app.core.constants import AssessmentType
+            from app.db.repositories.approval_policy_repo import ApprovalPolicyRepository
+            policy_repo = ApprovalPolicyRepository(self.db)
+            policy = await policy_repo.get_by_institution_and_type(
+                institution_id=inst_id,
+                assessment_type=AssessmentType.SUMMATIVE,
+            )
+            if policy and policy.summative_total_marks is not None:
+                policy_total = policy.summative_total_marks
+
+        from app.services.assessment_marks import (
+            required_marks,
+            max_possible_score,
+            validate_choice_pools,
+            validate_summative_structure,
+        )
+
+        req_marks = required_marks(assessment)
+        max_score = max_possible_score(assessment)
+        pool_issues = validate_choice_pools(assessment)
+        struct_res = validate_summative_structure(assessment, policy_total=policy_total)
+
+        from app.core.constants import AssessmentType
+        ass_type = getattr(assessment, "assessment_type", None)
+        is_summative = ass_type == AssessmentType.SUMMATIVE or str(ass_type) == "SUMMATIVE"
+
+        all_violations = [
+            {
+                "code": v.code,
+                "message": v.message,
+                "is_blocking": v.is_blocking,
+            }
+            for v in struct_res.all_issues
+        ]
+
+        return {
+            "assessment_id": assessment.id,
+            "required_marks": req_marks,
+            "total_required_marks": req_marks,
+            "max_possible_score": max_score,
+            "configured_total_marks": assessment.total_marks,
+            "configured_policy_total_marks": policy_total,
+            "policy_total": policy_total,
+            "is_summative": is_summative,
+            "is_valid_structure": struct_res.is_valid and len(pool_issues) == 0,
+            "choice_pool_issues": [
+                {
+                    "section_id": i.section_id,
+                    "section_title": i.section_title,
+                    "code": i.code,
+                    "message": i.message,
+                }
+                for i in pool_issues
+            ],
+            "hard_violations": [
+                {
+                    "code": v.code,
+                    "message": v.message,
+                    "is_blocking": v.is_blocking,
+                }
+                for v in struct_res.hard_violations
+            ],
+            "soft_warnings": [
+                {
+                    "code": w.code,
+                    "message": w.message,
+                    "is_blocking": w.is_blocking,
+                }
+                for w in struct_res.soft_warnings
+            ],
+            "structure_violations": all_violations,
+        }
+

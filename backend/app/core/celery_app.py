@@ -54,6 +54,7 @@ def create_celery() -> Celery:
             "app.workers.tasks",
             "app.workers.tasks.grading",
             "app.workers.tasks.document_processing",
+            "app.workers.tasks.sealing_deadline",
         ],
     )
 
@@ -143,6 +144,12 @@ def create_celery() -> Celery:
         "purge-old-logs": {
             "task": "app.workers.tasks.purge_old_logs",
             "schedule": crontab(hour=2, minute=0),
+            "options": {"queue": "cleanup"},
+        },
+        # Check sealing deadlines every 15 minutes (Phase 3 Spec 7.5)
+        "check-sealing-deadlines": {
+            "task": "app.workers.tasks.check_sealing_deadlines",
+            "schedule": 900.0,   # seconds (15 min)
             "options": {"queue": "cleanup"},
         },
         # TODO: Implement and re-enable grading_reminder task

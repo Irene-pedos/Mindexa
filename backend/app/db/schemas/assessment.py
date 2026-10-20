@@ -19,9 +19,12 @@ from app.db.enums import (
     GroupAssignmentMode,
     GradingMode,
     LanguageEnum,
+    OverAnswerPolicy,
     QuestionDistributionMode,
     QuestionType,
     ResultReleaseMode,
+    ScheduleState,
+    SectionKind,
     SupervisorRole,
 )
 from app.db.schemas.base import BaseAuditedResponse, MindexaSchema
@@ -176,6 +179,8 @@ class AssessmentSectionCreate(MindexaSchema):
     instructions: str | None = Field(default=None, max_length=2000)
     order_index: int = Field(ge=0)
     allocated_marks: int = Field(ge=0, le=1000)
+    section_kind: SectionKind = SectionKind.MIXED
+    questions_to_answer: int | None = Field(default=None, ge=1)
     question_count_target: int | None = Field(default=None, ge=1)
     allowed_question_types: list[str] | None = None
     difficulty_distribution: dict[str, int] | None = None
@@ -239,6 +244,9 @@ class AssessmentSectionResponse(BaseAuditedResponse):
     instructions: str | None
     order_index: int
     allocated_marks: int
+    section_kind: SectionKind = SectionKind.MIXED
+    questions_to_answer: int | None = None
+    pool_size: int = 0
     question_count_target: int | None
     allowed_question_types: Any | None
     difficulty_distribution: Any | None
@@ -254,6 +262,8 @@ class AssessmentSummaryResponse(MindexaSchema):
     status: str
     language: LanguageEnum = LanguageEnum.EN
     total_marks: int
+    over_answer_policy: OverAnswerPolicy = OverAnswerPolicy.FIRST_N
+    schedule_state: ScheduleState = ScheduleState.ON_TRACK
     window_start: datetime | None
     window_end: datetime | None
     academic_year: str
@@ -267,6 +277,8 @@ class AssessmentDetailResponse(BaseAuditedResponse):
     instructions: str | None
     assessment_type: str
     status: str
+    over_answer_policy: OverAnswerPolicy = OverAnswerPolicy.FIRST_N
+    schedule_state: ScheduleState = ScheduleState.ON_TRACK
     language: LanguageEnum = LanguageEnum.EN
     course_id: uuid.UUID
     subject_id: uuid.UUID | None

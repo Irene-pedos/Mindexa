@@ -933,7 +933,7 @@ function QuestionCard({
           </div>
 
           {/* Structured Table Section */}
-          <div className="space-y-3 p-4 border rounded-xl bg-zinc-50/50 dark:bg-muted/10">
+          <div className="space-y-3 p-4 border border-border/60 rounded-xl bg-muted/30">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <TableIcon className="size-4 text-primary" />
@@ -5406,7 +5406,7 @@ export default function NewAssessmentBuilder() {
             <Skeleton variant="title" className="h-9 w-24 rounded-lg" />
           </div>
         </div>
-        <div className="space-y-4 bg-zinc-50/50 p-4 rounded-xl border">
+        <div className="space-y-4 bg-muted/20 p-4 rounded-xl border border-border/60">
           <div className="flex gap-4">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <Skeleton
@@ -6568,7 +6568,7 @@ export default function NewAssessmentBuilder() {
                       <Textarea
                         id="customInstructions"
                         placeholder="Any additional custom rules..."
-                        className="min-h-30 text-sm bg-white"
+                        className="min-h-30 text-sm bg-background border-border/60"
                         value={metadata.customInstructions}
                         onChange={(e) => {
                           setMetadata({
@@ -8749,7 +8749,7 @@ export default function NewAssessmentBuilder() {
       {/* Header */}
       <div className="flex items-center justify-between border-b pb-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             Assessment Builder
           </h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
@@ -8777,14 +8777,14 @@ export default function NewAssessmentBuilder() {
             size="sm"
             onClick={handleSaveDraft}
             disabled={isSavingDraft}
-            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
+            className="h-8 text-[10px] font-bold uppercase tracking-wider rounded-lg border-border/60 bg-card hover:bg-muted/50 text-foreground"
           >
             <Save className="mr-1.5 size-3.5" />
             {isSavingDraft ? "Saving..." : "Save Draft"}
           </Button>
           <Badge
             variant="outline"
-            className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-zinc-100 border text-zinc-500"
+            className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-muted border-border/60 text-muted-foreground"
           >
             Step {activeStep} / 6
           </Badge>
@@ -10454,11 +10454,11 @@ export default function NewAssessmentBuilder() {
       </AlertDialog>
 
       {aiGenerating && (
-        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-zinc-950 text-white p-4 rounded-xl shadow-2xl border border-zinc-800 animate-in slide-in-from-bottom-5 duration-300">
+        <div className="fixed bottom-6 right-6 z-50 flex items-center gap-3 bg-card text-card-foreground p-4 rounded-xl shadow-2xl border border-border/60 animate-in slide-in-from-bottom-5 duration-300">
           <LoaderCircleIcon className="size-5 animate-spin text-primary" />
           <div className="text-xs">
-            <p className="font-semibold">AI Question Generator</p>
-            <p className="text-zinc-400">Generating candidates...</p>
+            <p className="font-semibold text-foreground">AI Question Generator</p>
+            <p className="text-muted-foreground">Generating candidates...</p>
           </div>
         </div>
       )}

@@ -29,13 +29,19 @@ from app.schemas.admin import (
     AdminInstitutionSummary,
     AdminUserAccommodationsUpdate,
 )
+from app.core.constants import AssessmentType, Duty
 from app.db.schemas.academic import (
     CourseResponse,
     InstitutionCreate,
     InstitutionUpdate,
     InstitutionResponse,
 )
+from app.db.models.auth import User
+from app.schemas.duty import DutyAssignmentCreate, DutyAssignmentResponse
+from app.schemas.policy import ApprovalPolicyResponse, ApprovalPolicyUpdate
 from app.services.admin_service import AdminService
+from app.services.approval_policy_service import ApprovalPolicyService
+from app.services.duty_service import DutyService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -387,3 +393,117 @@ async def list_institutions(
 ) -> list[InstitutionResponse]:
     service = AdminService(db)
     return await service.list_institutions()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# DUTIES (Phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/duties",
+    response_model=DutyAssignmentResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Assign an institutional duty",
+)
+async def assign_duty(
+    body: DutyAssignmentCreate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> DutyAssignmentResponse:
+    """
+    Assign a scoped duty (MODERATOR, EXAM_OFFICER, DEPARTMENT_HEAD) to a user.
+    Enforces base-role requirements, scope integrity, and duplicate prevention.
+    """
+    service = DutyService(db)
+    assignment = await service.assign_duty(actor=current_user, data=body)
+    return DutyService.build_response(assignment)
+
+
+@router.get(
+    "/duties",
+    response_model=list[DutyAssignmentResponse],
+    summary="List institutional duty assignments",
+)
+async def list_duties(
+    user_id: uuid.UUID | None = Query(None, description="Filter by user ID"),
+    duty: Duty | None = Query(None, description="Filter by duty"),
+    institution_id: uuid.UUID | None = Query(None, description="Filter by institution ID"),
+    campus_id: uuid.UUID | None = Query(None, description="Filter by campus ID"),
+    department_id: uuid.UUID | None = Query(None, description="Filter by department ID"),
+    is_active: bool | None = Query(None, description="Filter by active status"),
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[DutyAssignmentResponse]:
+    """List duty assignments matching the provided filters."""
+    service = DutyService(db)
+    assignments = await service.list_duties(
+        user_id=user_id,
+        duty=duty,
+        institution_id=institution_id,
+        campus_id=campus_id,
+        department_id=department_id,
+        is_active=is_active,
+    )
+    return [DutyService.build_response(a) for a in assignments]
+
+
+@router.delete(
+    "/duties/{id}",
+    response_model=DutyAssignmentResponse,
+    summary="Deactivate a duty assignment",
+)
+async def deactivate_duty(
+    id: uuid.UUID,  # noqa: A002
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> DutyAssignmentResponse:
+    """
+    Deactivate an institutional duty assignment.
+    Never physically deletes the assignment; records an audit log entry.
+    """
+    service = DutyService(db)
+    assignment = await service.deactivate_duty(actor=current_user, duty_id=id)
+    return DutyService.build_response(assignment)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# APPROVAL POLICIES (Phase 1)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/approval-policies",
+    response_model=list[ApprovalPolicyResponse],
+    summary="List institutional approval policies",
+)
+async def list_approval_policies(
+    institution_id: uuid.UUID | None = Query(None, description="Filter by institution ID"),
+    assessment_type: AssessmentType | None = Query(
+        None, description="Filter by assessment type"
+    ),
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> list[ApprovalPolicyResponse]:
+    """List approval policies configured for institutions."""
+    service = ApprovalPolicyService(db)
+    policies = await service.list_policies(
+        institution_id=institution_id,
+        assessment_type=assessment_type,
+    )
+    return [ApprovalPolicyService.build_response(p) for p in policies]
+
+
+@router.put(
+    "/approval-policies/{id}",
+    response_model=ApprovalPolicyResponse,
+    summary="Update an approval policy",
+)
+async def update_approval_policy(
+    id: uuid.UUID,  # noqa: A002
+    body: ApprovalPolicyUpdate,
+    current_user: User = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+) -> ApprovalPolicyResponse:
+    """Update approval policy settings for an assessment type."""
+    service = ApprovalPolicyService(db)
+    policy = await service.update_policy(actor=current_user, policy_id=id, data=body)
+    return ApprovalPolicyService.build_response(policy)

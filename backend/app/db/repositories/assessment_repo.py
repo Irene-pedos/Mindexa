@@ -86,8 +86,11 @@ from app.db.enums import (
     GradingMode,
     GroupAssignmentMode,
     LanguageEnum,
+    OverAnswerPolicy,
     QuestionDistributionMode,
     ResultReleaseMode,
+    ScheduleState,
+    SectionKind,
 )
 from app.db.models.assessment import (
     Assessment,
@@ -99,6 +102,7 @@ from app.db.models.assessment import (
     AssessmentSupervisor,
     AssessmentTargetSection,
 )
+from app.db.models.academic import Course
 from app.db.models.question import AssessmentQuestion, Question
 
 # ---------------------------------------------------------------------------
@@ -330,13 +334,15 @@ class AssessmentRepository:
                 or_(
                     col(Assessment.title).ilike(term, escape="\\"),
                     col(Assessment.instructions).ilike(term, escape="\\"),
-                    col(Assessment.course_name).ilike(term, escape="\\"),
-                    col(Assessment.course_code).ilike(term, escape="\\"),
+                    col(Course.name).ilike(term, escape="\\"),
+                    col(Course.code).ilike(term, escape="\\"),
                 )
             )
 
         count_result = await self.db.execute(
-            select(func.count(col(Assessment.id))).where(*filters)
+            select(func.count(col(Assessment.id)))
+            .join(Course, col(Course.id) == col(Assessment.course_id))
+            .where(*filters)
         )
         total = count_result.scalar_one()
 
@@ -359,6 +365,7 @@ class AssessmentRepository:
 
         result = await self.db.execute(
             select(Assessment)
+            .join(Course, col(Course.id) == col(Assessment.course_id))
             .options(
                 selectinload(Assessment.course),
                 selectinload(Assessment.subject),
@@ -402,13 +409,15 @@ class AssessmentRepository:
                 or_(
                     col(Assessment.title).ilike(term, escape="\\"),
                     col(Assessment.instructions).ilike(term, escape="\\"),
-                    col(Assessment.course_name).ilike(term, escape="\\"),
-                    col(Assessment.course_code).ilike(term, escape="\\"),
+                    col(Course.name).ilike(term, escape="\\"),
+                    col(Course.code).ilike(term, escape="\\"),
                 )
             )
 
         count_result = await self.db.execute(
-            select(func.count(col(Assessment.id))).where(*filters)
+            select(func.count(col(Assessment.id)))
+            .join(Course, col(Course.id) == col(Assessment.course_id))
+            .where(*filters)
         )
         total = count_result.scalar_one()
 
@@ -431,6 +440,7 @@ class AssessmentRepository:
 
         result = await self.db.execute(
             select(Assessment)
+            .join(Course, col(Course.id) == col(Assessment.course_id))
             .options(
                 selectinload(Assessment.course),
                 selectinload(Assessment.subject),
@@ -533,6 +543,8 @@ class AssessmentRepository:
         description: str | None = None,
         instructions: str | None = None,
         allocated_marks: int = 0,
+        section_kind: SectionKind | str = SectionKind.MIXED,
+        questions_to_answer: int | None = None,
         question_count_target: int | None = None,
         allowed_question_types: dict | None = None,
         difficulty_distribution: dict | None = None,
@@ -546,6 +558,8 @@ class AssessmentRepository:
             order_index=order_index,
             instructions=instructions,
             allocated_marks=allocated_marks,
+            section_kind=section_kind,
+            questions_to_answer=questions_to_answer,
             question_count_target=question_count_target,
             allowed_question_types=allowed_question_types,
             difficulty_distribution=difficulty_distribution,
@@ -576,31 +590,16 @@ class AssessmentRepository:
         return result.scalar_one()
 
     async def sum_marks(self, assessment_id: uuid.UUID) -> int:
-        """Sum the marks for all non-deleted questions in an assessment."""
-        from sqlalchemy import case
+        """
+        Return the total required marks for an assessment using the central
+        assessment_marks module (accounting for choice pools and compulsory sections).
+        """
+        from app.services.assessment_marks import required_marks
 
-        from app.db.models.question import Question
-
-        result = await self.db.execute(
-            select(
-                func.sum(
-                    case(
-                        (
-                            col(AssessmentQuestion.marks_override).is_not(None),
-                            col(AssessmentQuestion.marks_override),
-                        ),
-                        else_=col(Question.marks),
-                    )
-                )
-            )
-            .join(Question, col(Question.id) == col(AssessmentQuestion.question_id))
-            .where(
-                col(AssessmentQuestion.assessment_id) == assessment_id,
-                col(AssessmentQuestion.is_deleted) == False,  # noqa: E712
-                col(Question.is_deleted) == False,  # noqa: E712
-            )
-        )
-        return result.scalar() or 0
+        assessment = await self.get_by_id(assessment_id)
+        if not assessment:
+            return 0
+        return required_marks(assessment)
 
     async def delete_draft_progress(self, assessment_id: uuid.UUID) -> None:
         """Hard-delete the wizard progress row for an assessment."""
@@ -636,15 +635,6 @@ class AssessmentRepository:
             .order_by(col(AssessmentSection.order_index))
         )
         return list(result.scalars().all())
-
-    async def count_sections(self, assessment_id: uuid.UUID) -> int:
-        result = await self.db.execute(
-            select(func.count(col(AssessmentSection.id))).where(
-                col(AssessmentSection.assessment_id) == assessment_id,
-                col(AssessmentSection.is_deleted) == False,  # noqa: E712
-            )
-        )
-        return result.scalar_one()
 
     async def update_section(
         self, section_id: uuid.UUID, **fields
@@ -836,14 +826,6 @@ class AssessmentRepository:
         result = await self.db.execute(stmt)
         return list(result.scalars().all())
 
-    async def count_questions(self, assessment_id: uuid.UUID) -> int:
-        result = await self.db.execute(
-            select(func.count(col(AssessmentQuestion.id))).where(
-                col(AssessmentQuestion.assessment_id) == assessment_id
-            )
-        )
-        return result.scalar_one()
-
     async def lock_assessment(self, assessment_id: uuid.UUID) -> None:
         """Acquire an exclusive row lock on the assessment to serialize operations."""
         lock_stmt = select(Assessment.id).where(col(Assessment.id) == assessment_id).with_for_update()
@@ -884,37 +866,6 @@ class AssessmentRepository:
                 | (col(AssessmentQuestion.group_id).is_(None))
             )
         result = await self.db.execute(stmt)
-        return result.scalar_one()
-
-    async def sum_marks(self, assessment_id: uuid.UUID) -> int:
-        """
-        Return the total effective marks for all questions in the assessment.
-
-        Effective marks = marks_override if set, else question.marks.
-        This query uses COALESCE to handle that logic at the DB level.
-        """
-        from sqlalchemy import case
-
-        from app.db.models.question import Question
-
-        result = await self.db.execute(
-            select(
-                func.coalesce(
-                    func.sum(
-                        case(
-                            (
-                                col(AssessmentQuestion.marks_override).isnot(None),
-                                col(AssessmentQuestion.marks_override),
-                            ),
-                            else_=col(Question.marks),
-                        )
-                    ),
-                    0,
-                )
-            )
-            .join(Question, col(Question.id) == col(AssessmentQuestion.question_id))
-            .where(col(AssessmentQuestion.assessment_id) == assessment_id)
-        )
         return result.scalar_one()
 
     async def update_question_order(

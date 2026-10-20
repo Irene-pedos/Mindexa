@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from sqlmodel import SQLModel, Field, Relationship
-from sqlalchemy import Column, String, JSON, DateTime, Text
+from sqlalchemy import Column, String, JSON, DateTime, ForeignKey, Text
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.base import BaseModel
@@ -50,7 +51,10 @@ class StudyPlan(BaseModel, table=True):
     readiness_history: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     covered_material_ids: List[str] = Field(default=[], sa_column=Column(JSON))
     target_mode: str = Field(default="full_assessment_coverage", max_length=50)
-    target_learning_unit_id: Optional[uuid.UUID] = Field(default=None, foreign_key="learning_unit.id", nullable=True)
+    target_learning_unit_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("learning_unit.id", ondelete="SET NULL"), nullable=True),
+    )
 
     sessions: List["StudySession"] = Relationship(sa_relationship=relationship("StudySession", back_populates="plan"))
 
@@ -66,7 +70,10 @@ class StudySession(BaseModel, table=True):
 
     study_plan_id: uuid.UUID = Field(foreign_key="study_plan.id", index=True, nullable=False)
     student_id: uuid.UUID = Field(foreign_key="user.id", index=True, nullable=False)
-    learning_unit_id: Optional[uuid.UUID] = Field(default=None, foreign_key="learning_unit.id", index=True, nullable=True)
+    learning_unit_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("learning_unit.id", ondelete="SET NULL"), nullable=True, index=True),
+    )
 
     title: str = Field(max_length=255, nullable=False)
     topic: str = Field(max_length=255, nullable=False)
@@ -81,7 +88,7 @@ class StudySession(BaseModel, table=True):
     understanding_level: Optional[str] = Field(default=None, max_length=20)
     difficulty_rating: Optional[str] = Field(default=None, max_length=20)
     confidence_rating: Optional[int] = Field(default=None)
-    feedback_notes: Optional[str] = Field(default=None)
+    feedback_notes: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
 
     checklist_items: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
     quiz_questions: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
@@ -99,6 +106,8 @@ class StudySession(BaseModel, table=True):
     knowledge_check_report: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
     session_summary_text: Optional[str] = Field(default=None, sa_column=Column(Text))
     student_notes: Optional[str] = Field(default=None, sa_column=Column(Text))
-    tutor_chat_history: List[Dict[str, Any]] = Field(default=[], sa_column=Column(JSON))
+    tutor_chat_history: List[Dict[str, Any]] = Field(
+        default_factory=list, sa_column=Column(JSON, nullable=False)
+    )
 
     plan: Optional["StudyPlan"] = Relationship(sa_relationship=relationship("StudyPlan", back_populates="sessions"))

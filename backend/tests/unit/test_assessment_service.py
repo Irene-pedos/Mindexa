@@ -102,6 +102,7 @@ async def test_build_bulk_assessment_handles_duplicate_questions_gracefully():
     from app.db.models.question import Question as QuestionModel
 
     db_mock = AsyncMock()
+    db_mock.add = MagicMock()
     service = AssessmentService(db=db_mock)
     service._repo = AsyncMock()
 

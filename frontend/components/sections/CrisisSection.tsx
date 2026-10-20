@@ -12,28 +12,28 @@ const problems = [
     title: "Assessment Environments at Risk",
     desc: "Digital examinations often lack sufficient controls, enabling manipulation, copy-paste attempts, and unauthorized assistance during assessments.",
     badge: "Security Gap",
-    colorClass: "text-red-600 dark:text-red-400 bg-red-50/50 dark:bg-red-950/10 border-red-100 dark:border-red-900/30",
+    colorClass: "text-red-600 bg-red-50/50 border-red-100",
   },
   {
     icon: Workflow,
     title: "Disconnected Academic Workflows",
     desc: "Lecturers and students are forced to navigate multiple uncoordinated systems, resulting in operational friction, manual data transfers, and transcription errors.",
     badge: "Friction",
-    colorClass: "text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-950/10 border-blue-100 dark:border-blue-900/30",
+    colorClass: "text-blue-600 bg-blue-50/50 border-blue-100",
   },
   {
     icon: BookOpen,
     title: "Excessive Academic Burden",
     desc: "Manual grading, fragmented feedback loops, and heavy administrative overhead consume valuable institutional hours that should be spent on instruction.",
     badge: "Time Sink",
-    colorClass: "text-amber-600 dark:text-amber-400 bg-amber-50/50 dark:bg-amber-950/10 border-amber-100 dark:border-amber-900/30",
+    colorClass: "text-amber-600 bg-amber-50/50 border-amber-100",
   },
   {
     icon: Cpu,
     title: "Misaligned Use of AI Technologies",
     desc: "Unregulated AI usage introduces academic integrity risks, cheats the learning process, and undermines the authenticity of student evaluations.",
     badge: "AI Exploits",
-    colorClass: "text-violet-600 dark:text-violet-400 bg-violet-50/50 dark:bg-violet-950/10 border-violet-100 dark:border-violet-900/30",
+    colorClass: "text-violet-600 bg-violet-50/50 border-violet-100",
   },
 ];
 
@@ -99,7 +99,7 @@ export default function CrisisSection() {
   return (
     <section id="crisis" className="w-full lg:h-screen lg:min-h-0 flex flex-col justify-center py-12 md:py-20 lg:py-0 bg-background border-y border-border overflow-hidden relative">
       {/* Subtle ambient light gradient background */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_-20%,rgba(30,50,90,0.03),transparent_70%)] dark:bg-[radial-gradient(circle_at_50%_-20%,rgba(120,119,198,0.05),transparent_70%)] pointer-events-none" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_50%_-20%,rgba(30,50,90,0.03),transparent_70%)] pointer-events-none" />
 
       <div className="container mx-auto px-6 max-w-7xl relative z-10">
         

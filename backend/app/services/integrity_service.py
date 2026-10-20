@@ -41,6 +41,7 @@ from datetime import UTC, datetime
 
 from app.core.exceptions import (AuthorizationError, NotFoundError,
                                  ValidationError)
+from app.agents.integrity_explainer_agent import IntegrityExplainerOutput
 from app.db.enums import (AssessmentStatus, IntegrityEventType,
                           IntegrityFlagRaisedBy, IntegrityFlagStatus,
                           RiskLevel, WarningLevel)

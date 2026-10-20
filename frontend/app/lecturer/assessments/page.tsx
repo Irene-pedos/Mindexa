@@ -522,7 +522,7 @@ export default function ManageAssessmentsPage() {
       {/* ── Page header ── */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Assessments</h1>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">Assessments</h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
             Manage, monitor, and govern your assessment registry.
           </p>

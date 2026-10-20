@@ -599,7 +599,7 @@ export default function BatchGradingPage() {
                                       ? "bg-blue-500/10 text-blue-600 border-blue-500/20"
                                       : itemStatus === "IN_PROGRESS"
                                         ? "bg-amber-500/10 text-amber-600 border-amber-500/20 animate-pulse"
-                                        : "bg-zinc-500/10 text-zinc-600 border-zinc-500/20"
+                                        : "bg-muted text-muted-foreground border-border/60"
                                 )}
                               >
                                 {itemStatus === "COMPLETED"

@@ -36,7 +36,7 @@ from app.db.mixins import composite_index
 
 if TYPE_CHECKING:
     from app.db.models.assessment import Assessment, AssessmentSection, Rubric
-    from app.db.models.attempt import StudentResponse
+    from app.db.models.attempt import StudentGroup, StudentResponse
 
 
 # ─────────────────────────────────────────────────────────────────────────────

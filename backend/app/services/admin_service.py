@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import List, Tuple, Optional
+from typing import Any, List, Tuple, Optional
 
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,15 +35,20 @@ from app.schemas.admin import (
     AdminAnalyticsMetric,
     AdminAnalyticsResponse,
     AdminChartDataPoint,
+    AdminIntegrityOverview,
     AdminCourseListItem,
+    AdminCourseUpdate,
+    AdminInstitutionSummary,
     AdminDashboardResponse,
     AdminDashboardSummary,
     AdminRecentActivity,
+    AdminUserCreate,
     SystemSettingsSchema,
     AdminCourseCreate,
     AdminUserAccommodationsUpdate,
 )
-from app.db.schemas.academic import CourseResponse
+from app.db.schemas.academic import (CourseResponse, InstitutionCreate,
+                                     InstitutionUpdate)
 from app.services.auth_service import AuthService
 
 

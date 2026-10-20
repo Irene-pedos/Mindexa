@@ -58,4 +58,25 @@ def upgrade() -> None:
     except: pass
 
 def downgrade() -> None:
-    pass
+    # Restore objects removed by upgrade so earlier revisions can downgrade.
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+
+    if 'lecturer_option' not in inspector.get_table_names():
+        op.create_table(
+            'lecturer_option',
+            sa.Column('is_deleted', sa.Boolean(), nullable=False),
+            sa.Column('deleted_at', sa.DateTime(timezone=True), nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("TIMEZONE('utc', NOW())"), nullable=False),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text("TIMEZONE('utc', NOW())"), nullable=False),
+            sa.Column('id', sa.Uuid(), server_default=sa.text('gen_random_uuid()'), nullable=False),
+            sa.Column('lecturer_id', sa.UUID(), nullable=False),
+            sa.Column('option_id', sa.UUID(), nullable=False),
+            sa.ForeignKeyConstraint(['lecturer_id'], ['user.id'], ondelete='CASCADE'),
+            sa.ForeignKeyConstraint(['option_id'], ['option.id'], ondelete='CASCADE'),
+            sa.PrimaryKeyConstraint('id', 'lecturer_id', 'option_id'),
+        )
+        op.create_index('ix_lecturer_option_is_deleted', 'lecturer_option', ['is_deleted'], unique=False)
+
+    if 'head_lecturer_id' not in {column['name'] for column in inspector.get_columns('department')}:
+        op.add_column('department', sa.Column('head_lecturer_id', sa.Uuid(), nullable=True))

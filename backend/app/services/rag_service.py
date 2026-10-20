@@ -137,7 +137,7 @@ class RAGService:
         logger.info(
             "Lecturer RAG vector search complete",
             rows_returned=len(rows),
-            workspace_id=str(teaching_workspace_id),
+            workspace_id=str(resolved_workspace_id),
         )
 
         chunks = []

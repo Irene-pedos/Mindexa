@@ -72,7 +72,7 @@ export default function FAQSection() {
   return (
     <section id="faq" className="py-20 md:py-28 bg-background overflow-hidden relative border-t border-border">
       {/* Subtle ambient light gradient background */}
-      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_90%,rgba(30,50,90,0.02),transparent_70%)] dark:bg-[radial-gradient(circle_at_20%_90%,rgba(120,119,198,0.05),transparent_70%)] pointer-events-none" />
+      <div className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_20%_90%,rgba(30,50,90,0.02),transparent_70%)] pointer-events-none" />
 
       <div className="container mx-auto px-6 max-w-7xl relative z-10">
         <div className="grid gap-12 lg:grid-cols-5 items-start">

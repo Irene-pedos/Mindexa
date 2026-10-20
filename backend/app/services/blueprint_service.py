@@ -157,13 +157,14 @@ class BlueprintService:
         rules = await self._repo.list_by_assessment(assessment_id)
         questions = assessment.assessment_questions or []
 
-        total_marks = 0
+        from app.services.assessment_marks import required_marks
+
+        total_marks = required_marks(assessment)
         total_questions = len(questions)
         difficulty_dist: dict[str, int] = {}
         type_dist: dict[str, int] = {}
 
         for aq in questions:
-            total_marks += self._question_marks(aq)
             if aq.question:
                 d = self._enum_value(aq.question.difficulty)
                 t = self._enum_value(aq.question.question_type)
@@ -193,17 +194,23 @@ class BlueprintService:
         for section in (assessment.sections or []):
             section_questions = [aq for aq in questions if aq.assessment_section_id == section.id]
 
-            # 1. Section Marks Validation
-            sec_marks_sum = sum(self._question_marks(aq) for aq in section_questions)
-            if section.allocated_marks and sec_marks_sum != section.allocated_marks:
+            # 1. Section Marks Validation (choice pool: required contribution N * marks_per_q)
+            n = getattr(section, "questions_to_answer", None)
+            if n is not None and section_questions:
+                marks_per_q = self._question_marks(section_questions[0])
+                sec_marks_required = max(0, int(n)) * marks_per_q
+            else:
+                sec_marks_required = sum(self._question_marks(aq) for aq in section_questions)
+
+            if section.allocated_marks and sec_marks_required != section.allocated_marks:
                 violations.append(
                     BlueprintViolation(
                         rule_type="section_marks",
                         rule_id=None,
                         is_blocking=True,
-                        message=f"Section '{section.title}' marks sum ({sec_marks_sum}) does not match allocated marks ({section.allocated_marks}).",
+                        message=f"Section '{section.title}' marks ({sec_marks_required}) does not match allocated marks ({section.allocated_marks}).",
                         expected=section.allocated_marks,
-                        actual=sec_marks_sum,
+                        actual=sec_marks_required,
                     )
                 )
 
@@ -492,13 +499,14 @@ class BlueprintService:
         if not assessment:
             raise NotFoundError("Assessment not found.")
 
+        from app.services.assessment_marks import required_marks
+
         questions = assessment.assessment_questions or []
-        total_marks = 0
+        total_marks = required_marks(assessment)
         difficulty_dist: dict[str, int] = {}
         type_dist: dict[str, int] = {}
 
         for aq in questions:
-            total_marks += self._question_marks(aq)
             if aq.question:
                 d = self._enum_value(aq.question.difficulty)
                 t = self._enum_value(aq.question.question_type)

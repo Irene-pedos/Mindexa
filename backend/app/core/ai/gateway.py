@@ -371,6 +371,9 @@ class AIGateway:
         raw_output: dict | None = None,
     ) -> AIActionLog:
         """Record an audit log entry directly without making an LLM completion API request."""
+        audit_output = dict(raw_output or {})
+        if prompt_version is not None:
+            audit_output.setdefault("prompt_version", prompt_version)
         log_entry = AIActionLog(
             action_type=action_type,
             status=status,
@@ -381,8 +384,7 @@ class AIGateway:
             provider_name="deterministic_rule_engine",
             model_name="deterministic_evaluator",
             prompt_summary=prompt_summary,
-            prompt_version=prompt_version,
-            raw_output=raw_output,
+            raw_output=audit_output or None,
             total_tokens=0,
             latency_ms=0,
         )

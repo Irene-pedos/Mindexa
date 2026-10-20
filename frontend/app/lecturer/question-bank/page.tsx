@@ -158,37 +158,35 @@ export default function LecturerQuestionBank() {
         type: filterType === "all" ? undefined : filterType,
         difficulty: filterDifficulty === "all" ? undefined : filterDifficulty,
         course_id: filterCourse === "all" ? undefined : filterCourse,
-        page_size: 50,
       });
-      setQuestions(response.items as any);
-    } catch (error: any) {
-      console.error("Failed to fetch questions", error);
-      toast.error(error.message || "Could not load questions from bank");
+      setQuestions(response.items || []);
+    } catch (err) {
+      toast.error("Failed to load questions");
     } finally {
       setLoading(false);
     }
   }, [debouncedSearch, filterType, filterDifficulty, filterCourse]);
 
-  useEffect(() => {
-    async function loadCourses() {
-      try {
-        const data = await lecturerApi.getWorkspaces();
-        setCourses(data as any);
-      } catch (err) {
-        console.error("Failed to load courses", err);
-      }
+  const fetchCourses = useCallback(async () => {
+    try {
+      const data = await lecturerApi.getWorkspaces();
+      setCourses(data || []);
+    } catch (err) {
+      console.error("Failed to load courses");
     }
-    loadCourses();
   }, []);
 
   useEffect(() => {
     fetchQuestions();
   }, [fetchQuestions]);
 
+  useEffect(() => {
+    fetchCourses();
+  }, [fetchCourses]);
+
   const handlePreview = async (id: string) => {
     setPreviewOpen(true);
     setLoadingDetail(true);
-    setPreviewData(null);
     try {
       const data = await questionApi.getQuestion(id);
       setPreviewData(data);
@@ -206,27 +204,28 @@ export default function LecturerQuestionBank() {
     setFormLoading(true);
     try {
       const data = await questionApi.getQuestion(id);
-      setShowTableStemEditor(!!data.question_table_context);
-      setShowTableAnswerEditor(!!data.requires_table_answer);
       setFormData({
         content: data.content,
-        image_url: data.image_url,
         explanation: data.explanation || "",
         hint: data.hint || "",
         question_type: data.question_type.toLowerCase() as any,
         difficulty: data.difficulty.toLowerCase() as any,
         suggested_marks: data.marks,
-        course_id: data.course_id,
+        course_id: data.course_id || undefined,
+        topic: data.topic || "",
+        image_url: data.image_url || undefined,
         question_table_context: data.question_table_context,
         requires_table_answer: data.requires_table_answer,
         answer_table_template: data.answer_table_template,
-        options: data.options.map((opt) => ({
+        options: data.options.map((opt, i) => ({
           option_text: opt.option_text,
           option_text_right: opt.option_text_right,
           is_correct: opt.is_correct,
-          order_index: opt.order_index,
+          order_index: opt.order_index ?? i + 1,
         })),
       });
+      setShowTableStemEditor(!!data.question_table_context);
+      setShowTableAnswerEditor(!!data.requires_table_answer);
     } catch (err) {
       toast.error("Failed to load question for editing");
       setFormOpen(false);
@@ -237,63 +236,56 @@ export default function LecturerQuestionBank() {
 
   const handleAdd = () => {
     setFormEditingId(null);
-    setFormOpen(true);
-    setShowTableStemEditor(false);
-    setShowTableAnswerEditor(false);
     setFormData({
       content: "",
-      image_url: undefined,
       explanation: "",
       hint: "",
       question_type: "mcq",
       difficulty: "medium",
       suggested_marks: 1,
-      question_table_context: undefined,
-      requires_table_answer: false,
-      answer_table_template: undefined,
       options: [
         { option_text: "", is_correct: false, order_index: 1 },
         { option_text: "", is_correct: false, order_index: 2 },
       ],
     });
+    setShowTableStemEditor(false);
+    setShowTableAnswerEditor(false);
+    setFormOpen(true);
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) {
-        toast.error("Image too large. Max 5MB.");
-        return;
-      }
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setFormData((prev) => ({ ...prev, image_url: reader.result as string }));
-      };
-      reader.readAsDataURL(file);
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to remove this question?")) return;
+    try {
+      await questionApi.deleteQuestion(id);
+      toast.success("Question deleted successfully");
+      fetchQuestions();
+    } catch (err) {
+      toast.error("Failed to delete question");
     }
   };
 
   const handleFormSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (
-      formData.question_type === "mcq" ||
-      formData.question_type === "true_false"
-    ) {
-      const hasCorrect = formData.options.some((o) => o.is_correct);
-      if (!hasCorrect) {
-        toast.error("Please mark at least one option as correct");
-        return;
-      }
-    }
-
     setFormLoading(true);
+
+    const payload: QuestionCreateRequest = {
+      ...formData,
+      question_type: formData.question_type.toUpperCase() as any,
+      difficulty: formData.difficulty.toUpperCase() as any,
+      options:
+        formData.question_type === "mcq" ||
+        formData.question_type === "true_false" ||
+        formData.question_type === "matching"
+          ? formData.options.map((o, idx) => ({ ...o, order_index: idx + 1 }))
+          : [],
+    };
+
     try {
       if (editingId) {
-        await questionApi.updateQuestion(editingId, formData);
+        await questionApi.updateQuestion(editingId, payload);
         toast.success("Question updated successfully");
       } else {
-        await questionApi.createQuestion(formData);
+        await questionApi.createQuestion(payload);
         toast.success("Question created successfully");
       }
       setFormOpen(false);
@@ -305,15 +297,16 @@ export default function LecturerQuestionBank() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this question?")) return;
-
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0]) return;
+    const file = e.target.files[0];
+    const toastId = toast.loading("Uploading image asset...");
     try {
-      await questionApi.deleteQuestion(id);
-      toast.success("Question deleted successfully");
-      fetchQuestions();
-    } catch (error) {
-      toast.error("Failed to delete question");
+      const res = await lecturerApi.uploadImage(file);
+      setFormData((prev) => ({ ...prev, image_url: res.url }));
+      toast.success("Image uploaded", { id: toastId });
+    } catch (err: any) {
+      toast.error("Failed to upload image", { id: toastId });
     }
   };
 
@@ -350,43 +343,67 @@ export default function LecturerQuestionBank() {
     });
   };
 
+  const getDifficultyBadge = (difficulty: string) => {
+    const d = difficulty.toUpperCase();
+    if (d === "EASY") {
+      return (
+        <Badge variant="outline" className="capitalize text-[9px] font-semibold rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20">
+          Easy
+        </Badge>
+      );
+    }
+    if (d === "HARD") {
+      return (
+        <Badge variant="outline" className="capitalize text-[9px] font-semibold rounded-full bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20">
+          Hard
+        </Badge>
+      );
+    }
+    return (
+      <Badge variant="outline" className="capitalize text-[9px] font-semibold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20">
+        Medium
+      </Badge>
+    );
+  };
+
   return (
-    <div data-tour="lecturer-bank" className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
+    <div data-tour="lecturer-bank" className="w-full max-w-full 2xl:max-w-[1800px] mx-auto min-w-0 space-y-4 sm:space-y-5 p-1 sm:p-2 lg:p-3 transition-all duration-300 font-sans pb-12">
       {/* Header Container */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b pb-2">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/40 pb-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
-            Question Bank
+          <h1 className="text-base sm:text-lg font-semibold tracking-tight text-foreground flex items-center gap-2">
+            <Database className="size-4.5 text-primary" />
+            Institutional Question Bank
           </h1>
-          <p className="text-sm text-muted-foreground mt-1 font-medium">
-            Review, tag, and synchronize academic assessment items.
+          <p className="text-xs text-muted-foreground mt-0.5 font-normal">
+            Author, tag, and verify reusable assessment items with math formulas and dataset tables.
           </p>
         </div>
         <Button
           onClick={handleAdd}
           size="sm"
-          className="h-8 px-4 font-bold text-[10px] uppercase tracking-wider rounded-lg shadow-none text-white"
+          className="h-8 px-3.5 font-semibold text-xs rounded-xl shadow-2xs text-primary-foreground bg-primary hover:bg-primary/90 gap-1.5"
         >
-          <Plus className="mr-1.5 size-3.5" /> New Question
+          <Plus className="size-3.5" /> New Question
         </Button>
       </div>
 
-      {/* Filters and Searches */}
-      <div className="flex flex-wrap gap-2 pb-1.5 border-b border-zinc-100">
+      {/* Filters and Searches Control Bar */}
+      <div className="flex flex-wrap items-center gap-2.5 p-2.5 border border-border/50 bg-card/40 rounded-xl backdrop-blur-xs">
         <div className="relative flex-1 min-w-[200px] max-w-sm">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground/60" />
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
-            placeholder="Search items..."
+            placeholder="Search items by prompt or topic..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
-            className="pl-9 h-8.5 text-xs rounded-lg border-zinc-200 bg-white"
+            className="pl-8 h-8 text-xs rounded-lg border-border/60 bg-background text-foreground placeholder:text-muted-foreground"
           />
         </div>
         <Select value={filterType} onValueChange={setFilterType}>
-          <SelectTrigger className="w-40 h-8.5 text-xs rounded-lg border-zinc-200 bg-white">
+          <SelectTrigger className="w-36 h-8 text-xs rounded-lg border-border/60 bg-background text-foreground">
             <SelectValue placeholder="Protocol Type" />
           </SelectTrigger>
-          <SelectContent className="rounded-lg shadow-lg">
+          <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
             <SelectItem value="all" className="text-xs">All Types</SelectItem>
             <SelectItem value="MCQ" className="text-xs">Multiple Choice</SelectItem>
             <SelectItem value="TRUE_FALSE" className="text-xs">True/False</SelectItem>
@@ -396,10 +413,10 @@ export default function LecturerQuestionBank() {
           </SelectContent>
         </Select>
         <Select value={filterDifficulty} onValueChange={setFilterDifficulty}>
-          <SelectTrigger className="w-36 h-8.5 text-xs rounded-lg border-zinc-200 bg-white">
+          <SelectTrigger className="w-32 h-8 text-xs rounded-lg border-border/60 bg-background text-foreground">
             <SelectValue placeholder="Difficulty" />
           </SelectTrigger>
-          <SelectContent className="rounded-lg shadow-lg">
+          <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
             <SelectItem value="all" className="text-xs">All Levels</SelectItem>
             <SelectItem value="EASY" className="text-xs">Easy</SelectItem>
             <SelectItem value="MEDIUM" className="text-xs">Medium</SelectItem>
@@ -407,10 +424,10 @@ export default function LecturerQuestionBank() {
           </SelectContent>
         </Select>
         <Select value={filterCourse} onValueChange={setFilterCourse}>
-          <SelectTrigger className="w-48 h-8.5 text-xs rounded-lg border-zinc-200 bg-white">
+          <SelectTrigger className="w-44 h-8 text-xs rounded-lg border-border/60 bg-background text-foreground">
             <SelectValue placeholder="All Courses" />
           </SelectTrigger>
-          <SelectContent className="rounded-lg shadow-lg">
+          <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
             <SelectItem value="all" className="text-xs">All Courses</SelectItem>
             {courses.map((c) => (
               <SelectItem key={c.id} value={c.id} className="text-xs">
@@ -422,27 +439,27 @@ export default function LecturerQuestionBank() {
       </div>
 
       {/* Questions list feed */}
-      <div className="space-y-2">
+      <div className="space-y-3">
         {loading ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
             {[1, 2, 3].map((i) => (
-              <Card key={i} className="shadow-none border p-4 rounded-xl animate-pulse">
+              <Card key={i} className="shadow-2xs border border-border/60 p-4 rounded-xl animate-pulse bg-card">
                 <Skeleton className="h-4 w-3/4 rounded mb-2" />
                 <Skeleton className="h-3.5 w-1/4 rounded" />
               </Card>
             ))}
           </div>
         ) : questions.length === 0 ? (
-          <Card className="border-dashed bg-zinc-50/50 rounded-xl border-zinc-200/80 shadow-none">
+          <Card className="border-dashed bg-card/60 rounded-2xl border-border/60 shadow-none">
             <CardContent className="py-16 text-center">
               <Database className="size-8 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 No matching questions found
               </p>
               <Button
                 variant="link"
                 size="sm"
-                className="mt-1 text-xs font-bold text-primary"
+                className="mt-1 text-xs font-semibold text-primary"
                 onClick={() => {
                   setSearchTerm("");
                   setFilterType("all");
@@ -458,13 +475,13 @@ export default function LecturerQuestionBank() {
           questions.map((q) => (
             <Card
               key={q.id}
-              className="shadow-none border border-zinc-150 hover:border-primary/20 transition-all rounded-xl overflow-hidden bg-white"
+              className="shadow-2xs border border-border/60 hover:border-border transition-colors rounded-xl overflow-hidden bg-card"
             >
               <div className="p-4 flex flex-col gap-3">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex gap-3 flex-1 min-w-0">
                     {q.image_url && (
-                      <div className="size-12 rounded-lg border bg-zinc-50 overflow-hidden flex-shrink-0 relative">
+                      <div className="size-12 rounded-lg border border-border/60 bg-muted/20 overflow-hidden shrink-0 relative">
                         <Image
                           src={q.image_url}
                           alt="Resource prompt"
@@ -475,26 +492,21 @@ export default function LecturerQuestionBank() {
                       </div>
                     )}
                     <div className="space-y-1.5 flex-1 min-w-0">
-                      <div className="text-xs font-semibold leading-normal text-zinc-800 line-clamp-2">
+                      <div className="text-xs font-semibold leading-normal text-foreground line-clamp-2">
                         {renderRichMathText(q.content)}
                       </div>
                       <div className="flex flex-wrap gap-1.5">
                         <Badge
                           variant="outline"
-                          className="capitalize text-[8.5px] font-bold text-zinc-500 rounded-md border-zinc-200"
+                          className="capitalize text-[9px] font-semibold text-muted-foreground rounded-full border-border/60 bg-muted/30"
                         >
                           {q.question_type.toLowerCase().replace("_", " ")}
                         </Badge>
-                        <Badge
-                          variant="secondary"
-                          className="capitalize text-[8.5px] font-bold rounded-md bg-zinc-100 border text-zinc-600"
-                        >
-                          {q.difficulty.toLowerCase()}
-                        </Badge>
+                        {getDifficultyBadge(q.difficulty)}
                         {q.topic && (
                           <Badge
                             variant="outline"
-                            className="bg-primary/5 border-primary/25 text-primary text-[8.5px] font-bold rounded-md truncate max-w-[120px]"
+                            className="bg-primary/10 border-primary/20 text-primary text-[9px] font-semibold rounded-full truncate max-w-[120px]"
                           >
                             {q.topic}
                           </Badge>
@@ -502,7 +514,7 @@ export default function LecturerQuestionBank() {
                         {q.course_id && (
                           <Badge
                             variant="outline"
-                            className="text-[8.5px] font-bold rounded-md border-zinc-200 text-zinc-500 truncate max-w-[80px]"
+                            className="text-[9px] font-semibold rounded-full border-border/60 text-muted-foreground bg-muted/40 truncate max-w-[100px]"
                           >
                             {courses.find((c) => c.id === q.course_id)?.code || "Assigned Course"}
                           </Badge>
@@ -514,22 +526,22 @@ export default function LecturerQuestionBank() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="text-zinc-400 hover:text-red-500 h-7 w-7 transition-colors rounded-lg self-start shrink-0"
+                    className="text-muted-foreground hover:text-destructive hover:bg-destructive/10 size-7 transition-colors rounded-lg self-start shrink-0"
                     onClick={() => handleDelete(q.id)}
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
                 </div>
 
-                <div className="flex items-center justify-between text-[10px] pt-3 border-t border-zinc-100">
-                  <div className="flex items-center gap-4 text-zinc-400 font-medium">
+                <div className="flex items-center justify-between text-[10px] pt-3 border-t border-border/40">
+                  <div className="flex items-center gap-4 text-muted-foreground font-medium">
                     <div>
                       <span>Weight: </span>
-                      <span className="font-bold text-zinc-600">{q.marks} Marks</span>
+                      <span className="font-semibold text-foreground">{q.marks} Marks</span>
                     </div>
                     <div>
                       <span>Date: </span>
-                      <span className="font-bold text-zinc-600">
+                      <span className="font-semibold text-foreground">
                         {new Date(q.created_at).toLocaleDateString()}
                       </span>
                     </div>
@@ -538,18 +550,18 @@ export default function LecturerQuestionBank() {
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
+                      className="h-7.5 px-3 text-xs font-medium rounded-lg border-border/60 bg-card hover:bg-muted/50 text-foreground shadow-2xs"
                       onClick={() => handlePreview(q.id)}
                     >
-                      <Eye className="mr-1.5 size-3" /> Preview
+                      <Eye className="mr-1.5 size-3 text-muted-foreground" /> Preview
                     </Button>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="h-7 px-2.5 text-[9px] font-bold uppercase tracking-wider rounded-lg border-zinc-200 bg-white"
+                      className="h-7.5 px-3 text-xs font-medium rounded-lg border-border/60 bg-card hover:bg-muted/50 text-foreground shadow-2xs"
                       onClick={() => handleEdit(q.id)}
                     >
-                      <Edit className="mr-1.5 size-3" /> Modify
+                      <Edit className="mr-1.5 size-3 text-muted-foreground" /> Modify
                     </Button>
                   </div>
                 </div>
@@ -561,18 +573,18 @@ export default function LecturerQuestionBank() {
 
       {/* Preview Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col p-0 rounded-xl border border-zinc-200 shadow-xl bg-white">
-          <DialogHeader className="p-4 pb-3 border-b bg-zinc-50/50">
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-hidden flex flex-col p-0 rounded-2xl border border-border/60 shadow-xl bg-card text-card-foreground">
+          <DialogHeader className="p-4 pb-3 border-b border-border/40 bg-muted/20">
             <div className="flex items-center justify-between pr-6">
               <div>
-                <DialogTitle className="text-sm font-bold text-zinc-800">
+                <DialogTitle className="text-sm font-semibold text-foreground">
                   Question Detail Preview
                 </DialogTitle>
-                <DialogDescription className="text-[10px] text-muted-foreground mt-0.5 font-medium">
-                  Review item layout and correct options verification keys.
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5 font-normal">
+                  Review item layout and verified evaluation keys.
                 </DialogDescription>
               </div>
-              <Badge variant="outline" className="font-bold h-5.5 px-2 rounded-lg border-primary/20 text-primary bg-primary/5 text-[9px] uppercase">
+              <Badge variant="outline" className="font-mono font-medium h-5.5 px-2 rounded-full border-primary/20 text-primary bg-primary/10 text-[10px]">
                 {previewData?.marks} Marks
               </Badge>
             </div>
@@ -580,29 +592,29 @@ export default function LecturerQuestionBank() {
 
           <div className="flex-1 overflow-y-auto">
             <ScrollArea className="h-full">
-              <div className="p-5 space-y-6">
+              <div className="p-5 space-y-5">
                 {loadingDetail ? (
                   <div className="py-12 flex flex-col items-center justify-center gap-2">
-                    <Loader2 className="size-6 animate-spin text-zinc-400" />
-                    <span className="text-xs text-zinc-400">Loading details...</span>
+                    <Loader2 className="size-6 animate-spin text-primary" />
+                    <span className="text-xs text-muted-foreground">Loading details...</span>
                   </div>
                 ) : previewData ? (
                   <div className="space-y-5">
                     <div className="space-y-2">
-                      <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block ml-0.5">
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block ml-0.5">
                         Question Prompt
                       </span>
-                      <div className="space-y-4">
-                        <div className="text-xs font-semibold leading-relaxed p-4 rounded-xl border bg-zinc-50 text-zinc-800">
+                      <div className="space-y-3">
+                        <div className="text-xs font-semibold leading-relaxed p-4 rounded-xl border border-border/60 bg-muted/30 text-foreground">
                           {renderRichMathText(previewData.content)}
                         </div>
                         {previewData.question_table_context && (
-                          <div className="p-3 border rounded-xl bg-white">
+                          <div className="p-3 border border-border/60 rounded-xl bg-card">
                             <TableContextViewer data={previewData.question_table_context} />
                           </div>
                         )}
                         {previewData.image_url && (
-                          <div className="p-1.5 border rounded-xl bg-zinc-50 inline-block shadow-sm overflow-hidden max-w-full">
+                          <div className="p-1.5 border border-border/60 rounded-xl bg-muted/20 inline-block shadow-2xs overflow-hidden max-w-full">
                             <Image
                               src={previewData.image_url}
                               alt="Prompt Media Link"
@@ -617,8 +629,8 @@ export default function LecturerQuestionBank() {
                     </div>
 
                     {previewData.options && previewData.options.length > 0 && (
-                      <div className="space-y-2 pt-3 border-t border-dashed">
-                        <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400 block ml-0.5">
+                      <div className="space-y-2 pt-3 border-t border-border/40">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground block ml-0.5">
                           Response Candidates
                         </span>
                         <div className="grid gap-2">
@@ -626,26 +638,26 @@ export default function LecturerQuestionBank() {
                             <div
                               key={idx}
                               className={cn(
-                                "flex items-center justify-between p-3 px-4 rounded-lg border text-xs transition-colors",
+                                "flex items-center justify-between p-3 px-4 rounded-xl border text-xs transition-colors",
                                 opt.is_correct
-                                  ? "bg-emerald-50/50 border-emerald-100 text-emerald-900 font-bold shadow-sm"
-                                  : "bg-white border-zinc-150"
+                                  ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-900 dark:text-emerald-200 font-semibold shadow-2xs"
+                                  : "bg-card border-border/60 text-foreground"
                               )}
                             >
                               <div className="flex items-center gap-3">
                                 <div
                                   className={cn(
-                                    "size-5.5 rounded border flex items-center justify-center text-[9px] font-bold",
+                                    "size-5.5 rounded border flex items-center justify-center text-[10px] font-bold",
                                     opt.is_correct
                                       ? "bg-emerald-500 text-white border-emerald-400"
-                                      : "bg-zinc-100 text-zinc-500 border-zinc-200"
+                                      : "bg-muted text-muted-foreground border-border/60"
                                   )}
                                 >
                                   {String.fromCharCode(65 + idx)}
                                 </div>
                                 <span className="font-semibold">{renderRichMathText(opt.option_text)}</span>
                               </div>
-                              {opt.is_correct && <CheckCircle2 className="size-4 text-emerald-500 shrink-0" />}
+                              {opt.is_correct && <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400 shrink-0" />}
                             </div>
                           ))}
                         </div>
@@ -653,23 +665,23 @@ export default function LecturerQuestionBank() {
                     )}
 
                     {(previewData.explanation || previewData.hint) && (
-                      <div className="space-y-4 pt-4 border-t border-dashed">
+                      <div className="space-y-3 pt-3 border-t border-border/40">
                         {previewData.explanation && (
-                          <div className="p-4 rounded-xl bg-primary/[0.01] border border-primary/10">
-                            <h4 className="text-[9px] font-bold flex items-center gap-1.5 mb-1.5 text-primary uppercase tracking-wide">
+                          <div className="p-3.5 rounded-xl bg-primary/5 border border-primary/15">
+                            <h4 className="text-[10px] font-semibold flex items-center gap-1.5 mb-1 text-primary uppercase tracking-wider">
                               <AlertCircle className="size-3.5" /> Logic Explanation
                             </h4>
-                            <div className="text-xs font-medium text-zinc-600 leading-relaxed italic">
+                            <div className="text-xs font-normal text-muted-foreground leading-relaxed italic">
                               {renderRichMathText(previewData.explanation)}
                             </div>
                           </div>
                         )}
                         {previewData.hint && (
-                          <div className="p-4 rounded-xl bg-amber-50/40 border border-amber-100">
-                            <h4 className="text-[9px] font-bold flex items-center gap-1.5 mb-1.5 text-amber-700 uppercase tracking-wide">
+                          <div className="p-3.5 rounded-xl bg-amber-500/5 border border-amber-500/20">
+                            <h4 className="text-[10px] font-semibold flex items-center gap-1.5 mb-1 text-amber-700 dark:text-amber-400 uppercase tracking-wider">
                               <Sparkles className="size-3.5" /> Student Guidance Hint
                             </h4>
-                            <p className="text-xs font-medium text-amber-800 leading-relaxed italic">
+                            <p className="text-xs font-normal text-amber-800 dark:text-amber-300 leading-relaxed italic">
                               {previewData.hint}
                             </p>
                           </div>
@@ -682,19 +694,19 @@ export default function LecturerQuestionBank() {
             </ScrollArea>
           </div>
 
-          <DialogFooter className="p-4 border-t bg-zinc-50/50 flex gap-2 justify-end">
+          <DialogFooter className="p-4 border-t border-border/40 bg-muted/20 flex gap-2 justify-end">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setPreviewOpen(false)}
-              className="font-bold text-[10px] uppercase h-8 px-4 rounded-lg bg-white border-zinc-200"
+              className="text-xs font-medium h-8 px-4 rounded-xl border-border/60"
             >
               Close
             </Button>
             <Button
               onClick={() => previewData && handleEdit(previewData.id)}
               size="sm"
-              className="font-bold text-[10px] uppercase h-8 px-4 rounded-lg text-white bg-primary hover:bg-primary/95"
+              className="text-xs font-semibold h-8 px-4 rounded-xl text-primary-foreground bg-primary hover:bg-primary/90 shadow-2xs"
             >
               Edit Item
             </Button>
@@ -704,39 +716,39 @@ export default function LecturerQuestionBank() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-xl border border-zinc-200 shadow-xl bg-white">
+        <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-hidden flex flex-col p-0 rounded-2xl border border-border/60 shadow-xl bg-card text-card-foreground">
           <form onSubmit={handleFormSubmit} className="flex flex-col h-full overflow-hidden">
-            <DialogHeader className="p-4 pb-3 border-b bg-zinc-50/50">
-              <DialogTitle className="text-sm font-bold text-zinc-800">
+            <DialogHeader className="p-4 pb-3 border-b border-border/40 bg-muted/20">
+              <DialogTitle className="text-sm font-semibold text-foreground">
                 {editingId ? "Modify Question" : "New Question Entry"}
               </DialogTitle>
-              <DialogDescription className="text-[10px] text-muted-foreground mt-0.5 font-medium">
-                Configure details for evaluation questions registered in the institutional ledger.
+              <DialogDescription className="text-xs text-muted-foreground mt-0.5 font-normal">
+                Configure details for evaluation questions registered in the institutional bank.
               </DialogDescription>
             </DialogHeader>
 
             <div className="flex-1 overflow-y-auto">
               <ScrollArea className="h-full">
-                <div className="p-5 space-y-6">
+                <div className="p-5 space-y-5">
                   {formLoading && !formData.content ? (
                     <div className="py-12 flex flex-col items-center justify-center gap-2 animate-pulse">
-                      <Loader2 className="size-5 animate-spin text-zinc-400" />
-                      <span className="text-xs text-zinc-400">Syncing data...</span>
+                      <Loader2 className="size-5 animate-spin text-primary" />
+                      <span className="text-xs text-muted-foreground">Syncing data...</span>
                     </div>
                   ) : (
-                    <div className="space-y-5">
+                    <div className="space-y-4">
                       <div className="space-y-4">
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="content" className="text-xs font-bold text-zinc-700">
-                              Question Prompt
+                            <Label htmlFor="content" className="text-xs font-semibold text-foreground">
+                              Question Prompt <span className="text-destructive">*</span>
                             </Label>
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
                               onClick={() => openMathEditor("content")}
-                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                              className="h-6 px-2 text-[10px] font-semibold text-primary hover:bg-primary/10 gap-1 rounded-md"
                             >
                               <Sigma className="size-3" /> Insert Math / Formula
                             </Button>
@@ -744,7 +756,7 @@ export default function LecturerQuestionBank() {
                           <Textarea
                             id="content"
                             placeholder="Type the core question or prompt instruction... (LaTeX: $formula$ or $$block$$)"
-                            className="min-h-[100px] text-xs font-medium p-3 rounded-lg border-zinc-200 bg-white"
+                            className="min-h-[100px] text-xs font-normal p-3 rounded-lg border-border/60 bg-background text-foreground placeholder:text-muted-foreground"
                             value={formData.content}
                             onChange={(e) =>
                               setFormData((prev) => ({ ...prev, content: e.target.value }))
@@ -754,11 +766,11 @@ export default function LecturerQuestionBank() {
                         </div>
 
                         {/* Structured Table Section */}
-                        <div className="space-y-3 p-3.5 border border-zinc-200 rounded-xl bg-zinc-50/50">
+                        <div className="space-y-3 p-3.5 border border-border/60 rounded-xl bg-muted/20">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2">
                               <TableIcon className="size-4 text-primary" />
-                              <span className="text-xs font-bold text-zinc-800">
+                              <span className="text-xs font-semibold text-foreground">
                                 Structured Tables & Datasets
                               </span>
                             </div>
@@ -768,7 +780,7 @@ export default function LecturerQuestionBank() {
                                 variant={showTableStemEditor ? "default" : "outline"}
                                 size="sm"
                                 onClick={() => setShowTableStemEditor(!showTableStemEditor)}
-                                className="h-7 text-[10px] font-bold uppercase rounded-lg px-2.5"
+                                className="h-7 text-xs font-medium rounded-lg px-2.5 border-border/60"
                               >
                                 {formData.question_table_context ? "Edit Reference Table" : "+ Add Reference Table"}
                               </Button>
@@ -782,7 +794,7 @@ export default function LecturerQuestionBank() {
                                     setFormData((prev) => ({ ...prev, requires_table_answer: nextVal }));
                                     setShowTableAnswerEditor(nextVal);
                                   }}
-                                  className="h-7 text-[10px] font-bold uppercase rounded-lg px-2.5"
+                                  className="h-7 text-xs font-medium rounded-lg px-2.5 border-border/60"
                                 >
                                   {formData.requires_table_answer ? "✓ Requires Table Answer" : "Require Table Answer"}
                                 </Button>
@@ -791,9 +803,9 @@ export default function LecturerQuestionBank() {
                           </div>
 
                           {showTableStemEditor && (
-                            <div className="mt-3 p-3 bg-white border border-zinc-200 rounded-lg space-y-2">
+                            <div className="mt-3 p-3 bg-card border border-border/60 rounded-xl space-y-2">
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-semibold text-zinc-600">Question Stem Reference Table</span>
+                                <span className="text-xs font-semibold text-foreground">Question Stem Reference Table</span>
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -815,8 +827,8 @@ export default function LecturerQuestionBank() {
                           )}
 
                           {showTableAnswerEditor && formData.requires_table_answer && (
-                            <div className="mt-3 p-3 bg-white border border-zinc-200 rounded-lg space-y-2">
-                              <span className="text-xs font-semibold text-zinc-600">Student Answer Table Template Grid</span>
+                            <div className="mt-3 p-3 bg-card border border-border/60 rounded-xl space-y-2">
+                              <span className="text-xs font-semibold text-foreground">Student Answer Table Template Grid</span>
                               <TableEditor
                                 initialData={formData.answer_table_template}
                                 onChange={(data) => setFormData((prev) => ({ ...prev, answer_table_template: data }))}
@@ -825,9 +837,9 @@ export default function LecturerQuestionBank() {
                           )}
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
                           <div className="space-y-1.5">
-                            <Label htmlFor="type" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="type" className="text-xs font-semibold text-foreground">
                               Protocol Type
                             </Label>
                             <Select
@@ -836,10 +848,10 @@ export default function LecturerQuestionBank() {
                                 setFormData((prev) => ({ ...prev, question_type: val as any }))
                               }
                             >
-                              <SelectTrigger id="type" className="h-8.5 rounded-lg border-zinc-200 bg-white text-xs">
+                              <SelectTrigger id="type" className="h-8.5 rounded-lg border-border/60 bg-background text-xs text-foreground">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="rounded-lg shadow-lg">
+                              <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
                                 <SelectItem value="mcq" className="text-xs">Multiple Choice</SelectItem>
                                 <SelectItem value="true_false" className="text-xs">True / False</SelectItem>
                                 <SelectItem value="short_answer" className="text-xs">Short Answer</SelectItem>
@@ -850,7 +862,7 @@ export default function LecturerQuestionBank() {
                           </div>
 
                           <div className="space-y-1.5">
-                            <Label htmlFor="difficulty" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="difficulty" className="text-xs font-semibold text-foreground">
                               Complexity Vector
                             </Label>
                             <Select
@@ -859,10 +871,10 @@ export default function LecturerQuestionBank() {
                                 setFormData((prev) => ({ ...prev, difficulty: val as any }))
                               }
                             >
-                              <SelectTrigger id="difficulty" className="h-8.5 rounded-lg border-zinc-200 bg-white text-xs">
+                              <SelectTrigger id="difficulty" className="h-8.5 rounded-lg border-border/60 bg-background text-xs text-foreground">
                                 <SelectValue />
                               </SelectTrigger>
-                              <SelectContent className="rounded-lg shadow-lg">
+                              <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
                                 <SelectItem value="easy" className="text-xs">Easy</SelectItem>
                                 <SelectItem value="medium" className="text-xs">Medium</SelectItem>
                                 <SelectItem value="hard" className="text-xs">Hard</SelectItem>
@@ -871,16 +883,16 @@ export default function LecturerQuestionBank() {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-3 sm:gap-4">
                           <div className="space-y-1.5">
-                            <Label htmlFor="marks" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="marks" className="text-xs font-semibold text-foreground">
                               Weight (Marks)
                             </Label>
                             <Input
                               id="marks"
                               type="number"
                               min={1}
-                              className="h-8.5 font-bold rounded-lg border-zinc-200 bg-white text-xs"
+                              className="h-8.5 font-bold rounded-lg border-border/60 bg-background text-foreground text-xs"
                               value={formData.suggested_marks}
                               onChange={(e) =>
                                 setFormData((prev) => ({
@@ -893,7 +905,7 @@ export default function LecturerQuestionBank() {
                           </div>
 
                           <div className="space-y-1.5">
-                            <Label htmlFor="course" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="course" className="text-xs font-semibold text-foreground">
                               Linked Subject Ledger
                             </Label>
                             <Select
@@ -902,10 +914,10 @@ export default function LecturerQuestionBank() {
                                 setFormData((prev) => ({ ...prev, course_id: val }))
                               }
                             >
-                              <SelectTrigger id="course" className="h-8.5 rounded-lg border-zinc-200 bg-white text-xs">
+                              <SelectTrigger id="course" className="h-8.5 rounded-lg border-border/60 bg-background text-foreground text-xs">
                                 <SelectValue placeholder="General (All courses)" />
                               </SelectTrigger>
-                              <SelectContent className="rounded-lg shadow-lg">
+                              <SelectContent className="rounded-lg shadow-lg border-border/60 bg-popover text-popover-foreground">
                                 {courses.map((c) => (
                                   <SelectItem key={c.id} value={c.id} className="text-xs">
                                     {c.title}
@@ -916,13 +928,13 @@ export default function LecturerQuestionBank() {
                           </div>
 
                           <div className="space-y-1.5">
-                            <Label htmlFor="topic" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="topic" className="text-xs font-semibold text-foreground">
                               Topic Classification
                             </Label>
                             <Input
                               id="topic"
                               placeholder="e.g. Molecular Biology"
-                              className="h-8.5 rounded-lg border-zinc-200 bg-white text-xs font-medium"
+                              className="h-8.5 rounded-lg border-border/60 bg-background text-foreground text-xs font-medium"
                               value={formData.topic}
                               onChange={(e) =>
                                 setFormData((prev) => ({ ...prev, topic: e.target.value }))
@@ -932,12 +944,12 @@ export default function LecturerQuestionBank() {
                         </div>
 
                         <div className="space-y-1.5 pt-1">
-                          <Label className="text-xs font-bold text-zinc-700">
+                          <Label className="text-xs font-semibold text-foreground">
                             Media Attachment
                           </Label>
                           <div className="flex items-center gap-4">
                             {formData.image_url ? (
-                              <div className="relative group size-16 rounded-xl border bg-white p-1 overflow-hidden">
+                              <div className="relative group size-16 rounded-xl border border-border/60 bg-card p-1 overflow-hidden">
                                 <Image
                                   src={formData.image_url}
                                   alt="Media Upload"
@@ -950,15 +962,15 @@ export default function LecturerQuestionBank() {
                                   onClick={() =>
                                     setFormData((p) => ({ ...p, image_url: undefined }))
                                   }
-                                  className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
+                                  className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white"
                                 >
                                   <Trash2 className="size-4" />
                                 </button>
                               </div>
                             ) : (
-                              <label className="size-16 rounded-xl border border-dashed border-zinc-300 flex flex-col items-center justify-center cursor-pointer hover:bg-zinc-50 transition-colors group">
-                                <Upload className="size-4 text-zinc-400 group-hover:text-primary mb-1" />
-                                <span className="text-[8px] font-bold text-zinc-400 uppercase">
+                              <label className="size-16 rounded-xl border border-dashed border-border/60 flex flex-col items-center justify-center cursor-pointer hover:bg-muted/40 transition-colors group">
+                                <Upload className="size-4 text-muted-foreground group-hover:text-primary mb-1" />
+                                <span className="text-[8px] font-semibold text-muted-foreground uppercase">
                                   Upload
                                 </span>
                                 <input
@@ -969,14 +981,14 @@ export default function LecturerQuestionBank() {
                                 />
                               </label>
                             )}
-                            <div className="text-[10px] text-zinc-400 font-medium">
+                            <div className="text-[10px] text-muted-foreground font-normal">
                               JPEG or PNG format under 5MB.
                             </div>
                           </div>
                         </div>
                       </div>
 
-                      <Separator className="bg-zinc-100" />
+                      <Separator className="bg-border/40" />
 
                       {/* Interactive Options list */}
                       {(formData.question_type === "mcq" ||
@@ -984,7 +996,7 @@ export default function LecturerQuestionBank() {
                         formData.question_type === "matching") && (
                         <div className="space-y-3">
                           <div className="flex items-center justify-between">
-                            <Label className="text-xs font-bold text-zinc-700">
+                            <Label className="text-xs font-semibold text-foreground">
                               {formData.question_type === "matching"
                                 ? "Relation Pair Mapping"
                                 : "Option Nodes Settings"}
@@ -995,9 +1007,9 @@ export default function LecturerQuestionBank() {
                                 variant="outline"
                                 size="sm"
                                 onClick={addOption}
-                                className="h-7 rounded-lg text-[9px] font-bold uppercase tracking-wider border-primary/20 text-primary hover:bg-primary/5 bg-white"
+                                className="h-7 rounded-lg text-xs font-medium border-border/60 text-foreground hover:bg-muted/50 bg-card"
                               >
-                                <Plus className="mr-1.5 size-3" /> Add Option
+                                <Plus className="mr-1.5 size-3 text-primary" /> Add Option
                               </Button>
                             )}
                           </div>
@@ -1006,7 +1018,7 @@ export default function LecturerQuestionBank() {
                             {formData.options.map((opt, idx) => (
                               <div
                                 key={idx}
-                                className="flex items-center gap-3 p-3 bg-zinc-50/50 border border-zinc-150 rounded-xl focus-within:bg-white"
+                                className="flex items-center gap-3 p-3 bg-muted/20 border border-border/60 rounded-xl focus-within:bg-card focus-within:border-border"
                               >
                                 {formData.question_type === "mcq" ||
                                 formData.question_type === "true_false" ? (
@@ -1015,10 +1027,10 @@ export default function LecturerQuestionBank() {
                                     onCheckedChange={(checked) =>
                                       updateOption(idx, "is_correct", !!checked)
                                     }
-                                    className="size-4.5 rounded border-zinc-300 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-400"
+                                    className="size-4.5 rounded border-border/60 data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-400"
                                   />
                                 ) : (
-                                  <span className="text-[10px] font-bold text-zinc-400 font-mono">
+                                  <span className="text-[10px] font-bold text-muted-foreground font-mono">
                                     {idx + 1}.
                                   </span>
                                 )}
@@ -1034,20 +1046,20 @@ export default function LecturerQuestionBank() {
                                     onChange={(e) =>
                                       updateOption(idx, "option_text", e.target.value)
                                     }
-                                    className="border-none bg-transparent shadow-none px-0 h-7 text-xs font-semibold focus-visible:ring-0 placeholder:text-zinc-300"
+                                    className="border-none bg-transparent shadow-none px-0 h-7 text-xs font-semibold text-foreground focus-visible:ring-0 placeholder:text-muted-foreground"
                                     required
                                     disabled={formData.question_type === "true_false"}
                                   />
                                   {formData.question_type === "matching" && (
                                     <>
-                                      <ArrowRight className="size-3.5 text-zinc-300 mt-2 shrink-0" />
+                                      <ArrowRight className="size-3.5 text-muted-foreground mt-2 shrink-0" />
                                       <Input
                                         placeholder="Right Mapping..."
                                         value={opt.option_text_right || ""}
                                         onChange={(e) =>
                                           updateOption(idx, "option_text_right", e.target.value)
                                         }
-                                        className="border-none bg-transparent shadow-none px-0 h-7 text-xs font-semibold text-primary focus-visible:ring-0 placeholder:text-zinc-300"
+                                        className="border-none bg-transparent shadow-none px-0 h-7 text-xs font-semibold text-primary focus-visible:ring-0 placeholder:text-muted-foreground"
                                         required
                                       />
                                     </>
@@ -1058,7 +1070,7 @@ export default function LecturerQuestionBank() {
                                   type="button"
                                   variant="ghost"
                                   size="icon"
-                                  className="size-6 text-zinc-400 hover:text-primary rounded-lg shrink-0"
+                                  className="size-6 text-muted-foreground hover:text-primary rounded-lg shrink-0"
                                   title="Insert Math Formula"
                                   onClick={() => openMathEditor("option", idx)}
                                 >
@@ -1071,7 +1083,7 @@ export default function LecturerQuestionBank() {
                                       type="button"
                                       variant="ghost"
                                       size="icon"
-                                      className="size-6 text-zinc-400 hover:text-red-500 rounded-lg"
+                                      className="size-6 text-muted-foreground hover:text-destructive rounded-lg"
                                       onClick={() => removeOption(idx)}
                                     >
                                       <X className="size-3.5" />
@@ -1087,7 +1099,7 @@ export default function LecturerQuestionBank() {
                       <div className="space-y-4 pt-2">
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="explanation" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="explanation" className="text-xs font-semibold text-foreground">
                               Rubric Evaluation Guide
                             </Label>
                             <Button
@@ -1095,7 +1107,7 @@ export default function LecturerQuestionBank() {
                               variant="ghost"
                               size="sm"
                               onClick={() => openMathEditor("explanation")}
-                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                              className="h-6 px-2 text-[10px] font-semibold text-primary hover:bg-primary/10 gap-1 rounded-md"
                             >
                               <Sigma className="size-3" /> Insert Math
                             </Button>
@@ -1103,7 +1115,7 @@ export default function LecturerQuestionBank() {
                           <Textarea
                             id="explanation"
                             placeholder="Provide details on the correct answer rationale..."
-                            className="min-h-[80px] text-xs font-medium p-3 rounded-lg border-zinc-200 bg-white"
+                            className="min-h-[80px] text-xs font-normal p-3 rounded-lg border-border/60 bg-background text-foreground placeholder:text-muted-foreground"
                             value={formData.explanation}
                             onChange={(e) =>
                               setFormData((prev) => ({ ...prev, explanation: e.target.value }))
@@ -1113,7 +1125,7 @@ export default function LecturerQuestionBank() {
 
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <Label htmlFor="hint" className="text-xs font-bold text-zinc-700">
+                            <Label htmlFor="hint" className="text-xs font-semibold text-foreground">
                               Assistance Hint
                             </Label>
                             <Button
@@ -1121,7 +1133,7 @@ export default function LecturerQuestionBank() {
                               variant="ghost"
                               size="sm"
                               onClick={() => openMathEditor("hint")}
-                              className="h-6 px-2 text-[10px] font-bold text-primary hover:bg-primary/10 gap-1 rounded-md"
+                              className="h-6 px-2 text-[10px] font-semibold text-primary hover:bg-primary/10 gap-1 rounded-md"
                             >
                               <Sigma className="size-3" /> Insert Math
                             </Button>
@@ -1129,7 +1141,7 @@ export default function LecturerQuestionBank() {
                           <Input
                             id="hint"
                             placeholder="Hint suggestion for students (optional)..."
-                            className="h-8.5 text-xs rounded-lg border-zinc-200 bg-white px-3"
+                            className="h-8.5 text-xs rounded-lg border-border/60 bg-background text-foreground placeholder:text-muted-foreground px-3"
                             value={formData.hint}
                             onChange={(e) =>
                               setFormData((prev) => ({ ...prev, hint: e.target.value }))
@@ -1143,13 +1155,13 @@ export default function LecturerQuestionBank() {
               </ScrollArea>
             </div>
 
-            <DialogFooter className="p-4 border-t bg-zinc-50/50 flex gap-2 justify-end">
+            <DialogFooter className="p-4 border-t border-border/40 bg-muted/20 flex gap-2 justify-end">
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => setFormOpen(false)}
-                className="font-bold text-[10px] uppercase h-8 px-4 rounded-lg bg-white border-zinc-200"
+                className="text-xs font-medium h-8 px-4 rounded-xl border-border/60"
               >
                 Abort
               </Button>
@@ -1157,7 +1169,7 @@ export default function LecturerQuestionBank() {
                 type="submit"
                 disabled={formLoading}
                 size="sm"
-                className="font-bold text-[10px] uppercase h-8 px-5 rounded-lg text-white bg-primary hover:bg-primary/95 shadow-none"
+                className="text-xs font-semibold h-8 px-5 rounded-xl text-primary-foreground bg-primary hover:bg-primary/90 shadow-2xs"
               >
                 {formLoading ? (
                   <>

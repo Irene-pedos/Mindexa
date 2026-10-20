@@ -411,6 +411,15 @@ class AIGradeReview(BaseModel, table=True):
         nullable=True,
         index=True,
     )
+    delegation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("grading_delegation.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
     review_started_at: Optional[datetime] = Field(
         default=None,
         nullable=True,

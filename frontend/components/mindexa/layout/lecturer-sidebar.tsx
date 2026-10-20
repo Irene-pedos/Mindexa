@@ -261,7 +261,7 @@ export function LecturerSidebar({
                     className={cn(
                       "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
                       pathname.startsWith("/lecturer/grading")
-                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        ? "bg-muted/60 text-foreground font-semibold [&_svg:first-child]:text-primary"
                         : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                     )}
                   >
@@ -278,25 +278,45 @@ export function LecturerSidebar({
                   </SidebarMenuButton>
                 </CollapsibleTrigger>
                 <CollapsibleContent>
-                  <SidebarMenuSub>
+                  <SidebarMenuSub className="ml-4 mr-2 flex flex-col gap-1 border-l border-border/50 pl-2.5 pr-1 py-1 my-1">
                     {gradingNav.map((subItem) => {
-                      const isActive =
-                        pathname === subItem.url ||
-                        pathname.startsWith(subItem.url + "/");
+                      const isBatch = pathname.startsWith("/lecturer/grading/batch");
+                      const isAnalytics = pathname.startsWith("/lecturer/grading/analytics");
+                      let isActive = false;
+                      if (subItem.url === "/lecturer/grading/batch") {
+                        isActive = isBatch;
+                      } else if (subItem.url === "/lecturer/grading/analytics") {
+                        isActive = isAnalytics;
+                      } else if (subItem.url === "/lecturer/grading") {
+                        isActive = pathname.startsWith("/lecturer/grading") && !isBatch && !isAnalytics;
+                      }
+
                       return (
                         <SidebarMenuSubItem key={subItem.title}>
                           <SidebarMenuSubButton
                             asChild
                             isActive={isActive}
                             className={cn(
-                              "h-8 rounded-lg text-xs transition-all duration-150",
+                              "group/sub h-7.5 px-2.5 rounded-lg text-xs font-medium transition-all duration-150 flex items-center gap-2",
                               isActive
-                                ? "!bg-primary/10 !text-primary font-semibold border-l-2 border-primary pl-2.5"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/40"
+                                ? "!bg-primary/10 !text-primary font-semibold hover:!bg-primary/15"
+                                : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                             )}
                           >
-                            <Link href={subItem.url}>
-                              <span>{subItem.title}</span>
+                            <Link href={subItem.url} className="flex items-center gap-2 w-full">
+                              <subItem.icon
+                                className={cn(
+                                  "size-3.5 shrink-0 transition-colors",
+                                  isActive
+                                    ? "!text-primary"
+                                    : "text-muted-foreground/70 group-hover/sub:text-foreground"
+                                )}
+                                aria-hidden="true"
+                              />
+                              <span className="truncate flex-1">{subItem.title}</span>
+                              {isActive && (
+                                <span className="size-1.5 rounded-full bg-primary shrink-0" />
+                              )}
                             </Link>
                           </SidebarMenuSubButton>
                         </SidebarMenuSubItem>

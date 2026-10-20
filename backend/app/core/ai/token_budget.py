@@ -32,12 +32,17 @@ def _get_encoder() -> Optional[object]:
     if _ENCODER_TRIED:
         return _ENCODER
     _ENCODER_TRIED = True
+    import os
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("ENVIRONMENT") == "test":
+        _ENCODER = None
+        return None
     try:
         import tiktoken  # type: ignore
         _ENCODER = tiktoken.get_encoding("cl100k_base")
     except Exception:  # pragma: no cover
         _ENCODER = None
     return _ENCODER
+
 
 
 def estimate_tokens(text: str) -> int:

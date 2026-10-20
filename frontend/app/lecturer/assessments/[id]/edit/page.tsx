@@ -935,7 +935,7 @@ function QuestionCard({
           </div>
 
           {/* Structured Table Section */}
-          <div className="space-y-3 p-4 border rounded-xl bg-zinc-50/50 dark:bg-muted/10">
+          <div className="space-y-3 p-4 border border-border/60 rounded-xl bg-muted/30">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <TableIcon className="size-4 text-primary" />
@@ -5137,7 +5137,7 @@ export default function EditAssessmentPage() {
                                   accessPassword: e.target.value,
                                 });
                               }}
-                              className="h-9 text-sm bg-white"
+                              className="h-9 text-sm bg-background border-border/60"
                             />
                           </div>
                         )}
@@ -5160,7 +5160,7 @@ export default function EditAssessmentPage() {
                                   attempts: parseInt(e.target.value) || 1,
                                 });
                               }}
-                              className="h-9 text-sm bg-white"
+                              className="h-9 text-sm bg-background border-border/60"
                             />
                           </div>
                           {metadata.mode === "Homework" && (
@@ -5185,7 +5185,7 @@ export default function EditAssessmentPage() {
                                       parseFloat(e.target.value) || 0,
                                   });
                                 }}
-                                className="h-9 text-sm bg-white"
+                                className="h-9 text-sm bg-background border-border/60"
                               />
                             </div>
                           )}
@@ -5213,7 +5213,7 @@ export default function EditAssessmentPage() {
                                       parseInt(e.target.value) || 0,
                                   });
                                 }}
-                                className="h-9 text-sm bg-white"
+                                className="h-9 text-sm bg-background border-border/60"
                               />
                             </div>
                           )}
@@ -5233,7 +5233,7 @@ export default function EditAssessmentPage() {
                   <CardContent className="p-5">
                     <Textarea
                       placeholder="Define student-facing rules..."
-                      className="min-h-[250px] text-sm bg-white"
+                      className="min-h-[250px] text-sm bg-background border-border/60"
                       value={metadata.instructions}
                       onChange={(e) => {
                         setMetadata({
@@ -5775,7 +5775,7 @@ export default function EditAssessmentPage() {
                               });
                               runAutosave(4);
                             }}
-                            className="w-full h-9 rounded-lg border text-xs px-2.5 bg-white outline-none"
+                            className="w-full h-9 rounded-lg border border-border/60 text-xs px-2.5 bg-background text-foreground outline-none"
                           >
                             <option value="Easy">Easy</option>
                             <option value="Medium">Medium</option>
@@ -5795,7 +5795,7 @@ export default function EditAssessmentPage() {
                               });
                               runAutosave(4);
                             }}
-                            className="w-full h-9 rounded-lg border text-xs px-2.5 bg-white outline-none"
+                            className="w-full h-9 rounded-lg border border-border/60 text-xs px-2.5 bg-background text-foreground outline-none"
                           >
                             <option value="remember">Remember</option>
                             <option value="understand">Understand</option>
@@ -6256,9 +6256,9 @@ export default function EditAssessmentPage() {
 
                 {/* Validation and Distribution Report Card */}
                 {(validationResult || distributionData) && (
-                  <Card className="shadow-none border border-zinc-200">
-                    <CardHeader className="py-4 border-b bg-zinc-50/50">
-                      <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Card className="shadow-none border border-border/60 bg-card">
+                    <CardHeader className="py-4 border-b border-border/40 bg-muted/20">
+                      <CardTitle className="text-sm font-semibold flex items-center gap-2 text-foreground">
                         <CheckCircle2 className="size-4 text-primary" />{" "}
                         Blueprint Validation Report
                       </CardTitle>
@@ -6271,7 +6271,7 @@ export default function EditAssessmentPage() {
                               className={cn(
                                 "font-semibold text-xs",
                                 validationResult.is_valid
-                                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                  ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20"
                                   : "bg-destructive/10 text-destructive border-destructive/20",
                               )}
                               variant="outline"
@@ -6282,7 +6282,7 @@ export default function EditAssessmentPage() {
                             </Badge>
                             {!validationResult.can_finalize && (
                               <Badge
-                                className="bg-amber-50 text-amber-700 border-amber-200 text-xs font-semibold"
+                                className="bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20 text-xs font-semibold"
                                 variant="outline"
                               >
                                 Finalization Blocked
@@ -6317,10 +6317,10 @@ export default function EditAssessmentPage() {
                           {validationResult.warnings &&
                             validationResult.warnings.length > 0 && (
                               <div className="space-y-1.5">
-                                <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block font-semibold">
+                                <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider block font-semibold">
                                   Non-Blocking Warnings
                                 </span>
-                                <div className="space-y-1 border border-amber-200 p-3 rounded-lg bg-amber-50/50 text-xs text-amber-800">
+                                <div className="space-y-1 border border-amber-500/20 p-3 rounded-lg bg-amber-500/10 text-xs text-amber-800 dark:text-amber-300">
                                   {validationResult.warnings.map(
                                     (warning: any, idx: number) => (
                                       <div
@@ -6340,10 +6340,10 @@ export default function EditAssessmentPage() {
 
                       {/* Distribution Summary */}
                       {distributionData && (
-                        <div className="pt-4 border-t space-y-4">
+                        <div className="pt-4 border-t border-border/40 space-y-4">
                           <div className="grid grid-cols-2 gap-4">
                             <div className="space-y-2">
-                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
+                              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
                                 Composition by Difficulty
                               </span>
                               <div className="space-y-1 text-xs">
@@ -6353,12 +6353,12 @@ export default function EditAssessmentPage() {
                                 ).map(([diff, count]) => (
                                   <div
                                     key={diff}
-                                    className="flex justify-between items-center py-0.5 border-b last:border-0 border-zinc-100"
+                                    className="flex justify-between items-center py-0.5 border-b last:border-0 border-border/40"
                                   >
-                                    <span className="capitalize text-zinc-600">
+                                    <span className="capitalize text-muted-foreground">
                                       {diff}
                                     </span>
-                                    <span className="font-semibold text-zinc-800">
+                                    <span className="font-semibold text-foreground">
                                       {count as number}
                                     </span>
                                   </div>
@@ -6366,7 +6366,7 @@ export default function EditAssessmentPage() {
                               </div>
                             </div>
                             <div className="space-y-2">
-                              <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">
+                              <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider block">
                                 Composition by Question Type
                               </span>
                               <div className="space-y-1 text-xs">
@@ -6375,12 +6375,12 @@ export default function EditAssessmentPage() {
                                 ).map(([qType, count]) => (
                                   <div
                                     key={qType}
-                                    className="flex justify-between items-center py-0.5 border-b last:border-0 border-zinc-100"
+                                    className="flex justify-between items-center py-0.5 border-b last:border-0 border-border/40"
                                   >
-                                    <span className="capitalize text-zinc-600">
+                                    <span className="capitalize text-muted-foreground">
                                       {qType}
                                     </span>
-                                    <span className="font-semibold text-zinc-800">
+                                    <span className="font-semibold text-foreground">
                                       {count as number}
                                     </span>
                                   </div>
@@ -6628,7 +6628,7 @@ export default function EditAssessmentPage() {
     <div className="w-full space-y-3.5 p-1 md:p-2 animate-in fade-in duration-200">
       <div className="flex items-center justify-between border-b pb-2">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">
             Edit Assessment
           </h1>
           <p className="text-sm text-muted-foreground mt-1 font-medium">
@@ -6646,7 +6646,7 @@ export default function EditAssessmentPage() {
               <Check className="size-3" /> Saved
             </span>
           )}
-          <Badge variant="outline" className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-zinc-100 border text-zinc-500">
+          <Badge variant="outline" className="h-8 px-2.5 font-bold text-[10px] uppercase rounded-lg bg-muted border-border/60 text-muted-foreground">
             Step {activeStep} / 6
           </Badge>
         </div>
@@ -6697,45 +6697,45 @@ export default function EditAssessmentPage() {
           <div className="-mx-4 no-scrollbar max-h-[60vh] overflow-y-auto px-4 py-2 space-y-4 flex-1">
             {aiTargetSectionId === "all" ? (
               <div className="space-y-4">
-                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg space-y-2 text-xs text-zinc-600">
+                <div className="p-3 bg-muted/40 border border-border/60 rounded-lg space-y-2 text-xs text-muted-foreground">
                   <div>
-                    <strong>Course Workspace:</strong>{" "}
+                    <strong className="text-foreground">Course Workspace:</strong>{" "}
                     {selectedWorkspaceDetail?.title ||
                       "No course workspace selected"}
                   </div>
                   <div>
-                    <strong>Assessment Title:</strong>{" "}
+                    <strong className="text-foreground">Assessment Title:</strong>{" "}
                     {metadata.title || "Untitled Assessment"}
                   </div>
                   <div>
-                    <strong>Assessment Type:</strong> {metadata.mode || "CAT"}
+                    <strong className="text-foreground">Assessment Type:</strong> {metadata.mode || "CAT"}
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-zinc-700">
+                  <Label className="text-xs font-semibold text-foreground">
                     Blueprint Distribution Summary
                   </Label>
-                  <div className="space-y-2 border p-3 rounded-lg bg-zinc-50/50">
+                  <div className="space-y-2 border border-border/60 p-3 rounded-lg bg-card">
                     {blueprint.map((sec, idx) => (
                       <div
                         key={sec.id}
-                        className="flex justify-between items-center text-xs pb-1.5 border-b last:border-0 last:pb-0 border-zinc-100"
+                        className="flex justify-between items-center text-xs pb-1.5 border-b last:border-0 last:pb-0 border-border/40"
                       >
                         <div>
-                          <span className="font-semibold text-zinc-800">
+                          <span className="font-semibold text-foreground">
                             Section {idx + 1}: {sec.section}
                           </span>
-                          <div className="text-[10px] text-zinc-400 truncate max-w-[200px]">
+                          <div className="text-[10px] text-muted-foreground truncate max-w-[200px]">
                             {sec.topics || "General topics"}
                           </div>
                         </div>
-                        <div className="text-right text-[10px] font-medium text-zinc-500">
+                        <div className="text-right text-[10px] font-medium text-muted-foreground">
                           <div>
                             {sec.questions || 0} Questions · {sec.marks || 0}{" "}
                             Marks
                           </div>
-                          <div className="uppercase text-[9px] text-zinc-400">
+                          <div className="uppercase text-[9px] text-muted-foreground">
                             {sec.difficulty} · {sec.bloomLevel || "understand"}
                           </div>
                         </div>
@@ -6743,7 +6743,7 @@ export default function EditAssessmentPage() {
                     ))}
                   </div>
                 </div>
-                <div className="p-3 bg-amber-50 border border-amber-100 rounded-lg text-[10px] text-amber-800 leading-normal">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-lg text-[10px] text-amber-600 dark:text-amber-400 leading-normal">
                   <strong>Assessment balancing:</strong> The AI Question
                   Generation Agent will generate a balanced set of questions
                   mapping to each blueprint section&apos;s topics, difficulty
@@ -6769,14 +6769,14 @@ export default function EditAssessmentPage() {
               </div>
             ) : (
               <div className="space-y-4">
-                <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg space-y-2 text-xs text-zinc-600">
+                <div className="p-3 bg-muted/40 border border-border/60 rounded-lg space-y-2 text-xs text-muted-foreground">
                   <div>
-                    <strong>Course Workspace:</strong>{" "}
+                    <strong className="text-foreground">Course Workspace:</strong>{" "}
                     {selectedWorkspaceDetail?.title ||
                       "No course workspace selected"}
                   </div>
                   <div>
-                    <strong>Target Section:</strong>{" "}
+                    <strong className="text-foreground">Target Section:</strong>{" "}
                     {(() => {
                       const idx = blueprint.findIndex(
                         (s) => s.id === aiTargetSectionId,
@@ -6790,7 +6790,7 @@ export default function EditAssessmentPage() {
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold text-zinc-700">
+                  <Label className="text-xs font-semibold text-foreground">
                     Topic / Focus Area{" "}
                     <span className="text-destructive">*</span>
                   </Label>
@@ -6811,7 +6811,7 @@ export default function EditAssessmentPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-zinc-700">
+                    <Label className="text-xs font-semibold text-foreground">
                       Question Format
                     </Label>
                     <Select
@@ -6867,7 +6867,7 @@ export default function EditAssessmentPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-zinc-700">
+                    <Label className="text-xs font-semibold text-foreground">
                       Bloom&apos;s Level
                     </Label>
                     <Select
@@ -6896,7 +6896,7 @@ export default function EditAssessmentPage() {
 
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-zinc-700">
+                    <Label className="text-xs font-semibold text-foreground">
                       Difficulty
                     </Label>
                     <Select
@@ -6920,7 +6920,7 @@ export default function EditAssessmentPage() {
                   </div>
 
                   <div className="space-y-1.5">
-                    <Label className="text-xs font-semibold text-zinc-700">
+                    <Label className="text-xs font-semibold text-foreground">
                       Number of Questions (1–15)
                     </Label>
                     <Input
@@ -7007,9 +7007,9 @@ export default function EditAssessmentPage() {
           </DialogHeader>
 
           {aiFailedSectionIds.length > 0 && (
-            <div className="p-4 bg-amber-50 border border-amber-200 rounded-lg space-y-3 shrink-0 my-2">
-              <div className="flex gap-2.5 items-start text-xs text-amber-800">
-                <AlertTriangle className="size-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="p-4 bg-amber-500/10 border border-amber-500/20 rounded-lg space-y-3 shrink-0 my-2">
+              <div className="flex gap-2.5 items-start text-xs text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="size-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
                 <div>
                   <strong className="font-semibold block mb-0.5">
                     Partial Generation Failure
@@ -7031,7 +7031,7 @@ export default function EditAssessmentPage() {
                 size="sm"
                 onClick={handleRetryFailedSections}
                 disabled={aiGenerating}
-                className="w-full bg-white hover:bg-amber-100 border-amber-300 text-amber-900 font-semibold h-8 text-xs"
+                className="w-full bg-background hover:bg-amber-500/15 border-amber-500/30 text-amber-600 dark:text-amber-400 font-semibold h-8 text-xs"
               >
                 {aiGenerating ? (
                   <>
@@ -7076,7 +7076,7 @@ export default function EditAssessmentPage() {
                           variant="ghost"
                           size="icon"
                           onClick={() => handleAcceptCandidate(cand.id)}
-                          className="h-8 w-8 text-emerald-600 hover:bg-emerald-50"
+                          className="h-8 w-8 text-emerald-600 hover:bg-emerald-500/10"
                         >
                           <Check className="size-4" />
                         </Button>
@@ -7131,7 +7131,7 @@ export default function EditAssessmentPage() {
 
                         {editingOptions.length > 0 && (
                           <div className="space-y-2">
-                            <Label className="text-xs font-semibold text-zinc-700">
+                            <Label className="text-xs font-semibold text-foreground">
                               Options
                             </Label>
                             <div className="space-y-2">
@@ -7269,7 +7269,7 @@ export default function EditAssessmentPage() {
 
                         {aiTargetSectionId === "all" && (
                           <div className="space-y-1.5">
-                            <Label className="text-xs font-semibold text-zinc-700">
+                            <Label className="text-xs font-semibold text-foreground">
                               Target Section Override
                             </Label>
                             <Select
@@ -7345,8 +7345,8 @@ export default function EditAssessmentPage() {
                                     className={cn(
                                       "text-xs p-2 rounded border flex items-center justify-between",
                                       opt.is_correct
-                                        ? "bg-emerald-50 border-emerald-200 text-emerald-800"
-                                        : "bg-muted/10 border-border",
+                                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
+                                        : "bg-muted/20 border-border/60 text-muted-foreground",
                                     )}
                                   >
                                     <span>

@@ -11,9 +11,12 @@ from app.agents.base import BaseAgent
 from app.core.ai.gateway import AIGateway
 from app.core.ai.prompt_registry import get_prompt
 from app.core.ai.providers import AICompletionRequest, AIMessage
+from app.core.logger import get_logger
 from app.db.enums import AIActionType
 from app.db.models.study_plan import StudySession
 from pydantic import BaseModel, Field, field_validator
+
+logger = get_logger(__name__)
 
 
 class LearningUnitSegment(BaseModel):

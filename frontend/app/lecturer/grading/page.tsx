@@ -1812,7 +1812,7 @@ function LecturerGradingQueueContent() {
                               {isAuto ? (
                                 <Badge
                                   variant="secondary"
-                                  className="text-[8px] font-mono font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 px-1 py-0"
+                                  className="text-[8px] font-mono font-medium bg-muted text-muted-foreground border-border/60 px-1 py-0"
                                 >
                                   Auto
                                 </Badge>
@@ -1875,7 +1875,7 @@ function LecturerGradingQueueContent() {
                             className={cn(
                               "absolute bottom-0.5 right-0.5 size-1 rounded-full",
                               isAuto
-                                ? "bg-zinc-400"
+                                ? "bg-muted-foreground/60"
                                 : sub?.is_final
                                   ? "bg-emerald-500"
                                   : sub && !sub.is_final

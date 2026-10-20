@@ -15,8 +15,12 @@ from app.db.models.attempt import AssessmentAttempt
 from app.db.models.auth import User, UserProfile
 from app.db.models.integrity import (IntegrityEvent, IntegrityFlag,
                                      IntegrityWarning, SupervisionSession)
+from typing import TYPE_CHECKING
 from sqlalchemy import and_, exists, func, not_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from app.db.models.integrity import IntegrityProfile
 
 
 def _utcnow() -> datetime:

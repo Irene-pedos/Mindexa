@@ -4,7 +4,8 @@ import httpx
 
 from app.core.exceptions import RateLimitError, ServiceUnavailableError
 
-from .base_provider import AICompletionRequest, AICompletionResponse, BaseProvider
+from .base_provider import (AICompletionRequest, AICompletionResponse,
+                            AIEmbeddingRequest, AIEmbeddingResponse, BaseProvider)
 
 
 class OpenAIProvider(BaseProvider):

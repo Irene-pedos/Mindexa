@@ -29,9 +29,10 @@ from app.db.session import get_db
 from app.dependencies.auth import (require_active_user,
                                    require_lecturer_or_admin, require_student)
 from app.schemas.attempt import (AttemptDetailResponse, AttemptListResponse,
+                                 AttemptSectionSelectionResponse,
                                  AttemptStartRequest, AttemptStartResponse,
                                  AttemptSubmitRequest, AttemptSummary,
-                                 AttemptSupervisorView)
+                                 AttemptSupervisorView, QuestionSelectRequest)
 from app.services.attempt_service import AttemptService
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -455,3 +456,94 @@ async def list_attempts_for_assessment(
         page_size=page_size,
     )
     return [AttemptSupervisorView.model_validate(a) for a in items]
+
+
+# ── CHOICE SECTION QUESTION SELECTION (Phase 2) ───────────────────────────────
+
+
+@router.post(
+    "/{attempt_id}/sections/{section_id}/select",
+    response_model=AttemptSectionSelectionResponse,
+    status_code=201,
+    summary="Select a question in a choice-based section",
+)
+async def select_question(
+    attempt_id: uuid.UUID,
+    section_id: uuid.UUID,
+    body: QuestionSelectRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptSectionSelectionResponse:
+    svc = AttemptService(db)
+    selection = await svc.select_question(
+        attempt_id=attempt_id,
+        section_id=section_id,
+        question_id=body.question_id,
+        current_user=current_user,
+    )
+    return AttemptSectionSelectionResponse.model_validate(selection)
+
+
+@router.delete(
+    "/{attempt_id}/questions/{question_id}/select",
+    status_code=204,
+    summary="Deselect a question in a choice-based section",
+)
+async def deselect_question(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    svc = AttemptService(db)
+    await svc.deselect_question(
+        attempt_id=attempt_id,
+        question_id=question_id,
+        current_user=current_user,
+    )
+
+
+student_attempt_router = APIRouter(tags=["Student Attempts"])
+
+
+@student_attempt_router.post(
+    "/student/attempts/{attempt_id}/sections/{section_id}/select",
+    response_model=AttemptSectionSelectionResponse,
+    status_code=201,
+    summary="Select a question in a choice-based section (student alias)",
+)
+async def select_question_alias(
+    attempt_id: uuid.UUID,
+    section_id: uuid.UUID,
+    body: QuestionSelectRequest,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> AttemptSectionSelectionResponse:
+    svc = AttemptService(db)
+    selection = await svc.select_question(
+        attempt_id=attempt_id,
+        section_id=section_id,
+        question_id=body.question_id,
+        current_user=current_user,
+    )
+    return AttemptSectionSelectionResponse.model_validate(selection)
+
+
+@student_attempt_router.delete(
+    "/student/attempts/{attempt_id}/questions/{question_id}/select",
+    status_code=204,
+    summary="Deselect a question in a choice-based section (student alias)",
+)
+async def deselect_question_alias(
+    attempt_id: uuid.UUID,
+    question_id: uuid.UUID,
+    current_user=Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    svc = AttemptService(db)
+    await svc.deselect_question(
+        attempt_id=attempt_id,
+        question_id=question_id,
+        current_user=current_user,
+    )
+

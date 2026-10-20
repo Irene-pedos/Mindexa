@@ -173,9 +173,9 @@ export default function LecturerDashboard() {
             <Skeleton className="h-9 w-36 rounded-xl" />
           </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 !mt-3 sm:!mt-4">
           {[1, 2, 3, 4].map((i) => (
-            <Skeleton key={i} className="h-36 w-full rounded-2xl" />
+            <Skeleton key={i} className="h-24 w-full rounded-xl" />
           ))}
         </div>
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6">
@@ -208,7 +208,7 @@ export default function LecturerDashboard() {
       className="space-y-6 sm:space-y-8 w-full max-w-full 2xl:max-w-[1800px] mx-auto min-w-0 pb-12 transition-all duration-300 font-sans"
     >
       {/* Header & Global Control Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/40 pb-3 sm:pb-3.5">
         <div className="space-y-1">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-foreground">
@@ -260,68 +260,60 @@ export default function LecturerDashboard() {
       {/* Metrics Overview Grid */}
       <div
         data-tour="lecturer-dashboard-metrics"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 sm:gap-4"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 !mt-3 sm:!mt-4"
       >
         {metrics.map((stat, index) => {
           const IconComponent = stat.icon;
           return (
             <Card
               key={index}
-              className="rounded-2xl border border-border/50 bg-card/60 backdrop-blur-xs shadow-2xs hover:border-primary/30 transition-all duration-200 overflow-hidden flex flex-col justify-between"
+              className="rounded-xl border border-border/60 bg-card shadow-2xs hover:border-border transition-colors"
             >
-              <CardHeader className="p-4 pb-2 flex flex-row items-center justify-between border-none">
-                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              <CardHeader className="p-3.5 pb-1 flex flex-row items-center justify-between space-y-0">
+                <CardTitle className="text-muted-foreground text-[11px] font-semibold uppercase tracking-wider">
                   {stat.title}
-                </span>
-                <div
-                  className={cn(
-                    "size-8 rounded-xl flex items-center justify-center border",
-                    stat.bgColor,
-                    stat.color,
-                  )}
-                >
-                  <IconComponent className="size-4" />
+                </CardTitle>
+                <div className="size-7 rounded-lg bg-primary/10 flex items-center justify-center text-primary">
+                  <IconComponent className="size-3.5" />
                 </div>
               </CardHeader>
-              <CardContent className="p-4 pt-0 space-y-3">
-                <div className="flex items-baseline justify-between gap-2">
-                  <span className="text-2xl sm:text-3xl font-bold tracking-tight text-foreground font-mono">
+              <CardContent className="p-3.5 pt-1 space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl font-bold text-foreground tracking-tight tabular-nums">
                     {formatNumber(stat.value)}
                   </span>
-                  {stat.delta !== 0 ? (
+                  {stat.delta !== 0 && (
                     <Badge
-                      variant="outline"
+                      variant={stat.positive ? "outline" : "destructive"}
                       className={cn(
-                        "rounded-full h-5 px-1.5 text-[10px] font-medium font-mono gap-0.5",
+                        "rounded-full h-4 px-1.5 text-[9px] font-semibold",
                         stat.positive
                           ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/20"
-                          : "bg-rose-500/10 text-rose-600 border-rose-500/20",
+                          : "bg-destructive/10 text-destructive border-destructive/20",
                       )}
                     >
                       {stat.delta > 0 ? (
-                        <ArrowUp className="size-2.5" />
+                        <ArrowUp className="size-2 mr-0.5" />
                       ) : (
-                        <ArrowDown className="size-2.5" />
+                        <ArrowDown className="size-2 mr-0.5" />
                       )}
                       {Math.abs(stat.delta)}%
                     </Badge>
-                  ) : (
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      Current
-                    </span>
                   )}
                 </div>
 
-                <div className="pt-2 border-t border-border/30 flex items-center justify-between">
-                  <span className="text-[11px] text-muted-foreground font-normal">
-                    {stat.lastMonth > 0 ? `Prev: ${formatNumber(stat.lastMonth)}` : "Live Status"}
+                <div className="text-[10px] text-muted-foreground border-t border-border/40 pt-1 flex justify-between items-center font-medium">
+                  <span>
+                    {stat.lastMonth > 0
+                      ? `Prev: ${formatNumber(stat.lastMonth)}`
+                      : "Live Status"}
                   </span>
                   <Link
                     href={stat.href}
-                    className="text-[11px] font-semibold text-primary hover:underline flex items-center gap-0.5"
+                    className="text-[10px] font-semibold text-primary hover:underline inline-flex items-center gap-0.5 transition-colors"
                   >
                     <span>{stat.actionText}</span>
-                    <ChevronRight className="size-3" />
+                    <ChevronRight className="size-2.5" />
                   </Link>
                 </div>
               </CardContent>

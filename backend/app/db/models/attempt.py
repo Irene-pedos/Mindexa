@@ -54,7 +54,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -76,7 +76,9 @@ from app.db.mixins import composite_index, unique_composite_index
 if TYPE_CHECKING:
     from app.db.models.assessment import (
         Assessment,
+        AssessmentSection,
     )
+    from app.db.models.result import AssessmentResult
     from app.db.models.auth import User
     from app.db.models.integrity import (
         IntegrityEvent,
@@ -332,6 +334,10 @@ class AssessmentAttempt(BaseModel, table=True):
     )
     submission_grades: List["SubmissionGrade"] = Relationship(
         back_populates="attempt",
+    )
+    selections: List["AttemptSectionSelection"] = Relationship(
+        back_populates="attempt",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
     result: Optional["AssessmentResult"] = Relationship(
         back_populates="attempt",
@@ -1052,6 +1058,10 @@ class StudentResponse(BaseModel, table=True):
         sa_column=Column(JSONB, nullable=True),
     )
     is_submitted: bool = Field(default=False, nullable=False, index=True)
+    is_counted: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default=text("true"), index=True),
+    )
 
     # ── Repo-expected fields ──────────────────────────────────────────────────
 
@@ -1337,6 +1347,10 @@ class SubmissionGrade(AuditedBaseModel, table=True):
     # ── Score ─────────────────────────────────────────────────────────────────
 
     max_score: float = Field(default=0.0, nullable=False)
+    is_counted: bool = Field(
+        default=True,
+        sa_column=Column(Boolean, nullable=False, server_default=text("true"), index=True),
+    )
     score: Optional[float] = Field(default=None, nullable=True)
     raw_score: Optional[float] = Field(default=None, nullable=True)
     final_marks: Optional[float] = Field(default=None, nullable=True)
@@ -1416,6 +1430,24 @@ class SubmissionGrade(AuditedBaseModel, table=True):
         default=None,
         sa_type=DateTime(timezone=True),
         nullable=True,
+    )
+    graded_by_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("user.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
+    )
+    delegation_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("grading_delegation.id", ondelete="SET NULL"),
+            nullable=True,
+            index=True,
+        ),
     )
     lecturer_override: bool = Field(default=False, nullable=False)
     feedback_author_basis: str = Field(default="LECTURER", nullable=False)
@@ -1808,3 +1840,59 @@ class ResultAppeal(BaseModel, table=True):
     submission_grade: Optional["SubmissionGrade"] = Relationship(
         back_populates="appeals"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ATTEMPT SECTION SELECTION (Phase 2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AttemptSectionSelection(BaseModel, table=True):
+    """
+    Tracks a student's selection of a question in a choice-based section.
+    Enforces 1-based ordering and uniqueness per (attempt_id, question_id).
+    """
+
+    __tablename__ = "attempt_section_selection"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "attempt_id", "question_id",
+            name="uq_attempt_section_selection_attempt_question",
+        ),
+        composite_index("attempt_section_selection", "attempt_id", "assessment_section_id"),
+    )
+
+    attempt_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_attempt.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    assessment_section_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("assessment_section.id", ondelete="CASCADE"),
+            nullable=False,
+            index=True,
+        )
+    )
+    question_id: uuid.UUID = Field(
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("question.id", ondelete="RESTRICT"),
+            nullable=False,
+            index=True,
+        )
+    )
+    selected_order: int = Field(nullable=False)
+    selected_at: datetime = Field(
+        default_factory=utcnow,
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+
+    # ── Relationships ─────────────────────────────────────────────────────────
+    attempt: Optional["AssessmentAttempt"] = Relationship(back_populates="selections")
+    assessment_section: Optional["AssessmentSection"] = Relationship(back_populates="selections")
+    question: Optional["Question"] = Relationship()

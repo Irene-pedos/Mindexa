@@ -16,13 +16,14 @@ from app.db.enums import (AcademicPeriodType, ClassSectionStatus,
 from app.db.mixins import composite_index
 from sqlalchemy import Column, DateTime
 from sqlalchemy import Enum as SA_Enum
-from sqlalchemy import ForeignKey, String, Text, UniqueConstraint
+from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
 if TYPE_CHECKING:
     from app.db.models.assessment import Assessment, AssessmentTargetSection
     from app.db.models.auth import User
+    from app.db.models.resource import LecturerMaterial
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -181,7 +182,7 @@ class TeachingWorkspace(AuditedBaseModel, table=True):
     title: str = Field(nullable=False, max_length=255)
     description: Optional[str] = Field(default=None)
     banner_image_url: Optional[str] = Field(default=None, max_length=500)
-    status: str = Field(default="ACTIVE", max_length=50)
+    status: str = Field(default="ACTIVE", max_length=20)
     language: LanguageEnum = Field(
         default=LanguageEnum.EN,
         sa_column=Column(SA_Enum(LanguageEnum), nullable=False, server_default="EN", index=True),
@@ -218,12 +219,15 @@ class Institution(BaseModel, table=True):
     """Top-level academic organisation."""
 
     __tablename__ = "institution"
+    __table_args__ = (UniqueConstraint("code", name="uq_institution_code"),)
 
     name: str = Field(nullable=False, max_length=255, index=True)
-    code: str = Field(nullable=False, max_length=20, unique=True, index=True)
+    code: str = Field(nullable=False, max_length=20)
     timezone: str = Field(default="UTC", max_length=64)
-    logo_url: Optional[str] = Field(default=None)
-    is_active: bool = Field(default=True, nullable=False)
+    logo_url: Optional[str] = Field(default=None, sa_column=Column(Text, nullable=True))
+    is_active: bool = Field(default=True, nullable=False, index=True)
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
 
     # Multi-tenancy Config
     settings: Optional[dict] = Field(default_factory=dict, sa_column=Column(JSONB))
@@ -345,6 +349,8 @@ class Department(BaseModel, table=True):
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
     is_active: bool = Field(default=True, nullable=False)
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="departments")
@@ -371,13 +377,15 @@ class Option(BaseModel, table=True):
     department_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("department.id", ondelete="CASCADE"),
+            ForeignKey("department.id", ondelete="RESTRICT"),
             nullable=False,
         )
     )
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
-    is_active: bool = Field(default=True, nullable=False)
+    is_active: bool = Field(default=True, nullable=False, index=True)
+    external_id: Optional[str] = Field(default=None, max_length=100, index=True)
+    source_system: Optional[str] = Field(default=None, max_length=50)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     department: Optional["Department"] = Relationship(back_populates="options")
@@ -463,7 +471,7 @@ class LecturerDepartment(BaseModel, table=True):
         )
     )
 
-class LecturerCourseAssignment(BaseModel, table=True):
+class LecturerCourseAssignment(SQLModel, table=True):
     """Junction table: Lecturer ↔ Course (shared teaching)."""
 
     __tablename__ = "lecturer_course_assignment"
@@ -503,18 +511,18 @@ class AcademicPeriod(BaseModel, table=True):
     institution_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("institution.id", ondelete="CASCADE"),
+            ForeignKey("institution.id", ondelete="RESTRICT"),
             nullable=False,
         )
     )
-    name: str = Field(nullable=False, max_length=100) # e.g. Semester 1 2026
+    name: str = Field(nullable=False, max_length=255) # e.g. Semester 1 2026
     period_type: AcademicPeriodType = Field(
         default=AcademicPeriodType.SEMESTER,
         sa_column=Column(SA_Enum(AcademicPeriodType), nullable=False, server_default='SEMESTER')
     )
     start_date: date = Field(nullable=False)
     end_date: date = Field(nullable=False)
-    is_active: bool = Field(default=True, nullable=False)
+    is_active: bool = Field(default=True, nullable=False, index=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="academic_periods")
@@ -538,21 +546,20 @@ class Subject(BaseModel, table=True):
     institution_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("institution.id", ondelete="RESTRICT"),
+            ForeignKey("institution.id", ondelete="CASCADE"),
             nullable=False,
         )
     )
-    department_id: Optional[uuid.UUID] = Field(
+    department_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("department.id", ondelete="RESTRICT"),
-            nullable=True,
-            index=True,
+            ForeignKey("department.id", ondelete="CASCADE"),
+            nullable=False,
         )
     )
     name: str = Field(nullable=False, max_length=255)
     code: str = Field(nullable=False, max_length=20)
-    is_active: bool = Field(default=True, nullable=False)
+    is_active: bool = Field(default=True, nullable=False, index=True)
 
     # ── Relationships ─────────────────────────────────────────────────────────
     institution: Optional["Institution"] = Relationship(back_populates="subjects")
@@ -606,7 +613,7 @@ class Course(BaseModel, table=True):
     code: str = Field(nullable=False, max_length=20)
     academic_year: str = Field(nullable=False, max_length=100)
     description: Optional[str] = Field(default=None)
-    credit_hours: int = Field(default=3, ge=1)
+    credit_hours: int = Field(default=3, ge=1, nullable=False)
     language: LanguageEnum = Field(
         default=LanguageEnum.EN,
         sa_column=Column(SA_Enum(LanguageEnum), nullable=False, server_default="EN", index=True),
@@ -634,10 +641,10 @@ class CourseDepartment(BaseModel, table=True):
     """Junction table: Course ↔ Department."""
     __tablename__ = "course_department"
     course_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id", ondelete="CASCADE"), primary_key=True)
     )
     department_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("department.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("department.id", ondelete="CASCADE"), primary_key=True)
     )
 
     # Relationships
@@ -649,10 +656,10 @@ class CourseOption(BaseModel, table=True):
     """Junction table: Course ↔ Option."""
     __tablename__ = "course_option"
     course_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id", ondelete="CASCADE"), primary_key=True)
     )
     option_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("option.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("option.id", ondelete="CASCADE"), primary_key=True)
     )
 
     # Relationships
@@ -663,12 +670,18 @@ class CourseOption(BaseModel, table=True):
 class CourseSubject(BaseModel, table=True):
     """Junction table: Course ↔ Subject."""
     __tablename__ = "course_subject"
+    __table_args__ = (
+        UniqueConstraint("course_id", "subject_id", name="uq_course_subject_course_subject"),
+        Index("ix_course_subject_course_id", "course_id"),
+        Index("ix_course_subject_subject_id", "subject_id"),
+    )
     course_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id", ondelete="CASCADE"), nullable=False)
     )
     subject_id: uuid.UUID = Field(
-        sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id"), primary_key=True)
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("subject.id", ondelete="RESTRICT"), nullable=False)
     )
+    is_primary: bool = Field(default=False, nullable=False)
 
     # Relationships
     course: "Course" = Relationship()
@@ -685,7 +698,7 @@ class ClassSection(BaseModel, table=True):
 
     __tablename__ = "class_section"
     __table_args__ = (
-        UniqueConstraint("class_group_id", "name", name="uq_class_section_scope_name"),
+        UniqueConstraint("class_group_id", "name", "academic_year", name="uq_class_section_scope_year"),
         composite_index("class_section", "class_group_id", "is_active"),
     )
 
@@ -706,6 +719,17 @@ class ClassSection(BaseModel, table=True):
         )
     )
     name: str = Field(nullable=False, max_length=100) # e.g. IT Level 6 A
+    academic_year: str = Field(
+        default_factory=lambda: str(datetime.now().year), nullable=False, max_length=100
+    )
+    status: ClassSectionStatus = Field(
+        default=ClassSectionStatus.ACTIVE,
+        sa_column=Column(
+            SA_Enum(ClassSectionStatus, name="classsectionstatus"),
+            nullable=False,
+            server_default="ACTIVE",
+        ),
+    )
     capacity: Optional[int] = Field(default=None, nullable=True)
 
     # ── Operational Logistics ────────────────────────────────────────────────
@@ -735,19 +759,30 @@ class ClassSection(BaseModel, table=True):
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class StudentEnrollment(BaseModel, table=True):
+class StudentEnrollment(AuditedBaseModel, table=True):
     """Bridge table linking students to class sections."""
 
     __tablename__ = "student_enrollment"
     __table_args__ = (
-        UniqueConstraint("student_id", "class_section_id", name="uq_student_section"),
-        composite_index("student_enrollment", "student_id"),
+        UniqueConstraint(
+            "student_id", "class_section_id", name="uq_student_enrollment_student_section"
+        ),
+        Index(
+            "ix_student_enrollment_class_section_id_enrollment_status",
+            "class_section_id",
+            "enrollment_status",
+        ),
+        Index(
+            "ix_student_enrollment_student_id_enrollment_status",
+            "student_id",
+            "enrollment_status",
+        ),
     )
 
     student_id: uuid.UUID = Field(
         sa_column=Column(
             UUID(as_uuid=True),
-            ForeignKey("user.id", ondelete="CASCADE"),
+            ForeignKey("user.id", ondelete="RESTRICT"),
             nullable=False,
         )
     )

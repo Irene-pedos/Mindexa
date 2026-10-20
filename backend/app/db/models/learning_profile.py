@@ -4,7 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, JSON, DateTime, UniqueConstraint
+from sqlalchemy import Column, JSON, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.base import BaseModel
 
@@ -20,8 +21,13 @@ class StudentLearningProfile(BaseModel, table=True):
         UniqueConstraint("student_id", "course_id", name="uq_learning_profile_student_course"),
     )
 
-    student_id: uuid.UUID = Field(foreign_key="user.id", index=True, nullable=False)
-    course_id: Optional[uuid.UUID] = Field(default=None, foreign_key="course.id", index=True)
+    student_id: uuid.UUID = Field(
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("user.id"), nullable=False, index=True)
+    )
+    course_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(UUID(as_uuid=True), ForeignKey("course.id"), nullable=True, index=True),
+    )
 
     topic_confidence: Dict[str, Any] = Field(default={}, sa_column=Column(JSON))
     weak_topics: List[str] = Field(default=[], sa_column=Column(JSON))

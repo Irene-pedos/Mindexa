@@ -24,6 +24,8 @@ import { StudyResources } from "@/components/mindexa/dashboard/study-resources";
 import { AiStudyEntry } from "@/components/mindexa/dashboard/ai-study-entry";
 import { PerformanceChart } from "@/components/mindexa/dashboard/performance-chart";
 import { AcademicPlannerDropdown } from "@/components/mindexa/dashboard/academic-planner-dropdown";
+import { NotificationsMenu, NotificationMenuItem } from "@/components/ui/notifications-menu";
+import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Card,
@@ -288,6 +290,60 @@ export default function StudentDashboard() {
     [notifications]
   );
 
+  const formattedNotifications: NotificationMenuItem[] = useMemo(() => {
+    return (notifications?.items ?? []).map((n) => ({
+      id: n.id,
+      type: n.notification_type,
+      title: n.title,
+      body: n.body,
+      content: n.body,
+      isRead: n.is_read,
+      actionUrl: getNotificationLink(n),
+      timeAgo: formatDistanceToNow(new Date(n.created_at), { addSuffix: true }),
+      timestamp: new Date(n.created_at).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    }));
+  }, [notifications]);
+
+  const handleMarkAllNotificationsAsRead = async () => {
+    try {
+      await notificationApi.markAllAsRead();
+      setNotifications((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((n) => ({ ...n, is_read: true })),
+            }
+          : prev
+      );
+      toast.success("All notifications marked as read");
+    } catch {
+      toast.error("Failed to mark notifications as read");
+    }
+  };
+
+  const handleMarkNotificationAsRead = async (id: string | number) => {
+    try {
+      await notificationApi.markAsRead(String(id));
+      setNotifications((prev) =>
+        prev
+          ? {
+              ...prev,
+              items: prev.items.map((n) =>
+                n.id === String(id) ? { ...n, is_read: true } : n
+              ),
+            }
+          : prev
+      );
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   const dueTodayCount = useMemo(() => {
     const today = new Date();
     today.setHours(23, 59, 59, 999);
@@ -506,84 +562,22 @@ export default function StudentDashboard() {
             <StudentCalendar events={schedule?.events} />
           )}
 
-          {/* Recent Notifications Card */}
-          <Card className="shadow-2xs border border-border/60 rounded-xl overflow-hidden">
-            <CardHeader className="py-2.5 px-4 border-b border-border/40 flex flex-row items-center justify-between space-y-0 bg-muted/10">
-              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                <Bell className="size-3.5 text-primary" />
-                Notifications
-                {unreadCount > 0 && (
-                  <span className="inline-flex items-center justify-center size-4 rounded-full bg-primary text-primary-foreground text-[9px] font-bold">
-                    {unreadCount}
-                  </span>
-                )}
-              </CardTitle>
-              <Link
-                href="/student/notifications"
-                className="text-[11px] text-primary font-medium hover:underline"
-              >
-                View All →
-              </Link>
-            </CardHeader>
-            <CardContent className="p-0">
-              {sectionErrors.notifications ? (
-                <div className="p-6 text-center text-xs font-medium text-destructive">
-                  {sectionErrors.notifications}
-                </div>
-              ) : (
-                <div className="divide-y divide-border/40">
-                  {notifications?.items && notifications.items.length > 0 ? (
-                    notifications.items.map((notification) => (
-                      <Link
-                        key={notification.id}
-                        href={getNotificationLink(notification)}
-                        className={cn(
-                          "p-3 flex items-start gap-3 hover:bg-muted/30 transition-colors block",
-                          isCriticalNotification(notification.notification_type) &&
-                            "border-l-2 border-destructive bg-destructive/5"
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            "mt-0.5 rounded-md p-1.5 shrink-0",
-                            notification.is_read
-                              ? "bg-muted text-muted-foreground"
-                              : "bg-primary/10 text-primary"
-                          )}
-                        >
-                          {getNotificationIcon(notification.notification_type)}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p
-                            className={cn(
-                              "text-xs",
-                              notification.is_read
-                                ? "font-medium text-muted-foreground"
-                                : "font-semibold text-foreground"
-                            )}
-                          >
-                            {notification.title}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground mt-0.5 line-clamp-1">
-                            {notification.body}
-                          </p>
-                          <p className="text-[10px] text-muted-foreground/80 mt-1 font-medium">
-                            {formatDistanceToNow(new Date(notification.created_at), {
-                              addSuffix: true,
-                            })}
-                          </p>
-                        </div>
-                      </Link>
-                    ))
-                  ) : (
-                    <div className="p-8 text-center text-xs font-medium text-muted-foreground italic">
-                      No active notifications.
-                    </div>
-                  )}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* Recent Notifications Card (21st dev clean notification menu) */}
+          {sectionErrors.notifications ? (
+            <Card className="border-destructive/15 bg-destructive/[0.02] shadow-none rounded-xl">
+              <CardContent className="py-6 text-center text-xs font-medium text-destructive">
+                {sectionErrors.notifications}
+              </CardContent>
+            </Card>
+          ) : (
+            <NotificationsMenu
+              notifications={formattedNotifications}
+              title="Recent Notifications"
+              onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+              onMarkAsRead={handleMarkNotificationAsRead}
+              viewAllHref="/student/notifications"
+            />
+          )}
         </div>
 
         {/* Right column – Performance, Results & Study */}

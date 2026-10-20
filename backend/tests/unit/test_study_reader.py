@@ -497,6 +497,7 @@ async def test_on_write_orphan_validation_raises_not_found():
 async def test_copy_forward_material_study_data():
     """Verify copying forward annotations, key points with mapped annotation_id, and progress."""
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
 
     old_mat_id = uuid.uuid4()
     new_mat_id = uuid.uuid4()

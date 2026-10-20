@@ -23,6 +23,7 @@ from app.db.repositories.grading_repo import GradingRepository
 from app.db.repositories.integrity_repo import IntegrityRepository
 from app.db.repositories.workspace_repo import WorkspaceRepository
 from app.db.schemas.academic import CourseCreate, CourseResponse
+from app.db.schemas.auth import UserResponse
 from app.schemas.lecturer import (AddStudentRequest, LecturerChartDataPoint,
                                   LecturerCourseDetail,
                                   LecturerCourseRosterItem,
@@ -34,6 +35,7 @@ from app.schemas.lecturer import (AddStudentRequest, LecturerChartDataPoint,
                                   StudentRecordAttempt, WorkspaceCreate,
                                   WorkspaceDetail, WorkspaceListItem,
                                   WorkspaceUpdate)
+from app.schemas.admin import AdminCourseListItem
 from sqlalchemy import Date, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload

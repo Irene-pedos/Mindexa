@@ -176,7 +176,7 @@ class ResultService:
                 code="ATTEMPT_NOT_SUBMITTED",
             )
 
-        assessment = await self.assessment_repo.get_by_id_simple(attempt.assessment_id)
+        assessment = await self.assessment_repo.get_by_id(attempt.assessment_id)
         aq_count = await self.assessment_repo.count_assessment_questions(attempt.assessment_id)
         graded_count = await self.grading_repo.count_final_grades(attempt_id)
 
@@ -187,15 +187,63 @@ class ResultService:
                 code="ATTEMPT_PARTIALLY_GRADED",
             )
 
-        # Sum scores from final grades
+        # Resolve choice sections over-answer decisions (FIRST_N or BEST_N)
+        from app.services.assessment_marks import resolve_choice_section_responses, required_marks
+        from app.db.repositories.submission_repo import SubmissionRepository
+
+        sub_repo = SubmissionRepository(self.db)
+        selections = await self.attempt_repo.list_selections_for_attempt(attempt_id)
+        all_responses = await sub_repo.list_responses_for_attempt(attempt_id)
+        all_grades = await self.grading_repo.list_grades_for_attempt(attempt_id)
+
+        assessment_sections = getattr(assessment, "sections", None) or []
+        all_aqs = getattr(assessment, "assessment_questions", None) or []
+        aq_by_sec = {s.id: [] for s in assessment_sections}
+        for aq in all_aqs:
+            if aq.assessment_section_id in aq_by_sec:
+                aq_by_sec[aq.assessment_section_id].append(aq.question_id)
+
+        for sec in assessment_sections:
+            if getattr(sec, "questions_to_answer", None) is None:
+                continue
+
+            sec_qids = set(aq_by_sec.get(sec.id, []))
+            sec_responses = [r for r in all_responses if r.question_id in sec_qids and not getattr(r, "is_deleted", False)]
+            if not sec_responses:
+                continue
+
+            decisions = resolve_choice_section_responses(
+                section_id=sec.id,
+                questions_to_answer=sec.questions_to_answer,
+                over_answer_policy=getattr(assessment, "over_answer_policy", None),
+                responses=sec_responses,
+                grades=all_grades,
+                selections=selections,
+            )
+
+            for dec in decisions:
+                resp = next((r for r in sec_responses if r.id == dec.response_id), None)
+                if resp:
+                    resp.is_counted = dec.is_counted
+                    self.db.add(resp)
+
+                matching_grades = [g for g in all_grades if g.response_id == dec.response_id and g.is_current and not g.is_deleted]
+                for g in matching_grades:
+                    g.is_counted = dec.is_counted
+                    if not dec.is_counted:
+                        g.score = 0.0
+                    self.db.add(g)
+
+        await self.db.flush()
+
+        # Sum scores from final counted grades
         total_score = await self.grading_repo.sum_final_scores(attempt_id)
         
-        # Authoritative max score (denominator)
-        max_score = (
-            float(assessment.total_marks)
-            if (assessment and assessment.total_marks and assessment.total_marks > 0)
-            else await self.grading_repo.sum_max_scores(attempt_id)
-        )
+        # Authoritative max score (denominator) from central required_marks
+        from app.services.assessment_marks import required_marks
+
+        req_marks = required_marks(assessment) if assessment else 0
+        max_score = float(req_marks) if req_marks > 0 else await self.grading_repo.sum_max_scores(attempt_id)
         if max_score <= 0:
             max_score = await self.grading_repo.sum_max_scores(attempt_id)
 
@@ -204,8 +252,8 @@ class ResultService:
 
         # Passing threshold from assessment
         passing_pct = 0.0
-        if assessment and assessment.passing_marks and assessment.total_marks:
-            passing_pct = (assessment.passing_marks / assessment.total_marks) * 100
+        if assessment and assessment.passing_marks and max_score > 0:
+            passing_pct = (assessment.passing_marks / max_score) * 100
 
         letter_grade = _compute_letter_grade(percentage)
         is_passing = percentage >= passing_pct
@@ -381,13 +429,10 @@ class ResultService:
 
             # For missing results, attempt calculation only if attempt belongs to this assessment
             for aid in missing_attempt_ids:
-                try:
-                    att = await self.attempt_repo.get_by_id_simple(aid)
-                    if att and att.assessment_id == assessment_id:
-                        calc_res, _ = await self.calculate_result(attempt_id=aid)
-                        results.append(calc_res)
-                except Exception:
-                    pass
+                att = await self.attempt_repo.get_by_id_simple(aid)
+                if att and att.assessment_id == assessment_id:
+                    calc_res, _ = await self.calculate_result(attempt_id=aid)
+                    results.append(calc_res)
         elif class_section_id:
             from app.db.models.academic import StudentEnrollment
             from app.db.enums import EnrollmentStatus
