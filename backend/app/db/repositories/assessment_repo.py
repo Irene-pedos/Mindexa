@@ -1433,12 +1433,64 @@ class AssessmentRepository:
     ) -> tuple[list[Assessment], int]:
         """
         List all assessments that a student can currently see or take.
-        
-        Filters:
-            - status NOT IN (DRAFT, ARCHIVED)
-            - is_deleted = False
+
+        Filters: see _student_visibility_filters (PUBLISHED / ACTIVE only).
+        """
+        filters = self._student_visibility_filters(
+            student_id, [AssessmentStatus.PUBLISHED, AssessmentStatus.ACTIVE]
+        )
+
+        count_result = await self.db.execute(
+            select(func.count(col(Assessment.id))).where(*filters)
+        )
+        total = count_result.scalar_one()
+
+        order_by = col(Assessment.published_at).desc()
+        if sort == "oldest":
+            order_by = col(Assessment.published_at).asc()
+        elif sort == "title":
+            order_by = col(Assessment.title).asc()
+
+        from app.db.models.academic import TeachingWorkspace
+
+        result = await self.db.execute(
+            select(Assessment)
+            .options(
+                selectinload(Assessment.course),
+                selectinload(Assessment.subject),
+                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course)
+            )
+            .where(*filters)
+            .order_by(order_by)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(result.scalars().all()), total
+
+    async def is_visible_to_student(
+        self,
+        assessment_id: uuid.UUID,
+        student_id: uuid.UUID,
+        statuses: list[AssessmentStatus],
+    ) -> bool:
+        """Same visibility rules as the student list, for a single assessment."""
+        filters = self._student_visibility_filters(student_id, statuses)
+        result = await self.db.execute(
+            select(Assessment.id).where(Assessment.id == assessment_id, *filters).limit(1)
+        )
+        return result.first() is not None
+
+    def _student_visibility_filters(
+        self,
+        student_id: uuid.UUID,
+        statuses: list[AssessmentStatus],
+    ) -> list:
+        """
+        Filters deciding which assessments a student may see:
+            - status in `statuses`, not deleted
             - Student is enrolled in a class section targeted by this assessment
-              OR (no targets defined AND student enrolled in assessment's course)
+              OR (no targets defined AND enrolled via the teaching workspace)
+            - audience_type "selected" only when the student is targeted
         """
         from app.db.models.academic import (
             ClassSection,
@@ -1453,10 +1505,7 @@ class AssessmentRepository:
         
         # Base filters
         filters = [
-            col(Assessment.status).in_([
-                AssessmentStatus.PUBLISHED,
-                AssessmentStatus.ACTIVE,
-            ]),
+            col(Assessment.status).in_(statuses),
             col(Assessment.is_deleted) == False,  # noqa: E712
         ]
 
@@ -1533,31 +1582,7 @@ class AssessmentRepository:
             )
         )
         filters.append(audience_filter)
-
-        count_result = await self.db.execute(
-            select(func.count(col(Assessment.id))).where(*filters)
-        )
-        total = count_result.scalar_one()
-
-        order_by = col(Assessment.published_at).desc()
-        if sort == "oldest":
-            order_by = col(Assessment.published_at).asc()
-        elif sort == "title":
-            order_by = col(Assessment.title).asc()
-
-        result = await self.db.execute(
-            select(Assessment)
-            .options(
-                selectinload(Assessment.course),
-                selectinload(Assessment.subject),
-                selectinload(Assessment.workspace).selectinload(TeachingWorkspace.course)
-            )
-            .where(*filters)
-            .order_by(order_by)
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        )
-        return list(result.scalars().all()), total
+        return filters
 
     async def has_open_ended_questions(self, assessment_id: uuid.UUID) -> bool:
         """Check if an assessment contains any open-ended questions requiring manual/AI review."""

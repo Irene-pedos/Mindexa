@@ -22,7 +22,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.constants import Duty, UserRole
+from app.core.constants import Duty
 from app.core.exceptions import (
     BadRequestError,
     ConflictError,
@@ -74,9 +74,10 @@ class SealService:
         self.notification_repo = NotificationRepository(db)
 
     async def _assert_exam_officer(self, user: User, institution_id: Optional[uuid.UUID] = None) -> None:
-        """Enforce that current user holds active EXAM_OFFICER duty."""
-        if user.role == UserRole.ADMIN.value:
-            return
+        """
+        Enforce that current user holds active EXAM_OFFICER duty. No admin bypass
+        (spec §13.1): an admin acts as exam officer only when assigned the duty.
+        """
         is_eo = await has_duty(
             self.db,
             user,
@@ -457,7 +458,8 @@ class SealService:
         if not assessment:
             raise NotFoundError("Assessment", str(assessment_id))
 
-        # Check authorization: author/co-author, moderator for dept, exam officer for institution, or admin
+        # Check authorization: author/co-author, moderator for dept, or exam officer for
+        # institution. No admin exception — exam papers stay confidential before sitting.
         dept_id = assessment.course.department_id if assessment.course else None
         inst_id = assessment.course.institution_id if assessment.course else None
         is_mod = await has_duty(self.db, current_user, Duty.MODERATOR, department_id=dept_id) if dept_id else False
@@ -467,9 +469,8 @@ class SealService:
             getattr(s, "user_id", None) == current_user.id and not getattr(s, "is_deleted", False)
             for s in (assessment.supervisors or [])
         )
-        is_admin = current_user.role == UserRole.ADMIN.value
 
-        if not (is_author or is_coauthor or is_mod or is_eo or is_admin):
+        if not (is_author or is_coauthor or is_mod or is_eo):
             raise PermissionDeniedError("Unauthorized to download assessment documents.")
 
 

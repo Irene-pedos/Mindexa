@@ -106,17 +106,17 @@ export default function AdminProfilePage() {
             Manage your administrative account and system preferences
           </p>
         </div>
-        <Badge variant="secondary" className="bg-red-100 text-red-700 hover:bg-red-100 h-6">
-          <Lock className="mr-1 size-3" /> System Admin
+        <Badge variant="outline" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-semibold px-2.5 py-0.5 rounded-full h-6 text-xs gap-1">
+          <Lock className="size-3" /> System Admin
         </Badge>
       </div>
 
       {/* Profile Information */}
-      <Card>
-        <CardHeader>
+      <Card className="border border-border/60 shadow-none rounded-2xl bg-card overflow-hidden">
+        <CardHeader className="p-6 border-b bg-muted/20">
           <CardTitle>Personal Information</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-6">
+        <CardContent className="p-6 space-y-6">
           <div className="flex items-center gap-6">
             <Avatar className="h-24 w-24 border">
               <AvatarImage
@@ -161,6 +161,7 @@ export default function AdminProfilePage() {
               <Label htmlFor="firstName">First Name</Label>
               <Input
                 id="firstName"
+                className="rounded-xl text-xs h-10"
                 value={formData.first_name}
                 onChange={(e) =>
                   setFormData({ ...formData, first_name: e.target.value })
@@ -171,6 +172,7 @@ export default function AdminProfilePage() {
               <Label htmlFor="lastName">Last Name</Label>
               <Input
                 id="lastName"
+                className="rounded-xl text-xs h-10"
                 value={formData.last_name}
                 onChange={(e) =>
                   setFormData({ ...formData, last_name: e.target.value })
@@ -187,7 +189,7 @@ export default function AdminProfilePage() {
                 id="email"
                 value={user?.email || ""}
                 readOnly
-                className="pl-10 bg-muted"
+                className="pl-10 bg-muted/40 rounded-xl text-xs h-10"
               />
             </div>
           </div>
@@ -197,6 +199,7 @@ export default function AdminProfilePage() {
               <Label htmlFor="phone">Phone Number</Label>
               <Input
                 id="phone"
+                className="rounded-xl text-xs h-10"
                 value={formData.phone_number}
                 onChange={(e) =>
                   setFormData({ ...formData, phone_number: e.target.value })
@@ -210,7 +213,7 @@ export default function AdminProfilePage() {
                    user?.profile?.staff_id || "ADMIN-001"
                 }
                 readOnly
-                className="bg-muted"
+                className="bg-muted/40 rounded-xl text-xs h-10 font-mono"
               />
             </div>
           </div>
@@ -218,13 +221,13 @@ export default function AdminProfilePage() {
       </Card>
 
       {/* Security & Preferences */}
-      <Card>
-        <CardHeader>
+      <Card className="border border-border/60 shadow-none rounded-2xl bg-card overflow-hidden">
+        <CardHeader className="p-6 border-b bg-muted/20">
           <CardTitle className="flex items-center gap-2">
             <Shield className="size-5" /> Security & System Alerts
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-8">
+        <CardContent className="p-6 space-y-6">
           <div className="flex items-center justify-between">
             <div>
               <div className="font-medium">System Health Alerts</div>
@@ -256,7 +259,7 @@ export default function AdminProfilePage() {
       </Card>
 
       <div className="flex justify-end">
-        <Button size="lg" onClick={handleSave} disabled={loading}>
+        <Button size="sm" className="h-10 px-6 rounded-xl font-semibold text-xs" onClick={handleSave} disabled={loading}>
           {loading ? "Saving Changes..." : "Save Changes"}
         </Button>
       </div>

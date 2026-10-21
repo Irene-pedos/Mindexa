@@ -296,9 +296,11 @@ class ResultService:
             and result.graded_question_count >= result.total_question_count
         )
 
-        has_open_ended = await self.assessment_repo.has_open_ended_questions(attempt.assessment_id)
+        # Only IMMEDIATE mode releases automatically. MANUAL waits for the lecturer
+        # (spec §13.1) even for objective-only assessments; SCHEDULED is released
+        # by the scheduler.
         if (
-            (release_mode == ResultReleaseMode.IMMEDIATE.value or not has_open_ended)
+            release_mode == ResultReleaseMode.IMMEDIATE.value
             and not result.integrity_hold
             and not result.is_released
             and is_fully_graded
@@ -353,12 +355,12 @@ class ResultService:
                     if grade and grade.score is not None
                     else None
                 ),
-                "feedback": (grade.feedback or grade.ai_feedback_draft) if grade else None,
+                # Only lecturer-approved feedback reaches students. An AI draft the
+                # lecturer never accepted stays internal (AGENTS.md human review).
+                "feedback": grade.feedback if grade else None,
                 "grading_mode": grade.grading_mode if grade else None,
                 "feedback_author_basis": (
-                    grade.feedback_author_basis
-                    if (grade and grade.feedback)
-                    else ("AI" if (grade and grade.ai_feedback_draft) else "LECTURER")
+                    grade.feedback_author_basis if (grade and grade.feedback) else "LECTURER"
                 ),
                 "was_skipped": response.is_skipped if response else False,
             })
@@ -427,11 +429,13 @@ class ResultService:
             existing_attempt_ids = {r.attempt_id for r in results}
             missing_attempt_ids = [aid for aid in attempt_ids if aid not in existing_attempt_ids]
 
-            # For missing results, attempt calculation only if attempt belongs to this assessment
+            # For missing results, attempt calculation only if attempt belongs to this assessment.
+            # allow_partial so one incomplete attempt is reported as incomplete below
+            # instead of failing the whole release request.
             for aid in missing_attempt_ids:
                 att = await self.attempt_repo.get_by_id_simple(aid)
                 if att and att.assessment_id == assessment_id:
-                    calc_res, _ = await self.calculate_result(attempt_id=aid)
+                    calc_res, _ = await self.calculate_result(attempt_id=aid, allow_partial=True)
                     results.append(calc_res)
         elif class_section_id:
             from app.db.models.academic import StudentEnrollment
@@ -452,6 +456,7 @@ class ResultService:
         releasable = []
         held = []
         incomplete = []
+        unreviewed = []
 
         for r in results:
             if r.is_released:
@@ -459,6 +464,12 @@ class ResultService:
             if r.integrity_hold:
                 held.append(r)
                 continue
+
+            # AI suggestions accepted without human review never reach students
+            if r.attempt_id and not r.is_group_result:
+                if await self.grading_repo.list_unreviewed_ai_acceptances(r.attempt_id, assessment_id):
+                    unreviewed.append(r)
+                    continue
 
             # Live check of question counts for data integrity
             if r.is_group_result or not r.attempt_id:
@@ -508,14 +519,51 @@ class ResultService:
                     assessment_title=assessment_title,
                 )
 
+            # Phase 6A: Eligibility triggers on result release
+            try:
+                from app.services.eligibility_service import EligibilityService
+                from app.db.enums import AssessmentType
+                elig_svc = EligibilityService(self.db)
+                asm_type = assessment.assessment_type if assessment else None
+                type_str = asm_type.value if hasattr(asm_type, "value") else str(asm_type or "")
+
+                for r in releasable:
+                    if type_str in ["FORMATIVE", "formative"]:
+                        await elig_svc.process_formative_finalization(
+                            assessment_id=assessment_id,
+                            student_id=r.student_id,
+                            score=r.total_score,
+                            max_marks=r.max_score,
+                        )
+                    elif type_str in ["REASSESSMENT", "reassessment"] or (assessment and assessment.reassessment_of_id is not None):
+                        if r.attempt_id:
+                            await elig_svc.process_reassessment_attempt_graded(r.attempt_id)
+                    elif type_str in ["EXAM", "exam", "SUMMATIVE", "summative"]:
+                        await elig_svc.process_summative_finalization(
+                            assessment_id=assessment_id,
+                            student_id=r.student_id,
+                            score=r.total_score,
+                            max_marks=r.max_score,
+                        )
+            except Exception as e:
+                import structlog
+                logger = structlog.get_logger(__name__)
+                logger.error("eligibility_release_trigger_error", error=str(e), assessment_id=str(assessment_id))
+
         held_attempt_ids = [r.attempt_id or r.id for r in held]
         incomplete_attempt_ids = [r.attempt_id or r.id for r in incomplete]
+        unreviewed_attempt_ids = [r.attempt_id or r.id for r in unreviewed]
 
         parts = [f"{released_count} result(s) released."]
         if held:
             parts.append(f"{len(held)} held due to integrity flags.")
         if incomplete:
             parts.append(f"{len(incomplete)} skipped (partially graded / incomplete).")
+        if unreviewed:
+            parts.append(
+                f"{len(unreviewed)} blocked: AI grades accepted without review "
+                "(review them individually or run a sample check)."
+            )
 
         return {
             "released_count": released_count,
@@ -523,8 +571,45 @@ class ResultService:
             "held_attempt_ids": held_attempt_ids,
             "incomplete_count": len(incomplete),
             "incomplete_attempt_ids": incomplete_attempt_ids,
+            "unreviewed_count": len(unreviewed),
+            "unreviewed_attempt_ids": unreviewed_attempt_ids,
             "message": " ".join(parts),
         }
+
+    async def unrelease_result(
+        self,
+        *,
+        result_id: uuid.UUID,
+        current_user: User,
+        reason: str,
+    ) -> None:
+        """
+        Withdraw a released result (e.g. released by mistake). The student no longer
+        sees it until it is released again. Always audited with the reason.
+        """
+        result = await self.result_repo.get_by_id(result_id)
+        if not result:
+            raise NotFoundError("Result not found", code="RESULT_NOT_FOUND")
+        await self.assert_lecturer_assessment_access(result.assessment_id, user=current_user)
+        if not result.is_released:
+            raise ConflictError("This result has not been released.", code="RESULT_NOT_RELEASED")
+
+        from app.db.models.audit import AuditLog
+
+        await self.result_repo.unrelease(result.id)
+        self.db.add(
+            AuditLog(
+                actor_id=current_user.id,
+                actor_role=getattr(current_user.role, "value", current_user.role),
+                entity_type="assessment_result",
+                entity_id=result.id,
+                action="result_unreleased",
+                description=f"Result withdrawn from student: {reason}",
+                before_state={"is_released": True},
+                after_state={"is_released": False},
+            )
+        )
+        await self.db.flush()
 
     # -----------------------------------------------------------------------
     # GET RESULT (role-aware)
@@ -994,7 +1079,8 @@ class ResultService:
                         if max_score is None:
                             max_score = float(aq.marks_override or q.marks or 0.0)
 
-                        feedback = ans_content.get("feedback") or ans_content.get("ai_feedback_draft")
+                        # Lecturer-approved feedback only — never the unreviewed AI draft.
+                        feedback = ans_content.get("feedback")
                         is_correct = ans_content.get("auto_grade_is_correct")
                         was_skipped = bool(ans_content.get("is_skipped", False))
 

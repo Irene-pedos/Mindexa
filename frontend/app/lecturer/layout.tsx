@@ -9,6 +9,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { dutyHomePath, isAllowedInDutyWorkspace, isDutyOnlyStaff } from "@/lib/duty-workspace";
 
 export default function LecturerLayout({
   children,
@@ -37,8 +38,14 @@ export default function LecturerLayout({
       userRole !== "super_admin"
     ) {
       router.replace(`/${userRole}/dashboard`);
+      return;
     }
-  }, [isAuthenticated, loading, isInitializing, router, user]);
+
+    // Office-based moderators/exam officers only see their duty pages
+    if (isDutyOnlyStaff(user) && pathname && !isAllowedInDutyWorkspace(pathname)) {
+      router.replace(dutyHomePath(user));
+    }
+  }, [isAuthenticated, loading, isInitializing, router, user, pathname]);
 
   // Block render until auth is resolved to avoid flash
   if (loading || isInitializing) {

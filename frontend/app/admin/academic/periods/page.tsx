@@ -209,13 +209,13 @@ export default function AcademicPeriodsPage() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden bg-white border border-muted/10 rounded-xl">
+      <div className="flex-1 flex flex-col overflow-hidden bg-card border border-border/60 rounded-2xl shadow-none">
         <div className="p-3 border-b border-muted/10 bg-muted/5">
           <div className="relative w-64">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <Input 
               placeholder="Search periods..." 
-              className="pl-8 h-8 text-[11px] rounded-lg border-muted/30 bg-white focus:border-primary/40 focus:ring-0"
+              className="pl-8 h-8 text-[11px] rounded-lg border-muted/30 bg-background focus:border-primary/40 focus:ring-0"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -339,7 +339,7 @@ export default function AcademicPeriodsPage() {
               Establish a new semester or academic year
             </DialogDescription>
           </div>
-          <div className="p-5 space-y-4 bg-white">
+          <div className="p-5 space-y-4 bg-card">
             <div className="grid gap-1">
               <Label className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground ml-0.5">Institution</Label>
               <Select value={formData.institution_id} onValueChange={(v) => setFormData({...formData, institution_id: v})}>
@@ -436,7 +436,7 @@ export default function AcademicPeriodsPage() {
               Modifying registry for {editingItem?.name}
             </DialogDescription>
           </div>
-          <div className="p-5 space-y-4 bg-white">
+          <div className="p-5 space-y-4 bg-card">
             <div className="grid gap-1">
               <Label htmlFor="edit-name" className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground ml-0.5">Period Name</Label>
               <Input 

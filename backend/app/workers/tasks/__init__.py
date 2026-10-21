@@ -33,6 +33,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, TypeVar
 
 from app.core.celery_app import celery
+from app.core.exceptions import NotFoundError
 from app.core.logger import get_logger
 from app.db.models.question import AIGenerationBatch
 from celery import Task
@@ -473,6 +474,18 @@ def process_ai_grading_job(
     """
     try:
         return _run(_process_ai_grading_async(grading_queue_item_id))
+    except NotFoundError as exc:
+        if self.request.retries < 1:
+            logger.warning(
+                "process_ai_grading_job: item %s not found on initial attempt, retrying in 3s...",
+                grading_queue_item_id,
+            )
+            raise self.retry(exc=exc, countdown=3)
+        logger.error(
+            "process_ai_grading_job: item %s permanently not found in database. Discarding task.",
+            grading_queue_item_id,
+        )
+        return {"status": "not_found", "item_id": grading_queue_item_id}
     except SoftTimeLimitExceeded:
         logger.error(
             "process_ai_grading_job: soft time limit for item %s",

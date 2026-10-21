@@ -17,6 +17,7 @@ import { aiGradingApi } from "@/lib/api/ai-grading";
 import { lecturerApi } from "@/lib/api/lecturer";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { AiSampleCheckDialog } from "@/components/mindexa/grading/ai-sample-check-dialog";
 import {
   AssessmentSummary,
   GradingQueueItem,
@@ -290,27 +291,9 @@ export default function BatchGradingPage() {
     toast.success("AI suggestion loaded. Click Save to finalize.");
   };
 
-  const handleApplyAiToAll = () => {
-    const items = groupedBatchQuestions[selectedBatchQuestionId] || [];
-    const nextState = { ...batchGradeState };
-    let appliedCount = 0;
-
-    items.forEach(item => {
-      const ai = getAiSuggestion(item);
-      if (ai.hasSuggestion) {
-        const details = aiDetailsCache[item.response_id];
-        const detailAi = getAiSuggestion(details);
-        nextState[item.response_id] = {
-          score: ai.score!.toString(),
-          feedback: detailAi.feedbackDraft || detailAi.rationale || ""
-        };
-        appliedCount++;
-      }
-    });
-
-    setBatchGradeState(nextState);
-    toast.success(`Applied AI suggestions locally for ${appliedCount} items. Click Save All to upload.`);
-  };
+  // Accepting AI grades across many students goes through the sample check
+  // (spec §9.6) — filling every row and saving them as manual grades bypassed it.
+  const [showSampleCheck, setShowSampleCheck] = useState(false);
 
   const handleSaveBatchGrade = async (
     responseId: string,
@@ -325,7 +308,7 @@ export default function BatchGradingPage() {
     try {
       await gradingApi.saveGrade(responseId, {
         score: Number(scoreVal),
-        feedback: feedbackVal || null,
+        feedback: feedbackVal || undefined,
         is_final: true
       });
       
@@ -366,7 +349,7 @@ export default function BatchGradingPage() {
       try {
         await gradingApi.saveGrade(item.response_id, {
           score: Number(state.score),
-          feedback: state.feedback || null,
+          feedback: state.feedback || undefined,
           is_final: true
         });
         
@@ -535,10 +518,10 @@ export default function BatchGradingPage() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={handleApplyAiToAll}
+                    onClick={() => setShowSampleCheck(true)}
                     className="h-8 text-xs font-bold text-primary border-primary/20 bg-primary/5 hover:bg-primary/10 rounded-lg"
                   >
-                    <Sparkles className="size-3.5 mr-1.5" /> Apply AI to All
+                    <Sparkles className="size-3.5 mr-1.5" /> Accept AI grades…
                   </Button>
                   <Button
                     size="sm"
@@ -913,6 +896,15 @@ export default function BatchGradingPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AiSampleCheckDialog
+        open={showSampleCheck}
+        onOpenChange={setShowSampleCheck}
+        assessmentId={selectedAssessmentId !== "all" ? selectedAssessmentId : null}
+        onCompleted={() => {
+          if (selectedAssessmentId !== "all") fetchQueue(selectedAssessmentId);
+        }}
+      />
     </div>
   );
 }

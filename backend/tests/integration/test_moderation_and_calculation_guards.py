@@ -461,8 +461,11 @@ class TestModerationAndCalculationGuards:
         }, headers=headers)
         assert res_neg.status_code in (400, 422)
 
-    async def test_closed_only_assessment_auto_releases_even_in_manual_mode(self, db, client: AsyncClient, make_auth_headers):
-        """Verify that an assessment with only closed questions auto-releases upon calculation even in MANUAL release mode."""
+    async def test_closed_only_assessment_release_respects_release_mode(self, db, client: AsyncClient, make_auth_headers):
+        """
+        Closed-question assessments follow the lecturer's release mode (spec §13.1:
+        the lecturer releases results): MANUAL waits, IMMEDIATE releases on calculation.
+        """
         data = await self._setup_data(db)
         lecturer = data["lecturer"]
         student = data["student"]
@@ -543,8 +546,16 @@ class TestModerationAndCalculationGuards:
         calc_res = await client.post(f"/api/v1/results/calculate/{attempt.id}", headers=headers)
         assert calc_res.status_code == 200
 
-        # Verify that AssessmentResult is automatically released!
+        # MANUAL: calculated but held for the lecturer
         stmt = select(AssessmentResult).where(AssessmentResult.attempt_id == attempt.id)
         res_row = (await db.execute(stmt)).scalar_one()
         assert res_row.total_score == 20.0
+        assert res_row.is_released is False
+
+        # IMMEDIATE: released automatically on (re)calculation
+        closed_assessment.result_release_mode = ResultReleaseMode.IMMEDIATE
+        await db.commit()
+        calc_res = await client.post(f"/api/v1/results/calculate/{attempt.id}", headers=headers)
+        assert calc_res.status_code == 200
+        await db.refresh(res_row)
         assert res_row.is_released is True

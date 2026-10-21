@@ -442,49 +442,53 @@ export default function AdminUsersPage() {
         </div>
 
         <TabsContent value="directory" className="space-y-4 m-0">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
             label: "Total Accounts",
             value: totalUsers,
             icon: Users,
             color: "text-primary",
+            bg: "bg-primary/10",
           },
           {
             label: "Awaiting Approval",
             value: users.filter((u) => u.status === "PENDING_APPROVAL").length,
             icon: UserCheck,
-            color: "text-amber-600",
+            color: "text-amber-600 dark:text-amber-400",
+            bg: "bg-amber-500/10",
           },
           {
             label: "Active Nodes",
             value: users.filter((u) => u.status === "ACTIVE").length,
             icon: CheckCircle,
-            color: "text-emerald-600",
+            color: "text-emerald-600 dark:text-emerald-400",
+            bg: "bg-emerald-500/10",
           },
           {
             label: "Suspended",
             value: users.filter((u) => u.status === "SUSPENDED").length,
             icon: Lock,
-            color: "text-destructive",
+            color: "text-rose-600 dark:text-rose-400",
+            bg: "bg-rose-500/10",
           },
         ].map((stat, i) => (
           <Card
             key={i}
-            className="border shadow-none rounded-xl bg-background/50 overflow-hidden"
+            className="border border-border/60 shadow-none rounded-2xl bg-card transition-all hover:border-primary/20"
           >
-            <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {stat.label}
-              </p>
-              <h3
-                className={cn(
-                  "text-xl font-semibold leading-tight",
-                  stat.color,
-                )}
-              >
-                {stat.value}
-              </h3>
+            <CardContent className="p-5 flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {stat.label}
+                </p>
+                <h3 className={cn("text-2xl font-bold tracking-tight", stat.color)}>
+                  {stat.value}
+                </h3>
+              </div>
+              <div className={cn("size-11 rounded-xl flex items-center justify-center shrink-0", stat.bg, stat.color)}>
+                <stat.icon className="size-5" />
+              </div>
             </CardContent>
           </Card>
         ))}
@@ -512,7 +516,7 @@ export default function AdminUsersPage() {
               <Button
                 size="sm"
                 variant="outline"
-                className="rounded-full h-8 px-4 border-emerald-100 text-emerald-700 hover:bg-emerald-50 text-[10px] font-bold uppercase"
+                className="rounded-full h-8 px-4 border-emerald-500/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/10 text-[10px] font-bold uppercase"
                 onClick={handleBulkApprove}
                 disabled={isSubmitting}
               >
@@ -527,7 +531,7 @@ export default function AdminUsersPage() {
               <Button
                 size="sm"
                 variant="outline"
-                className="rounded-full h-8 px-4 border-red-100 text-red-700 hover:bg-red-50 text-[10px] font-bold uppercase"
+                className="rounded-full h-8 px-4 border-rose-500/30 text-rose-700 dark:text-rose-400 hover:bg-rose-500/10 text-[10px] font-bold uppercase"
                 onClick={() => handleBulkStatusUpdate("SUSPENDED")}
                 disabled={isSubmitting}
               >
@@ -704,14 +708,14 @@ export default function AdminUsersPage() {
                       <Badge
                         variant="outline"
                         className={cn(
-                          "rounded-full px-2 py-0 text-[9px] font-semibold h-4.5 border uppercase",
+                          "rounded-full px-2.5 py-0.5 text-[9px] font-semibold h-5 border uppercase tracking-wide",
                           user.role === "ADMIN" &&
-                            "border-primary text-primary bg-primary/5",
+                            "border-primary/40 text-primary bg-primary/10",
                           user.role === "COORDINATOR" &&
-                            "border-amber-400 text-amber-700 bg-amber-50/50",
+                            "border-purple-500/40 text-purple-700 dark:text-purple-400 bg-purple-500/10",
                           user.role === "LECTURER" &&
-                            "border-blue-400 text-blue-600 bg-blue-50/50",
-                          user.role === "STUDENT" && "text-muted-foreground",
+                            "border-blue-500/40 text-blue-700 dark:text-blue-400 bg-blue-500/10",
+                          user.role === "STUDENT" && "text-muted-foreground border-border/80 bg-muted/20",
                         )}
                       >
                         {user.role}
@@ -721,13 +725,13 @@ export default function AdminUsersPage() {
                       <Badge
                         variant="secondary"
                         className={cn(
-                          "rounded-full px-2 py-0 text-[9px] font-semibold h-4.5 border uppercase",
+                          "rounded-full px-2.5 py-0.5 text-[9px] font-semibold h-5 border uppercase tracking-wide",
                           user.status === "ACTIVE" &&
-                            "bg-emerald-50 text-emerald-700 border-emerald-200",
+                            "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30",
                           user.status === "PENDING_APPROVAL" &&
-                            "bg-amber-50 text-amber-700 border-amber-200",
+                            "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
                           user.status === "SUSPENDED" &&
-                            "bg-red-50 text-red-700 border-red-200",
+                            "bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/30",
                         )}
                       >
                         {user.status.replace("_", " ")}
@@ -874,48 +878,68 @@ export default function AdminUsersPage() {
 
         {/* Accommodations Tab Content */}
         <TabsContent value="accommodations" className="space-y-4 m-0">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
-              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                  Enrolled Students
-                </p>
-                <h3 className="text-xl font-semibold leading-tight text-primary">
-                  {accommodationStats.total}
-                </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="border border-border/60 shadow-none rounded-2xl bg-card">
+              <CardContent className="p-5 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Enrolled Students
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight text-primary">
+                    {accommodationStats.total}
+                  </h3>
+                </div>
+                <div className="size-11 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <GraduationCap className="size-5" />
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
-              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                  Extra Time Active
-                </p>
-                <h3 className="text-xl font-semibold leading-tight text-emerald-600">
-                  {accommodationStats.withExtraTime}
-                </h3>
+            <Card className="border border-border/60 shadow-none rounded-2xl bg-card">
+              <CardContent className="p-5 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Extra Time Active
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight text-emerald-600 dark:text-emerald-400">
+                    {accommodationStats.withExtraTime}
+                  </h3>
+                </div>
+                <div className="size-11 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                  <Clock className="size-5" />
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
-              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                  Screen Reader Profiles
-                </p>
-                <h3 className="text-xl font-semibold leading-tight text-indigo-600">
-                  {accommodationStats.withScreenReader}
-                </h3>
+            <Card className="border border-border/60 shadow-none rounded-2xl bg-card">
+              <CardContent className="p-5 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Screen Reader Profiles
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight text-indigo-600 dark:text-indigo-400">
+                    {accommodationStats.withScreenReader}
+                  </h3>
+                </div>
+                <div className="size-11 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <Accessibility className="size-5" />
+                </div>
               </CardContent>
             </Card>
 
-            <Card className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
-              <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-                <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                  Simple Mode Defaults
-                </p>
-                <h3 className="text-xl font-semibold leading-tight text-amber-600">
-                  {accommodationStats.withSimpleMode}
-                </h3>
+            <Card className="border border-border/60 shadow-none rounded-2xl bg-card">
+              <CardContent className="p-5 flex items-center justify-between">
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Simple Mode Defaults
+                  </p>
+                  <h3 className="text-2xl font-bold tracking-tight text-amber-600 dark:text-amber-400">
+                    {accommodationStats.withSimpleMode}
+                  </h3>
+                </div>
+                <div className="size-11 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                  <Sliders className="size-5" />
+                </div>
               </CardContent>
             </Card>
           </div>

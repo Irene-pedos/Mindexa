@@ -50,6 +50,21 @@ from app.services.grading_service import GradingService
 router = APIRouter(prefix="/grading", tags=["Grading"])
 
 
+async def _assert_assessment_access(db: AsyncSession, assessment_id: uuid.UUID, user: Any) -> None:
+    """Role checks alone let any lecturer reach any assessment — scope to the course team."""
+    from app.services.result_service import ResultService
+
+    await ResultService(db).assert_lecturer_assessment_access(assessment_id, user)
+
+
+async def _assert_attempt_access(db: AsyncSession, attempt_id: uuid.UUID, user: Any):
+    attempt = await AttemptRepository(db).get_by_id_simple(attempt_id)
+    if not attempt:
+        raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+    await _assert_assessment_access(db, attempt.assessment_id, user)
+    return attempt
+
+
 # ── CLASS-CENTRIC GRADING WORKFLOW (Refactored) ──────────────────────────────
 
 
@@ -173,10 +188,7 @@ async def grade_attempt(
     Typically called automatically after submission.
     Lecturers can also trigger manually for re-grading.
     """
-    attempt_repo = AttemptRepository(db)
-    attempt = await attempt_repo.get_by_id_simple(attempt_id)
-    if not attempt:
-        raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
+    attempt = await _assert_attempt_access(db, attempt_id, current_user)
 
     service = GradingService(db)
     counts = await service.grade_attempt(
@@ -317,6 +329,15 @@ async def draft_feedback(
         group_answer = res.scalar_one_or_none()
         if not group_answer:
             raise NotFoundError("Grade not found for this response")
+
+        # Verify lecturer access to assessment for group work
+        from app.db.models.attempt import GroupSubmission
+        from app.services.result_service import ResultService
+        gsub = await db.get(GroupSubmission, group_answer.submission_id)
+        if not gsub:
+            raise NotFoundError("Group submission not found")
+        res_svc = ResultService(db)
+        await res_svc.assert_lecturer_assessment_access(assessment_id=gsub.assessment_id, user=current_user)
             
         # We found a group answer! Let's trigger AI feedback draft for it
         q_res = await db.execute(select(Question).where(Question.id == group_answer.question_id))
@@ -447,6 +468,15 @@ async def get_grade_for_response(
         group_answer = res.scalar_one_or_none()
         if not group_answer:
             raise NotFoundError("Grade not found", code="GRADE_NOT_FOUND")
+
+        # Verify lecturer access to assessment for group work
+        from app.db.models.attempt import GroupSubmission
+        from app.services.result_service import ResultService
+        gsub = await db.get(GroupSubmission, group_answer.submission_id)
+        if not gsub:
+            raise NotFoundError("Group submission not found")
+        res_svc = ResultService(db)
+        await res_svc.assert_lecturer_assessment_access(assessment_id=gsub.assessment_id, user=current_user)
             
         # We found a group answer! Let's build a mock SubmissionGradeResponse
         q_res = await db.execute(select(Question).where(Question.id == group_answer.question_id))
@@ -464,10 +494,10 @@ async def get_grade_for_response(
         from datetime import datetime, timezone, timedelta
         from app.schemas.grading import RubricResponse
         
-        # Derive for group answer
+        # Derive for group answer (no fabricated timings)
         ai_status_g = "COMPLETED" if ans_dict.get("ai_suggested_score") is not None else "PENDING"
-        ai_start_g = datetime.now(timezone.utc) - timedelta(seconds=8)
-        ai_end_g = datetime.now(timezone.utc)
+        ai_start_g = None
+        ai_end_g = None
         
         conf_g = ans_dict.get("ai_confidence")
         if conf_g is not None:
@@ -484,29 +514,11 @@ async def get_grade_for_response(
             elif ans_dict.get("ai_suggested_score") is not None:
                 q_mode_g = "AI_ASSISTED"
                 
-        alignment_g = []
-        if rubric:
-            ref_score_g = ans_dict.get("ai_suggested_score") or 0.0
-            max_s_g = float(q.marks) if q else 10.0
-            ratio_g = ref_score_g / max_s_g if max_s_g > 0 else 0.8
-            for criterion in rubric.criteria:
-                pts_g = round(criterion.max_marks * ratio_g, 1)
-                alignment_g.append({
-                    "criterion": criterion.title,
-                    "description": criterion.description or "",
-                    "points_awarded": pts_g,
-                    "max_points": float(criterion.max_marks),
-                    "matched": pts_g > 0
-                })
-                
-        issues_g = []
+        # No invented rubric alignment / canned issues (see individual path below)
+        alignment_g: list = []
+        issues_g: list = []
         ans_txt = ans_dict.get("answer_text") or ans_dict.get("text") or ""
-        if ans_dict.get("ai_suggested_score") is not None and q:
-            if float(ans_dict.get("ai_suggested_score")) < float(q.marks) * 0.7:
-                issues_g.append("Answer response is partially incomplete relative to rubric criteria.")
-            if len(ans_txt) < 50:
-                issues_g.append("Brief answer text submitted; potentially lacks detail.")
-                
+
         return SubmissionGradeResponse(
             id=group_answer.id,
             response_id=group_answer.id,
@@ -548,15 +560,23 @@ async def get_grade_for_response(
             question_grading_mode=q_mode_g,
         )
     
+    await _assert_attempt_access(db, grade.attempt_id, current_user)
+
     # Map extra fields from the joined data
     resp_obj = SubmissionGradeResponse.model_validate(grade)
-    
-    # Derive new fields
-    from datetime import timezone, timedelta
-    ai_status = "COMPLETED" if grade.ai_suggested_score is not None else "PENDING"
-    ai_start = grade.created_at
-    ai_end = grade.created_at + timedelta(seconds=8) if grade.created_at else None
-    
+
+    # AI review status comes from the real queue state, so failures are visible.
+    queue_item = await repo.get_latest_queue_item_for_response(response_id)
+    queue_status = getattr(getattr(queue_item, "status", None), "value", getattr(queue_item, "status", None))
+    if grade.ai_suggested_score is not None:
+        ai_status = "COMPLETED"
+    elif queue_status == "FAILED":
+        ai_status = "FAILED"
+    elif queue_status == "IN_PROGRESS":
+        ai_status = "PROCESSING"
+    else:
+        ai_status = "PENDING"
+
     conf = grade.ai_confidence
     if conf is not None:
         val = conf if conf <= 1.0 else conf / 100.0
@@ -573,8 +593,6 @@ async def get_grade_for_response(
         elif grade.grading_mode == "SEMI" or grade.grading_mode == "AI_ASSISTED":
             q_mode = "AI_ASSISTED"
             
-    alignment = []
-    
     has_rubric = False
     if grade.student_response:
         resp_obj.student_answer = grade.student_response.answer_text
@@ -585,34 +603,18 @@ async def get_grade_for_response(
                 has_rubric = True
             if q_obj.rubric:
                 resp_obj.rubric = q_obj.rubric
-                ref_score = grade.ai_suggested_score if grade.ai_suggested_score is not None else 0.0
-                max_s = grade.max_score or 10.0
-                ratio = ref_score / max_s if max_s > 0 else 0.8
-                for criterion in q_obj.rubric.criteria:
-                    pts = round(criterion.max_marks * ratio, 1)
-                    alignment.append({
-                        "criterion": criterion.title,
-                        "description": criterion.description or "",
-                        "points_awarded": pts,
-                        "max_points": float(criterion.max_marks),
-                        "matched": pts > 0
-                    })
-                
+
     resp_obj.ai_grading_basis = "RUBRIC" if has_rubric else "GENERAL_KNOWLEDGE"
-    
-    issues = []
-    if grade.ai_suggested_score is not None and grade.max_score is not None:
-        if grade.ai_suggested_score < grade.max_score * 0.7:
-            issues.append("Response lacks depth in reference context analysis.")
-        if not grade.student_response or not grade.student_response.answer_text or len(grade.student_response.answer_text) < 50:
-            issues.append("Word count is significantly lower than recommended guidelines.")
-            
+
+    # Per-criterion alignment and "detected issues" used to be invented here
+    # (total score scaled across criteria, canned messages) and shown to lecturers
+    # as AI findings. Only report what the AI actually produced.
     resp_obj.ai_review_status = ai_status
-    resp_obj.ai_started_at = ai_start
-    resp_obj.ai_completed_at = ai_end
+    resp_obj.ai_started_at = None
+    resp_obj.ai_completed_at = None
     resp_obj.ai_confidence_level = ai_conf_lvl
-    resp_obj.rubric_alignment = alignment
-    resp_obj.detected_issues = issues
+    resp_obj.rubric_alignment = []
+    resp_obj.detected_issues = []
     resp_obj.question_grading_mode = q_mode
     
     return resp_obj
@@ -632,6 +634,11 @@ async def suggest_ai_changes(
     """
     Pass lecturer feedback/correction back to AI and trigger immediate re-grading.
     """
+    response = await SubmissionRepository(db).get_response_by_id(response_id)
+    if not response:
+        raise NotFoundError("Response not found", code="RESPONSE_NOT_FOUND")
+    await _assert_attempt_access(db, response.attempt_id, current_user)
+
     service = GradingService(db)
     result = await service.suggest_ai_changes(
         response_id=response_id,
@@ -658,6 +665,7 @@ async def get_attempt_grading_summary(
     Return the grading progress summary for an attempt.
     Shows how many questions are graded, pending, etc.
     """
+    await _assert_attempt_access(db, attempt_id, current_user)
     grading_repo = GradingRepository(db)
     submission_repo = SubmissionRepository(db)
 
@@ -694,9 +702,9 @@ async def verify_attempt_grades(
     db: AsyncSession = Depends(get_db),
 ) -> VerifyMarksResponse:
     from app.db.models.attempt import SubmissionGrade
-    from app.db.models.ai import AIGradeReview
-    from app.db.enums import AIGradeDecision
     from sqlalchemy import select
+
+    await _assert_attempt_access(db, attempt_id, current_user)
 
     # 1. Fetch all manual/open-ended grades for the attempt
     stmt = (
@@ -718,21 +726,20 @@ async def verify_attempt_grades(
         if not grade.is_final:
             ungraded_count += 1
             errors.append(f"Question node {grade.question_id} is not graded yet.")
-        else:
-            # Check if this grade was accepted in bulk (AIGradeReview with ACCEPTED and review_duration_seconds is None)
-            review_stmt = (
-                select(AIGradeReview)
-                .where(
-                    AIGradeReview.submission_grade_id == grade.id,
-                    AIGradeReview.grading_decision == AIGradeDecision.ACCEPTED,
-                    AIGradeReview.review_duration_seconds.is_(None),
-                )
-            )
-            review_res = await db.execute(review_stmt)
-            unreviewed_bulk = review_res.scalars().first()
-            if unreviewed_bulk:
-                unreviewed_bulk_count += 1
-                errors.append(f"Question node {grade.question_id} was bulk-accepted via AI without human individual review.")
+
+    # Same rule the release gate applies (accepted AI grade, no review evidence,
+    # no verified sample check for the assessment).
+    attempt = await AttemptRepository(db).get_by_id_simple(attempt_id)
+    unreviewed = (
+        await GradingRepository(db).list_unreviewed_ai_acceptances(attempt_id, attempt.assessment_id)
+        if attempt
+        else []
+    )
+    unreviewed_bulk_count = len(unreviewed)
+    for question_id in unreviewed:
+        errors.append(
+            f"Question node {question_id} was accepted from AI without human review."
+        )
 
     valid = (ungraded_count == 0 and unreviewed_bulk_count == 0)
     return VerifyMarksResponse(
@@ -800,6 +807,7 @@ async def assign_queue_item(
     item = await repo.get_queue_item_by_id(item_id)
     if not item:
         raise NotFoundError("Queue item not found", code="QUEUE_ITEM_NOT_FOUND")
+    await _assert_assessment_access(db, item.assessment_id, current_user)
 
     await repo.assign_queue_item(
         item_id=item_id,
@@ -830,10 +838,16 @@ async def process_ai_queue_item_endpoint(
         group_answer = res.scalar_one_or_none()
         if not group_answer:
             raise NotFoundError("Queue item or Group answer not found", code="QUEUE_ITEM_NOT_FOUND")
+        from app.db.models.attempt import GroupSubmission
+
+        group_submission = await db.get(GroupSubmission, group_answer.submission_id)
+        if not group_submission:
+            raise NotFoundError("Group submission not found", code="QUEUE_ITEM_NOT_FOUND")
+        await _assert_assessment_access(db, group_submission.assessment_id, current_user)
 
         # Dispatch to Celery (do NOT run inline — group AI grading may take 15-30s)
         from app.workers.tasks import process_ai_grading_job
-        process_ai_grading_job.delay(str(item_id))
+        process_ai_grading_job.apply_async(args=[str(item_id)], countdown=1)
 
         return AIReviewSuggestionResponse(
             status="queued",
@@ -842,9 +856,11 @@ async def process_ai_queue_item_endpoint(
             suggested_score=None,
         )
 
+    await _assert_assessment_access(db, item.assessment_id, current_user)
+
     # Dispatch individual queue item to Celery worker — never block uvicorn with LLM calls
     from app.workers.tasks import process_ai_grading_job
-    process_ai_grading_job.delay(str(item_id))
+    process_ai_grading_job.apply_async(args=[str(item_id)], countdown=1)
 
     return AIReviewSuggestionResponse(
         status="queued",

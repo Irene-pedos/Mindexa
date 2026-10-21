@@ -194,7 +194,15 @@ class ResultReleaseResponse(BaseModel):
     held_attempt_ids: list[uuid.UUID] = []
     incomplete_count: int = 0
     incomplete_attempt_ids: list[uuid.UUID] = []
+    # Blocked because AI suggestions were accepted without human review
+    unreviewed_count: int = 0
+    unreviewed_attempt_ids: list[uuid.UUID] = []
     message: str
+
+
+class ResultUnreleaseRequest(BaseModel):
+    """Body for POST /results/{result_id}/unrelease."""
+    reason: str = Field(..., min_length=10, max_length=1000)
 
 
 class ReleaseQueueItem(BaseModel):

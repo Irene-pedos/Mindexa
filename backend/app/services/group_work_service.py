@@ -1270,10 +1270,9 @@ class GroupWorkService:
                 total_question_count=total_questions_count,
             )
 
-        # Automatic Release for IMMEDIATE mode (or closed-only assessments with no open-ended questions) if fully graded
-        has_open_ended = await self.assessment_repo.has_open_ended_questions(assessment.id)
+        # Automatic release only in IMMEDIATE mode; MANUAL waits for the lecturer.
         if (
-            (release_mode == ResultReleaseMode.IMMEDIATE.value or not has_open_ended)
+            release_mode == ResultReleaseMode.IMMEDIATE.value
             and is_final
             and total_questions_count > 0
             and completed_answers_count >= total_questions_count

@@ -356,25 +356,50 @@ export default function InstitutionsPage() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-            { label: "Active Partners", value: summary?.active_partners || 0, color: "text-emerald-600" },
+            { 
+              label: "Active Partners", 
+              value: summary?.active_partners || 0, 
+              color: "text-emerald-600 dark:text-emerald-400",
+              bg: "bg-emerald-500/10",
+              icon: Building2 
+            },
             { 
               label: "Total Capacity", 
               value: (summary?.total_capacity || 0) >= 1000 
                 ? ((summary?.total_capacity || 0) / 1000).toFixed(1) + "k" 
                 : summary?.total_capacity || 0, 
-              color: "text-primary" 
+              color: "text-primary",
+              bg: "bg-primary/10",
+              icon: Globe 
             },
-            { label: "Integrations", value: summary?.integrations_count || 0, color: "text-amber-600" },
-            { label: "Suspended", value: summary?.suspended_partners || 0, color: "text-destructive" }
+            { 
+              label: "Integrations", 
+              value: summary?.integrations_count || 0, 
+              color: "text-amber-600 dark:text-amber-400",
+              bg: "bg-amber-500/10",
+              icon: Settings 
+            },
+            { 
+              label: "Suspended", 
+              value: summary?.suspended_partners || 0, 
+              color: "text-rose-600 dark:text-rose-400",
+              bg: "bg-rose-500/10",
+              icon: PowerOff 
+            }
         ].map((stat, i) => (
-            <Card key={i} className="border shadow-none rounded-xl bg-background/50 overflow-hidden">
-                <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-                    <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">{stat.label}</p>
-                    <h3 className={cn("text-xl font-semibold leading-tight", stat.color)}>
-                      {loading ? <Skeleton className="h-6 w-10" /> : stat.value}
-                    </h3>
+            <Card key={i} className="border border-border/60 shadow-none rounded-2xl bg-card transition-all hover:border-primary/20">
+                <CardContent className="p-5 flex items-center justify-between">
+                    <div className="space-y-1">
+                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{stat.label}</p>
+                      <h3 className={cn("text-2xl font-bold tracking-tight", stat.color)}>
+                        {loading ? <Skeleton className="h-7 w-12" /> : stat.value}
+                      </h3>
+                    </div>
+                    <div className={cn("size-11 rounded-xl flex items-center justify-center shrink-0", stat.bg, stat.color)}>
+                      <stat.icon className="size-5" />
+                    </div>
                 </CardContent>
             </Card>
         ))}
@@ -456,10 +481,10 @@ export default function InstitutionsPage() {
                       <Badge 
                         variant="secondary"
                         className={cn(
-                          "rounded-full px-2 py-0 text-[9px] font-semibold border uppercase",
+                          "rounded-full px-2.5 py-0.5 text-[9px] font-semibold border uppercase tracking-wide",
                           inst.is_active 
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
-                            : "bg-amber-50 text-amber-700 border-amber-200"
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30" 
+                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30"
                         )}
                       >
                         {inst.is_active ? "ACTIVE" : "SUSPENDED"}
@@ -485,7 +510,7 @@ export default function InstitutionsPage() {
                           <DropdownMenuItem 
                             className={cn(
                               "text-[11px] font-semibold cursor-pointer py-2 rounded-lg",
-                              inst.is_active ? "text-amber-600 focus:text-amber-600 focus:bg-amber-50" : "text-emerald-600 focus:text-emerald-600 focus:bg-emerald-50"
+                              inst.is_active ? "text-amber-600 focus:text-amber-600 focus:bg-amber-500/10 dark:focus:bg-amber-950/40" : "text-emerald-600 focus:text-emerald-600 focus:bg-emerald-500/10 dark:focus:bg-emerald-950/40"
                             )}
                             onClick={() => handleToggleStatus(inst)}
                           >

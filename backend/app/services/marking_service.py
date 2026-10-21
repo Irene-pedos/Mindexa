@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from typing import List, Optional, Sequence
 
 from sqlalchemy import and_, or_, select, update
+from sqlalchemy import func as sa_func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -52,6 +53,7 @@ from app.db.models.marking import (
 )
 from app.db.models.question import Question
 from app.db.models.resource import LecturerMaterial
+from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.marking_repo import MarkingRepository
 from app.schemas.marking import (
     GradingDelegationCreate,
@@ -59,6 +61,8 @@ from app.schemas.marking import (
     MarkingSchemeCreate,
     MarkingSchemeUpdate,
     QuestionMarkStepCreate,
+    SampleCheckItem,
+    SampleCheckResponse,
     SampleCheckVerifyItem,
 )
 from app.services.assessment_service import AssessmentService
@@ -434,13 +438,94 @@ class MarkingService:
 
     # ── AI Grade Sample Check & Bulk Accept (R-13) ───────────────────────────
 
+    async def to_sample_check_response(self, check: AIGradeSampleCheck) -> SampleCheckResponse:
+        """Sample check plus the sampled items, so the lecturer can actually verify them."""
+        response = SampleCheckResponse.model_validate(check)
+        items = await self.repo.list_sample_items(check.sampled_review_ids or [])
+        pending = await self.repo.list_pending_ai_reviews_for_assessment(check.assessment_id)
+        return response.model_copy(
+            update={
+                "items": [SampleCheckItem.model_validate(i) for i in items],
+                "pending_review_count": len(pending),
+            }
+        )
+
+    async def get_latest_sample_check(
+        self, assessment_id: uuid.UUID, user: User
+    ) -> SampleCheckResponse:
+        await self._verify_assessment_access(assessment_id, user)
+        check = await self.repo.get_latest_sample_check_for_assessment(assessment_id)
+        if not check:
+            raise NotFoundError("No sample check found for this assessment", code="SAMPLE_CHECK_NOT_FOUND")
+        return await self.to_sample_check_response(check)
+
+    async def _complete_finalized_grades(self, grade_ids: Sequence[uuid.UUID]) -> None:
+        """
+        After grades are finalised outside the per-item grading flow (sample check,
+        bulk accept): close their queue items and calculate results for attempts
+        that are now fully graded — previously these attempts were left hanging.
+        """
+        if not grade_ids:
+            return
+        from app.db.models.attempt import GradingQueueItem
+        from app.db.enums import GradingQueueStatus
+        from app.services.result_service import ResultService
+
+        grades = (
+            await self.db.execute(select(SubmissionGrade).where(SubmissionGrade.id.in_(list(grade_ids))))
+        ).scalars().all()
+        response_ids = [g.response_id for g in grades if g.response_id]
+        if response_ids:
+            await self.db.execute(
+                update(GradingQueueItem)
+                .where(
+                    GradingQueueItem.response_id.in_(response_ids),
+                    GradingQueueItem.status.in_([
+                        GradingQueueStatus.PENDING,
+                        GradingQueueStatus.ASSIGNED,
+                        GradingQueueStatus.AI_SUGGESTED,
+                        GradingQueueStatus.IN_PROGRESS,
+                        GradingQueueStatus.FAILED,
+                    ]),
+                )
+                .values(status=GradingQueueStatus.COMPLETED)
+            )
+        await self.db.flush()
+
+        result_service = ResultService(self.db)
+        for attempt_id in {g.attempt_id for g in grades}:
+            attempt = await self.db.get(AssessmentAttempt, attempt_id)
+            if not attempt:
+                continue
+            final_count = (
+                await self.db.execute(
+                    select(sa_func.count(SubmissionGrade.id)).where(
+                        SubmissionGrade.attempt_id == attempt_id,
+                        SubmissionGrade.is_final == True,  # noqa: E712
+                        SubmissionGrade.is_current == True,  # noqa: E712
+                        SubmissionGrade.is_deleted == False,  # noqa: E712
+                    )
+                )
+            ).scalar_one()
+            question_count = await AssessmentRepository(self.db).count_assessment_questions(
+                attempt.assessment_id
+            )
+            if question_count and final_count >= question_count:
+                await result_service.calculate_result(attempt_id=attempt_id)
+
     async def create_sample_check(
         self,
         assessment_id: uuid.UUID,
         user: User,
         sample_size: Optional[int] = None,
-    ) -> AIGradeSampleCheck:
+    ) -> SampleCheckResponse:
         assessment = await self._verify_assessment_access(assessment_id, user)
+
+        # Reuse an unfinished sample instead of drawing a new one each time
+        latest = await self.repo.get_latest_sample_check_for_assessment(assessment_id)
+        if latest and latest.status == SampleCheckStatus.PENDING:
+            return await self.to_sample_check_response(latest)
+
         pending_reviews = await self.repo.list_pending_ai_reviews_for_assessment(assessment_id)
         count = len(pending_reviews)
         if count == 0:
@@ -475,7 +560,7 @@ class MarkingService:
         )
         self.db.add(audit)
         await self.db.commit()
-        return check
+        return await self.to_sample_check_response(check)
 
     async def verify_sample_check(
         self,
@@ -483,7 +568,7 @@ class MarkingService:
         sample_check_id: uuid.UUID,
         user: User,
         verifications: List[SampleCheckVerifyItem],
-    ) -> AIGradeSampleCheck:
+    ) -> SampleCheckResponse:
         await self._verify_assessment_access(assessment_id, user)
         check = await self.repo.get_sample_check(sample_check_id)
         if not check or check.assessment_id != assessment_id:
@@ -492,6 +577,7 @@ class MarkingService:
         sampled_set = set(check.sampled_review_ids)
         agreed_count = 0
         now = datetime.now(UTC)
+        finalized_grade_ids: list[uuid.UUID] = []
 
         for item in verifications:
             str_id = str(item.review_id)
@@ -522,23 +608,34 @@ class MarkingService:
                 review.lecturer_notes = item.lecturer_feedback
             self.db.add(review)
 
-            # Update SubmissionGrade
+            # Update SubmissionGrade. Feedback: the lecturer's text if given; an
+            # agreed item also accepts the AI draft (this check is the human
+            # review). Never overwrite existing feedback with nothing.
             if review.submission_grade_id:
+                grade = await self.db.get(SubmissionGrade, review.submission_grade_id)
+                values: dict = {
+                    "is_final": True,
+                    "score": final_score,
+                    "graded_by_id": user.id,
+                    "graded_at": now,
+                }
+                if item.lecturer_feedback:
+                    values["feedback"] = item.lecturer_feedback
+                elif item.agreed and grade and not grade.feedback and grade.ai_feedback_draft:
+                    values["feedback"] = grade.ai_feedback_draft
                 await self.db.execute(
                     update(SubmissionGrade)
                     .where(SubmissionGrade.id == review.submission_grade_id)
-                    .values(
-                        is_final=True,
-                        score=final_score,
-                        graded_by_id=user.id,
-                        graded_at=now,
-                        feedback=item.lecturer_feedback,
-                    )
+                    .values(**values)
                 )
+                finalized_grade_ids.append(review.submission_grade_id)
+
+        await self._complete_finalized_grades(finalized_grade_ids)
 
         checked_count = len(verifications)
         agreement_rate = (agreed_count / checked_count) if checked_count > 0 else 0.0
-        status = SampleCheckStatus.VERIFIED if agreement_rate >= 0.80 else SampleCheckStatus.VERIFIED
+        # The agreement threshold is enforced at bulk-accept time.
+        status = SampleCheckStatus.VERIFIED
 
         updated_check = await self.repo.update_sample_check(
             sample_check_id,
@@ -558,7 +655,7 @@ class MarkingService:
         )
         self.db.add(audit)
         await self.db.commit()
-        return updated_check or check
+        return await self.to_sample_check_response(updated_check or check)
 
     async def bulk_accept_grades(
         self,
@@ -605,6 +702,7 @@ class MarkingService:
         pending_reviews = await self.repo.list_pending_ai_reviews_for_assessment(assessment_id)
         now = datetime.now(UTC)
         accepted_count = 0
+        finalized_grade_ids: list[uuid.UUID] = []
 
         for review in pending_reviews:
             final_score = review.ai_suggested_total or 0.0
@@ -616,17 +714,26 @@ class MarkingService:
             self.db.add(review)
 
             if review.submission_grade_id:
+                grade = await self.db.get(SubmissionGrade, review.submission_grade_id)
+                values: dict = {
+                    "is_final": True,
+                    "score": final_score,
+                    "graded_by_id": user.id,
+                    "graded_at": now,
+                }
+                # Accepting under a verified sample check accepts the AI feedback too
+                if grade and not grade.feedback and grade.ai_feedback_draft:
+                    values["feedback"] = grade.ai_feedback_draft
+                    values["feedback_author_basis"] = "AI"
                 await self.db.execute(
                     update(SubmissionGrade)
                     .where(SubmissionGrade.id == review.submission_grade_id)
-                    .values(
-                        is_final=True,
-                        score=final_score,
-                        graded_by_id=user.id,
-                        graded_at=now,
-                    )
+                    .values(**values)
                 )
+                finalized_grade_ids.append(review.submission_grade_id)
             accepted_count += 1
+
+        await self._complete_finalized_grades(finalized_grade_ids)
 
         # 3. Log audit event [AUDIT]
         audit_log = AuditLog(

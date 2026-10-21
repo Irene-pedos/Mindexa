@@ -46,6 +46,13 @@ class FeedbackAgent(BaseAgent):
         """
         Draft feedback for a student attempt.
         """
+        from app.core.ai.language_policy import assert_ai_allowed
+        assert_ai_allowed(
+            "en",
+            action="draft_feedback",
+            context={"grade_id": str(grade_id) if grade_id else None, "attempt_id": str(attempt_id) if attempt_id else None},
+        )
+
         prompt_template = self._get_prompt()
         
         system_content = (

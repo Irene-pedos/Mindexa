@@ -375,6 +375,45 @@ class MarkingRepository:
         res = await self.db.execute(stmt)
         return list(res.scalars().all())
 
+    async def list_sample_items(self, review_ids: Sequence[str]) -> list[dict]:
+        """Sampled reviews with the question and student answer the lecturer must verify."""
+        from app.db.models.attempt import StudentResponse
+
+        ids = [uuid.UUID(str(r)) for r in review_ids]
+        if not ids:
+            return []
+        stmt = (
+            select(AIGradeReview, StudentResponse, Question, SubmissionGrade)
+            .outerjoin(StudentResponse, StudentResponse.id == AIGradeReview.response_id)
+            .outerjoin(Question, Question.id == StudentResponse.question_id)
+            .outerjoin(SubmissionGrade, SubmissionGrade.id == AIGradeReview.submission_grade_id)
+            .where(AIGradeReview.id.in_(ids))
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {
+                "review_id": review.id,
+                "response_id": review.response_id,
+                "attempt_id": review.attempt_id,
+                "question_content": question.content if question else None,
+                "student_answer": response.answer_text if response else None,
+                "ai_suggested_score": review.ai_suggested_total,
+                "max_score": review.max_possible_score,
+                "ai_feedback_draft": grade.ai_feedback_draft if grade else None,
+                "decision": review.grading_decision.value
+                if hasattr(review.grading_decision, "value")
+                else str(review.grading_decision),
+            }
+            for review, response, question, grade in rows
+        ]
+
+    async def has_verified_sample_check(self, assessment_id: uuid.UUID) -> bool:
+        stmt = select(AIGradeSampleCheck.id).where(
+            AIGradeSampleCheck.assessment_id == assessment_id,
+            AIGradeSampleCheck.status == SampleCheckStatus.VERIFIED,
+        ).limit(1)
+        return (await self.db.execute(stmt)).first() is not None
+
     # ── Grading Delegations ──────────────────────────────────────────────────
 
     async def get_delegation(

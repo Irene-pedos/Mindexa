@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
@@ -184,12 +185,14 @@ export default function AdminSystemSettings() {
         </div>
         <Button
           size="sm"
-          className="rounded-lg px-4 h-9"
+          className="rounded-xl px-5 h-9 text-xs font-semibold"
           onClick={handleSave}
           disabled={loading}
         >
           {loading ? (
-            "Processing..."
+            <>
+              <Loader2 className="mr-2 size-3.5 animate-spin" /> Processing...
+            </>
           ) : (
             <>
               <Save className="mr-2 size-3.5" /> Save Changes
@@ -221,13 +224,13 @@ export default function AdminSystemSettings() {
 
         {/* Content Area */}
         <div className="md:col-span-2 space-y-6 pb-20">
-          <Card id="general" className="border shadow-none scroll-mt-20">
+          <Card id="general" className="border border-border/60 shadow-none rounded-2xl bg-card scroll-mt-20 overflow-hidden">
             <CardHeader className="py-3 px-4 border-b h-12 flex justify-center">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 General Configuration
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-4 space-y-4">
+            <CardContent className="p-6 space-y-5">
               <div className="space-y-1.5">
                 <Label className="text-[10px] uppercase font-bold text-muted-foreground">
                   Platform Display Name
@@ -286,13 +289,13 @@ export default function AdminSystemSettings() {
             </CardContent>
           </Card>
 
-          <Card id="security" className="border shadow-none scroll-mt-20">
+          <Card id="security" className="border border-border/60 shadow-none rounded-2xl bg-card scroll-mt-20 overflow-hidden">
             <CardHeader className="py-3 px-4 border-b h-12 flex justify-center">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Security & Institutional Integrity Profiles
               </CardTitle>
             </CardHeader>
-            <CardContent className="p-4 space-y-6">
+            <CardContent className="p-6 space-y-6">
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
                   <div className="text-xs font-semibold">
@@ -401,10 +404,10 @@ export default function AdminSystemSettings() {
                                 </td>
                                 <td className="py-2 px-3">
                                   <span
-                                    className={`inline-block px-2 py-0.5 rounded text-[9px] font-bold ${
+                                    className={`inline-block px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider ${
                                       currentRuleConfig.category === "Non-Tolerated"
-                                        ? "bg-red-50 text-red-700 border border-red-200"
-                                        : "bg-amber-50 text-amber-700 border border-amber-200"
+                                        ? "bg-rose-500/10 text-rose-700 dark:text-rose-400 border border-rose-500/30"
+                                        : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border border-amber-500/30"
                                     }`}
                                   >
                                     {currentRuleConfig.category}
@@ -441,7 +444,7 @@ export default function AdminSystemSettings() {
             </CardContent>
           </Card>
 
-          <Card id="academic" className="border shadow-none scroll-mt-20">
+          <Card id="academic" className="border border-border/60 shadow-none rounded-2xl bg-card scroll-mt-20 overflow-hidden">
             <CardHeader className="py-3 px-4 border-b h-12 flex justify-center">
               <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
                 Academic & Institutional
@@ -454,9 +457,12 @@ export default function AdminSystemSettings() {
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs font-bold"
+                className="h-9 text-xs font-semibold rounded-xl"
+                asChild
               >
-                Manage Academic Structure <ArrowRight className="size-3 ml-2" />
+                <Link href="/admin/academic/structure">
+                  Manage Academic Structure <ArrowRight className="size-3.5 ml-2" />
+                </Link>
               </Button>
             </CardContent>
           </Card>

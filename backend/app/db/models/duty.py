@@ -156,3 +156,8 @@ class UserDutyAssignment(BaseModel, table=True):
     department: Optional["Department"] = Relationship(
         sa_relationship_kwargs={"lazy": "selectin"}
     )
+
+
+# Compatibility alias
+DutyAssignment = UserDutyAssignment
+

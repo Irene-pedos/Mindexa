@@ -470,10 +470,11 @@ export function AIReviewPanel({
           <div className="flex flex-col items-center justify-center py-6 text-center space-y-2 bg-rose-500/5 rounded-2xl border border-dashed border-rose-500/20 p-4">
             <AlertCircle className="size-6 text-rose-500" />
             <p className="text-xs font-semibold text-rose-700 dark:text-rose-400">
-              Evaluation Engine Stalled
+              AI grading failed
             </p>
             <p className="text-[11px] text-muted-foreground max-w-[260px]">
-              Unable to generate AI review for this response format.
+              The AI could not grade this answer after several attempts. Retry, or
+              grade it manually — it stays in your queue until it is graded.
             </p>
             <Button
               size="sm"

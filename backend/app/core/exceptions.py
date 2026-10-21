@@ -207,6 +207,30 @@ class AILanguageBlockedError(AuthorizationError):
     default_code = "AI_BLOCKED_LANGUAGE_POLICY"
 
 
+class EligibilityBlockedError(AuthorizationError):
+    """
+    Raised when a student attempt start is blocked by institutional eligibility rules.
+    Maps to HTTP 403.
+    """
+
+    status_code = 403
+    default_message = "You are not eligible to start this assessment."
+    default_code = "ELIGIBILITY_BLOCKED"
+
+    def __init__(
+        self,
+        detail: str | None = None,
+        reason_code: str | None = None,
+        code: str = "ELIGIBILITY_BLOCKED",
+        **kwargs: Any,
+    ) -> None:
+        if reason_code:
+            kwargs["reason_code"] = reason_code
+        msg = detail or (f"Eligibility blocked: {reason_code}" if reason_code else self.default_message)
+        super().__init__(detail=msg, code=code, **kwargs)
+        self.reason_code = reason_code
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ACCOUNT STATE  (403)
 # ─────────────────────────────────────────────────────────────────────────────

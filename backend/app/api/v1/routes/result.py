@@ -39,6 +39,7 @@ from app.schemas.result import (
     ResultListResponse,
     ResultReleaseResponse,
     ResultSummary,
+    ResultUnreleaseRequest,
     ReleaseQueueResponse,
 )
 from app.services.result_service import ResultService
@@ -388,6 +389,24 @@ async def release_results(
         current_user=current_user,
     )
     return ResultReleaseResponse(**release_data)
+
+
+@router.post(
+    "/{result_id}/unrelease",
+    response_model=dict,
+    summary="Withdraw a released result (audited)",
+)
+async def unrelease_result(
+    result_id: uuid.UUID,
+    body: ResultUnreleaseRequest,
+    current_user: User = Depends(require_lecturer_or_admin),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Hide a released result from the student again, e.g. after a release mistake."""
+    await ResultService(db).unrelease_result(
+        result_id=result_id, current_user=current_user, reason=body.reason
+    )
+    return {"message": "Result withdrawn", "result_id": str(result_id)}
 
 
 @router.post(

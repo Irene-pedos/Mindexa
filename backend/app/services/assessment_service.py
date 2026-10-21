@@ -33,7 +33,7 @@ from typing import Any, List, Optional, Tuple
 
 from sqlalchemy import select
 
-from app.core.constants import AssessmentStatus, UserRole
+from app.core.constants import AssessmentStatus, Duty, UserRole
 from app.core.exceptions import (AuthorizationError, ConflictError,
                                  NotFoundError, ValidationError)
 from app.core.security import hash_password
@@ -1249,21 +1249,53 @@ class AssessmentService:
         if not assessment:
             raise NotFoundError("Assessment not found.")
 
-        # Lecturers can only see their own assessments
         if current_user.role == UserRole.LECTURER.value:
-            if str(assessment.created_by_id) != str(current_user.id):
+            if not await self._lecturer_can_view(assessment, current_user):
                 raise AuthorizationError("You do not have access to this assessment.")
 
-        # Students can only see finalized assessments
+        # Students: only published assessments they are enrolled/targeted for —
+        # the same rule as the student assessment list. Unpublished stages
+        # (moderation, approved, sealed) must never be reachable by ID.
         if current_user.role == UserRole.STUDENT.value:
-            if not assessment.draft_is_complete:
+            visible = await self._repo.is_visible_to_student(
+                assessment.id,
+                current_user.id,
+                [DbAssessmentStatus.PUBLISHED, DbAssessmentStatus.ACTIVE, DbAssessmentStatus.CLOSED],
+            )
+            if not visible:
                 raise NotFoundError("Assessment not found.")
-            if assessment.audience_type == "selected":
-                target_ids = assessment.target_student_ids or []
-                if str(current_user.id) not in [str(tid) for tid in target_ids]:
-                    raise NotFoundError("Assessment not found.")
 
         return assessment
+
+    async def _lecturer_can_view(self, assessment, current_user: User) -> bool:
+        """
+        Authoring side (author, co-author, delegate, supervisor), the department's
+        moderator, or the institution's exam officer may read an assessment.
+        """
+        if str(assessment.created_by_id) == str(current_user.id):
+            return True
+        try:
+            await self._async_assert_can_edit(assessment, current_user)
+            return True
+        except AuthorizationError:
+            pass
+        for s in getattr(assessment, "supervisors", None) or []:
+            if getattr(s, "user_id", None) == current_user.id and not getattr(s, "is_deleted", False):
+                return True
+
+        from app.core.permissions import has_duty, is_moderator_for
+        from app.db.models.academic import Course
+
+        course = await self.db.get(Course, assessment.course_id) if assessment.course_id else None
+        if course is None:
+            return False
+        if course.department_id and await is_moderator_for(
+            self.db, current_user.id, department_id=course.department_id
+        ):
+            return True
+        return await has_duty(
+            self.db, current_user, Duty.EXAM_OFFICER, institution_id=course.institution_id
+        )
 
     async def list_questions(
         self,
@@ -1405,6 +1437,21 @@ class AssessmentService:
                             # For IN_PROGRESS, use the most recent active attempt
                             summary.student_attempt_id = attempts[0].id
                             summary.student_attempt_expires_at = attempts[0].expires_at
+
+                # Phase 6A: Check eligibility gate to populate blocked_reason for student preview
+                if summary.student_status == "NOT_STARTED":
+                    try:
+                        from app.core.exceptions import EligibilityBlockedError
+                        from app.services.eligibility_service import EligibilityService
+                        elig_svc = EligibilityService(self.db)
+                        await elig_svc.evaluate_attempt_start_gate(
+                            student_id=current_user.id,
+                            assessment_id=a.id,
+                        )
+                    except EligibilityBlockedError as e:
+                        summary.blocked_reason = e.reason_code or "ELIGIBILITY_BLOCKED"
+                    except Exception:
+                        pass
 
             summary_items.append(summary)
 

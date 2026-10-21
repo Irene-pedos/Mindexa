@@ -2,6 +2,7 @@
 // Shared utilities for grading pages and components.
 // Previously these were incorrectly exported from the page component.
 
+import type { GradeSavePayload, RubricScoreInput } from "@/lib/api/grading";
 
 export {
   isQuestionAutoGraded,
@@ -168,13 +169,14 @@ export interface GradeSaveOptions {
   feedback?: string;
   isFinal?: boolean;
   acceptAiSuggestion?: boolean;
-  rubricScores?: Array<{ criterion_id: string; score: number; comment?: string }>;
+  rubricScores?: RubricScoreInput[];
 }
 
-export function buildGradeSavePayload(options: GradeSaveOptions): Record<string, unknown> {
-  const payload: Record<string, unknown> = {
+export function buildGradeSavePayload(options: GradeSaveOptions): GradeSavePayload {
+  const payload: GradeSavePayload = {
     feedback: options.feedback,
     is_final: options.isFinal ?? true,
+    score: options.score,
   };
 
   if (options.rubricScores && options.rubricScores.length > 0) {
@@ -183,9 +185,6 @@ export function buildGradeSavePayload(options: GradeSaveOptions): Record<string,
 
   if (options.acceptAiSuggestion) {
     payload.accept_ai_suggestion = true;
-    payload.override_score = options.score;
-  } else {
-    payload.score = options.score;
   }
 
   return payload;

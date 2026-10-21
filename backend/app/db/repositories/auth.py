@@ -36,7 +36,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlmodel import col, select
@@ -67,7 +67,7 @@ class UserRepository:
         """
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.profile))
+            .options(selectinload(User.profile), selectinload(User.duty_assignments))
             .where(
                 User.id == user_id,
                 User.is_deleted == False,
@@ -82,7 +82,7 @@ class UserRepository:
         """
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.profile))
+            .options(selectinload(User.profile), selectinload(User.duty_assignments))
             .where(User.id == user_id)
         )
         return result.scalar_one_or_none()
@@ -95,7 +95,7 @@ class UserRepository:
         """
         result = await self.db.execute(
             select(User)
-            .options(selectinload(User.profile))
+            .options(selectinload(User.profile), selectinload(User.duty_assignments))
             .where(
                 User.email == email,
                 User.is_deleted == False,
@@ -187,6 +187,7 @@ class UserRepository:
         *,
         role: str | None = None,
         status: str | None = None,
+        search: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ) -> tuple[list[User], int]:
@@ -195,6 +196,23 @@ class UserRepository:
             filters.append(User.role == role)
         if status:
             filters.append(User.status == status)
+        if search and search.strip():
+            # Case-insensitive substring match on email or profile names;
+            # LIKE wildcards in the user's input are matched literally.
+            term = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{term}%"
+            full_name = func.concat(UserProfile.first_name, " ", UserProfile.last_name)
+            profile_match = select(UserProfile.user_id).where(
+                or_(
+                    UserProfile.first_name.ilike(pattern, escape="\\"),
+                    UserProfile.last_name.ilike(pattern, escape="\\"),
+                    UserProfile.display_name.ilike(pattern, escape="\\"),
+                    full_name.ilike(pattern, escape="\\"),
+                )
+            )
+            filters.append(
+                or_(User.email.ilike(pattern, escape="\\"), User.id.in_(profile_match))
+            )
 
         count_result = await self.db.execute(
             select(func.count(User.id)).where(*filters)
@@ -219,6 +237,32 @@ class UserRepository:
             )
         )
         return result.scalar_one()
+
+    async def has_active_teaching_assignment(self, user_id: uuid.UUID) -> bool:
+        """True if the user holds any active teaching or shared-course assignment."""
+        from app.db.models.academic import LecturerCourseAssignment, TeachingAssignment
+
+        teaching = await self.db.execute(
+            select(TeachingAssignment.id)
+            .where(
+                TeachingAssignment.lecturer_id == user_id,
+                TeachingAssignment.is_active == True,  # noqa: E712
+                TeachingAssignment.is_deleted == False,  # noqa: E712
+            )
+            .limit(1)
+        )
+        if teaching.first() is not None:
+            return True
+
+        shared = await self.db.execute(
+            select(LecturerCourseAssignment.course_id)
+            .where(
+                LecturerCourseAssignment.lecturer_id == user_id,
+                LecturerCourseAssignment.is_active == True,  # noqa: E712
+            )
+            .limit(1)
+        )
+        return shared.first() is not None
 
 
 # ─────────────────────────────────────────────────────────────────────────────

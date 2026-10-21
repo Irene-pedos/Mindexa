@@ -285,7 +285,17 @@ async def _setup_flow_environment(db: AsyncSession):
         valid_to=now + timedelta(days=90),
         assigned_by_id=admin.id,
     )
-    db.add_all([duty_mod_cs, duty_mod_ee, duty_eo1, duty_eo2])
+    duty_author_mod = UserDutyAssignment(
+        user_id=author.id,
+        duty=Duty.MODERATOR,
+        institution_id=inst1.id,
+        department_id=dept_cs.id,
+        is_active=True,
+        valid_from=now - timedelta(days=1),
+        valid_to=now + timedelta(days=90),
+        assigned_by_id=admin.id,
+    )
+    db.add_all([duty_mod_cs, duty_mod_ee, duty_eo1, duty_eo2, duty_author_mod])
 
     # 8. Approval Policy for Inst 1
     policy1 = ApprovalPolicy(

@@ -13,6 +13,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import Duty
+from app.core.permissions import require_duty
 from app.db.models.auth import User
 from app.db.session import get_db
 from app.dependencies.auth import require_active_user, require_lecturer_or_admin
@@ -162,7 +164,7 @@ async def resolve_moderation_comment(
 )
 async def get_moderator_queue(
     status: Optional[str] = Query(None, description="Filter by status (OPEN, CHANGES_REQUESTED)"),
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.MODERATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> List[ModeratorQueueItemResponse]:
     svc = ModerationService(db)
@@ -176,7 +178,7 @@ async def get_moderator_queue(
 )
 async def claim_review(
     id: uuid.UUID,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.MODERATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     svc = ModerationService(db)
@@ -198,7 +200,7 @@ async def claim_review(
 async def add_review_comment(
     id: uuid.UUID,
     body: ModerationCommentCreate,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.MODERATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> ModerationCommentResponse:
     svc = ModerationService(db)
@@ -220,7 +222,7 @@ async def add_review_comment(
 async def request_review_changes(
     id: uuid.UUID,
     body: ModerationDecideRequest,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.MODERATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     svc = ModerationService(db)
@@ -244,7 +246,7 @@ async def request_review_changes(
 async def approve_review(
     id: uuid.UUID,
     body: Optional[ModerationApproveRequest] = None,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.MODERATOR)),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     svc = ModerationService(db)

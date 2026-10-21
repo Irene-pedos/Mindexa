@@ -57,11 +57,6 @@ export const integrityApi = {
     body: JSON.stringify(data)
   }),
 
-  liftHold: (attemptId: string) => 
-    apiClient(`/integrity/attempt/${attemptId}/lift-hold`, { 
-      method: "POST" 
-    }),
-
   toggleFlag: (attemptId: string, flagged: boolean) => 
     apiClient(`/integrity/attempt/${attemptId}/toggle-flag`, { 
       method: "POST", 

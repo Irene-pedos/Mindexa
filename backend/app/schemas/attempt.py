@@ -86,6 +86,9 @@ class AttemptQuestionResponse(BaseModel):
     assessment_section_id: Optional[uuid.UUID] = None
     section_title: Optional[str] = None
     options: Optional[List[AttemptQuestionOption]] = None
+    # MATCHING only: right-hand values, shuffled and detached from their options
+    # so the correct pairing is not part of the payload.
+    match_choices: Optional[List[str]] = None
     grading_mode: Optional[str] = None
     question_table_context: Optional[Any] = Field(None, validation_alias="question_table_context")
     questionTableContext: Optional[Any] = Field(None, validation_alias="questionTableContext")

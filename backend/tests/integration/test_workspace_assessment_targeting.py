@@ -240,7 +240,7 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
     # Scenario A: Assessment in global workspace targeting "all" (no target sections)
     ass_all = Assessment(
         title="Midterm Exam All",
-        assessment_type=AssessmentType.SUMMATIVE,
+        assessment_type=AssessmentType.CAT,
         status=AssessmentStatus.PUBLISHED,
         created_by_id=lid,
         teaching_workspace_id=global_workspace.id,
@@ -263,7 +263,7 @@ async def test_workspace_targeting_and_visibility(client: AsyncClient, make_auth
     # Scenario B: Section-level targeting (target Section A only)
     ass_sec_a = Assessment(
         title="Midterm Section A Only",
-        assessment_type=AssessmentType.SUMMATIVE,
+        assessment_type=AssessmentType.CAT,
         status=AssessmentStatus.PUBLISHED,
         created_by_id=lid,
         teaching_workspace_id=global_workspace.id,

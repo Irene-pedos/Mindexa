@@ -37,8 +37,17 @@ from app.db.schemas.academic import (
 )
 from app.db.repositories.notification_repo import NotificationRepository
 from app.db.enums import NotificationType
+from app.core.logger import get_logger
+from app.dependencies.auth import require_admin
 
-router = APIRouter(prefix="/admin/academic", tags=["Admin Academic"])
+logger = get_logger(__name__)
+
+# Every endpoint here mutates institutional structure — admin only.
+router = APIRouter(
+    prefix="/admin/academic",
+    tags=["Admin Academic"],
+    dependencies=[Depends(require_admin)],
+)
 
 # ── Teaching Assignments ───────────────────────────────────────────────────
 
@@ -62,7 +71,11 @@ async def _send_assignment_notification(db: AsyncSession, assignment: TeachingAs
             reference_type="teaching_assignment"
         )
     except Exception as e:
-        print(f"Failed to send assignment notification: {e}")
+        logger.warning(
+            "assignment_notification_failed",
+            assignment_id=str(assignment.id),
+            error=str(e),
+        )
 
 @router.post("/assignments/bulk", response_model=List[TeachingAssignmentResponse], status_code=status.HTTP_201_CREATED)
 async def create_bulk_assignments(

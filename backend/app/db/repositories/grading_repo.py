@@ -245,6 +245,42 @@ class GradingRepository:
         )
         return result.scalar_one()
 
+    async def list_unreviewed_ai_acceptances(
+        self, attempt_id: uuid.UUID, assessment_id: uuid.UUID
+    ) -> list[uuid.UUID]:
+        """
+        Question ids whose final grade is an AI suggestion accepted with no
+        evidence of human review: no review duration recorded, and no verified
+        sample check for the assessment (spec §9.6 bulk accept is legitimate only
+        after one). Such grades must not be released.
+        """
+        from app.db.enums import AIGradeDecision, SampleCheckStatus
+        from app.db.models.ai import AIGradeReview
+        from app.db.models.marking import AIGradeSampleCheck
+
+        verified = await self.db.execute(
+            select(AIGradeSampleCheck.id).where(
+                AIGradeSampleCheck.assessment_id == assessment_id,
+                AIGradeSampleCheck.status == SampleCheckStatus.VERIFIED,
+            ).limit(1)
+        )
+        if verified.first() is not None:
+            return []
+
+        result = await self.db.execute(
+            select(SubmissionGrade.question_id)
+            .join(AIGradeReview, AIGradeReview.submission_grade_id == SubmissionGrade.id)
+            .where(
+                SubmissionGrade.attempt_id == attempt_id,
+                SubmissionGrade.is_current.is_(True),
+                SubmissionGrade.is_final.is_(True),
+                SubmissionGrade.is_deleted.is_(False),
+                AIGradeReview.grading_decision == AIGradeDecision.ACCEPTED,
+                AIGradeReview.review_duration_seconds.is_(None),
+            )
+        )
+        return list(dict.fromkeys(result.scalars().all()))
+
     async def sum_final_scores(self, attempt_id: uuid.UUID) -> float:
         result = await self.db.execute(
             select(func.coalesce(func.sum(SubmissionGrade.score), 0.0)).where(
@@ -365,6 +401,18 @@ class GradingRepository:
     async def get_queue_item_by_id(self, item_id: uuid.UUID) -> GradingQueueItem | None:
         result = await self.db.execute(
             select(GradingQueueItem).where(GradingQueueItem.id == item_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_latest_queue_item_for_response(
+        self, response_id: uuid.UUID
+    ) -> GradingQueueItem | None:
+        """Most recent queue item in any status (used to report AI grading state)."""
+        result = await self.db.execute(
+            select(GradingQueueItem)
+            .where(GradingQueueItem.response_id == response_id)
+            .order_by(GradingQueueItem.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -545,12 +593,14 @@ class GradingRepository:
             # Map extra columns from the row
             if getattr(row, "anonymous_marking", False):
                 student_name = f"Candidate-{str(item.attempt_id)[:6].upper()}"
+                masked_student_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"candidate:{item.attempt_id}")
             else:
                 student_name = (
                     " ".join(part for part in [row.student_first_name, row.student_last_name] if part).strip()
                     or row.student_display_name
                     or "Student"
                 )
+                masked_student_id = item.student_id
 
             student_ans = row.student_answer_text
             if not student_ans and row.student_submitted_content:
@@ -561,6 +611,7 @@ class GradingRepository:
 
             # Convert model to dict and add extra fields
             item_dict = item.model_dump()
+            item_dict["student_id"] = masked_student_id
             item_dict.update({
                 "student_name": student_name,
                 "student_answer": student_ans or "No written response provided",
@@ -658,15 +709,18 @@ class GradingRepository:
         outlier_stmt = (
             select(
                 SubmissionGrade.response_id,
+                SubmissionGrade.attempt_id,
                 UserProfile.first_name,
                 UserProfile.last_name,
                 UserProfile.display_name,
                 SubmissionGrade.score,
                 SubmissionGrade.ai_suggested_score,
                 SubmissionGrade.max_score,
-                AssessmentAttempt.integrity_risk_score
+                AssessmentAttempt.integrity_risk_score,
+                Assessment.anonymous_marking,
             )
             .join(AssessmentAttempt, SubmissionGrade.attempt_id == AssessmentAttempt.id)
+            .join(Assessment, SubmissionGrade.assessment_id == Assessment.id)
             .join(User, SubmissionGrade.student_id == User.id)
             .outerjoin(UserProfile, User.profile)
             .where(
@@ -687,7 +741,10 @@ class GradingRepository:
         outlier_res = await self.db.execute(outlier_stmt)
         outliers = []
         for row in outlier_res.all():
-            student_name = " ".join(filter(None, [row.first_name, row.last_name])) or row.display_name or "Student"
+            if getattr(row, "anonymous_marking", False):
+                student_name = f"Candidate-{str(row.attempt_id)[:6].upper()}"
+            else:
+                student_name = " ".join(filter(None, [row.first_name, row.last_name])) or row.display_name or "Student"
             deviation = None
             if row.score is not None and row.ai_suggested_score is not None:
                 deviation = row.score - row.ai_suggested_score

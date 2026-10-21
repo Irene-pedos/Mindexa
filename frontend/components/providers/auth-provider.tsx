@@ -17,6 +17,8 @@ export type AuthUser = {
   id: string;
   email: string;
   role: string;
+  duties?: string[];
+  has_teaching_assignments?: boolean | null;
   onboarding_completed: boolean;
   onboarding_tour_completed?: boolean;
   onboarding_tour_step?: number;

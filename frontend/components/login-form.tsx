@@ -12,6 +12,7 @@ import { useState } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 import Image from "next/image";
+import { dutyHomePath, isDutyOnlyStaff } from "@/lib/duty-workspace";
 
 export function LoginForm({
   className,
@@ -49,6 +50,7 @@ export function LoginForm({
       }
 
       if (role === "student") router.push("/student/dashboard");
+      else if (isDutyOnlyStaff(data.user)) router.push(dutyHomePath(data.user));
       else if (role === "lecturer") router.push("/lecturer/dashboard");
       else router.push("/student/dashboard");
     } catch (err: unknown) {

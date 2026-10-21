@@ -410,6 +410,13 @@ class ResultRepository:
             )
         )
 
+    async def unrelease(self, result_id: uuid.UUID) -> None:
+        await self.db.execute(
+            update(AssessmentResult)
+            .where(AssessmentResult.id == result_id)
+            .values(is_released=False, released_at=None, released_by_id=None)
+        )
+
     async def set_integrity_hold(self, result_id: uuid.UUID, hold: bool) -> None:
         await self.db.execute(
             update(AssessmentResult)

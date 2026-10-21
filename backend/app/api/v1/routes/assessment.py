@@ -28,6 +28,7 @@ import uuid
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import UserRole
 from app.db.models.auth import User
 from app.db.session import get_db
 from app.dependencies.auth import require_active_user, require_lecturer_or_admin
@@ -46,6 +47,8 @@ from app.schemas.assessment import (
     FinalizeAssessmentResponse,
     MarksSummaryResponse,
     ReorderQuestionsRequest,
+    redact_assessment_for_student,
+    redact_assessment_question_for_student,
 )
 from app.services.assessment_service import AssessmentService
 
@@ -125,16 +128,10 @@ async def get_assessment(
 ) -> AssessmentDetailResponse:
     svc = _service(db)
     assessment = await svc.get_assessment(assessment_id, current_user)
-    if current_user.role == "student":
-        if assessment.assessment_questions:
-            for aq in assessment.assessment_questions:
-                if aq.question:
-                    aq.question.explanation = None
-                    if aq.question.options:
-                        for opt in aq.question.options:
-                            opt.is_correct = None
-                            opt.explanation = None
-    return AssessmentDetailResponse.model_validate(assessment)
+    detail = AssessmentDetailResponse.model_validate(assessment)
+    if current_user.role == UserRole.STUDENT.value:
+        return redact_assessment_for_student(detail)
+    return detail
 
 
 @router.put(
@@ -394,7 +391,10 @@ async def list_assessment_questions_endpoint(
 ) -> list[AssessmentQuestionResponse]:
     svc = _service(db)
     questions = await svc.list_questions(assessment_id, current_user)
-    return [AssessmentQuestionResponse.model_validate(q) for q in questions]
+    items = [AssessmentQuestionResponse.model_validate(q) for q in questions]
+    if current_user.role == UserRole.STUDENT.value:
+        return [redact_assessment_question_for_student(aq) for aq in items]
+    return items
 
 
 @router.post(

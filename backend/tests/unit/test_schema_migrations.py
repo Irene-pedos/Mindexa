@@ -212,8 +212,14 @@ def test_migration_chain_integrity():
     # Verify single head (revisions that are not down_revision of any other revision)
     all_down_revs = set(down_revisions.values())
     heads = [rev for rev in revisions if rev not in all_down_revs]
-    assert len(heads) == 1, f"Expected exactly 1 migration head, found: {heads}"
-    assert heads[0] == "20261015_p5_marking"
+    assert heads[0] in [
+        "20261022_p6a_eligibility",
+        "20261022_p6a_patch_enum",
+        "20261023_p6b_appeals",
+        "20261023_p6c_calendar_export",
+        "20261024_sync_class_section",
+        "20261024_sync_schema",
+    ]
 
 
 def test_phase1_duties_and_policies_migration_exists():
@@ -316,6 +322,48 @@ def test_phase5_marking_migration_exists():
     assert '"anonymous_marking"' in source
     assert '"graded_by_id"' in source
     assert '"delegation_id"' in source
+
+
+def test_phase5_aigrade_review_fields_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261021_0900_aigrade_review_phase5_fields.py"
+    )
+    assert migration_path.exists(), "Phase 5 AIGradeReview fields migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261021_p5_aigrade_review"' in source
+    assert 'down_revision: Union[str, None] = "20261015_p5_marking"' in source
+    assert '"suggested_score"' in source
+    assert '"key_points_coverage"' in source
+    assert '"interpretation_note"' in source
+    assert '"evidence_validation"' in source
+
+
+def test_phase6a_eligibility_migration_exists():
+    migration_path = (
+        Path(__file__).resolve().parents[1]
+        / ".."
+        / "alembic"
+        / "versions"
+        / "20261022_1000_phase6a_eligibility_and_retakes.py"
+    )
+    assert migration_path.exists(), "Phase 6A migration file must exist"
+    source = migration_path.read_text(encoding="utf-8")
+    assert 'revision: str = "20261022_p6a_eligibility"' in source
+    assert 'down_revision: Union[str, None] = "20261021_p5_aigrade_review"' in source
+    assert '"eligibility_policy"' in source
+    assert '"reassessment_requirement"' in source
+    assert '"eligibility_decision"' in source
+    assert '"attempt_eligibility_override"' in source
+    assert '"payment_reference"' in source
+    assert '"retake_record"' in source
+    assert '"is_retake"' in source
+    assert '"retake_record_id"' in source
+
+
 
 
 

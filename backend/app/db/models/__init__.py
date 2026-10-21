@@ -158,6 +158,22 @@ from app.db.models.marking import (
     QuestionKeyPoint,
     QuestionMarkStep,
 )
+from app.db.models.eligibility import (
+    AttemptEligibilityOverride,
+    EligibilityDecision,
+    EligibilityPolicy,
+    PaymentReference,
+    ReassessmentRequirement,
+    RetakeRecord,
+)
+from app.db.models.appeals import (
+    AbsenceExcusePolicy,
+    AbsenceExcuseRequest,
+    Appeal,
+    AppealPolicy,
+)
+from app.db.models.calendar import AcademicCalendarEvent
+from app.db.models.export import ExportJob, ExportTemplate
 
 
 __all__: list[str] = [
@@ -280,4 +296,20 @@ __all__: list[str] = [
     "QuestionKeyPoint",
     "AIGradeSampleCheck",
     "GradingDelegation",
+    # ── Eligibility & Reassessment (Phase 6A) ────────────────────────────────
+    "EligibilityPolicy",
+    "ReassessmentRequirement",
+    "EligibilityDecision",
+    "AttemptEligibilityOverride",
+    "PaymentReference",
+    "RetakeRecord",
+    # ── Appeals & Absence Excuses (Phase 6B) ─────────────────────────────────
+    "AppealPolicy",
+    "Appeal",
+    "AbsenceExcusePolicy",
+    "AbsenceExcuseRequest",
+    # ── Academic Calendar & Export (Phase 6C) ─────────────────────────────────
+    "AcademicCalendarEvent",
+    "ExportTemplate",
+    "ExportJob",
 ]

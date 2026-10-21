@@ -447,6 +447,9 @@ class UserResponse(BaseAuditedResponse):
     email_verified_at: datetime | None = None
     last_login_at: datetime | None = None
     profile: UserProfileResponse | None = None
+    duties: list[str] = Field(default_factory=list)
+    # Set on /auth/login and /auth/me for lecturers only; None elsewhere.
+    has_teaching_assignments: bool | None = None
 
     @property
     def full_name(self) -> str:

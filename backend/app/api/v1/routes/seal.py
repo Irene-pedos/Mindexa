@@ -14,6 +14,8 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from fastapi.responses import Response as RawResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.constants import Duty
+from app.core.permissions import require_duty
 from app.db.models.auth import User
 from app.db.session import get_db
 from app.dependencies.auth import require_active_user
@@ -43,7 +45,7 @@ router = APIRouter(tags=["Exam Office & Seals"])
 )
 async def get_exam_office_queue(
     status: Optional[str] = Query(None, description="Filter by status (APPROVED, SEALED)"),
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.EXAM_OFFICER)),
     db: AsyncSession = Depends(get_db),
 ) -> List[ExamOfficeQueueItemResponse]:
     svc = SealService(db)
@@ -67,7 +69,7 @@ async def get_exam_office_queue(
 async def seal_assessment(
     id: uuid.UUID,
     body: Optional[SealAssessmentRequest] = None,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.EXAM_OFFICER)),
     db: AsyncSession = Depends(get_db),
 ) -> SealAssessmentResponse:
     svc = SealService(db)
@@ -102,7 +104,7 @@ async def seal_assessment(
 async def revoke_seal(
     id: uuid.UUID,
     body: RevokeSealRequest,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.EXAM_OFFICER)),
     db: AsyncSession = Depends(get_db),
 ) -> RevokeSealResponse:
     svc = SealService(db)
@@ -128,7 +130,7 @@ async def revoke_seal(
 async def update_print_job(
     id: uuid.UUID,
     body: PrintJobUpdateRequest,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_duty(Duty.EXAM_OFFICER)),
     db: AsyncSession = Depends(get_db),
 ) -> PrintJobResponse:
     svc = SealService(db)

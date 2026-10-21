@@ -64,6 +64,7 @@ import {
   Download,
   Loader2 as LoaderCircleIcon,
   CheckCircle2,
+  ShieldCheck,
   Trash2,
   Eye,
 } from "lucide-react";
@@ -77,6 +78,7 @@ import { resultApi } from "@/lib/api/result";
 import { attemptApi } from "@/lib/api/attempt";
 import { gradingApi } from "@/lib/api/grading";
 import { aiGenerationApi } from "@/lib/api/ai-generation";
+import { moderationApi, ModerationOverview } from "@/lib/api/moderation";
 import { Skeleton } from "@/components/ui/interfaces-skeleton";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
@@ -172,6 +174,10 @@ export default function AssessmentDetailsPage() {
   const [editingExplanation, setEditingExplanation] = useState("");
   const [editingMarks, setEditingMarks] = useState(2);
 
+  const [moderationOverview, setModerationOverview] = useState<ModerationOverview | null>(null);
+  const [isSubmittingModeration, setIsSubmittingModeration] = useState(false);
+  const [isPublishingSummative, setIsPublishingSummative] = useState(false);
+
   // Fetch full assessment data & statistics
   const fetchDetails = useCallback(async () => {
     try {
@@ -224,6 +230,14 @@ export default function AssessmentDetailsPage() {
       } catch (e) {
         console.error("Failed to load grading queue:", e);
       }
+
+      // Fetch moderation overview
+      try {
+        const modRes = await moderationApi.getAssessmentModeration(assessmentId);
+        setModerationOverview(modRes);
+      } catch (e) {
+        // Not all assessments are summative or have moderation rounds yet
+      }
     } catch (err) {
       toast.error("Failed to load assessment details.");
     } finally {
@@ -237,6 +251,31 @@ export default function AssessmentDetailsPage() {
     }
   }, [assessmentId, fetchDetails]);
 
+  const handleSubmitForModeration = async () => {
+    try {
+      setIsSubmittingModeration(true);
+      await moderationApi.submitForModeration(assessmentId);
+      toast.success("Assessment submitted for department moderation!");
+      fetchDetails();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit for moderation");
+    } finally {
+      setIsSubmittingModeration(false);
+    }
+  };
+
+  const handlePublishSealed = async () => {
+    try {
+      setIsPublishingSummative(true);
+      await assessmentApi.finalizeAssessment(assessmentId);
+      toast.success("Assessment published successfully!");
+      fetchDetails();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to publish assessment");
+    } finally {
+      setIsPublishingSummative(false);
+    }
+  };
   // Derived Grading Stats
   const ungradedCount = useMemo(() => gradingQueue.length, [gradingQueue]);
   const gradedCount = useMemo(() => results.length, [results]);
@@ -654,6 +693,10 @@ export default function AssessmentDetailsPage() {
             className={cn(
               "h-9 px-4 font-bold uppercase tracking-wider text-[11px] rounded-lg",
               assessment.status === "DRAFT" && "bg-muted text-muted-foreground border border-border/60",
+              assessment.status === "PENDING_MODERATION" && "bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20",
+              assessment.status === "CHANGES_REQUESTED" && "bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20",
+              assessment.status === "APPROVED" && "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
+              assessment.status === "SEALED" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20",
               assessment.status === "PUBLISHED" && "bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20",
               assessment.status === "SCHEDULED" && "bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20",
               assessment.status === "ACTIVE" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 animate-pulse",
@@ -664,6 +707,75 @@ export default function AssessmentDetailsPage() {
           </Badge>
         </div>
       </div>
+
+      {/* Moderation Workflow Lifecycle Banner for Summative Assessments */}
+      {(assessment.assessment_type === "SUMMATIVE" || assessment.mode === "SUMMATIVE" || assessment.status === "PENDING_MODERATION" || assessment.status === "CHANGES_REQUESTED" || assessment.status === "APPROVED" || assessment.status === "SEALED") && (
+        <Card className="border-primary/20 bg-primary/[0.02] shadow-none">
+          <CardContent className="p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2.5 rounded-xl bg-primary/10 text-primary shrink-0 mt-0.5">
+                <ShieldCheck className="size-5" />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold text-sm text-foreground">
+                    Summative Assessment Moderation Lifecycle
+                  </h3>
+                  <Badge variant="outline" className="text-[10px] font-bold">
+                    Stage: {assessment.status.replace("_", " ")}
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {assessment.status === "DRAFT" && "Assessment must pass automated pre-moderation and receive department moderator approval before Exam Office sealing."}
+                  {assessment.status === "PENDING_MODERATION" && "Submitted to Department Moderation Queue. Waiting for moderator to claim and review."}
+                  {assessment.status === "CHANGES_REQUESTED" && "Moderator requested changes on this draft. Please review feedback and resubmit."}
+                  {assessment.status === "APPROVED" && "Moderation complete! Assessment has moved to Exam Office queue for cryptographic sealing."}
+                  {assessment.status === "SEALED" && "Exam Office cryptographic seal active! Content is securely locked and ready for publish."}
+                  {assessment.status === "PUBLISHED" && "Official summative assessment sealed and published."}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 w-full md:w-auto justify-end">
+              {(assessment.status === "DRAFT" || assessment.status === "CHANGES_REQUESTED") && (
+                <Button
+                  size="sm"
+                  disabled={isSubmittingModeration}
+                  onClick={handleSubmitForModeration}
+                  className="h-8 text-xs rounded-lg gap-1.5"
+                >
+                  {isSubmittingModeration ? (
+                    <LoaderCircleIcon className="size-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <ShieldCheck className="size-3.5" />
+                      Submit for Moderation
+                    </>
+                  )}
+                </Button>
+              )}
+
+              {assessment.status === "SEALED" && (
+                <Button
+                  size="sm"
+                  disabled={isPublishingSummative}
+                  onClick={handlePublishSealed}
+                  className="h-8 text-xs rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5"
+                >
+                  {isPublishingSummative ? (
+                    <LoaderCircleIcon className="size-3.5 animate-spin" />
+                  ) : (
+                    <>
+                      <Check className="size-3.5" />
+                      Publish Sealed Assessment
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Progress & statistics dashboard rows */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

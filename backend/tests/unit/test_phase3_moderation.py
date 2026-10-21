@@ -1238,3 +1238,204 @@ async def test_public_seal_verification_rate_limiting_tier():
     assert count > 20
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# ADMIN HAS NO IMPLICIT MODERATION / EXAM-OFFICE POWERS (spec §13.1)
+# CONFLICT OF INTEREST COVERS COLLABORATORS AND DELEGATES (A-14)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _add_paper(db: AsyncSession, env: dict, status: AssessmentStatus | None = None) -> Assessment:
+    asmt, secs, aqs = _build_valid_summative_paper(env["course_cs"], env["author"])
+    if status is not None:
+        asmt.status = status
+    db.add(asmt)
+    for s in secs:
+        db.add(s)
+    for aq in aqs:
+        db.add(aq.question)
+        for opt in (aq.question.options or []):
+            db.add(opt)
+        db.add(aq)
+    return asmt
+
+
+async def _submitted_cs_review(db: AsyncSession, env: dict) -> tuple[Assessment, ModerationReview]:
+    asmt = _add_paper(db, env)
+    await db.commit()
+    review, _ = await ModerationService(db).submit_for_moderation(asmt.id, env["author"])
+    return asmt, review
+
+
+@pytest.mark.asyncio
+async def test_admin_without_duty_cannot_claim_review(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    _, review = await _submitted_cs_review(db, env)
+
+    with pytest.raises(PermissionDeniedError, match="not an active moderator"):
+        await ModerationService(db).claim_review(review.id, env["admin"])
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_decide_review_claimed_by_moderator(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    _, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+
+    with pytest.raises(PermissionDeniedError, match="Only the claiming reviewer"):
+        await mod_svc.approve_review(
+            review_id=review.id, current_user=env["admin"], decision_note="override"
+        )
+
+
+@pytest.mark.asyncio
+async def test_admin_cannot_submit_for_moderation(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    asmt = _add_paper(db, env)
+    await db.commit()
+
+    with pytest.raises(PermissionDeniedError, match="Only the author"):
+        await ModerationService(db).submit_for_moderation(asmt.id, env["admin"])
+
+
+@pytest.mark.asyncio
+async def test_admin_without_exam_officer_duty_cannot_seal_or_download(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    asmt = _add_paper(db, env, AssessmentStatus.APPROVED)
+    await db.commit()
+
+    seal_svc = SealService(db)
+    with pytest.raises(PermissionDeniedError, match="EXAM_OFFICER"):
+        await seal_svc.seal_assessment(asmt.id, env["admin"])
+    with pytest.raises(PermissionDeniedError, match="Unauthorized to download"):
+        await seal_svc.get_document(asmt.id, "paper", env["admin"])
+
+
+@pytest.mark.asyncio
+async def test_admin_with_exam_officer_duty_can_seal(db: AsyncSession):
+    env = await _setup_institutional_env(db)
+    db.add(
+        UserDutyAssignment(
+            user_id=env["admin"].id,
+            duty=Duty.EXAM_OFFICER,
+            institution_id=env["inst"].id,
+            is_active=True,
+            valid_from=datetime.now(UTC) - timedelta(days=1),
+            assigned_by_id=env["admin"].id,
+        )
+    )
+    asmt = _add_paper(db, env, AssessmentStatus.APPROVED)
+    await db.commit()
+
+    seal, _ = await SealService(db).seal_assessment(asmt.id, env["admin"])
+    assert seal.verification_code
+
+
+@pytest.mark.asyncio
+async def test_collaborator_moderator_conflict_of_interest(db: AsyncSession):
+    from app.db.models.authoring import AssessmentCollaborator
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    db.add(
+        AssessmentCollaborator(
+            assessment_id=asmt.id,
+            lecturer_id=env["mod_cs"].id,
+            added_by_id=env["author"].id,
+            is_active=True,
+        )
+    )
+    await db.commit()
+
+    with pytest.raises(PermissionDeniedError, match="Conflict of Interest"):
+        await ModerationService(db).claim_review(review.id, env["mod_cs"])
+
+
+@pytest.mark.asyncio
+async def test_delegate_moderator_conflict_of_interest(db: AsyncSession):
+    from app.db.enums import DelegationStatus
+    from app.db.models.authoring import AuthorDelegation
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    now = datetime.now(UTC)
+    db.add(
+        AuthorDelegation(
+            assessment_id=asmt.id,
+            delegator_id=env["author"].id,
+            delegate_id=env["mod_cs"].id,
+            created_by_id=env["author"].id,
+            reason="Author on leave",
+            valid_from=now - timedelta(days=1),
+            valid_to=now + timedelta(days=7),
+            status=DelegationStatus.ACTIVE,
+        )
+    )
+    await db.commit()
+
+    with pytest.raises(PermissionDeniedError, match="Conflict of Interest"):
+        await ModerationService(db).claim_review(review.id, env["mod_cs"])
+
+
+@pytest.mark.asyncio
+async def test_collaborator_can_resolve_comment_but_outsider_cannot(db: AsyncSession):
+    """Anyone allowed to resubmit (author, collaborator, delegate) can resolve comments."""
+    from app.db.models.authoring import AssessmentCollaborator
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+    comment = await mod_svc.add_comment(
+        review_id=review.id,
+        current_user=env["mod_cs"],
+        target_type=ModerationCommentTarget.ASSESSMENT,
+        target_id=None,
+        category=ModerationCommentCategory.WORDING,
+        comment="Clarify the instructions.",
+    )
+
+    # Exam officer is unrelated to the paper
+    with pytest.raises(PermissionDeniedError, match="Only the author"):
+        await mod_svc.resolve_comment(comment.id, env["exam_officer"])
+
+    db.add(
+        AssessmentCollaborator(
+            assessment_id=asmt.id,
+            lecturer_id=env["mod_math"].id,
+            added_by_id=env["author"].id,
+            is_active=True,
+        )
+    )
+    await db.commit()
+
+    resolved = await mod_svc.resolve_comment(comment.id, env["mod_math"])
+    assert resolved.resolved is True
+
+
+@pytest.mark.asyncio
+async def test_conflict_of_interest_rechecked_at_approval(db: AsyncSession):
+    """A moderator added as collaborator after claiming may no longer approve."""
+    from app.db.models.authoring import AssessmentCollaborator
+
+    env = await _setup_institutional_env(db)
+    asmt, review = await _submitted_cs_review(db, env)
+    mod_svc = ModerationService(db)
+    await mod_svc.claim_review(review.id, env["mod_cs"])
+
+    db.add(
+        AssessmentCollaborator(
+            assessment_id=asmt.id,
+            lecturer_id=env["mod_cs"].id,
+            added_by_id=env["author"].id,
+            is_active=True,
+        )
+    )
+    await db.commit()
+
+    with pytest.raises(PermissionDeniedError, match="Conflict of Interest"):
+        await mod_svc.approve_review(
+            review_id=review.id, current_user=env["mod_cs"], decision_note="Looks good"
+        )
+
+

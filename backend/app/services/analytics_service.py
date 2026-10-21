@@ -37,10 +37,16 @@ class AnalyticsService:
         """
         Compute aggregates and retrieve or generate AI insights for an assessment.
         """
-        # 1. Load assessment
+        # 1. Load assessment (scoped to the course team)
         assessment = await self.db.get(Assessment, assessment_id)
         if not assessment:
             raise NotFoundError("Assessment not found")
+
+        from app.services.result_service import ResultService
+
+        await ResultService(self.db).assert_lecturer_assessment_access(
+            assessment_id, lecturer_id=lecturer_id
+        )
 
         # 2. Compute cohort aggregates (filtered by class section if provided)
         stats = await self._compute_aggregates(assessment_id, class_section_id)

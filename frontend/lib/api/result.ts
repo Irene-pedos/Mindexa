@@ -25,9 +25,14 @@ export const resultApi = {
     method: "POST",
     body: JSON.stringify({ assessment_id: assessmentId, attempt_ids: attemptIds, class_section_id: classSectionId })
   }),
-  clearHold: (resultId: string, reason: string) => apiClient(`/results/${resultId}/clear-hold`, {
+  clearHold: (resultId: string, justification: string) => apiClient(`/results/${resultId}/clear-hold`, {
     method: "POST",
-    body: JSON.stringify({ justification: reason })
+    body: JSON.stringify({ result_id: resultId, justification })
+  }),
+  /** Withdraw a released result (audited; reason ≥ 10 chars). */
+  unreleaseResult: (resultId: string, reason: string) => apiClient(`/results/${resultId}/unrelease`, {
+    method: "POST",
+    body: JSON.stringify({ reason })
   }),
   updateReleasePolicy: (assessmentId: string, data: Record<string, unknown>) => 
     apiClient(`/results/assessment/${assessmentId}/release-policy`, {

@@ -995,6 +995,17 @@ class AuthService:
             raise NotFoundError(resource="User", resource_id=str(user_id))
         return user
 
+    async def has_teaching_assignments(self, user: User) -> bool | None:
+        """
+        Whether a lecturer currently teaches anything. None for non-lecturers.
+
+        Lecturers with duties but no teaching (office-based moderators and exam
+        officers) get a duty-only workspace in the frontend.
+        """
+        if user.role != UserRole.LECTURER.value:
+            return None
+        return await self._users.has_active_teaching_assignment(user.id)
+
     # ─────────────────────────────────────────────────────────────────────────
     # PRIVATE HELPERS
     # ─────────────────────────────────────────────────────────────────────────

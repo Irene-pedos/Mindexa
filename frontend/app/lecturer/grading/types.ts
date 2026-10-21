@@ -263,7 +263,13 @@ export interface SubmissionRecord extends AiSuggestion {
   feedback: string | null;
   feedback_comments?: string | null;
   rubric_scores?: RubricScore[] | null;
+  /** In the grading workspace: true once the grade is locked (see grade_is_final). */
   is_final: boolean;
+  /** Current grade attached by GET /submissions/attempt/{id} for lecturers. */
+  grade_score?: number | null;
+  grade_feedback?: string | null;
+  grade_rubric_scores?: unknown[] | null;
+  grade_is_final?: boolean | null;
 }
 
 export interface ClassStatRecord {

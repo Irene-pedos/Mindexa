@@ -27,6 +27,12 @@ export interface MatchingOption {
 
 export interface MatchingDndProps {
   options: MatchingOption[];
+  /**
+   * Right-hand choices supplied separately by the server (graded attempts), so the
+   * correct pairing never reaches the client. When omitted (study/practice tools),
+   * choices are derived from each option's right-hand value.
+   */
+  matchChoices?: string[] | null;
   questionId: string;
   attemptId?: string | null;
   currentVal?: Record<string, string>;
@@ -191,6 +197,7 @@ function DroppableMatchTarget({
 
 export function SharedMatchingDnd({
   options,
+  matchChoices,
   questionId,
   attemptId,
   currentVal,
@@ -221,18 +228,24 @@ export function SharedMatchingDnd({
   }, [options]);
 
   const responses = useMemo(() => {
-    const raw = (options || [])
-      .map(
-        (o: MatchingOption) =>
-          o.option_text_right || o.match_value || o.text || o.option_text,
-      )
-      .filter(Boolean) as string[];
-    const shuffled = seededShuffle(raw, `${attemptId || ""}-${questionId}`);
+    // Server-provided choices are already shuffled; never fall back to option text
+    // for graded attempts, since that would offer the premises as answers.
+    const raw = matchChoices
+      ? matchChoices.filter(Boolean)
+      : ((options || [])
+          .map(
+            (o: MatchingOption) =>
+              o.option_text_right || o.match_value || o.text || o.option_text,
+          )
+          .filter(Boolean) as string[]);
+    const shuffled = matchChoices
+      ? raw
+      : seededShuffle(raw, `${attemptId || ""}-${questionId}`);
     return shuffled.map((text, i) => ({
       id: `resp-${i}`,
       text,
     }));
-  }, [options, attemptId, questionId]);
+  }, [options, matchChoices, attemptId, questionId]);
 
   const responseCountsByText = useMemo(() => {
     const counts: Record<string, number> = {};

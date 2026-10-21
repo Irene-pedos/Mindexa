@@ -285,11 +285,7 @@ async def get_latest_grading_sample_check(
     db: AsyncSession = Depends(get_db),
 ):
     service = MarkingService(db)
-    check = await service.repo.get_latest_sample_check_for_assessment(id)
-    if not check:
-        from app.core.exceptions import NotFoundError
-        raise NotFoundError("No sample check found for this assessment", code="SAMPLE_CHECK_NOT_FOUND")
-    return check
+    return await service.get_latest_sample_check(id, current_user)
 
 
 @router.post(

@@ -107,6 +107,12 @@ class SubmissionResponse(BaseModel):
     ai_feedback_draft: str | None = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # Current grade for this answer (lecturer views only). `is_final` above means
+    # the answer was submitted; `grade_is_final` means the grade is locked.
+    grade_score: float | None = None
+    grade_feedback: str | None = None
+    grade_rubric_scores: list[dict[str, Any]] | None = None
+    grade_is_final: bool | None = None
 
     @model_validator(mode="after")
     def populate_ai_aliases(self) -> "SubmissionResponse":
@@ -117,6 +123,26 @@ class SubmissionResponse(BaseModel):
         if self.ai_feedback_draft is None and self.ai_grade_rationale is not None:
             self.ai_feedback_draft = self.ai_grade_rationale
         return self
+
+    def for_student(self, *, scores_released: bool) -> "SubmissionResponse":
+        """
+        Student-safe copy. AI grading internals (score, confidence, rationale,
+        decision, feedback draft) are never shown to students — released,
+        human-approved feedback reaches them through the result breakdown.
+        Auto-grade outcomes stay hidden until the result is released.
+        """
+        update: dict[str, Any] = {
+            "ai_grade_score": None,
+            "ai_grade_confidence": None,
+            "ai_grade_rationale": None,
+            "ai_grade_decision": None,
+            "ai_suggested_score": None,
+            "ai_feedback_draft": None,
+        }
+        if not scores_released:
+            update["auto_grade_score"] = None
+            update["auto_grade_is_correct"] = None
+        return self.model_copy(update=update)
 
 
 class SubmissionSummary(BaseModel):

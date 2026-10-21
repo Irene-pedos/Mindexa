@@ -312,15 +312,15 @@ export default function AcademicStructurePage() {
 
   const getSectionLocationBadge = (type: string) => {
       switch(type) {
-          case 'ONLINE': return <Badge className="bg-sky-50 text-sky-700 border-sky-100 uppercase text-[8px] h-4">Online</Badge>
-          case 'HYBRID': return <Badge className="bg-purple-50 text-purple-700 border-purple-100 uppercase text-[8px] h-4">Hybrid</Badge>
-          case 'NOT_APPLICABLE': return <Badge className="bg-muted/50 text-muted-foreground border-none uppercase text-[8px] h-4">Remote</Badge>
-          default: return <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 uppercase text-[8px] h-4">Campus</Badge>
+          case 'ONLINE': return <Badge variant="outline" className="bg-sky-500/10 text-sky-700 dark:text-sky-400 border-sky-500/30 uppercase text-[8px] h-4.5 font-semibold">Online</Badge>
+          case 'HYBRID': return <Badge variant="outline" className="bg-purple-500/10 text-purple-700 dark:text-purple-400 border-purple-500/30 uppercase text-[8px] h-4.5 font-semibold">Hybrid</Badge>
+          case 'NOT_APPLICABLE': return <Badge variant="outline" className="bg-muted/50 text-muted-foreground border-border/60 uppercase text-[8px] h-4.5 font-semibold">Remote</Badge>
+          default: return <Badge variant="outline" className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 uppercase text-[8px] h-4.5 font-semibold">Campus</Badge>
       }
   }
 
   return (
-    <div data-tour="admin-academic" className="flex flex-col h-[calc(100vh-120px)] overflow-hidden">
+    <div data-tour="admin-academic" className="flex flex-col min-h-[calc(100vh-140px)] space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between mb-4 border-b border-muted/20 pb-4">
         <div>
@@ -371,8 +371,8 @@ export default function AcademicStructurePage() {
                         <div className={cn(
                             "size-7 rounded flex items-center justify-center border transition-colors",
                             isActive ? "bg-white/20 text-white border-white/30" : 
-                            isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
-                            "bg-muted/10 border-muted/40 group-hover:bg-white"
+                            isCompleted ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" :
+                            "bg-muted/10 border-muted/40 group-hover:bg-card"
                         )}>
                             {isCompleted ? <CheckCircle2 className="size-3.5" /> : <Icon className="size-3.5" />}
                         </div>
@@ -407,7 +407,7 @@ export default function AcademicStructurePage() {
         </div>
 
         {/* Content Area */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white border border-muted/10 rounded-xl">
+        <div className="flex-1 flex flex-col overflow-hidden bg-card border border-border/60 rounded-2xl shadow-none">
             {/* Toolbar */}
             <div className="p-3 border-b border-muted/10 flex flex-wrap items-center justify-between gap-3 bg-muted/5">
                 <div className="flex flex-wrap items-center gap-2">
@@ -415,7 +415,7 @@ export default function AcademicStructurePage() {
                         <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                         <Input 
                             placeholder={`Search records...`} 
-                            className="pl-8 h-8 text-[11px] rounded-lg border-muted/30 bg-white focus:border-primary/40 focus:ring-0"
+                            className="pl-8 h-8 text-[11px] rounded-lg border-muted/30 bg-background focus:border-primary/40 focus:ring-0"
                             value={searchTerm}
                             onChange={(e) => setSearchTerm(e.target.value)}
                         />
@@ -425,7 +425,7 @@ export default function AcademicStructurePage() {
                     <div className="flex flex-wrap items-center gap-1.5">
                         {activeStep !== "campuses" && (
                             <Select value={selCampus} onValueChange={setSelCampus}>
-                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-white border-muted/30 min-w-[100px] w-fit font-semibold text-primary">
+                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-background border-border/60 min-w-[100px] w-fit font-semibold text-primary">
                                     <MapPin className="size-3 mr-1.5 text-muted-foreground" />
                                     <SelectValue placeholder="All Sites" />
                                 </SelectTrigger>
@@ -440,7 +440,7 @@ export default function AcademicStructurePage() {
 
                         {["departments", "options", "class-groups", "sections"].includes(activeStep) && (
                             <Select value={selCollege} onValueChange={setSelCollege}>
-                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-white border-muted/30 min-w-[100px] w-fit font-semibold text-primary">
+                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-background border-border/60 min-w-[100px] w-fit font-semibold text-primary">
                                     <School className="size-3 mr-1.5 text-muted-foreground" />
                                     <SelectValue placeholder="Faculty" />
                                 </SelectTrigger>
@@ -455,7 +455,7 @@ export default function AcademicStructurePage() {
 
                         {["options", "class-groups", "sections"].includes(activeStep) && (
                             <Select value={selDept} onValueChange={setSelDept}>
-                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-white border-muted/30 min-w-[110px] w-fit font-semibold text-primary">
+                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-background border-border/60 min-w-[110px] w-fit font-semibold text-primary">
                                     <Library className="size-3 mr-1.5 text-muted-foreground" />
                                     <SelectValue placeholder="Department" />
                                 </SelectTrigger>
@@ -470,7 +470,7 @@ export default function AcademicStructurePage() {
 
                         {["class-groups", "sections"].includes(activeStep) && (
                             <Select value={selOpt} onValueChange={setSelOpt} disabled={selDept === "none"}>
-                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-white border-muted/30 min-w-[110px] w-fit font-semibold text-primary">
+                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-background border-border/60 min-w-[110px] w-fit font-semibold text-primary">
                                     <Layers className="size-3 mr-1.5 text-muted-foreground" />
                                     <SelectValue placeholder="Program" />
                                 </SelectTrigger>
@@ -485,7 +485,7 @@ export default function AcademicStructurePage() {
 
                         {activeStep === "sections" && (
                             <Select value={selGroup} onValueChange={setSelGroup} disabled={selOpt === "none"}>
-                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-white border-muted/30 min-w-[100px] w-fit font-semibold text-primary">
+                                <SelectTrigger className="h-7 text-[10px] rounded-md bg-background border-border/60 min-w-[100px] w-fit font-semibold text-primary">
                                     <LayoutGrid className="size-3 mr-1.5 text-muted-foreground" />
                                     <SelectValue placeholder="Year Level" />
                                 </SelectTrigger>
@@ -654,7 +654,7 @@ export default function AcademicStructurePage() {
                       Registering entity into institutional registry
                   </DialogDescription>
               </div>
-              <div className="p-5 space-y-4 bg-white">
+              <div className="p-5 space-y-4 bg-card">
                   <div className="grid gap-1">
                       <Label htmlFor="name" className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground ml-0.5">
                         {activeStep === "sections" ? "Cohort / Section Identifier" : "Entity Name"}
@@ -757,7 +757,7 @@ export default function AcademicStructurePage() {
                       Modifying record for {activeStep.slice(0, -1)}
                   </DialogDescription>
               </div>
-              <div className="p-5 space-y-4 bg-white">
+              <div className="p-5 space-y-4 bg-card">
                   <div className="grid gap-1">
                       <Label htmlFor="edit-name" className="text-[9px] font-semibold uppercase tracking-widest text-muted-foreground ml-0.5">Entity Name</Label>
                       <Input 

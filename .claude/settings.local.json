@@ -4,7 +4,8 @@
       "Bash(npx claude-code-templates@latest *)",
       "Bash(xargs grep *)",
       "Bash(grep -E \"\\\\.\\(txt|md\\)$\")",
-      "Bash(grep -E \"\\\\.py$\")"
+      "Bash(grep -E \"\\\\.py$\")",
+      "Bash(python -c ' *)"
     ]
   }
 }

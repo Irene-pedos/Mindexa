@@ -140,6 +140,19 @@ class SampleCheckVerifyRequest(BaseModel):
     verifications: List[SampleCheckVerifyItem] = Field(..., min_length=1)
 
 
+class SampleCheckItem(BaseModel):
+    """One sampled AI grade the lecturer must verify."""
+    review_id: uuid.UUID
+    response_id: Optional[uuid.UUID] = None
+    attempt_id: uuid.UUID
+    question_content: Optional[str] = None
+    student_answer: Optional[str] = None
+    ai_suggested_score: Optional[float] = None
+    max_score: Optional[float] = None
+    ai_feedback_draft: Optional[str] = None
+    decision: str
+
+
 class SampleCheckResponse(BaseModel):
     id: uuid.UUID
     assessment_id: uuid.UUID
@@ -151,6 +164,9 @@ class SampleCheckResponse(BaseModel):
     status: SampleCheckStatus
     created_at: datetime
     updated_at: datetime
+    # Populated by the service so the UI can show what is being verified
+    items: List[SampleCheckItem] = []
+    pending_review_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
 

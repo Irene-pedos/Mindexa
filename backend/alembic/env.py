@@ -85,6 +85,13 @@ from app.db.models import (  # noqa: F401
     ApprovalPolicy,
     AssessmentCollaborator,
     AuthorDelegation,
+    AppealPolicy,
+    Appeal,
+    AbsenceExcusePolicy,
+    AbsenceExcuseRequest,
+    AcademicCalendarEvent,
+    ExportTemplate,
+    ExportJob,
 )
 
 # Autogenerate target — SQLModel metadata contains all registered models

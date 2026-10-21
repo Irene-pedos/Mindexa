@@ -24,7 +24,7 @@ import uuid
 from app.db.models.auth import User
 from app.db.models.question import Question
 from app.db.session import get_db
-from app.dependencies.auth import require_active_user, require_lecturer_or_admin
+from app.dependencies.auth import require_lecturer_or_admin
 from app.schemas.question import (
     AttachTagsRequest,
     DetachTagsRequest,
@@ -93,7 +93,7 @@ async def list_questions(
     is_active: bool | None = Query(default=True),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> QuestionListResponse:
     params = QuestionSearchParams(
@@ -119,7 +119,7 @@ async def list_questions(
     summary="List all available question tags",
 )
 async def list_tags(
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> list[QuestionTagResponse]:
     from app.db.repositories.question_repo import QuestionRepository
@@ -143,7 +143,7 @@ async def list_tags(
 )
 async def get_question(
     question_id: uuid.UUID,
-    current_user: User = Depends(require_active_user),
+    current_user: User = Depends(require_lecturer_or_admin),
     db: AsyncSession = Depends(get_db),
 ) -> QuestionDetailResponse:
     svc = _service(db)

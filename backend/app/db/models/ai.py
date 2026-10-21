@@ -43,7 +43,7 @@ import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import Column, DateTime, ForeignKey
+from sqlalchemy import Column, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlmodel import Field, Relationship
 
@@ -395,12 +395,27 @@ class AIGradeReview(BaseModel, table=True):
     # ── Scores ────────────────────────────────────────────────────────────────
 
     ai_suggested_total: Optional[float] = Field(default=None, nullable=True)
+    suggested_score: Optional[float] = Field(default=None, nullable=True)
     lecturer_final_total: Optional[float] = Field(default=None, nullable=True)
     score_delta: Optional[float] = Field(default=None, nullable=True)
     max_possible_score: Optional[float] = Field(
         default=None,
         nullable=True,
         # Cached from assessment.total_marks at grading time.
+    )
+
+    # ── Phase 5 V2 Explanatory & Validation Fields (Section 9.4) ──────────────
+    key_points_coverage: Optional[list[dict]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
+    )
+    interpretation_note: Optional[str] = Field(
+        default=None,
+        sa_column=Column(Text, nullable=True),
+    )
+    evidence_validation: Optional[list[dict]] = Field(
+        default=None,
+        sa_column=Column(JSONB, nullable=True),
     )
 
     # ── Reviewer ──────────────────────────────────────────────────────────────

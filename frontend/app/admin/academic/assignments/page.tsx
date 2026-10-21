@@ -405,13 +405,13 @@ export default function AdminAssignmentPanel() {
           </Button>
         </div>
 
-        <Card className="flex-1 flex flex-col border shadow-none overflow-hidden rounded-xl bg-white">
+        <Card className="flex-1 flex flex-col border border-border/60 shadow-none overflow-hidden rounded-2xl bg-card">
             <div className="p-3 border-b border-muted/10 bg-muted/5 flex items-center gap-3">
                 <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                     <Input
                         placeholder="Search by lecturer or module..."
-                        className="pl-9 h-8 text-[11px] rounded-lg border-muted/30 bg-white focus:border-primary/40 focus:ring-0 transition-all"
+                        className="pl-9 h-8 text-[11px] rounded-lg border-muted/30 bg-background focus:border-primary/40 focus:ring-0 transition-all"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
@@ -487,7 +487,7 @@ export default function AdminAssignmentPanel() {
                                             <Button
                                                 variant="ghost"
                                                 size="icon"
-                                                className="size-6 rounded-md hover:bg-red-50 hover:text-red-600 transition-colors"
+                                                className="size-6 rounded-md hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 transition-colors"
                                                 onClick={() => handleRemoveAssignment(assignment.id)}
                                                 disabled={isProcessingRow === assignment.id}
                                             >
@@ -592,8 +592,8 @@ export default function AdminAssignmentPanel() {
                         <div className={cn(
                             "size-8 rounded-lg flex items-center justify-center border transition-colors",
                             isActive ? "bg-white/20 text-white border-white/30" :
-                            isCompleted ? "bg-emerald-50 text-emerald-600 border-emerald-200" :
-                            "bg-muted/10 border-muted/40 group-hover:bg-white"
+                            isCompleted ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30" :
+                            "bg-muted/10 border-muted/40 group-hover:bg-card"
                         )}>
                             {isCompleted ? <CheckCircle2 className="size-4" /> : <Icon className="size-4" />}
                         </div>
@@ -629,7 +629,7 @@ export default function AdminAssignmentPanel() {
         </div>
 
         {/* Content Area - Scrollable */}
-        <div className="flex-1 flex flex-col overflow-hidden bg-white border border-muted/10 rounded-xl">
+        <div className="flex-1 flex flex-col overflow-hidden bg-card border border-border/60 rounded-2xl">
             <ScrollArea className="flex-1">
                 <div className="p-8">
                     {activeStep === "staff" && (
@@ -673,7 +673,7 @@ export default function AdminAssignmentPanel() {
                                         </Select>
                                     </div>
                                     <div className="flex flex-col justify-end">
-                                        <div className="h-10 px-4 rounded-xl border border-dashed border-emerald-200 bg-emerald-50/50 flex items-center gap-2.5 text-emerald-700">
+                                        <div className="h-10 px-4 rounded-xl border border-dashed border-emerald-500/30 bg-emerald-500/10 flex items-center gap-2.5 text-emerald-700 dark:text-emerald-400">
                                             <CheckCircle2 className="size-4" />
                                             <span className="text-[10px] font-bold uppercase tracking-tight">Identity Validated</span>
                                         </div>
@@ -717,7 +717,7 @@ export default function AdminAssignmentPanel() {
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Campus (If applicable)</Label>
                                         <Select value={selectedCampus} onValueChange={setSelectedCampus} disabled={!selectedInst || isFetching.campuses}>
-                                            <SelectTrigger className="h-10 rounded-xl border-muted/30 text-sm font-medium bg-white">
+                                            <SelectTrigger className="h-10 rounded-xl border-border/60 text-sm font-medium bg-background">
                                                 <div className="flex items-center gap-2">
                                                     <MapPin className="size-4 text-muted-foreground/50" />
                                                     <SelectValue placeholder="No Campus" />
@@ -734,7 +734,7 @@ export default function AdminAssignmentPanel() {
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">College / School</Label>
                                         <Select value={selectedCollege} onValueChange={setSelectedCollege} disabled={!selectedInst || isFetching.colleges}>
-                                            <SelectTrigger className="h-10 rounded-xl border-muted/30 text-sm font-medium bg-white">
+                                            <SelectTrigger className="h-10 rounded-xl border-border/60 text-sm font-medium bg-background">
                                                 <div className="flex items-center gap-2">
                                                     <School className="size-4 text-muted-foreground/50" />
                                                     <SelectValue placeholder="No College" />
@@ -795,7 +795,7 @@ export default function AdminAssignmentPanel() {
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Academic Level</Label>
                                         <Select value={selectedGroup} onValueChange={setSelectedGroup} disabled={selectedOpt === "none" || isFetching.groups}>
-                                            <SelectTrigger className="h-10 rounded-xl border-muted/30 text-sm font-medium bg-white">
+                                            <SelectTrigger className="h-10 rounded-xl border-border/60 text-sm font-medium bg-background">
                                                 <div className="flex items-center gap-2">
                                                     <LayoutGrid className="size-4 text-muted-foreground/50" />
                                                     <SelectValue placeholder="All Levels" />
@@ -814,7 +814,7 @@ export default function AdminAssignmentPanel() {
                                     <div className="space-y-2">
                                         <Label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground ml-1">Specific Class Section</Label>
                                         <Select value={selectedSection} onValueChange={setSelectedSection} disabled={selectedGroup === "none" || isFetching.sections}>
-                                            <SelectTrigger className="h-10 rounded-xl border-muted/30 text-sm font-medium bg-white">
+                                            <SelectTrigger className="h-10 rounded-xl border-border/60 text-sm font-medium bg-background">
                                                 <div className="flex items-center gap-2">
                                                     <Users className="size-4 text-muted-foreground/50" />
                                                     <SelectValue placeholder="Entire Class Cohort" />
@@ -860,7 +860,7 @@ export default function AdminAssignmentPanel() {
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
                                     <Input
                                         placeholder="Filter available modules by name or code..."
-                                        className="pl-9 h-9 text-xs rounded-xl border-muted/30 bg-muted/5 focus:bg-white transition-all"
+                                        className="pl-9 h-9 text-xs rounded-xl border-muted/30 bg-muted/5 focus:bg-background transition-all"
                                         value={courseSearch}
                                         onChange={(e) => setCourseSearch(e.target.value)}
                                     />
@@ -900,7 +900,7 @@ export default function AdminAssignmentPanel() {
                                                         <div className={cn(
                                                             "size-5 rounded border transition-all flex items-center justify-center",
                                                             isSelected ? "bg-primary border-primary" :
-                                                            isAssigned ? "bg-emerald-500 border-emerald-500" : "bg-white border-muted-foreground/30"
+                                                            isAssigned ? "bg-emerald-500 border-emerald-500 text-white" : "bg-background border-muted-foreground/30"
                                                         )}>
                                                             {(isSelected || isAssigned) && <Check className="size-3 text-white stroke-[3px]" />}
                                                         </div>
@@ -917,7 +917,7 @@ export default function AdminAssignmentPanel() {
                                                                 )}
                                                             </p>
                                                         </div>
-                                                        {isAssigned && <span className="text-[8px] font-bold text-emerald-700 uppercase px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-100">Assigned</span>}
+                                                        {isAssigned && <span className="text-[8px] font-bold text-emerald-700 dark:text-emerald-400 uppercase px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30">Assigned</span>}
                                                     </div>
                                                 );
                                             })

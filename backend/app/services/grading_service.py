@@ -33,12 +33,33 @@ from datetime import UTC, datetime
 from typing import Any
 
 from app.core.config import settings
-from app.core.exceptions import ConflictError, NotFoundError, ValidationError
+from app.core.exceptions import (
+    AuthorizationError,
+    ConflictError,
+    NotFoundError,
+    ValidationError,
+)
 from app.core.logger import get_logger
-from app.db.enums import (GradingMode, GradingQueuePriority,
-                          GradingQueueStatus, QuestionType)
-from app.db.models.attempt import (GradingQueueItem, StudentResponse,
-                                   SubmissionGrade)
+from app.db.enums import (
+    AIGradeDecision,
+    DelegationStatus,
+    GradingDelegationScope,
+    GradingMode,
+    GradingQueuePriority,
+    GradingQueueStatus,
+    QuestionType,
+)
+from app.db.models.academic import Course, LecturerCourseAssignment, TeachingAssignment
+from app.db.models.ai import AIGradeReview
+from app.db.models.assessment import Assessment
+from app.db.models.attempt import (
+    AssessmentAttempt,
+    GradingQueueItem,
+    StudentResponse,
+    SubmissionGrade,
+)
+from app.db.models.authoring import AssessmentCollaborator
+from app.db.models.marking import GradingDelegation
 from app.db.models.question import Question
 from app.db.repositories.assessment_repo import AssessmentRepository
 from app.db.repositories.grading_repo import GradingRepository
@@ -177,7 +198,7 @@ class GradingService:
 
         # Always trigger AI grading job to pre-populate suggestions for open-ended questions
         from app.workers.tasks import process_ai_grading_job
-        process_ai_grading_job.delay(str(item.id))
+        process_ai_grading_job.apply_async(args=[str(item.id)], countdown=2)
 
         return item
 
@@ -206,6 +227,19 @@ class GradingService:
         item_uuid = uuid.UUID(str(item_id))
         item = await self.grading_repo.get_queue_item_by_id(item_uuid)
         if not item:
+            # Check if this ID belongs to a GroupSubmissionAnswer (dispatched from group grading endpoint)
+            from app.db.models.attempt import GroupSubmissionAnswer
+            from sqlalchemy import select
+            stmt = select(GroupSubmissionAnswer).where(GroupSubmissionAnswer.id == item_uuid)
+            res = await self.db.execute(stmt)
+            group_answer = res.scalar_one_or_none()
+            if group_answer:
+                await self.process_ai_group_answer(group_answer)
+                return {
+                    "item_id": str(item_uuid),
+                    "type": "group_answer",
+                    "status": "completed",
+                }
             raise NotFoundError(f"GradingQueueItem {item_id} not found.")
         await self.grading_repo.update_queue_item(
             item.id,
@@ -402,6 +436,9 @@ class GradingService:
                 cost=cost,
                 ai_started_at=ai_started_at,
                 ai_completed_at=ai_completed_at,
+                key_points_coverage=[kp.model_dump() for kp in ai_output.key_points_coverage] if getattr(ai_output, "key_points_coverage", None) else None,
+                interpretation_note=getattr(ai_output, "interpretation_note", None),
+                evidence_validation=getattr(ai_output, "evidence_validation", None),
             )
 
             # 5.5 Automatically generate feedback draft (grade returned above, no extra SELECT needed)
@@ -458,7 +495,9 @@ class GradingService:
         )
         student_profile = student_profile_res.scalar_one_or_none()
         student_name = "a student"
-        if student_profile:
+        if assessment and getattr(assessment, "anonymous_marking", False):
+            student_name = f"Candidate-{str(item.attempt_id)[:6].upper()}"
+        elif student_profile:
             student_name = " ".join(
                 part for part in [student_profile.first_name, student_profile.last_name] if part
             ).strip() or student_profile.display_name or "a student"
@@ -765,6 +804,9 @@ class GradingService:
             cost=cost,
             ai_started_at=ai_started_at,
             ai_completed_at=ai_completed_at,
+            key_points_coverage=[kp.model_dump() for kp in ai_output.key_points_coverage] if getattr(ai_output, "key_points_coverage", None) else None,
+            interpretation_note=getattr(ai_output, "interpretation_note", None),
+            evidence_validation=getattr(ai_output, "evidence_validation", None),
         )
 
         # Regenerate feedback draft
@@ -834,6 +876,9 @@ class GradingService:
         cost: float | None = None,
         ai_started_at: datetime | None = None,
         ai_completed_at: datetime | None = None,
+        key_points_coverage: list[dict] | None = None,
+        interpretation_note: str | None = None,
+        evidence_validation: list[dict] | None = None,
     ) -> SubmissionGrade:
         """
         Store an AI-generated grading suggestion.
@@ -921,7 +966,14 @@ class GradingService:
             existing_rev = rev_res.scalar_one_or_none()
             if isinstance(existing_rev, AIGradeReview):
                 existing_rev.ai_suggested_total = ai_suggested_score
+                existing_rev.suggested_score = ai_suggested_score
                 existing_rev.max_possible_score = max_score
+                if key_points_coverage is not None:
+                    existing_rev.key_points_coverage = key_points_coverage
+                if interpretation_note is not None:
+                    existing_rev.interpretation_note = interpretation_note
+                if evidence_validation is not None:
+                    existing_rev.evidence_validation = evidence_validation
                 self.db.add(existing_rev)
             elif not isinstance(existing_rev, Mock) and not isinstance(getattr(existing, "attempt_id", None), Mock):
                 new_rev = AIGradeReview(
@@ -932,7 +984,11 @@ class GradingService:
                     submission_grade_id=existing.id,
                     grading_decision=AIGradeDecision.PENDING,
                     ai_suggested_total=ai_suggested_score,
+                    suggested_score=ai_suggested_score,
                     max_possible_score=max_score,
+                    key_points_coverage=key_points_coverage,
+                    interpretation_note=interpretation_note,
+                    evidence_validation=evidence_validation,
                 )
                 self.db.add(new_rev)
             await self.db.flush()
@@ -940,6 +996,91 @@ class GradingService:
             logger.warning("failed_to_sync_ai_grade_review: %s", str(e))
 
         return existing
+
+    # -----------------------------------------------------------------------
+    # VERIFY GRADING AUTHORIZATION (Helper extracted for L-02)
+    # -----------------------------------------------------------------------
+
+    async def _verify_grading_authorization(
+        self, lecturer_id: uuid.UUID, existing: SubmissionGrade
+    ) -> GradingDelegation | None:
+        """
+        Verify lecturer is assigned to this assessment's course or is an active delegate.
+        Returns the active delegation if applicable, else None.
+        Raises AuthorizationError if unauthorized.
+        """
+        now_dt = datetime.now(UTC)
+        del_stmt = (
+            select(GradingDelegation)
+            .where(
+                GradingDelegation.assessment_id == existing.assessment_id,
+                GradingDelegation.delegate_id == lecturer_id,
+                GradingDelegation.status == DelegationStatus.ACTIVE,
+                GradingDelegation.valid_from <= now_dt,
+                GradingDelegation.valid_to >= now_dt,
+            )
+        )
+        del_res = await self.db.execute(del_stmt)
+        delegation = del_res.scalars().first()
+        if delegation:
+            if delegation.scope == GradingDelegationScope.SELECTED_STUDENTS:
+                targets = delegation.target_student_ids or []
+                if str(existing.student_id) not in [str(s) for s in targets]:
+                    raise AuthorizationError(
+                        "This student is outside your delegated grading scope",
+                        code="DELEGATION_SCOPE_MISMATCH",
+                    )
+            elif delegation.scope == GradingDelegationScope.SECTION and delegation.target_section_id:
+                attempt_stmt = select(AssessmentAttempt).where(AssessmentAttempt.id == existing.attempt_id)
+                att = (await self.db.execute(attempt_stmt)).scalar_one_or_none()
+                if att and att.class_section_id and att.class_section_id != delegation.target_section_id:
+                    raise AuthorizationError(
+                        "This class section is outside your delegated grading scope",
+                        code="DELEGATION_SCOPE_MISMATCH",
+                    )
+            return delegation
+
+        auth_stmt = (
+            select(TeachingAssignment.id)
+            .join(Course, Course.id == TeachingAssignment.course_id)
+            .join(Assessment, Assessment.course_id == Course.id)
+            .where(
+                TeachingAssignment.lecturer_id == lecturer_id,
+                Assessment.id == existing.assessment_id,
+                TeachingAssignment.is_active == True,
+            )
+        )
+        auth_res = await self.db.execute(auth_stmt)
+        if auth_res.scalars().first():
+            return None
+
+        lc_stmt = (
+            select(LecturerCourseAssignment.course_id)
+            .join(Course, Course.id == LecturerCourseAssignment.course_id)
+            .join(Assessment, Assessment.course_id == Course.id)
+            .where(
+                LecturerCourseAssignment.lecturer_id == lecturer_id,
+                Assessment.id == existing.assessment_id,
+                LecturerCourseAssignment.is_active == True,
+            )
+        )
+        if (await self.db.execute(lc_stmt)).scalars().first():
+            return None
+
+        ass_stmt = select(Assessment).where(Assessment.id == existing.assessment_id)
+        ass = (await self.db.execute(ass_stmt)).scalar_one_or_none()
+        if ass and ass.created_by_id == lecturer_id:
+            return None
+        elif ass:
+            col_stmt = select(AssessmentCollaborator.id).where(
+                AssessmentCollaborator.assessment_id == existing.assessment_id,
+                AssessmentCollaborator.lecturer_id == lecturer_id,
+                AssessmentCollaborator.is_active == True,
+            )
+            if (await self.db.execute(col_stmt)).scalars().first():
+                return None
+
+        raise AuthorizationError("You are not authorized to grade responses for this course")
 
     # -----------------------------------------------------------------------
     # FINALIZE GRADE (Lecturer manual or confirmation)
@@ -974,105 +1115,21 @@ class GradingService:
             raise NotFoundError("Grade not found", code="GRADE_NOT_FOUND")
 
         if existing.is_final:
-            # If already final and user wants to finalize, consider this a success (idempotency).
-            # This is crucial for batch grading where duplicate requests or refreshes might occur.
-            if is_final:
-                return existing
-
-            raise ConflictError(
-                "This grade has already been finalised",
-                code="GRADE_ALREADY_FINAL",
-            )
+            # Final grades stay editable until results are released; afterwards a
+            # change must go through audited grade moderation. Previously a second
+            # final save was silently ignored while the UI reported success.
+            existing_result = await self.result_repo.get_by_attempt(existing.attempt_id)
+            if existing_result and existing_result.is_released:
+                raise ConflictError(
+                    "Results for this attempt have been released. "
+                    "Use grade moderation to change this mark.",
+                    code="GRADE_RELEASED",
+                )
+            # A later save (e.g. autosave) never un-finalises a grade.
+            is_final = True
 
         # 0. Authorization: Verify lecturer is assigned to this assessment's course or is an active delegate
-        from app.core.exceptions import AuthorizationError
-        from app.db.models.academic import Course, TeachingAssignment, LecturerCourseAssignment
-        from app.db.models.assessment import Assessment
-        from app.db.models.attempt import AssessmentAttempt
-        from app.db.models.authoring import AssessmentCollaborator
-        from app.db.models.marking import GradingDelegation
-        from app.db.enums import DelegationStatus, GradingDelegationScope
-
-        delegation = None
-        is_authorized = False
-
-        # Check active grading delegation first to capture delegation_id
-        now_dt = datetime.now(UTC)
-        del_stmt = (
-            select(GradingDelegation)
-            .where(
-                GradingDelegation.assessment_id == existing.assessment_id,
-                GradingDelegation.delegate_id == lecturer_id,
-                GradingDelegation.status == DelegationStatus.ACTIVE,
-                GradingDelegation.valid_from <= now_dt,
-                GradingDelegation.valid_to >= now_dt,
-            )
-        )
-        del_res = await self.db.execute(del_stmt)
-        delegation = del_res.scalars().first()
-        if delegation:
-            if delegation.scope == GradingDelegationScope.SELECTED_STUDENTS:
-                targets = delegation.target_student_ids or []
-                if str(existing.student_id) not in [str(s) for s in targets]:
-                    raise AuthorizationError(
-                        "This student is outside your delegated grading scope",
-                        code="DELEGATION_SCOPE_MISMATCH",
-                    )
-            elif delegation.scope == GradingDelegationScope.SECTION and delegation.target_section_id:
-                attempt_stmt = select(AssessmentAttempt).where(AssessmentAttempt.id == existing.attempt_id)
-                att = (await self.db.execute(attempt_stmt)).scalar_one_or_none()
-                if att and att.class_section_id and att.class_section_id != delegation.target_section_id:
-                    raise AuthorizationError(
-                        "This class section is outside your delegated grading scope",
-                        code="DELEGATION_SCOPE_MISMATCH",
-                    )
-            is_authorized = True
-
-        if not is_authorized:
-            auth_stmt = (
-                select(TeachingAssignment.id)
-                .join(Course, Course.id == TeachingAssignment.course_id)
-                .join(Assessment, Assessment.course_id == Course.id)
-                .where(
-                    TeachingAssignment.lecturer_id == lecturer_id,
-                    Assessment.id == existing.assessment_id,
-                    TeachingAssignment.is_active == True
-                )
-            )
-            auth_res = await self.db.execute(auth_stmt)
-            if auth_res.scalars().first():
-                is_authorized = True
-
-        if not is_authorized:
-            lc_stmt = (
-                select(LecturerCourseAssignment.course_id)
-                .join(Course, Course.id == LecturerCourseAssignment.course_id)
-                .join(Assessment, Assessment.course_id == Course.id)
-                .where(
-                    LecturerCourseAssignment.lecturer_id == lecturer_id,
-                    Assessment.id == existing.assessment_id,
-                    LecturerCourseAssignment.is_active == True,
-                )
-            )
-            if (await self.db.execute(lc_stmt)).scalars().first():
-                is_authorized = True
-
-        if not is_authorized:
-            ass_stmt = select(Assessment).where(Assessment.id == existing.assessment_id)
-            ass = (await self.db.execute(ass_stmt)).scalar_one_or_none()
-            if ass and ass.created_by_id == lecturer_id:
-                is_authorized = True
-            elif ass:
-                col_stmt = select(AssessmentCollaborator.id).where(
-                    AssessmentCollaborator.assessment_id == existing.assessment_id,
-                    AssessmentCollaborator.lecturer_id == lecturer_id,
-                    AssessmentCollaborator.is_active == True,
-                )
-                if (await self.db.execute(col_stmt)).scalars().first():
-                    is_authorized = True
-
-        if not is_authorized:
-            raise AuthorizationError("You are not authorized to grade responses for this course")
+        delegation = await self._verify_grading_authorization(lecturer_id, existing)
 
         # Determine final score
         if accept_ai_suggestion:
@@ -1103,7 +1160,6 @@ class GradingService:
         )
 
         # Determine grading decision for audit
-        from app.db.enums import AIGradeDecision
         decision = AIGradeDecision.NOT_APPLICABLE
         score_delta = None
 
@@ -1113,6 +1169,12 @@ class GradingService:
                 decision = AIGradeDecision.ACCEPTED
             else:
                 decision = AIGradeDecision.MODIFIED
+
+        # Explicitly accepting the AI suggestion with no feedback typed also accepts
+        # the AI feedback draft — this is the human review step. Drafts that were
+        # never accepted are never shown to students.
+        if accept_ai_suggestion and is_final and not (feedback and feedback.strip()):
+            feedback = existing.ai_feedback_draft or feedback
 
         # Determine feedback author basis
         feedback_author_basis = "LECTURER"
@@ -1144,26 +1206,46 @@ class GradingService:
                 internal_notes=internal_notes,
             )
 
-        # 2. Record audit trail in AIGradeReview
-        await self.grading_repo.create_ai_grade_review(
-            attempt_id=existing.attempt_id,
-            assessment_id=existing.assessment_id,
-            student_id=existing.student_id,
-            response_id=existing.response_id,
-            submission_grade_id=existing.id,
-            ai_action_log_id=existing.student_response.ai_action_log_id if existing.student_response else None,
-            grading_decision=decision,
-            ai_suggested_total=existing.ai_suggested_score, # "total" means per-item here
-            lecturer_final_total=final_score,
-            score_delta=score_delta,
-            max_possible_score=existing.max_score,
-            lecturer_id=lecturer_id,
-            delegation_id=delegation.id if delegation else None,
-            review_started_at=review_started_at,
-            review_completed_at=datetime.now(UTC),
-            review_duration_seconds=review_duration_seconds,
-            lecturer_notes=internal_notes,
+        # 2. Record/Update audit trail in AIGradeReview (Fix H-04)
+        rev_stmt = select(AIGradeReview).where(
+            AIGradeReview.response_id == existing.response_id,
+            AIGradeReview.grading_decision == AIGradeDecision.PENDING,
         )
+        existing_rev = (await self.db.execute(rev_stmt)).scalars().first()
+
+        now_utc = datetime.now(UTC)
+        if existing_rev:
+            existing_rev.grading_decision = decision
+            existing_rev.lecturer_final_total = final_score
+            existing_rev.score_delta = score_delta
+            existing_rev.lecturer_id = lecturer_id
+            existing_rev.delegation_id = delegation.id if delegation else None
+            existing_rev.review_started_at = review_started_at or existing_rev.review_started_at
+            existing_rev.review_completed_at = now_utc
+            existing_rev.review_duration_seconds = review_duration_seconds
+            existing_rev.lecturer_notes = internal_notes
+            self.db.add(existing_rev)
+            await self.db.flush()
+        else:
+            await self.grading_repo.create_ai_grade_review(
+                attempt_id=existing.attempt_id,
+                assessment_id=existing.assessment_id,
+                student_id=existing.student_id,
+                response_id=existing.response_id,
+                submission_grade_id=existing.id,
+                ai_action_log_id=existing.student_response.ai_action_log_id if existing.student_response else None,
+                grading_decision=decision,
+                ai_suggested_total=existing.ai_suggested_score,
+                lecturer_final_total=final_score,
+                score_delta=score_delta,
+                max_possible_score=existing.max_score,
+                lecturer_id=lecturer_id,
+                delegation_id=delegation.id if delegation else None,
+                review_started_at=review_started_at,
+                review_completed_at=now_utc,
+                review_duration_seconds=review_duration_seconds,
+                lecturer_notes=internal_notes,
+            )
 
         # Sync decision onto StudentResponse row if exists
         try:
@@ -1498,12 +1580,15 @@ class GradingService:
         if assessment_id and assessment_id not in allowed_assessment_ids:
             return [], 0
 
-        # Default status: show only active queue items if not specified
+        # Default status: items that still need a lecturer. FAILED is included —
+        # an item whose AI grading failed still has to be graded manually or retried,
+        # otherwise the attempt can never be completed or released.
         statuses = [status] if status else [
             GradingQueueStatus.PENDING,
             GradingQueueStatus.ASSIGNED,
             GradingQueueStatus.IN_PROGRESS,
             GradingQueueStatus.AI_SUGGESTED,
+            GradingQueueStatus.FAILED,
         ]
 
         items, total = await self.grading_repo.list_queue(
@@ -2023,6 +2108,43 @@ class GradingService:
     # MODERATION LAYER (Phase 4)
     # -----------------------------------------------------------------------
 
+    async def _assert_can_moderate_grades(
+        self, assessment_id: uuid.UUID, user_id: uuid.UUID
+    ) -> None:
+        """
+        Grade moderation is limited to the assessment's authoring side (author,
+        co-author, delegate) or the department's moderator / head of department.
+        Admins do not mark (spec §13.1).
+        """
+        from app.core.constants import Duty, UserRole
+        from app.core.permissions import has_duty
+        from app.db.models.academic import Course
+        from app.db.models.assessment import Assessment
+        from app.db.models.auth import User
+        from app.services.assessment_service import AssessmentService
+
+        user = await self.db.get(User, user_id)
+        assessment = await self.db.get(Assessment, assessment_id)
+        if not user or not assessment:
+            raise NotFoundError("Assessment not found")
+
+        if user.role == UserRole.LECTURER.value:
+            try:
+                await AssessmentService(self.db)._async_assert_can_edit(assessment, user)
+                return
+            except AuthorizationError:
+                pass
+            course = await self.db.get(Course, assessment.course_id) if assessment.course_id else None
+            if course and course.department_id:
+                for duty in (Duty.MODERATOR, Duty.DEPARTMENT_HEAD):
+                    if await has_duty(self.db, user, duty, department_id=course.department_id):
+                        return
+
+        raise AuthorizationError(
+            "Only the assessment's author, co-author, delegate, or the department "
+            "moderator / head of department may moderate grades."
+        )
+
     async def get_moderation_data(
         self,
         question_id: uuid.UUID,
@@ -2030,7 +2152,11 @@ class GradingService:
     ) -> dict[str, Any]:
         """
         Returns analytics and outliers for a question to assist moderation.
+        The caller must be allowed to moderate grades on at least one
+        assessment that uses the question.
         """
+        from sqlalchemy import select as sa_select
+
         from app.db.models.question import AssessmentQuestion, Question
 
         q = await self.db.get(Question, question_id)
@@ -2043,6 +2169,24 @@ class GradingService:
 
         if not q:
             raise NotFoundError("Question not found")
+
+        assessment_ids = (
+            await self.db.execute(
+                sa_select(AssessmentQuestion.assessment_id).where(
+                    AssessmentQuestion.question_id == question_id
+                )
+            )
+        ).scalars().all()
+        authorized = False
+        for a_id in set(assessment_ids):
+            try:
+                await self._assert_can_moderate_grades(a_id, moderator_id)
+                authorized = True
+                break
+            except AuthorizationError:
+                continue
+        if not authorized:
+            raise AuthorizationError("You may not moderate grades for this question.")
 
         stats = await self.grading_repo.get_moderation_stats(question_id)
         stats["question_title"] = q.content or "Untitled Question"
@@ -2083,6 +2227,13 @@ class GradingService:
         existing = await self.grading_repo.get_grade_by_response(response_id)
         if not existing:
             raise NotFoundError("Grade not found")
+
+        attempt = (
+            await self.db.get(AssessmentAttempt, existing.attempt_id) if existing.attempt_id else None
+        )
+        if attempt is None:
+            raise NotFoundError("Attempt not found")
+        await self._assert_can_moderate_grades(attempt.assessment_id, moderator_id)
 
         if not existing.is_final:
             raise ConflictError("Only finalised grades can be moderated. Use manual grading for pending items.")

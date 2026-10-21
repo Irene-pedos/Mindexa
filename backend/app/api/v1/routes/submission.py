@@ -74,7 +74,8 @@ async def save_answer(
         time_spent_seconds=body.time_spent_seconds,
         is_skipped=body.is_skipped,
     )
-    return SubmissionResponse.model_validate(response)
+    # Saving only happens during an active attempt, so nothing is released yet.
+    return SubmissionResponse.model_validate(response).for_student(scores_released=False)
 
 
 # ── LIST RESPONSES FOR ATTEMPT ────────────────────────────────────────────────
@@ -102,16 +103,50 @@ async def list_responses(
         raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
 
     from app.db.enums import UserRole
-    if current_user.role == UserRole.STUDENT and attempt.student_id != current_user.id:
+    is_student = current_user.role == UserRole.STUDENT
+    if is_student and attempt.student_id != current_user.id:
         raise AuthorizationError("Attempt ownership violation", code="ATTEMPT_OWNERSHIP_VIOLATION")
+    if not is_student:
+        from app.services.result_service import ResultService
+
+        await ResultService(db).assert_lecturer_assessment_access(
+            attempt.assessment_id, current_user
+        )
 
     repo = SubmissionRepository(db)
     responses = await repo.list_responses_for_attempt(attempt_id)
+    submissions = [SubmissionResponse.model_validate(r) for r in responses]
+
+    if is_student:
+        from app.db.repositories.result_repo import ResultRepository
+
+        result = await ResultRepository(db).get_by_attempt(attempt_id)
+        released = bool(result and result.is_released)
+        submissions = [s.for_student(scores_released=released) for s in submissions]
+    else:
+        # Attach the current grade so the grading workspace shows saved marks
+        from app.db.repositories.grading_repo import GradingRepository
+
+        grades = await GradingRepository(db).list_grades_for_attempt(attempt_id)
+        by_response = {g.response_id: g for g in grades}
+        submissions = [
+            s.model_copy(
+                update={
+                    "grade_score": g.score,
+                    "grade_feedback": g.feedback,
+                    "grade_rubric_scores": g.rubric_scores,
+                    "grade_is_final": g.is_final,
+                }
+            )
+            if (g := by_response.get(s.id))
+            else s
+            for s in submissions
+        ]
 
     return AttemptSubmissionsResponse(
         attempt_id=attempt_id,
-        submissions=[SubmissionResponse.model_validate(r) for r in responses],
-        total=len(responses),
+        submissions=submissions,
+        total=len(submissions),
     )
 
 
@@ -140,7 +175,11 @@ async def list_group_responses(
 
     return AttemptSubmissionsResponse(
         attempt_id=group_id, # Reusing schema, use group_id as ID
-        submissions=[SubmissionResponse.model_validate(r) for r in responses],
+        # Live collaboration view during the attempt: never expose grading data.
+        submissions=[
+            SubmissionResponse.model_validate(r).for_student(scores_released=False)
+            for r in responses
+        ],
         total=len(responses),
     )
 

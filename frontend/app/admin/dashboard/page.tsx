@@ -12,10 +12,28 @@ import {
 } from "@/components/ui/card-v2";
 import { Badge } from "@/components/ui/badge-v2";
 import { Button } from "@/components/ui/button-v2";
-import { Users, BookOpen, Shield, Activity, AlertTriangle, MoreHorizontal, ArrowUp, ArrowDown, Settings, Pin, Share2, Trash, TriangleAlert } from "lucide-react";
+import {
+  Users,
+  BookOpen,
+  Shield,
+  Activity,
+  AlertTriangle,
+  MoreHorizontal,
+  ArrowUp,
+  ArrowDown,
+  Settings,
+  Pin,
+  Share2,
+  Trash,
+  TriangleAlert,
+  Lock,
+  GraduationCap,
+} from "lucide-react";
 import Link from "next/link";
 import { ChartAreaInteractive } from "@/components/chart-area-interactive";
 import { adminApi, AdminDashboardResponse } from "@/lib/api/admin";
+import { useAuth } from "@/hooks/use-auth";
+import { hasDuty } from "@/lib/duty-workspace";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import {
@@ -27,6 +45,9 @@ import {
 } from "@/components/ui/dropdown-menu-v2";
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
+  // Admins reach the exam office only when they hold the EXAM_OFFICER duty
+  const isExamOfficer = hasDuty(user, "EXAM_OFFICER");
   const [data, setData] = useState<AdminDashboardResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -52,6 +73,7 @@ export default function AdminDashboard() {
       positive: (data?.summary.total_students as any)?.positive ?? true,
       lastMonth: (data?.summary.total_students as any)?.last_month ?? 0,
       icon: Users,
+      pill: "bg-primary/10 text-primary",
     },
     {
       title: "Active Courses",
@@ -60,22 +82,25 @@ export default function AdminDashboard() {
       positive: (data?.summary.active_courses as any)?.positive ?? true,
       lastMonth: (data?.summary.active_courses as any)?.last_month ?? 0,
       icon: BookOpen,
+      pill: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
     },
     {
-      title: "Total Lecturers",
+      title: "Faculty & Staff",
       value: (data?.summary.total_lecturers as any)?.value ?? data?.summary.total_lecturers ?? 0,
       delta: (data?.summary.total_lecturers as any)?.delta ?? 0,
       positive: (data?.summary.total_lecturers as any)?.positive ?? true,
       lastMonth: (data?.summary.total_lecturers as any)?.last_month ?? 0,
-      icon: Users,
+      icon: GraduationCap,
+      pill: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     },
     {
-      title: "Flagged Events",
+      title: "Flagged Today",
       value: (data?.summary.flagged_events_today as any)?.value ?? data?.summary.flagged_events_today ?? 0,
       delta: (data?.summary.flagged_events_today as any)?.delta ?? 0,
       positive: (data?.summary.flagged_events_today as any)?.positive ?? true,
       lastMonth: (data?.summary.flagged_events_today as any)?.last_month ?? 0,
       icon: AlertTriangle,
+      pill: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
     },
   ];
 
@@ -116,54 +141,33 @@ export default function AdminDashboard() {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {systemMetrics.map((stat, index) => (
-          <Card key={index} className="rounded-xl">
-            <CardHeader className="border-0 pb-1 pt-3 px-4">
-              <CardTitle className="text-muted-foreground text-[10px] font-bold uppercase tracking-widest">{stat.title}</CardTitle>
-              <CardToolbar>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="dim" size="sm" mode="icon" className="-me-1.5 opacity-40 hover:opacity-100">
-                      <MoreHorizontal className="size-3.5" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" side="bottom">
-                    <DropdownMenuItem className="text-xs">
-                      <Settings className="size-3.5" />
-                      Settings
-                    </DropdownMenuItem>
-                    <DropdownMenuItem className="text-xs">
-                      <Pin className="size-3.5" /> Pin to Top
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem variant="destructive" className="text-xs">
-                      <Trash className="size-3.5" />
-                      Remove
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </CardToolbar>
-            </CardHeader>
-            <CardContent className="space-y-1.5 pt-0 px-4 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="text-2xl font-bold text-primary tracking-tight tabular-nums">
-                  {formatNumber(stat.value)}
-                </span>
-                {stat.delta !== 0 && (
-                  <Badge variant={stat.positive ? 'success' : 'destructive'} appearance="light" className="rounded-full h-4 px-1.5 text-[9px] font-bold">
-                    {stat.delta > 0 ? <ArrowUp className="size-2.5" /> : <ArrowDown className="size-2.5" />}
-                    {Math.abs(stat.delta)}%
-                  </Badge>
-                )}
+          <Card key={index} className="border border-border/60 shadow-none rounded-2xl bg-card overflow-hidden p-5">
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {stat.title}
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="text-2xl font-bold tracking-tight tabular-nums">
+                    {formatNumber(stat.value)}
+                  </span>
+                  {stat.delta !== 0 && (
+                    <Badge variant={stat.positive ? 'success' : 'destructive'} appearance="light" className="rounded-full h-4 px-1.5 text-[9px] font-bold">
+                      {stat.delta > 0 ? <ArrowUp className="size-2.5" /> : <ArrowDown className="size-2.5" />}
+                      {Math.abs(stat.delta)}%
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-[11px] text-muted-foreground font-medium pt-0.5">
+                  Prev. {formatNumber(stat.lastMonth)}
+                </div>
               </div>
-              <div className="text-[10px] text-muted-foreground mt-1 border-t border-muted/20 pt-1.5 flex justify-between items-center uppercase font-bold tracking-wider">
-                <span>Prev. Period</span>
-                <span className="text-foreground">
-                  {formatNumber(stat.lastMonth)}
-                </span>
+              <div className={cn("size-11 rounded-xl flex items-center justify-center shrink-0", stat.pill)}>
+                <stat.icon className="size-5" />
               </div>
-            </CardContent>
+            </div>
           </Card>
         ))}
       </div>
@@ -187,49 +191,71 @@ export default function AdminDashboard() {
         </div>
 
         {/* Quick Actions */}
-        <Card className="lg:col-span-5 flex flex-col rounded-xl">
-          <CardHeader className="border-b py-3 px-5 bg-muted/5">
-            <CardTitle className="text-xs font-bold uppercase tracking-wider">Platform Management</CardTitle>
+        <Card className="lg:col-span-5 flex flex-col rounded-2xl border border-border/60 shadow-none bg-card overflow-hidden">
+          <CardHeader className="border-b py-4 px-5 bg-muted/20">
+            <CardTitle className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Platform Management & Quick Actions</CardTitle>
           </CardHeader>
-          <CardContent className="flex-1 p-3 grid grid-cols-2 gap-2">
+          <CardContent className="flex-1 p-4 grid grid-cols-2 sm:grid-cols-3 gap-2.5">
             <Button
               asChild
-              variant="secondary"
-              className="h-full min-h-20 flex-col gap-1.5 justify-center rounded-xl text-xs"
+              variant="outline"
+              className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
             >
               <Link href="/admin/users">
-                <Users className="size-4" />
-                <span>Manage Users</span>
+                <Users className="size-4 text-primary" />
+                <span className="font-semibold">Manage Users</span>
               </Link>
             </Button>
             <Button
               asChild
               variant="outline"
-              className="h-full min-h-20 flex-col gap-1.5 justify-center rounded-xl text-xs"
+              className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
             >
               <Link href="/admin/courses">
-                <BookOpen className="size-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Courses & Classes</span>
+                <BookOpen className="size-4 text-indigo-500" />
+                <span className="font-semibold">Courses & Classes</span>
               </Link>
             </Button>
+            {isExamOfficer && (
+              <Button
+                asChild
+                variant="outline"
+                className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
+              >
+                <Link href="/admin/exam-office">
+                  <Lock className="size-4 text-amber-500" />
+                  <span className="font-semibold">Exam Office & Seals</span>
+                </Link>
+              </Button>
+            )}
             <Button
               asChild
               variant="outline"
-              className="h-full min-h-20 flex-col gap-1.5 justify-center rounded-xl text-xs"
+              className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
             >
               <Link href="/admin/integrity">
-                <AlertTriangle className="size-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Integrity Logs</span>
+                <AlertTriangle className="size-4 text-rose-500" />
+                <span className="font-semibold">Integrity Center</span>
               </Link>
             </Button>
             <Button
               asChild
               variant="outline"
-              className="h-full min-h-20 flex-col gap-1.5 justify-center rounded-xl text-xs"
+              className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
             >
               <Link href="/admin/analytics">
-                <Activity className="size-4 text-muted-foreground" />
-                <span className="text-muted-foreground">Full Analytics</span>
+                <Activity className="size-4 text-emerald-500" />
+                <span className="font-semibold">Full Analytics</span>
+              </Link>
+            </Button>
+            <Button
+              asChild
+              variant="outline"
+              className="h-auto py-3.5 flex-col gap-1.5 justify-center rounded-xl text-xs border-border/60 hover:bg-muted/40 transition-colors"
+            >
+              <Link href="/admin/settings">
+                <Settings className="size-4 text-muted-foreground" />
+                <span className="font-semibold">System Settings</span>
               </Link>
             </Button>
           </CardContent>
@@ -238,7 +264,7 @@ export default function AdminDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Platform Activity */}
-        <Card className="rounded-xl overflow-hidden">
+        <Card className="rounded-2xl border border-border/60 shadow-none bg-card overflow-hidden">
           <CardHeader className="border-b py-3 px-5 bg-muted/5">
             <CardTitle className="text-xs font-bold uppercase tracking-wider">
               Recent Activity
@@ -283,7 +309,7 @@ export default function AdminDashboard() {
         </Card>
 
         {/* System Health */}
-        <Card className="rounded-xl overflow-hidden">
+        <Card className="rounded-2xl border border-border/60 shadow-none bg-card overflow-hidden">
           <CardHeader className="border-b py-3 px-5 bg-muted/5">
             <CardTitle className="text-xs font-bold uppercase tracking-wider">Infrastructure Status</CardTitle>
           </CardHeader>
@@ -294,8 +320,8 @@ export default function AdminDashboard() {
                   className={cn(
                     "p-2 rounded-full",
                     data?.summary.system_status === "Healthy"
-                      ? "bg-emerald-50"
-                      : "bg-destructive/10",
+                      ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                      : "bg-destructive/10 text-destructive",
                   )}
                 >
                   <Shield

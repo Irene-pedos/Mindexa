@@ -55,6 +55,8 @@ def create_celery() -> Celery:
             "app.workers.tasks.grading",
             "app.workers.tasks.document_processing",
             "app.workers.tasks.sealing_deadline",
+            "app.workers.tasks.grading_reminder",
+            "app.workers.tasks.export_tasks",
         ],
     )
 
@@ -96,6 +98,7 @@ def create_celery() -> Celery:
     cleanup_exchange = Exchange("cleanup", type="direct")
     high_priority_exchange = Exchange("high_priority", type="direct")
     rag_exchange = Exchange("rag", type="direct")
+    exports_exchange = Exchange("exports", type="direct")
 
     app.conf.task_queues = [
         Queue("default", default_exchange, routing_key="default"),
@@ -104,6 +107,7 @@ def create_celery() -> Celery:
         Queue("cleanup", cleanup_exchange, routing_key="cleanup"),
         Queue("high_priority", high_priority_exchange, routing_key="high_priority"),
         Queue("rag", rag_exchange, routing_key="rag"),
+        Queue("exports", exports_exchange, routing_key="exports"),
     ]
     app.conf.update(
         task_default_queue="default",
@@ -124,6 +128,7 @@ def create_celery() -> Celery:
         "app.workers.tasks.auto_submit_expired_attempts": {"queue": "cleanup"},
         "app.workers.tasks.process_ai_generation_batch": {"queue": "default"},
         "app.workers.tasks.grading_reminder": {"queue": "cleanup"},
+        "app.workers.tasks.export_tasks.run_export_job": {"queue": "exports"},
     }
 
     # ── Beat schedule (periodic tasks) ────────────────────────────────────────
@@ -152,12 +157,12 @@ def create_celery() -> Celery:
             "schedule": 900.0,   # seconds (15 min)
             "options": {"queue": "cleanup"},
         },
-        # TODO: Implement and re-enable grading_reminder task
-        # "grading-reminder": {
-        #     "task": "app.workers.tasks.grading_reminder",
-        #     "schedule": 43200.0,
-        #     "options": {"queue": "cleanup"},
-        # },
+        # Phase 6C: grading deadline reminders — every 6 hours
+        "grading-reminder": {
+            "task": "app.workers.tasks.grading_reminder",
+            "schedule": 21600.0,  # 6 hours
+            "options": {"queue": "cleanup"},
+        },
     }
 
     return app

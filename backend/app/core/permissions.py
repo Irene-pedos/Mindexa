@@ -377,8 +377,10 @@ def require_duty(duty: Duty | str) -> Callable[..., Any]:
     duty_enum = Duty(duty) if isinstance(duty, str) else duty
 
     async def _guard(
-        current_user: Annotated[User, Depends(require_active_user)],
-        db: Annotated[AsyncSession, Depends(get_db)],
+        # Plain defaults, not Annotated: with postponed annotations FastAPI cannot
+        # resolve the locally imported User inside this closure.
+        current_user: User = Depends(require_active_user),
+        db: AsyncSession = Depends(get_db),
     ) -> User:
         if not await has_duty(db=db, user_or_db=current_user, duty_or_user=duty_enum):
             raise PermissionDeniedError(f"User lacks required active duty: {duty_enum.value}")

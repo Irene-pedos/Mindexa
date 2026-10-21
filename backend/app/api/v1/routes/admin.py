@@ -120,12 +120,17 @@ async def list_users(
     page_size: int = Query(default=20, ge=1, le=100),
     role: Optional[str] = Query(default=None),
     status: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(
+        default=None, max_length=100, description="Match email or name (case-insensitive)"
+    ),
     current_user=Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ) -> AdminUserListResponse:
     """Returns a paginated list of all users on the platform."""
     service = AdminService(db)
-    items, total = await service.list_users(page, page_size, role=role, status=status)
+    items, total = await service.list_users(
+        page, page_size, role=role, status=status, search=search
+    )
     return AdminUserListResponse(items=items, total=total)
 
 

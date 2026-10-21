@@ -169,6 +169,8 @@ export interface AssessmentQuestion {
   question_type?: string;
   marks: number;
   options?: QuestionOption[];
+  /** MATCHING: shuffled right-hand choices, sent separately from options. */
+  match_choices?: string[] | null;
   assessment_section_id?: string;
   section_title?: string;
   section_instructions?: string;
@@ -551,7 +553,7 @@ function useOfflineSync({
     qType: string,
     answerVal: AnswerValue,
     changeType: "autosave" | "manual_save",
-  ) => Promise<void>;
+  ) => Promise<boolean>;
 }) {
   const [isOnline, setIsOnline] = useState(true);
 
@@ -594,41 +596,67 @@ function useOfflineSync({
     [attemptId],
   );
 
-  const flushOfflineQueue = useCallback(async () => {
-    if (!attemptId || !attemptToken) return;
-    const queueKey = `offline_saves_${attemptId}`;
+  const pendingOfflineCount = useCallback((): number => {
+    if (!attemptId) return 0;
     try {
-      const queueStr = localStorage.getItem(queueKey);
-      if (!queueStr) return;
-      const queue = JSON.parse(queueStr);
-      if (queue.length === 0) return;
+      const queueStr = localStorage.getItem(`offline_saves_${attemptId}`);
+      return queueStr ? JSON.parse(queueStr).length : 0;
+    } catch {
+      return 0;
+    }
+  }, [attemptId]);
 
-      toast.info("Connection restored — syncing local answers...");
+  /**
+   * Re-sends answers that previously failed to save. Returns true when nothing
+   * is left unsaved. Each answer is retried independently — one failure (or a
+   * failed RECONNECT log) no longer aborts the whole sync.
+   */
+  const flushOfflineQueue = useCallback(
+    async (options: { silent?: boolean } = {}): Promise<boolean> => {
+      if (!attemptId || !attemptToken) return true;
+      const queueKey = `offline_saves_${attemptId}`;
+      let queue: Array<{ question_id: string; q_type: string; answer_val: AnswerValue }>;
+      try {
+        const queueStr = localStorage.getItem(queueKey);
+        queue = queueStr ? JSON.parse(queueStr) : [];
+      } catch {
+        return true;
+      }
+      if (queue.length === 0) return true;
 
-      // Log a RECONNECT integrity event
-      await attemptApi.recordIntegrityEvent(
-        attemptId,
-        attemptToken,
-        "RECONNECT",
-        {
+      if (!options.silent) toast.info("Syncing answers saved on this device...");
+
+      attemptApi
+        .recordIntegrityEvent(attemptId, attemptToken, "RECONNECT", {
           offline_saves_count: queue.length,
-        },
-      );
+        })
+        .catch(() => undefined);
 
+      let failed = 0;
       for (const item of queue) {
-        await saveAnswer(
-          item.question_id,
-          item.q_type,
-          item.answer_val,
-          "autosave",
-        );
+        // saveAnswer removes the item from the queue on success, re-queues on failure
+        const ok = await saveAnswer(item.question_id, item.q_type, item.answer_val, "autosave");
+        if (!ok) failed++;
       }
 
-      toast.success("Connection restored — all answers synced");
-    } catch (err) {
-      console.error("Failed to flush offline queue", err);
-    }
-  }, [attemptId, attemptToken, saveAnswer]);
+      if (failed === 0) {
+        toast.success("All answers synced.", { id: "offline-sync" });
+        return true;
+      }
+      return false;
+    },
+    [attemptId, attemptToken, saveAnswer],
+  );
+
+  // Keep retrying unsaved answers: the browser `online` event never fires for
+  // server-side failures, so relying on it alone could leave answers unsent.
+  useEffect(() => {
+    if (!attemptId || !attemptToken) return;
+    const interval = setInterval(() => {
+      if (pendingOfflineCount() > 0) void flushOfflineQueue({ silent: true });
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [attemptId, attemptToken, flushOfflineQueue, pendingOfflineCount]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -655,7 +683,7 @@ function useOfflineSync({
     };
   }, [flushOfflineQueue]);
 
-  return { isOnline, queueLocalSave, flushOfflineQueue };
+  return { isOnline, queueLocalSave, flushOfflineQueue, pendingOfflineCount };
 }
 
 // --- DnD Components for Matching Pairs & Fill In The Blanks ---
@@ -676,6 +704,7 @@ function MatchingDnd({
   return (
     <SharedMatchingDnd
       options={q.options || []}
+      matchChoices={q.match_choices}
       questionId={q.id}
       attemptId={attemptId}
       currentVal={currentVal}
@@ -1112,7 +1141,8 @@ export default function TakeAssessmentPage() {
   const [attemptNumber, setAttemptNumber] = useState<number>(1);
 
   useEffect(() => {
-    if (stage === "submitted") {
+    // A failed submission must stay on the retry screen, not jump to results
+    if (stage === "submitted" && !submitError) {
       const redirect = () => {
         router.push(
           attemptId ? `/student/results/${attemptId}` : "/student/results",
@@ -1122,7 +1152,7 @@ export default function TakeAssessmentPage() {
       const timer = setTimeout(redirect, 10000);
       return () => clearTimeout(timer);
     }
-  }, [stage, attemptId, router]);
+  }, [stage, attemptId, router, submitError]);
 
   const [flaggedQuestions, setFlaggedQuestions] = useState<
     Record<string, boolean>
@@ -1155,10 +1185,10 @@ export default function TakeAssessmentPage() {
         qType: string,
         answerVal: AnswerValue,
         changeType: "autosave" | "manual_save",
-      ) => Promise<void>)
+      ) => Promise<boolean>)
     | null
   >(null);
-  const saveAllPendingAnswersRef = useRef<(() => Promise<void>) | undefined>(
+  const saveAllPendingAnswersRef = useRef<(() => Promise<number>) | undefined>(
     undefined,
   );
   const readinessAbortControllerRef = useRef<AbortController | null>(null);
@@ -1258,8 +1288,15 @@ export default function TakeAssessmentPage() {
     [assessment],
   );
 
+  // Outcome of the automatic submit after an integrity termination, shown on
+  // the termination screen instead of always claiming success.
+  const [terminationSubmit, setTerminationSubmit] = useState<
+    "pending" | "recorded" | "failed"
+  >("pending");
+
   const autoSubmit = useCallback(async () => {
     if (!attemptId || !attemptToken) return;
+    setTerminationSubmit("pending");
     try {
       if (saveAllPendingAnswersRef.current) {
         await saveAllPendingAnswersRef.current();
@@ -1267,11 +1304,12 @@ export default function TakeAssessmentPage() {
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
       localStorage.removeItem(`attempt_token_${attemptId}`);
       localStorage.removeItem(`active_attempt_${assessmentId}`);
-      toast.info("Responses preserved.");
+      setTerminationSubmit("recorded");
     } catch (err: unknown) {
       console.error("Auto-submit failed", err);
+      setTerminationSubmit("failed");
     }
-  }, [attemptId, attemptToken]);
+  }, [assessmentId, attemptId, attemptToken]);
 
   const terminateSession = useCallback(
     (reason: string) => {
@@ -1375,17 +1413,17 @@ export default function TakeAssessmentPage() {
     setIsScreenBlurred,
   });
 
-  const { isOnline, queueLocalSave, flushOfflineQueue } = useOfflineSync({
+  const { isOnline, queueLocalSave, flushOfflineQueue, pendingOfflineCount } = useOfflineSync({
     attemptId,
     attemptToken,
     saveAnswer: useCallback(
-      async (questionId, qType, answerVal, changeType) => {
-        await saveAnswerRef.current?.(questionId, qType, answerVal, changeType);
-      },
+      async (questionId, qType, answerVal, changeType) =>
+        (await saveAnswerRef.current?.(questionId, qType, answerVal, changeType)) ?? false,
       [],
     ),
   });
 
+  /** Saves one answer. Resolves true only when the server accepted it. */
   const saveAnswer = useCallback(
     async (
       questionId: string,
@@ -1393,8 +1431,8 @@ export default function TakeAssessmentPage() {
       answerVal: AnswerValue,
       changeType: "autosave" | "manual_save" = "autosave",
       isSkippedOverride?: boolean,
-    ) => {
-      if (!attemptId || !attemptToken) return;
+    ): Promise<boolean> => {
+      if (!attemptId || !attemptToken) return false;
 
       const answerType = getAnswerType(qType);
       const timeOnQuestion = timeSpentRef.current[questionId] || 0;
@@ -1474,13 +1512,16 @@ export default function TakeAssessmentPage() {
             console.error(e);
           }
         }
+        return true;
       } catch (err: unknown) {
         console.error("Save failed, queueing locally", err);
         setSaveStatus((prev) => ({ ...prev, [questionId]: "failed" }));
         queueLocalSave(questionId, qType, answerVal);
-        toast.warning("Network connection issue. Answer saved locally.", {
-          id: `save-fail-${questionId}`,
-        });
+        toast.warning(
+          "Your answer could not be sent yet. It is kept on this device and will be retried.",
+          { id: `save-fail-${questionId}` },
+        );
+        return false;
       }
     },
     [attemptId, attemptToken, queueLocalSave, skippedQuestions],
@@ -1777,8 +1818,14 @@ export default function TakeAssessmentPage() {
   }, [stage, attemptId, terminateSession]);
 
   // Timer with server deadline countdown
-  const saveAllPendingAnswers = useCallback(async () => {
-    if (!attemptId || !attemptToken || !questions.length) return;
+  /**
+   * Sends every answer that is not yet on the server — including answers that
+   * failed earlier and wait in the offline queue. Returns how many are still
+   * unsaved afterwards.
+   */
+  const saveAllPendingAnswers = useCallback(async (): Promise<number> => {
+    if (!attemptId || !attemptToken || !questions.length) return 0;
+    await flushOfflineQueue({ silent: true });
     for (const q of questions) {
       const currentAnswer = answersRef.current[q.id];
       if (
@@ -1786,21 +1833,19 @@ export default function TakeAssessmentPage() {
         JSON.stringify(currentAnswer) !==
           JSON.stringify(lastSavedValuesRef.current[q.id])
       ) {
-        try {
-          await saveAnswer(q.id, q.type, currentAnswer, "manual_save");
-          lastSavedValuesRef.current[q.id] = currentAnswer;
-        } catch (err: unknown) {
-          console.error(`Failed to save pending answer for ${q.id}`, err);
-        }
+        const ok = await saveAnswer(q.id, q.type, currentAnswer, "manual_save");
+        if (ok) lastSavedValuesRef.current[q.id] = currentAnswer;
       }
     }
-  }, [attemptId, attemptToken, questions, saveAnswer]);
+    return pendingOfflineCount();
+  }, [attemptId, attemptToken, questions, saveAnswer, flushOfflineQueue, pendingOfflineCount]);
 
   const handleAutoSubmit = useCallback(async () => {
     setSubmitting(true);
     setSubmitError(null);
     toast.info("Time expired! Automatically submitting your assessment as-is.");
     try {
+      // Time is up: submit regardless, after a best-effort save of everything pending
       await saveAllPendingAnswers();
       await attemptApi.submitAttempt(attemptId!, attemptToken!, true);
       setStage("submitted");
@@ -1895,12 +1940,9 @@ export default function TakeAssessmentPage() {
     const controller = new AbortController();
 
     const timer = setTimeout(async () => {
-      try {
-        await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
-        if (controller.signal.aborted) return;
+      const ok = await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
+      if (ok && !controller.signal.aborted) {
         lastSavedValuesRef.current[currentQ.id] = currentAnswer;
-      } catch (err: unknown) {
-        console.error(err);
       }
     }, AUTOSAVE_DEBOUNCE_MS);
 
@@ -1918,18 +1960,15 @@ export default function TakeAssessmentPage() {
     const interval = setInterval(async () => {
       if (currentQ) {
         const currentAnswer = answers[currentQ.id];
-        if (currentAnswer !== undefined) {
-          try {
-            await saveAnswer(
-              currentQ.id,
-              currentQ.type,
-              currentAnswer,
-              "autosave",
-            );
-            if (controller.signal.aborted) return;
+        // Only re-send when something changed since the last successful save
+        if (
+          currentAnswer !== undefined &&
+          JSON.stringify(currentAnswer) !==
+            JSON.stringify(lastSavedValuesRef.current[currentQ.id])
+        ) {
+          const ok = await saveAnswer(currentQ.id, currentQ.type, currentAnswer, "autosave");
+          if (ok && !controller.signal.aborted) {
             lastSavedValuesRef.current[currentQ.id] = currentAnswer;
-          } catch (err: unknown) {
-            console.error(err);
           }
         }
       }
@@ -1958,12 +1997,9 @@ export default function TakeAssessmentPage() {
             JSON.stringify(currentAnswer) !==
               JSON.stringify(lastSavedValuesRef.current[qId])
           ) {
-            try {
-              await saveAnswer(qId, qType, currentAnswer, "manual_save");
-              lastSavedValuesRef.current[qId] = currentAnswer;
-            } catch (saveErr) {
-              console.error("Navigation save error:", saveErr);
-            }
+            // A failed save stays queued for retry; navigation is not blocked
+            const ok = await saveAnswer(qId, qType, currentAnswer, "manual_save");
+            if (ok) lastSavedValuesRef.current[qId] = currentAnswer;
           }
         }
 
@@ -1982,7 +2018,16 @@ export default function TakeAssessmentPage() {
     setSubmitting(true);
     setManualSubmitError(null);
     try {
-      await saveAllPendingAnswers();
+      // Never submit while answers are still only on this device — the server
+      // would grade the attempt without them.
+      const unsaved = await saveAllPendingAnswers();
+      if (unsaved > 0) {
+        setManualSubmitError(
+          `${unsaved} answer(s) could not be sent to the server yet. Check your connection and press Submit again — nothing has been lost.`,
+        );
+        toast.error("Some answers are not saved yet.");
+        return;
+      }
       await attemptApi.submitAttempt(attemptId, attemptToken, true);
       if (typeof document !== "undefined" && document.fullscreenElement)
         document.exitFullscreen();
@@ -2935,10 +2980,32 @@ export default function TakeAssessmentPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="p-6 space-y-4">
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              Your responses have been securely recorded. The session has been
-              closed due to security protocol enforcement.
-            </p>
+            {terminationSubmit === "recorded" && (
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Your responses have been recorded. The session has been closed
+                due to security protocol enforcement.
+              </p>
+            )}
+            {terminationSubmit === "pending" && (
+              <p className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Submitting your responses…
+              </p>
+            )}
+            {terminationSubmit === "failed" && (
+              <div className="space-y-2">
+                <p className="text-sm text-destructive leading-relaxed">
+                  Your responses could not be submitted yet. They are kept on this
+                  device — check your connection and retry.
+                </p>
+                <Button
+                  onClick={() => void autoSubmit()}
+                  className="w-full h-10 text-xs font-medium rounded-lg"
+                  variant="destructive"
+                >
+                  Retry submission
+                </Button>
+              </div>
+            )}
             <Button
               onClick={() => router.push("/student/dashboard")}
               className="w-full h-10 text-xs font-medium rounded-lg shadow-sm"
@@ -4038,14 +4105,16 @@ export default function TakeAssessmentPage() {
                             if (currentQ) {
                               const currentAnswer = answers[currentQ.id];
                               if (currentAnswer !== undefined) {
-                                await saveAnswer(
+                                const ok = await saveAnswer(
                                   currentQ.id,
                                   currentQ.type,
                                   currentAnswer,
                                   "manual_save",
                                 );
-                                lastSavedValuesRef.current[currentQ.id] =
-                                  currentAnswer;
+                                if (ok) {
+                                  lastSavedValuesRef.current[currentQ.id] =
+                                    currentAnswer;
+                                }
                               }
                             }
                             setShowSubmitConfirm(true);

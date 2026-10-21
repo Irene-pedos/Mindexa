@@ -140,6 +140,18 @@ class AttemptService:
                         code="STUDENT_NOT_TARGETED",
                     )
 
+        # Gate 1c — Institutional eligibility gate (Phase 6A: CAT reassessment block, Summative entry)
+        asm_type = getattr(assessment, "assessment_type", None)
+        asm_type_str = (asm_type.value if hasattr(asm_type, "value") else str(asm_type or "")).upper()
+        if asm_type_str in ["CAT", "SUMMATIVE", "EXAM"]:
+            from app.services.eligibility_service import EligibilityService
+            eligibility_service = EligibilityService(self.db)
+            await eligibility_service.evaluate_attempt_start_gate(
+                student_id=student_id,
+                assessment_id=assessment_id,
+                assessment=assessment,
+            )
+
         # Gate 2 — within window
         now = _utcnow()
         if assessment.window_start and now < assessment.window_start:
@@ -483,6 +495,18 @@ class AttemptService:
         except Exception as e:
             # Don't fail submission if notification fails
             print(f"FAILED to send submission notifications: {e}")
+
+        # Phase 6A: If submitting a reassessment, mark requirement as SUBMITTED (satisfies CAT gate A-06)
+        try:
+            from app.services.eligibility_service import EligibilityService
+            eligibility_service = EligibilityService(self.db)
+            await eligibility_service.process_reassessment_attempt_submitted(
+                reassessment_attempt_id=attempt_id,
+                reassessment_assessment_id=attempt.assessment_id,
+                student_id=student_id,
+            )
+        except Exception as e:
+            print(f"FAILED to update reassessment requirement status on submit: {e}")
 
         attempt.status = AttemptStatus.SUBMITTED
         attempt.submitted_at = now

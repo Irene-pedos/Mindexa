@@ -99,6 +99,9 @@ def _resolve_tier(path: str) -> str:
     if "/study-reader" in path and ("/generate" in path or "/ai" in path):
         return "ai_heavy"
 
+    if "/draft-feedback" in path:
+        return "ai_heavy"
+
     return _DEFAULT_TIER
 
 

@@ -7,7 +7,11 @@ from app.db.models.attempt import SubmissionGrade, StudentResponse
 
 
 @pytest.mark.asyncio
-async def test_generate_breakdown_falls_back_to_ai_feedback_draft():
+async def test_generate_breakdown_never_exposes_unaccepted_ai_feedback_draft():
+    """
+    AGENTS.md human-review rule: only lecturer-approved feedback reaches students.
+    (Accepting the AI suggestion copies the draft into `feedback` at grading time.)
+    """
     db = AsyncMock()
     service = ResultService(db)
     service.result_repo = AsyncMock()
@@ -33,7 +37,7 @@ async def test_generate_breakdown_falls_back_to_ai_feedback_draft():
     grade2.question_id = q2_id
     grade2.score = 8.0
     grade2.max_score = 10.0
-    grade2.feedback = None  # Lecturer accepted AI grade without manual feedback typing
+    grade2.feedback = None  # AI draft exists but the lecturer never accepted it
     grade2.ai_feedback_draft = "Clear argument, consider adding more citations."
     grade2.grading_mode = "AI_ASSISTED"
     grade2.feedback_author_basis = "LECTURER"
@@ -63,6 +67,6 @@ async def test_generate_breakdown_falls_back_to_ai_feedback_draft():
     assert bd_map[q1_id]["feedback"] == "Good attempt, improve structure."
     assert bd_map[q1_id]["feedback_author_basis"] == "LECTURER"
 
-    # q2: falls back to ai_feedback_draft and sets basis to AI
-    assert bd_map[q2_id]["feedback"] == "Clear argument, consider adding more citations."
-    assert bd_map[q2_id]["feedback_author_basis"] == "AI"
+    # q2: unaccepted AI draft stays internal
+    assert bd_map[q2_id]["feedback"] is None
+    assert bd_map[q2_id]["feedback_author_basis"] == "LECTURER"

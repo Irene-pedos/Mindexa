@@ -599,6 +599,22 @@ class NotificationType(str, Enum):
     POST_APPROVAL_EDIT = "POST_APPROVAL_EDIT"
     SEAL_SUPERSEDED = "SEAL_SUPERSEDED"
     ASSESSMENT_UPDATE_NOTICE = "ASSESSMENT_UPDATE_NOTICE"
+    # Phase 6A: Eligibility, reassessment, and retakes
+    REASSESSMENT_REQUIRED = "REASSESSMENT_REQUIRED"
+    REASSESSMENT_ASSIGNED = "REASSESSMENT_ASSIGNED"
+    CAT_BLOCKED_REASSESSMENT = "CAT_BLOCKED_REASSESSMENT"
+    RETAKE_FLAGGED = "RETAKE_FLAGGED"
+    RETAKE_PAYMENT_CONFIRMED = "RETAKE_PAYMENT_CONFIRMED"
+    RETAKE_ENROLLED = "RETAKE_ENROLLED"
+    # Phase 6B: Appeals and absence excuses
+    APPEAL_PAYMENT_CONFIRMED = "APPEAL_PAYMENT_CONFIRMED"
+    APPEAL_REVIEWER_ASSIGNED = "APPEAL_REVIEWER_ASSIGNED"
+    APPEAL_DECIDED = "APPEAL_DECIDED"
+    EXCUSE_SUBMITTED = "EXCUSE_SUBMITTED"
+    EXCUSE_DECIDED = "EXCUSE_DECIDED"
+    # Phase 6C: Calendar and grading reminders
+    MARKS_DEADLINE_REMINDER = "MARKS_DEADLINE_REMINDER"
+    MARKS_OVERDUE = "MARKS_OVERDUE"
 
 
 class ScheduledEventType(str, Enum):
@@ -728,5 +744,130 @@ class GradingDelegationScope(str, Enum):
     WHOLE = "WHOLE"
     SECTION = "SECTION"
     SELECTED_STUDENTS = "SELECTED_STUDENTS"
+
+
+# ── Phase 6A: Eligibility, Reassessment & Retakes ────────────────────────────
+
+class ReassessmentRequirementStatus(str, Enum):
+    REQUIRED = "REQUIRED"
+    ASSIGNED = "ASSIGNED"
+    SUBMITTED = "SUBMITTED"
+    GRADED = "GRADED"
+    EXCUSED = "EXCUSED"
+    WAIVED = "WAIVED"
+
+
+class EligibilityDecisionType(str, Enum):
+    CAT_GATE = "CAT_GATE"
+    SUMMATIVE_ENTRY = "SUMMATIVE_ENTRY"
+    COURSE_OUTCOME = "COURSE_OUTCOME"
+
+
+class EligibilityResult(str, Enum):
+    ELIGIBLE = "ELIGIBLE"
+    BLOCKED = "BLOCKED"
+    PASS = "PASS"
+    RETAKE_REQUIRED = "RETAKE_REQUIRED"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+
+
+class OverrideSource(str, Enum):
+    EXCUSE = "EXCUSE"
+    HOD_OVERRIDE = "HOD_OVERRIDE"
+
+
+class RetakeTrigger(str, Enum):
+    ENTRY_THRESHOLD_NOT_MET = "ENTRY_THRESHOLD_NOT_MET"
+    SUMMATIVE_FAILED = "SUMMATIVE_FAILED"
+
+
+class RetakeStatus(str, Enum):
+    FLAGGED = "FLAGGED"
+    PAYMENT_PENDING = "PAYMENT_PENDING"
+    PAID = "PAID"
+    ENROLLED = "ENROLLED"
+    CANCELLED = "CANCELLED"
+
+
+class PaymentStatus(str, Enum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    REJECTED = "REJECTED"
+
+
+class PaymentPurpose(str, Enum):
+    RETAKE = "RETAKE"
+    APPEAL = "APPEAL"
+
+
+class FormativeScope(str, Enum):
+    PER_FORMATIVE = "PER_FORMATIVE"
+
+
+class ReassessmentBlockScope(str, Enum):
+    COURSE = "COURSE"
+    ALL_COURSES = "ALL_COURSES"
+
+
+class PendingMarksBehavior(str, Enum):
+    BLOCK = "BLOCK"
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    EXCLUDE = "EXCLUDE"
+
+
+class NoCourseworkBehavior(str, Enum):
+    MANUAL_REVIEW = "MANUAL_REVIEW"
+    BLOCK = "BLOCK"
+    ALLOW = "ALLOW"
+
+
+# ── Phase 6B: Appeals and Absence Excuses ────────────────────────────────────
+
+class IndividualAppealStatus(str, Enum):
+    SUBMITTED = "SUBMITTED"
+    PAYMENT_PENDING = "PAYMENT_PENDING"
+    PAID = "PAID"
+    ASSIGNED = "ASSIGNED"
+    UNDER_REVIEW = "UNDER_REVIEW"
+    DECIDED = "DECIDED"
+    CLOSED = "CLOSED"
+    REJECTED_INVALID = "REJECTED_INVALID"
+    WITHDRAWN = "WITHDRAWN"
+
+
+class AppealOutcome(str, Enum):
+    MARK_CONFIRMED = "MARK_CONFIRMED"
+    MARK_INCREASED = "MARK_INCREASED"
+    MARK_DECREASED = "MARK_DECREASED"
+
+
+class AbsenceExcuseStatus(str, Enum):
+    SUBMITTED = "SUBMITTED"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    WITHDRAWN = "WITHDRAWN"
+
+
+# ── Phase 6C: Academic Calendar and Excel Export ─────────────────────────────
+
+class CalendarEventType(str, Enum):
+    MARKS_DEADLINE = "MARKS_DEADLINE"
+    DELIBERATION = "DELIBERATION"
+    APPEAL_WINDOW = "APPEAL_WINDOW"
+    REASSESSMENT_WINDOW = "REASSESSMENT_WINDOW"
+    EXAM_PERIOD = "EXAM_PERIOD"
+    OTHER = "OTHER"
+
+
+class ExportJobStatus(str, Enum):
+    QUEUED = "QUEUED"
+    RUNNING = "RUNNING"
+    DONE = "DONE"
+    FAILED = "FAILED"
+
+
+class ExportType(str, Enum):
+    ASSESSMENT_MARKSHEET = "ASSESSMENT_MARKSHEET"
+    COURSE_CONSOLIDATED = "COURSE_CONSOLIDATED"
 
 

@@ -52,8 +52,11 @@ RESPONSE PATTERNS:
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import structlog
 from fastapi import APIRouter, Cookie, Depends, Request, Response, status, File, UploadFile
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -181,6 +184,24 @@ def _build_user_response(user) -> UserResponse:
             reduced_motion_default=getattr(user.profile, "reduced_motion_default", False),
         )
 
+    # Only currently valid duties — mirrors the filters in core.permissions.has_duty
+    # Skip when the relationship wasn't eager-loaded: a lazy load here raises
+    # MissingGreenlet under the async session.
+    now = datetime.now(UTC)
+    duties_list: list[str] = []
+    state = sa_inspect(user, raiseerr=False)
+    loaded = state is not None and "duty_assignments" not in state.unloaded
+    for da in (user.duty_assignments if loaded else None) or []:
+        if da.is_deleted or not da.is_active:
+            continue
+        if da.valid_from and da.valid_from > now:
+            continue
+        if da.valid_to and da.valid_to < now:
+            continue
+        val = da.duty.value if hasattr(da.duty, "value") else str(da.duty)
+        if val not in duties_list:
+            duties_list.append(val)
+
     return UserResponse(
         id=user.id,
         created_at=user.created_at,
@@ -196,6 +217,7 @@ def _build_user_response(user) -> UserResponse:
         email_verified_at=getattr(user, "email_verified_at", None),
         last_login_at=getattr(user, "last_login_at", None),
         profile=profile_response,
+        duties=duties_list,
     )
 
 
@@ -382,6 +404,7 @@ async def login(
     # Load the full user for the response (login service returns tokens + basic info)
     user = await service.get_user_by_id(result["user_id"])
     user_response = _build_user_response(user)
+    user_response.has_teaching_assignments = await service.has_teaching_assignments(user)
 
     # Set refresh token as HttpOnly cookie
     _set_refresh_cookie(response, result["refresh_token"])
@@ -799,6 +822,7 @@ async def reset_password(
 )
 async def get_me(
     current_user: CurrentUser,
+    db: AsyncSession = Depends(get_db),
 ) -> UserResponse:
     """
     Get the authenticated user's own profile.
@@ -808,9 +832,14 @@ async def get_me(
     check their status even if unverified (to know they need to verify).
 
     Note: `current_user` is injected by `get_current_user` which already
-    loads the user with their profile (selectinload). No extra DB call here.
+    loads the user with their profile (selectinload). Lecturers cost one extra
+    lightweight query for the teaching-assignment flag.
     """
-    return _build_user_response(current_user)
+    response = _build_user_response(current_user)
+    response.has_teaching_assignments = await AuthService(db).has_teaching_assignments(
+        current_user
+    )
+    return response
 
 
 @router.patch(

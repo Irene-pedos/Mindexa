@@ -46,6 +46,7 @@ class ReviewAgentV2Output(BaseModel):
     key_points_coverage: list[KeyPointCoverageItem] = Field(default_factory=list)
     interpretation_note: Optional[str] = None
     inconsistent_ai_output: bool = False
+    evidence_validation: list[dict] = Field(default_factory=list)
 
 
 def _format_student_answer(student_answer: str) -> str:
@@ -86,7 +87,7 @@ def validate_v2_output(
     1. 0 <= suggested_score <= max_score
     2. sum(marks_awarded) == suggested_score (within 0.01 tolerance), else inconsistent_ai_output=True
     3. Every evidence_quote must appear in student_answer (case-insensitive substring check),
-       else quote is dropped and confidence is reduced.
+       else quote is dropped and confidence is reduced. Audit details stored in evidence_validation.
     """
     # 1. Clamping suggested_score
     if parsed.suggested_score < 0:
@@ -103,13 +104,30 @@ def validate_v2_output(
 
     # 3. Substring check for evidence quotes
     clean_student_ans = student_answer.lower() if student_answer else ""
+    evidence_validation: list[dict] = []
     for item in parsed.key_points_coverage:
         if item.evidence_quote:
-            quote = item.evidence_quote.strip().lower()
+            orig_quote = item.evidence_quote
+            quote = orig_quote.strip().lower()
             if quote and quote not in clean_student_ans:
                 # Fabricated or hallucinated quote - drop and penalize confidence
                 item.evidence_quote = None
                 parsed.confidence = max(0.0, parsed.confidence - 0.1)
+                evidence_validation.append({
+                    "key_point_id": item.key_point_id,
+                    "quote": orig_quote,
+                    "valid": False,
+                    "status": "dropped_hallucination",
+                    "reason": "Quote not found as substring in student answer",
+                })
+            else:
+                evidence_validation.append({
+                    "key_point_id": item.key_point_id,
+                    "quote": orig_quote,
+                    "valid": True,
+                    "status": "verified_in_text",
+                })
+    parsed.evidence_validation = evidence_validation
 
     return parsed
 

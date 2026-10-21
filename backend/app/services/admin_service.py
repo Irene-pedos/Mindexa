@@ -355,14 +355,16 @@ class AdminService:
         page: int = 1, 
         page_size: int = 20,
         role: Optional[str] = None,
-        status: Optional[str] = None
+        status: Optional[str] = None,
+        search: Optional[str] = None,
     ) -> Tuple[List[UserResponse], int]:
         """List all users with their full profile and assigned courses for lecturers."""
         users, total = await self.user_repo.list_all(
-            page=page, 
+            page=page,
             page_size=page_size,
             role=role,
-            status=status
+            status=status,
+            search=search,
         )
 
         items = []
@@ -646,6 +648,12 @@ class AdminService:
         self.db.add(institution)
         await self.db.commit()
         await self.db.refresh(institution)
+        try:
+            from app.services.approval_policy_service import ApprovalPolicyService
+            policy_svc = ApprovalPolicyService(self.db)
+            await policy_svc.seed_defaults_for_institution(institution.id)
+        except Exception as exc:
+            pass
         return institution
 
     async def update_institution(self, institution_id: uuid.UUID, data: InstitutionUpdate) -> Institution:

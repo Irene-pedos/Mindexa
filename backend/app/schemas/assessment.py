@@ -14,7 +14,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from app.core.constants import AssessmentType, GradingMode
+from app.core.constants import AssessmentType, GradingMode, SectionKind
 from app.db.enums import GroupAssignmentMode, QuestionDistributionMode
 from app.schemas.question import QuestionDetailResponse
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -28,7 +28,7 @@ class AssessmentSectionCreate(BaseModel):
     instructions: str | None = None
     order_index: int = Field(default=0, ge=0)
     allocated_marks: int | None = Field(default=None, ge=0)
-    section_kind: str = Field(default="MIXED")
+    section_kind: SectionKind = Field(default=SectionKind.MIXED)
     questions_to_answer: int | None = Field(default=None, ge=1)
 
 
@@ -38,7 +38,7 @@ class AssessmentSectionUpdate(BaseModel):
     instructions: str | None = None
     order_index: int | None = Field(default=None, ge=0)
     allocated_marks: int | None = Field(default=None, ge=0)
-    section_kind: str | None = None
+    section_kind: SectionKind | None = None
     questions_to_answer: int | None = Field(default=None, ge=1)
 
 
@@ -50,7 +50,7 @@ class AssessmentSectionResponse(BaseModel):
     instructions: str | None
     order_index: int
     allocated_marks: int | None
-    section_kind: str = "MIXED"
+    section_kind: SectionKind | str = SectionKind.MIXED
     questions_to_answer: int | None = None
     pool_size: int = 0
     question_count_target: int | None = None
@@ -399,6 +399,7 @@ class AssessmentSummaryResponse(BaseModel):
     late_submission_allowed: bool = False
     is_supervised: bool = False
     attempts_used: int = 0
+    blocked_reason: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -524,6 +525,57 @@ class AssessmentDetailResponse(BaseModel):
     target_student_ids: list[uuid.UUID] | None = None
 
     model_config = {"from_attributes": True, "populate_by_name": True}
+
+
+# ─── Student-facing redaction ─────────────────────────────────────────────────
+# Applied to already-serialized Pydantic copies, never to ORM objects: mutating
+# ORM rows here would be committed by get_db and erase the answer key.
+
+
+def redact_question_for_student(question: QuestionDetailResponse) -> QuestionDetailResponse:
+    """Strip answer keys: correct flags, matching pairs, correct order, explanations."""
+    return question.model_copy(
+        update={
+            "explanation": None,
+            "correct_order_json": None,
+            "options": [
+                opt.model_copy(
+                    update={
+                        "is_correct": None,
+                        "explanation": None,
+                        "option_text_right": None,
+                        "match_key": None,
+                    }
+                )
+                for opt in question.options
+            ],
+        }
+    )
+
+
+def redact_assessment_question_for_student(
+    aq: AssessmentQuestionResponse,
+) -> AssessmentQuestionResponse:
+    if aq.question is None:
+        return aq
+    return aq.model_copy(update={"question": redact_question_for_student(aq.question)})
+
+
+def redact_assessment_for_student(detail: AssessmentDetailResponse) -> AssessmentDetailResponse:
+    """Student view: no answer keys, no authoring hints, no other students' identities."""
+    return detail.model_copy(
+        update={
+            "assessment_questions": [
+                redact_assessment_question_for_student(aq) for aq in detail.assessment_questions
+            ],
+            "sections": [
+                s.model_copy(update={"ai_generation_prompt_hint": None}) for s in detail.sections
+            ],
+            "target_student_ids": None,
+            "student_enrollment_snapshot": None,
+            "draft_progress": None,
+        }
+    )
 
 
 class AssessmentListResponse(BaseModel):

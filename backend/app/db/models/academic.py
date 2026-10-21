@@ -14,6 +14,7 @@ from app.db.enums import (AcademicPeriodType, ClassSectionStatus,
                           EnrollmentStatus, LanguageEnum,
                           LecturerAssignmentRole, LocationType)
 from app.db.mixins import composite_index
+import sqlalchemy as sa
 from sqlalchemy import Column, DateTime
 from sqlalchemy import Enum as SA_Enum
 from sqlalchemy import ForeignKey, Index, String, Text, UniqueConstraint
@@ -808,6 +809,19 @@ class StudentEnrollment(AuditedBaseModel, table=True):
         sa_type=DateTime(timezone=True),
     )
     withdrawal_reason: Optional[str] = Field(default=None, nullable=True)
+    is_retake: bool = Field(
+        default=False,
+        nullable=False,
+        sa_column_kwargs={"server_default": sa.text("false")},
+    )
+    retake_record_id: Optional[uuid.UUID] = Field(
+        default=None,
+        sa_column=Column(
+            UUID(as_uuid=True),
+            ForeignKey("retake_record.id", ondelete="SET NULL"),
+            nullable=True,
+        ),
+    )
 
     # ── Relationships ─────────────────────────────────────────────────────────
     student: Optional["User"] = Relationship()

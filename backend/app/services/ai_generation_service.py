@@ -200,6 +200,17 @@ class AIGenerationService:
         if data.add_to_assessment_id:
             await self._assessment_repo.lock_assessment(data.add_to_assessment_id)
 
+            # Same rules as any other edit: caller must be on the authoring side and
+            # the assessment must still be editable (not under moderation/approved/sealed).
+            from app.services.assessment_service import AssessmentService
+
+            target = await self._assessment_repo.get_by_id_simple(data.add_to_assessment_id)
+            if not target:
+                raise NotFoundError("Assessment not found.")
+            assessment_svc = AssessmentService(self.db)
+            await assessment_svc._async_assert_can_edit(target, current_user)
+            assessment_svc._assert_not_finalized(target)
+
         ai_question = await self._repo.get_generated_question(ai_question_id)
         if not ai_question:
             raise NotFoundError("AI-generated question not found.")

@@ -159,15 +159,17 @@ class ModerationService:
             raise NotFoundError("Assessment", str(assessment_id))
         return assessment
 
-    async def _assert_can_author_or_delegate(self, assessment: Assessment, user: User) -> Optional[uuid.UUID]:
+    async def _resolve_author_side(
+        self, assessment: Assessment, user: User
+    ) -> Tuple[bool, Optional[uuid.UUID]]:
         """
-        Verify user is author, co-author, active delegate, or admin (Spec Section 8.1).
-        Returns delegation_id if user is acting under an active delegation, else None.
+        Whether user is on the authoring side of the assessment: author, supervisor,
+        active collaborator, or active delegate (Spec Section 8.1).
+        Returns (is_author_side, delegation_id); delegation_id is set only when the
+        user acts under an active delegation.
         """
-        if user.role == UserRole.ADMIN.value:
-            return None
         if str(assessment.created_by_id) == str(user.id):
-            return None
+            return True, None
 
         # Check active collaborator
         from app.db.models.authoring import AssessmentCollaborator, AuthorDelegation
@@ -179,7 +181,7 @@ class ModerationService:
             AssessmentCollaborator.is_deleted == False,
         )
         if (await self.db.execute(stmt_c)).first():
-            return None
+            return True, None
 
         # Check active author delegation
         now = utcnow()
@@ -193,28 +195,38 @@ class ModerationService:
         )
         row = (await self.db.execute(stmt_d)).first()
         if row:
-            return row[0]
+            return True, row[0]
 
         # Check supervisors fallback
         supervisors = getattr(assessment, "supervisors", []) or []
         for s in supervisors:
             if getattr(s, "user_id", None) == user.id and not getattr(s, "is_deleted", False):
-                return None
+                return True, None
 
-        raise PermissionDeniedError("Only the author, co-author, or active delegate may perform this action.")
+        return False, None
 
-    def _assert_author_or_coauthor(self, assessment: Assessment, user: User) -> None:
-        """Check if user is author or co-author of the assessment (synchronous fallback)."""
-        if user.role == UserRole.ADMIN.value:
-            return
-        if assessment.created_by_id == user.id:
-            return
-        # Also check supervisor / collaborator if present
-        supervisors = getattr(assessment, "supervisors", []) or []
-        for s in supervisors:
-            if getattr(s, "user_id", None) == user.id and not getattr(s, "is_deleted", False):
-                return
-        raise PermissionDeniedError("Only the author or co-author may perform this action.")
+    async def _assert_can_author_or_delegate(self, assessment: Assessment, user: User) -> Optional[uuid.UUID]:
+        """
+        Verify user is author, co-author, or active delegate (Spec Section 8.1).
+        Admins are not authors (spec §13.1). Returns the delegation_id when acting
+        under an active delegation, else None.
+        """
+        is_author_side, delegation_id = await self._resolve_author_side(assessment, user)
+        if not is_author_side:
+            raise PermissionDeniedError("Only the author, co-author, or active delegate may perform this action.")
+        return delegation_id
+
+    async def _assert_no_conflict_of_interest(self, assessment: Assessment, user: User) -> None:
+        """
+        Rule A-14: anyone on the authoring side — author, supervisor, collaborator,
+        or active delegate — may not moderate the assessment.
+        """
+        is_author_side, _ = await self._resolve_author_side(assessment, user)
+        if is_author_side:
+            raise PermissionDeniedError(
+                "Conflict of Interest: A moderator cannot moderate an assessment they "
+                "authored, co-authored, or hold an authoring delegation for."
+            )
 
     async def _resolve_policy(self, assessment: Assessment) -> ApprovalPolicy | None:
         """Resolve institutional approval policy for the assessment."""
@@ -223,10 +235,22 @@ class ModerationService:
             inst_id = assessment.course.institution_id
         if not inst_id:
             return None
-        return await self.policy_repo.get_by_institution_and_type(
+        policy = await self.policy_repo.get_by_institution_and_type(
             institution_id=inst_id,
             assessment_type=assessment.assessment_type,
         )
+        if not policy:
+            try:
+                from app.services.approval_policy_service import ApprovalPolicyService
+                policy_svc = ApprovalPolicyService(self.db)
+                await policy_svc.seed_defaults_for_institution(inst_id)
+                policy = await self.policy_repo.get_by_institution_and_type(
+                    institution_id=inst_id,
+                    assessment_type=assessment.assessment_type,
+                )
+            except Exception:
+                pass
+        return policy
 
     # ─────────────────────────────────────────────────────────────────────────
     # SUBMIT FOR MODERATION
@@ -383,15 +407,7 @@ class ModerationService:
         assessment = await self._get_assessment_with_details(review.assessment_id)
 
         # Conflict of Interest check (A-14)
-        if assessment.created_by_id == current_user.id:
-            raise PermissionDeniedError(
-                "Conflict of Interest: A moderator cannot moderate an assessment they authored."
-            )
-        for s in (assessment.supervisors or []):
-            if getattr(s, "user_id", None) == current_user.id and not getattr(s, "is_deleted", False):
-                raise PermissionDeniedError(
-                    "Conflict of Interest: A moderator cannot moderate an assessment they co-authored."
-                )
+        await self._assert_no_conflict_of_interest(assessment, current_user)
 
         # Department scope check
         dept_id = assessment.course.department_id if assessment.course else None
@@ -399,7 +415,7 @@ class ModerationService:
             raise BadRequestError("Assessment course has no department assigned.")
 
         has_mod_duty = await is_moderator_for(self.db, current_user.id, department_id=dept_id)
-        if not has_mod_duty and current_user.role != UserRole.ADMIN.value:
+        if not has_mod_duty:
             raise PermissionDeniedError(
                 f"User is not an active moderator for department {dept_id}."
             )
@@ -449,19 +465,11 @@ class ModerationService:
         assessment = await self._get_assessment_with_details(review.assessment_id)
 
         # Conflict of Interest check (A-14)
-        if assessment.created_by_id == current_user.id:
-            raise PermissionDeniedError(
-                "Conflict of Interest: An author cannot submit moderation comments on their own assessment."
-            )
-        for s in (assessment.supervisors or []):
-            if getattr(s, "user_id", None) == current_user.id and not getattr(s, "is_deleted", False):
-                raise PermissionDeniedError(
-                    "Conflict of Interest: A co-author cannot submit moderation comments on their own assessment."
-                )
+        await self._assert_no_conflict_of_interest(assessment, current_user)
 
         dept_id = assessment.course.department_id if assessment.course else None
         has_mod_duty = await is_moderator_for(self.db, current_user.id, department_id=dept_id)
-        if not has_mod_duty and current_user.role != UserRole.ADMIN.value:
+        if not has_mod_duty:
             raise PermissionDeniedError("Only a department moderator may comment on this review.")
 
 
@@ -517,15 +525,16 @@ class ModerationService:
         if not review.reviewer_id:
             raise BadRequestError("Review must be claimed by a moderator before requesting changes.")
 
-        if review.reviewer_id != current_user.id and current_user.role != UserRole.ADMIN.value:
+        if review.reviewer_id != current_user.id:
             raise PermissionDeniedError("Only the claiming reviewer may decide this review.")
-
 
         comments = await self.repo.list_comments_by_review(review_id)
         if not comments:
             raise BadRequestError("At least one comment is required when requesting changes.")
 
         assessment = await self._get_assessment_with_details(review.assessment_id)
+        # Re-checked at decision time: a collaborator/delegation may have been added after the claim
+        await self._assert_no_conflict_of_interest(assessment, current_user)
 
         # Update review
         decided = await self.repo.decide_review(
@@ -576,7 +585,7 @@ class ModerationService:
         comment_id: uuid.UUID,
         current_user: User,
     ) -> ModerationComment:
-        """Mark a moderation comment as resolved by the author."""
+        """Mark a moderation comment as resolved by the author, co-author, or active delegate."""
         comment = await self.repo.get_comment_by_id(comment_id)
         if not comment:
             raise NotFoundError("ModerationComment", str(comment_id))
@@ -586,7 +595,9 @@ class ModerationService:
             raise NotFoundError("ModerationReview", str(comment.review_id))
 
         assessment = await self._get_assessment_with_details(review.assessment_id)
-        self._assert_author_or_coauthor(assessment, current_user)
+        # Same authoring-side rule as submit/resubmit, so whoever may resubmit can
+        # also clear the comments that block resubmission.
+        delegation_id = await self._assert_can_author_or_delegate(assessment, current_user)
 
         resolved = await self.repo.resolve_comment(comment_id, current_user.id)
 
@@ -599,6 +610,7 @@ class ModerationService:
             description="Author resolved moderation comment.",
             before_state={"resolved": False},
             after_state={"resolved": True, "resolved_by_id": str(current_user.id)},
+            acting_under_delegation_id=delegation_id,
         )
         self.db.add(audit)
         await self.db.commit()
@@ -736,7 +748,7 @@ class ModerationService:
         """
         Approve an assessment review.
         Enforces:
-            - current_user is the claiming reviewer (or admin)
+            - current_user is the claiming reviewer, with no conflict of interest
             - review is OPEN
             - all BLOCKING checklist items passed
         Transitions assessment status to APPROVED.
@@ -752,11 +764,12 @@ class ModerationService:
         if not review.reviewer_id:
             raise BadRequestError("Review must be claimed by a moderator before it can be approved.")
 
-        if review.reviewer_id != current_user.id and current_user.role != UserRole.ADMIN.value:
+        if review.reviewer_id != current_user.id:
             raise PermissionDeniedError("Only the claiming reviewer may approve this review.")
 
-
         assessment = await self._get_assessment_with_details(review.assessment_id)
+        # Re-checked at decision time: a collaborator/delegation may have been added after the claim
+        await self._assert_no_conflict_of_interest(assessment, current_user)
 
         # Check for unresolved blocking failures in checklist
         checklist = getattr(review, "checklist_result", None) or {}
@@ -846,7 +859,8 @@ class ModerationService:
         """Fetch moderation history, rounds, and comments for an assessment."""
         assessment = await self._get_assessment_with_details(assessment_id)
 
-        # Authorize: author/co-author, moderator for department, HOD, or admin
+        # Authorize: author/co-author, moderator for department, HOD, or admin.
+        # Admin keeps read-only oversight of history; it cannot act on reviews.
         dept_id = assessment.course.department_id if assessment.course else None
         is_mod = await is_moderator_for(self.db, current_user.id, department_id=dept_id) if dept_id else False
         is_hod = await is_hod_of(self.db, current_user.id, department_id=dept_id) if dept_id else False
@@ -910,28 +924,22 @@ class ModerationService:
             )
         )
         dept_ids = (await self.db.execute(dept_stmt)).scalars().all()
-        if not dept_ids and current_user.role != UserRole.ADMIN.value:
-            return []
 
         all_items = []
-        if current_user.role == UserRole.ADMIN.value and not dept_ids:
-            # Admin with no explicit duty gets all open reviews
-            pass
-        else:
-            for dept_id in dept_ids:
-                queue_items = await self.repo.list_moderator_queue(dept_id, status=status)
-                for rev, asmt in queue_items:
-                    all_items.append({
-                        "review_id": str(rev.id),
-                        "assessment_id": str(asmt.id),
-                        "assessment_title": asmt.title,
-                        "round_no": rev.round_no,
-                        "review_status": rev.status.value,
-                        "assessment_status": asmt.status.value,
-                        "reviewer_id": str(rev.reviewer_id) if rev.reviewer_id else None,
-                        "started_at": rev.started_at.isoformat() if rev.started_at else None,
-                        "claimed_at": rev.claimed_at.isoformat() if rev.claimed_at else None,
-                    })
+        for dept_id in dept_ids:
+            queue_items = await self.repo.list_moderator_queue(dept_id, status=status)
+            for rev, asmt in queue_items:
+                all_items.append({
+                    "review_id": str(rev.id),
+                    "assessment_id": str(asmt.id),
+                    "assessment_title": asmt.title,
+                    "round_no": rev.round_no,
+                    "review_status": rev.status.value,
+                    "assessment_status": asmt.status.value,
+                    "reviewer_id": str(rev.reviewer_id) if rev.reviewer_id else None,
+                    "started_at": rev.started_at.isoformat() if rev.started_at else None,
+                    "claimed_at": rev.claimed_at.isoformat() if rev.claimed_at else None,
+                })
 
         return all_items
 
@@ -951,9 +959,8 @@ class ModerationService:
             getattr(s, "user_id", None) == current_user.id and not getattr(s, "is_deleted", False)
             for s in (assessment.supervisors or [])
         )
-        is_admin = current_user.role == UserRole.ADMIN.value
 
-        if not (is_author or is_coauthor or is_mod or is_admin):
+        if not (is_author or is_coauthor or is_mod):
             raise PermissionDeniedError("Unauthorized to run pre-moderation checklist on this assessment.")
 
         inst_id = assessment.course.institution_id if assessment.course else None

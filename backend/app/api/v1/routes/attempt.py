@@ -29,6 +29,7 @@ from app.db.session import get_db
 from app.dependencies.auth import (require_active_user,
                                    require_lecturer_or_admin, require_student)
 from app.schemas.attempt import (AttemptDetailResponse, AttemptListResponse,
+                                 AttemptQuestionResponse,
                                  AttemptSectionSelectionResponse,
                                  AttemptStartRequest, AttemptStartResponse,
                                  AttemptSubmitRequest, AttemptSummary,
@@ -292,6 +293,39 @@ async def list_my_attempts(
 # ── GET ATTEMPT ───────────────────────────────────────────────────────────────
 
 
+def _attempt_options_without_key(question, q_type: str, attempt_id: uuid.UUID) -> list[dict] | None:
+    """
+    Options as sent to the student, stripped of anything grading treats as the key:
+      - MATCHING: no match_value / match_key (the pairing is the answer; choices go
+        separately in `match_choices`).
+      - ORDERING: options shuffled per attempt and order_index hidden (the stored
+        order is the answer).
+      - CASE_STUDY: match_key carries sub-question marks and is kept.
+    """
+    options = list(question.options or [])
+    if not options:
+        return None
+
+    import random
+
+    if q_type == "ORDERING":
+        random.Random(f"{attempt_id}:{question.id}:order").shuffle(options)
+
+    hide_pairing = q_type == "MATCHING"
+    return [
+        {
+            "id": str(opt.id),
+            "text": opt.content,
+            "option_text": opt.content,
+            "match_key": None if hide_pairing else opt.match_key,
+            "match_value": None,
+            "option_text_right": None,
+            "order_index": idx if q_type == "ORDERING" else opt.order_index,
+        }
+        for idx, opt in enumerate(options)
+    ]
+
+
 @router.get(
     "/{attempt_id}",
     response_model=AttemptDetailResponse,
@@ -305,18 +339,27 @@ async def get_attempt(
     """
     Return attempt detail.
 
-    Students: can only access their own attempts.
-    Lecturers/Admins: can access any attempt.
+    Students: own attempts only; score hidden until the result is released.
+    Lecturers/Admins: attempts of assessments they have access to.
     """
     repo = AttemptRepository(db)
     attempt = await repo.get_with_questions(attempt_id)
     if not attempt:
         raise NotFoundError("Attempt not found", code="ATTEMPT_NOT_FOUND")
 
-    if current_user.role == UserRole.STUDENT.value and attempt.student_id != current_user.id:
+    is_student = current_user.role == UserRole.STUDENT.value
+    if is_student and attempt.student_id != current_user.id:
         raise AuthorizationError("You do not own this attempt", code="ATTEMPT_OWNERSHIP_VIOLATION")
+    if not is_student:
+        from app.services.result_service import ResultService
+
+        await ResultService(db).assert_lecturer_assessment_access(
+            attempt.assessment_id, current_user
+        )
 
     # Map assessment questions to attempt questions
+    import random
+
     questions_data = []
     if attempt.assessment and attempt.assessment.assessment_questions:
         # Load sections for title lookup
@@ -325,6 +368,12 @@ async def get_attempt(
         for aq in attempt.assessment.assessment_questions:
             if aq.question:
                 q = aq.question
+                q_type = getattr(q.question_type, "value", str(q.question_type)).upper()
+                options_data = _attempt_options_without_key(q, q_type, attempt.id)
+                match_choices = None
+                if q_type == "MATCHING":
+                    match_choices = [o.match_value for o in (q.options or []) if o.match_value]
+                    random.Random(f"{attempt.id}:{q.id}:choices").shuffle(match_choices)
                 questions_data.append({
                     "id": str(q.id),
                     "type": q.question_type.value,
@@ -344,24 +393,12 @@ async def get_attempt(
                     "requiresTableAnswer": bool(q.requires_table_answer),
                     "answer_table_template": q.answer_table_template,
                     "answerTableTemplate": q.answer_table_template,
-                    "options": [
-                        {
-                            "id": str(opt.id),
-                            "text": opt.content,
-                            "option_text": opt.content,
-                            "match_key": opt.match_key,
-                            "match_value": None if getattr(q.question_type, 'value', str(q.question_type)).upper() == "CASE_STUDY" else opt.match_value,
-                            "option_text_right": None if getattr(q.question_type, 'value', str(q.question_type)).upper() == "CASE_STUDY" else opt.match_value,
-                            "order_index": opt.order_index
-                        }
-                        for opt in (q.options or [])
-                    ] if q.options else None
+                    "options": options_data,
+                    "match_choices": match_choices,
                 })
 
     # Shuffling Logic: Shuffle within each section if enabled
     if attempt.assessment and attempt.assessment.randomize_questions:
-        import random
-
         # Seed with attempt ID for stability per attempt
         rng = random.Random(str(attempt.id))
 
@@ -389,7 +426,17 @@ async def get_attempt(
         questions_data.sort(key=lambda x: x["order_index"])
 
     response = AttemptDetailResponse.model_validate(attempt)
-    response.questions = questions_data
+    response.questions = [
+        AttemptQuestionResponse.model_validate(q) if isinstance(q, dict) else q
+        for q in questions_data
+    ]
+
+    if is_student and response.total_score is not None:
+        from app.db.repositories.result_repo import ResultRepository
+
+        result = await ResultRepository(db).get_by_attempt(attempt.id)
+        if not (result and result.is_released):
+            response.total_score = None
 
     # Populate group-work specific fields
     if attempt.group_id:

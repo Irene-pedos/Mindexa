@@ -395,3 +395,146 @@ def test_anonymous_marking_alias_formatting():
         name = "John Doe"
 
     assert name == "Candidate-123456"
+
+
+# ── 10. AIGradeReview Phase 5 Persistence & Evidence Validation ──────────────
+
+
+def test_validate_v2_output_records_evidence_validation_audit():
+    """Verify evidence validation audits both valid and hallucinated quotes."""
+    student_ans = "The gradient descent algorithm iteratively updates weights to minimize loss."
+    parsed = ReviewAgentV2Output(
+        suggested_score=5.0,
+        rationale="Solid explanation of gradient descent.",
+        rubric_alignment=[],
+        confidence=0.85,
+        key_points_coverage=[
+            KeyPointCoverageItem(
+                key_point_id="kp1",
+                covered=True,
+                evidence_quote="gradient descent algorithm iteratively",
+                note="Present in text",
+            ),
+            KeyPointCoverageItem(
+                key_point_id="kp2",
+                covered=True,
+                evidence_quote="quantum computing accelerates backprop",
+                note="Hallucinated quote",
+            ),
+        ],
+    )
+    validated = validate_v2_output(parsed, student_answer=student_ans, max_score=10.0)
+    assert validated.evidence_validation is not None
+    assert len(validated.evidence_validation) == 2
+
+    # First quote verified
+    assert validated.evidence_validation[0]["status"] == "verified_in_text"
+    assert validated.evidence_validation[0]["quote"] == "gradient descent algorithm iteratively"
+
+    # Second quote flagged as hallucination
+    assert validated.evidence_validation[1]["status"] == "dropped_hallucination"
+    assert validated.evidence_validation[1]["key_point_id"] == "kp2"
+    assert "Quote not found as substring in student answer" in validated.evidence_validation[1]["reason"]
+
+
+@pytest.mark.asyncio
+async def test_aigrade_review_persistence_fields():
+    """Verify AIGradeReview supports suggested_score, key_points_coverage, interpretation_note, evidence_validation."""
+    from app.db.models.ai import AIGradeReview
+
+    review = AIGradeReview(
+        attempt_id=uuid.uuid4(),
+        assessment_id=uuid.uuid4(),
+        student_id=uuid.uuid4(),
+        grading_decision=AIGradeDecision.PENDING,
+        ai_suggested_total=7.5,
+        suggested_score=7.5,
+        key_points_coverage=[{"key_point_id": "kp1", "covered": True}],
+        interpretation_note="Demonstrated good conceptual grasp.",
+        evidence_validation=[{"status": "verified_in_text", "quote": "sample quote"}],
+    )
+    assert review.suggested_score == 7.5
+    assert len(review.key_points_coverage) == 1
+    assert review.interpretation_note == "Demonstrated good conceptual grasp."
+    assert review.evidence_validation[0]["status"] == "verified_in_text"
+
+
+# ── 11. Finalize Grade Updates AIGradeReview Decision & Audit ────────────────
+
+
+@pytest.mark.asyncio
+async def test_finalize_grade_updates_aigrade_review_decision():
+    """Verify finalize_grade transitions pending AIGradeReview to ACCEPTED/MODIFIED/REJECTED."""
+    from app.services.grading_service import GradingService
+    from app.db.models.ai import AIGradeReview
+
+    db = AsyncMock()
+    service = GradingService(db)
+
+    # Mock grade and existing pending review
+    lecturer_id = uuid.uuid4()
+    response_id = uuid.uuid4()
+    attempt_id = uuid.uuid4()
+    assessment_id = uuid.uuid4()
+
+    mock_grade = MagicMock()
+    mock_grade.id = uuid.uuid4()
+    mock_grade.response_id = response_id
+    mock_grade.attempt_id = attempt_id
+    mock_grade.assessment_id = assessment_id
+    mock_grade.student_id = uuid.uuid4()
+    mock_grade.is_final = False
+    mock_grade.max_score = 10.0
+    mock_grade.ai_suggested_score = 8.0
+    mock_grade.student_response = None
+
+    service.grading_repo.get_grade_by_response = AsyncMock(return_value=mock_grade)
+    service.grading_repo.finalize_grade = AsyncMock(return_value=mock_grade)
+    service.grading_repo.update_grade = AsyncMock(return_value=mock_grade)
+    service.grading_repo.get_active_queue_item_for_response = AsyncMock(return_value=None)
+    service.grading_repo.count_final_grades = AsyncMock(return_value=1)
+    service.assessment_repo.count_assessment_questions = AsyncMock(return_value=2)
+    service._verify_grading_authorization = AsyncMock(return_value=None)
+
+    pending_review = AIGradeReview(
+        id=uuid.uuid4(),
+        attempt_id=attempt_id,
+        assessment_id=assessment_id,
+        student_id=mock_grade.student_id,
+        response_id=response_id,
+        grading_decision=AIGradeDecision.PENDING,
+        ai_suggested_total=8.0,
+    )
+
+    review_res = MagicMock()
+    review_res.scalars.return_value.first.return_value = pending_review
+    db.execute = AsyncMock(return_value=review_res)
+
+    res = await service.finalize_grade(
+        response_id=response_id,
+        lecturer_id=lecturer_id,
+        score=8.0,
+        accept_ai_suggestion=True,
+    )
+
+    assert pending_review.grading_decision == AIGradeDecision.ACCEPTED
+    assert pending_review.lecturer_final_total == 8.0
+    assert pending_review.score_delta == 0.0
+    assert pending_review.review_completed_at is not None
+
+
+# ── 12. Anonymous Marking in Grading Repo Masking ─────────────────────────────
+
+
+def test_anonymous_marking_deterministic_student_masking():
+    """Verify anonymous marking masks student_id to deterministic UUID and student_name to Candidate-XXXXXX."""
+    import uuid
+
+    attempt_id = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    mask_name = f"Candidate-{attempt_id[:6].upper()}"
+    assert mask_name == "Candidate-A1B2C3"
+
+    pseudo_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"candidate:{attempt_id}")
+    pseudo_id_2 = uuid.uuid5(uuid.NAMESPACE_DNS, f"candidate:{attempt_id}")
+    assert pseudo_id == pseudo_id_2
+    assert isinstance(pseudo_id, uuid.UUID)

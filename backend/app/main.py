@@ -5,10 +5,10 @@ from datetime import datetime
 
 from app.api.v1.routes import (academic, admin, admin_academic, admin_ai_audit,
                                ai_generation, analytics, assessment, attempt,
-                               auth, authoring, blueprint, gemini, grading, group_work,
-                               health, integrity, lecturer, me, moderation, notification,
+                               auth, authoring, blueprint, eligibility, gemini, grading, group_work,
+                               health, integrity, lecturer, marking, me, moderation, notification,
                                question, resource, result, seal, student, student_ai, student_resources,
-                               study_planner, study_reader, submission)
+                               study_planner, study_reader, submission, appeals, calendar, export)
 from app.core.config import settings
 from app.core.handlers import register_exception_handlers
 from app.core.logging import get_logger
@@ -64,7 +64,7 @@ def create_app() -> FastAPI:
                                    gemini, grading, group_work, health,
                                    integrity, lecturer, lecturer_ai, marking, me, moderation, notification, question,
                                    resource, result, seal, student, student_ai,
-                                   student_resources, study_planner, study_reader, submission, authoring)
+                                   student_resources, study_planner, study_reader, submission, authoring, eligibility)
 
     # ── ROUTE REGISTRATION ────────────────────────────────────────────────────
     app.include_router(admin_ai_audit.router, prefix=settings.API_V1_STR)
@@ -109,6 +109,14 @@ def create_app() -> FastAPI:
     app.include_router(authoring.router)
     app.include_router(marking.router, prefix=settings.API_V1_STR)
     app.include_router(marking.router)
+    app.include_router(eligibility.router, prefix=settings.API_V1_STR)
+    app.include_router(eligibility.router)
+    app.include_router(appeals.router, prefix=settings.API_V1_STR)
+    app.include_router(appeals.router)
+    app.include_router(calendar.router, prefix=settings.API_V1_STR)
+    app.include_router(calendar.router)
+    app.include_router(export.router, prefix=settings.API_V1_STR)
+    app.include_router(export.router)
 
     # ── EXCEPTION HANDLERS ───────────────────────────────────────────────────
     register_exception_handlers(app)

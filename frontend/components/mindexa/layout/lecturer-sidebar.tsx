@@ -20,6 +20,8 @@ import {
   BarChart3,
   Unlock,
   ChevronRight,
+  ShieldCheck,
+  Lock,
 } from "lucide-react";
 
 import {
@@ -52,6 +54,7 @@ import { notificationApi } from "@/lib/api/notification";
 import { gradingApi } from "@/lib/api/grading";
 import { NotificationType } from "@/lib/api/notification/notificationTypes";
 import { User } from "@/lib/types/user";
+import { hasDuty, isDutyOnlyStaff } from "@/lib/duty-workspace";
 
 const mainNav = [
   { title: "Dashboard", url: "/lecturer/dashboard", icon: LayoutDashboard, tourId: "lecturer-dashboard" },
@@ -163,6 +166,11 @@ export function LecturerSidebar({
     };
   }, [user]);
 
+  // Visibility follows active duty assignments only; the backend still enforces access.
+  const isModerator = hasDuty(user, "MODERATOR");
+  const isExamOfficer = hasDuty(user, "EXAM_OFFICER");
+  const dutyOnly = isDutyOnlyStaff(user);
+
   const displayName =
     user?.profile?.display_name ||
     (user?.profile?.first_name
@@ -202,7 +210,9 @@ export function LecturerSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        {/* Main Teaching Navigation */}
+        {/* Teaching & grading navigation — hidden for office-based duty staff */}
+        {!dutyOnly && (
+        <>
         <SidebarGroup>
           <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
             Teaching
@@ -328,8 +338,63 @@ export function LecturerSidebar({
             </Collapsible>
           </SidebarMenu>
         </SidebarGroup>
+        </>
+        )}
+
+        {/* Academic Duties (Moderator & Exam Officer) */}
+        {(isModerator || isExamOfficer) && (
+          <SidebarGroup>
+            <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
+              {dutyOnly ? "My Duties" : "Academic Duties"}
+            </SidebarGroupLabel>
+            <SidebarMenu>
+              {isModerator && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip="Moderation Queue"
+                    isActive={pathname === "/lecturer/moderation" || pathname.startsWith("/lecturer/moderation/")}
+                    className={cn(
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      pathname.startsWith("/lecturer/moderation")
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    <Link href="/lecturer/moderation" className="relative flex items-center w-full">
+                      <ShieldCheck className="size-4.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">Moderation Queue</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+
+              {isExamOfficer && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    asChild
+                    tooltip="Exam Office & Seals"
+                    isActive={pathname === "/lecturer/exam-office" || pathname.startsWith("/lecturer/exam-office/")}
+                    className={cn(
+                      "relative h-9 rounded-xl text-xs font-medium transition-all duration-200",
+                      pathname.startsWith("/lecturer/exam-office")
+                        ? "!bg-primary !text-primary-foreground font-semibold shadow-sm shadow-primary/25 [&_svg]:!text-primary-foreground"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                    )}
+                  >
+                    <Link href="/lecturer/exam-office" className="relative flex items-center w-full">
+                      <Lock className="size-4.5 shrink-0" aria-hidden="true" />
+                      <span className="truncate">Exam Office & Seals</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
+            </SidebarMenu>
+          </SidebarGroup>
+        )}
 
         {/* Management & Oversight */}
+        {!dutyOnly && (
         <SidebarGroup>
           <SidebarGroupLabel className="group-data-[collapsible=icon]:hidden">
             Management
@@ -361,16 +426,19 @@ export function LecturerSidebar({
             })}
           </SidebarMenu>
         </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="gap-2">
-        <SidebarAiWidget
-          storageKey="mindexa_lecturer_sidebar_ai_widget"
-          title="Academic AI Copilot"
-          description="Create assessments, generate questions, review submissions, and improve feedback."
-          buttonText="Open AI Assistant"
-          buttonHref="/lecturer/ai-assistant"
-        />
+        {!dutyOnly && (
+          <SidebarAiWidget
+            storageKey="mindexa_lecturer_sidebar_ai_widget"
+            title="Academic AI Copilot"
+            description="Create assessments, generate questions, review submissions, and improve feedback."
+            buttonText="Open AI Assistant"
+            buttonHref="/lecturer/ai-assistant"
+          />
+        )}
         <NavUser />
       </SidebarFooter>
 

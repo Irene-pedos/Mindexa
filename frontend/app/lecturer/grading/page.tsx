@@ -95,6 +95,7 @@ import { resultApi } from "@/lib/api/result";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { AIReviewPanel } from "@/components/mindexa/grading/ai-review-panel";
+import { AiSampleCheckDialog } from "@/components/mindexa/grading/ai-sample-check-dialog";
 import { AIFeedbackEditor } from "@/components/mindexa/grading/ai-feedback-editor";
 import { RubricGradingPanel } from "@/components/mindexa/grading/rubric-grading-panel";
 import {
@@ -272,10 +273,7 @@ function LecturerGradingQueueContent() {
   // Selection & Bulk actions in Step D Main Queue
   const [selectedAttemptIds, setSelectedAttemptIds] = useState<string[]>([]);
   const [isBulkFlagging, setIsBulkFlagging] = useState(false);
-  const [isBulkApplyingAi, setIsBulkApplyingAi] = useState(false);
   const [showBulkAiDialog, setShowBulkAiDialog] = useState(false);
-  const [bulkAiConfidenceThreshold, setBulkAiConfidenceThreshold] =
-    useState<number>(80);
 
   // Tab switcher in Step D: "queue" | "release"
   const tabParam = searchParams?.get("tab");
@@ -322,6 +320,11 @@ function LecturerGradingQueueContent() {
   const [aiSuggestions, setAiSuggestions] = useState<string[]>([]);
   const [rubricScores, setRubricScores] = useState<RubricScore[]>([]);
   const [reviewStartedAt, setReviewStartedAt] = useState<Date | null>(null);
+  // Review time is measured per question: it is the evidence that an AI
+  // suggestion was individually reviewed (checked by the release gate).
+  useEffect(() => {
+    setReviewStartedAt(new Date());
+  }, [activeQuestionIndex]);
   const [isSaving, setIsSaving] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -332,6 +335,7 @@ function LecturerGradingQueueContent() {
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
   const [isAiAccepted, setIsAiAccepted] = useState(false);
   const [showIntegrityLiftDialog, setShowIntegrityLiftDialog] = useState(false);
+  const [liftJustification, setLiftJustification] = useState("");
   const [filterUngradedOnly, setFilterUngradedOnly] = useState(false);
   const [bulkReleaseDialogOpen, setBulkReleaseDialogOpen] = useState(false);
   const [bulkReleaseAction, setBulkReleaseAction] = useState<{
@@ -650,68 +654,31 @@ function LecturerGradingQueueContent() {
     if (selectedAttemptIds.length === 0) return;
     setIsBulkFlagging(true);
     try {
+      const outcomes = await Promise.allSettled(
+        selectedAttemptIds.map((id) => integrityApi.toggleFlag(id, flagged)),
+      );
+      const succeeded = selectedAttemptIds.filter(
+        (_, i) => outcomes[i].status === "fulfilled",
+      );
       setData((prev) =>
         prev.map((item) =>
-          selectedAttemptIds.includes(item.attempt_id)
+          succeeded.includes(item.attempt_id)
             ? { ...item, is_flagged: flagged }
             : item,
         ),
       );
-      toast.success(
-        `Successfully ${flagged ? "flagged" : "unflagged"} ${selectedAttemptIds.length} attempts.`,
-      );
+      if (succeeded.length > 0) {
+        toast.success(
+          `${flagged ? "Flagged" : "Unflagged"} ${succeeded.length} attempt(s).`,
+        );
+      }
+      const failed = selectedAttemptIds.length - succeeded.length;
+      if (failed > 0) {
+        toast.error(`Could not update ${failed} attempt(s).`);
+      }
       setSelectedAttemptIds([]);
-    } catch {
-      toast.error("Failed to perform bulk flag update.");
     } finally {
       setIsBulkFlagging(false);
-    }
-  };
-
-  const handleBulkAcceptAiSuggestions = async (threshold: number) => {
-    if (selectedAttemptIds.length === 0) return;
-    setIsBulkApplyingAi(true);
-    try {
-      let applied = 0;
-      for (const attId of selectedAttemptIds) {
-        const items = data.filter((d) => d.attempt_id === attId);
-        for (const item of items) {
-          const ai = getAiSuggestion(item);
-          if (
-            ai.hasSuggestion &&
-            ai.score !== null &&
-            (ai.confidence || 100) >= threshold
-          ) {
-            const responseId = item.response_id || item.id;
-            if (!responseId) continue;
-            await gradingApi.saveGrade(
-              responseId,
-              buildGradeSavePayload({
-                score: ai.score,
-                feedback: ai.feedbackDraft || ai.rationale || undefined,
-                isFinal: true,
-                acceptAiSuggestion: true,
-              }),
-            );
-            applied++;
-          }
-        }
-      }
-      toast.success(
-        `Bulk AI finalization completed! Processed ${applied} responses.`,
-      );
-      setShowBulkAiDialog(false);
-      setSelectedAttemptIds([]);
-      if (selectedAssessment) {
-        fetchQueue(selectedAssessment.id, selectedClass?.class_id, currentPage);
-        if (selectedClass) {
-          loadReleaseQueue(selectedAssessment.id, selectedClass.class_id);
-        }
-      }
-    } catch {
-      toast.error("Bulk AI suggestions application failed.");
-    } finally {
-      setIsBulkApplyingAi(false);
     }
   };
 
@@ -755,9 +722,15 @@ function LecturerGradingQueueContent() {
         bulkReleaseAction.attemptIds,
         selectedClass?.class_id,
       );
-      toast.success(
-        `Released ${res.released_count} results successfully. Notification dispatched.`,
-      );
+      // The server explains anything it did not release (integrity hold,
+      // incomplete grading, AI grades accepted without review).
+      const notReleased =
+        (res.held_count ?? 0) + (res.incomplete_count ?? 0) + (res.unreviewed_count ?? 0);
+      if (notReleased > 0) {
+        toast.warning(res.message, { duration: 8000 });
+      } else {
+        toast.success(res.message || `Released ${res.released_count} result(s).`);
+      }
       setBulkReleaseDialogOpen(false);
       setBulkReleaseAction(null);
       setSelectedAttemptIds([]);
@@ -861,7 +834,7 @@ function LecturerGradingQueueContent() {
         attemptApi.getAttempt(item.attempt_id),
         submissionApi.getSubmissionsForAttempt(item.attempt_id),
       ]);
-      const normalizedSubmissions: SubmissionRecord[] = Array.isArray(subRes)
+      const rawSubmissions: SubmissionRecord[] = Array.isArray(subRes)
         ? subRes
         : Array.isArray(subRes?.submissions)
           ? subRes.submissions
@@ -870,6 +843,16 @@ function LecturerGradingQueueContent() {
             : Array.isArray(subRes?.data)
               ? subRes.data
               : [];
+      // The API's `is_final` means "answer submitted"; in this workspace it means
+      // "grade locked". Use the attached grade so saved marks load and
+      // "next ungraded" works.
+      const normalizedSubmissions: SubmissionRecord[] = rawSubmissions.map((s) => ({
+        ...s,
+        score: s.grade_score ?? null,
+        feedback: s.grade_feedback ?? null,
+        rubric_scores: (s.grade_rubric_scores as RubricScore[] | null | undefined) ?? [],
+        is_final: s.grade_is_final ?? false,
+      }));
 
       setActiveAttempt(attemptRes);
       setActiveSubmissions(normalizedSubmissions);
@@ -980,20 +963,32 @@ function LecturerGradingQueueContent() {
         clearTimeout(autosaveTimerRef.current);
       }
 
+      // Nothing to save until a score is entered (the backend requires one).
+      const parsed = parseFloat(scoreVal);
+      if (isNaN(parsed)) {
+        setAutosaveStatus("idle");
+        return;
+      }
+
       setAutosaveStatus("saving");
       autosaveTimerRef.current = setTimeout(async () => {
         try {
-          const parsed = parseFloat(scoreVal);
           await gradingApi.saveGrade(sub.id, {
-            score: isNaN(parsed) ? undefined : parsed,
+            score: parsed,
             feedback: fbVal,
             rubric_scores: rScores,
             is_final: false,
           });
           setAutosaveStatus("saved");
           setLastAutosavedAt(new Date());
-        } catch {
+        } catch (err: unknown) {
           setAutosaveStatus("idle");
+          toast.error(
+            err instanceof Error && err.message
+              ? `Autosave failed: ${err.message}`
+              : "Autosave failed — your changes are not saved yet.",
+            { id: "grading-autosave-failed" },
+          );
         }
       }, 1200);
     },
@@ -1025,12 +1020,18 @@ function LecturerGradingQueueContent() {
     }
 
     try {
+      const startedAt = reviewStartedAt ?? new Date();
       await gradingApi.saveGrade(sub.id, {
         score: parsedScore,
         feedback: finalFeedback,
         rubric_scores: rubricScores,
         is_final: isFinal,
         accept_ai_suggestion: aiAccepted,
+        review_started_at: startedAt.toISOString(),
+        review_duration_seconds: Math.max(
+          1,
+          Math.round((Date.now() - startedAt.getTime()) / 1000),
+        ),
       });
 
       setActiveSubmissions((prev) => {
@@ -1043,7 +1044,8 @@ function LecturerGradingQueueContent() {
                 feedback_comments: finalFeedback,
                 feedback: finalFeedback,
                 rubric_scores: rubricScores,
-                is_final: isFinal,
+                // A locked grade stays locked when edited before release
+                is_final: isFinal || s.is_final,
               }
             : s,
         );
@@ -1111,12 +1113,15 @@ function LecturerGradingQueueContent() {
     const newFlag = !selectedStudent.is_flagged;
     setIsSaving(true);
     try {
+      await integrityApi.toggleFlag(selectedStudent.attempt_id, newFlag);
       setSelectedStudent((prev) =>
         prev ? { ...prev, is_flagged: newFlag } : null,
       );
       toast.success(`Attempt ${newFlag ? "flagged" : "unflagged"}.`);
-    } catch {
-      toast.error("Failed to toggle flag state.");
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message ? err.message : "Failed to toggle flag state.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -1124,15 +1129,29 @@ function LecturerGradingQueueContent() {
 
   const handleLiftIntegrityHold = async () => {
     if (!activeAttempt) return;
+    if (liftJustification.trim().length < 10) {
+      toast.error("Explain why the hold is lifted (at least 10 characters).");
+      return;
+    }
     setIsSaving(true);
     try {
+      // The hold lives on the result; it is cleared with an audited justification.
+      const result = await resultApi.getResultByAttempt(activeAttempt.id);
+      if (!result?.id) {
+        toast.error("No result exists for this attempt yet.");
+        return;
+      }
+      await resultApi.clearHold(result.id, liftJustification.trim());
       setActiveAttempt((prev) =>
         prev ? { ...prev, integrity_hold: false } : null,
       );
       setShowIntegrityLiftDialog(false);
-      toast.success("Security hold lifted successfully.");
-    } catch {
-      toast.error("Failed to lift integrity hold.");
+      setLiftJustification("");
+      toast.success("Security hold lifted.");
+    } catch (err: unknown) {
+      toast.error(
+        err instanceof Error && err.message ? err.message : "Failed to lift integrity hold.",
+      );
     } finally {
       setIsSaving(false);
     }
@@ -4007,6 +4026,7 @@ function LecturerGradingQueueContent() {
                           <SelectItem value="all">All Submissions</SelectItem>
                           <SelectItem value="PENDING">Awaiting Review</SelectItem>
                           <SelectItem value="AI_SUGGESTED">AI Ready</SelectItem>
+                          <SelectItem value="FAILED">AI Failed</SelectItem>
                           <SelectItem value="COMPLETED">Graded</SelectItem>
                         </SelectContent>
                       </Select>
@@ -4507,75 +4527,22 @@ function LecturerGradingQueueContent() {
         </DialogContent>
       </Dialog>
 
-      {/* Bulk Accept AI Dialog */}
-      <Dialog open={showBulkAiDialog} onOpenChange={setShowBulkAiDialog}>
-        <DialogContent className="max-w-md bg-background border border-border/60 rounded-2xl shadow-2xl p-5 text-left font-sans">
-          <DialogHeader>
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-primary/10 text-primary">
-                <Sparkles className="size-5" />
-              </div>
-              <div>
-                <DialogTitle className="text-base font-semibold text-foreground">
-                  Batch Accept AI Suggestions
-                </DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Finalize AI grades across {selectedAttemptIds.length} student attempts.
-                </DialogDescription>
-              </div>
-            </div>
-          </DialogHeader>
+      {/* Bulk accept AI grades — sample check first (spec §9.6) */}
+      <AiSampleCheckDialog
+        open={showBulkAiDialog}
+        onOpenChange={setShowBulkAiDialog}
+        assessmentId={selectedAssessment?.id ?? null}
+        onCompleted={() => {
+          setSelectedAttemptIds([]);
+          if (selectedAssessment) {
+            fetchQueue(selectedAssessment.id, selectedClass?.class_id, currentPage);
+            if (selectedClass) {
+              loadReleaseQueue(selectedAssessment.id, selectedClass.class_id);
+            }
+          }
+        }}
+      />
 
-          <div className="space-y-3 my-2 text-xs">
-            <div className="space-y-1.5">
-              <Label className="text-xs font-medium text-muted-foreground">
-                Minimum AI Confidence
-              </Label>
-              <Select
-                value={bulkAiConfidenceThreshold.toString()}
-                onValueChange={(val) =>
-                  setBulkAiConfidenceThreshold(parseInt(val))
-                }
-              >
-                <SelectTrigger className="h-9 text-xs rounded-xl">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="90">High Confidence Only (≥ 90%)</SelectItem>
-                  <SelectItem value="80">Medium-High (≥ 80%)</SelectItem>
-                  <SelectItem value="70">Moderate (≥ 70%)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-
-          <DialogFooter className="mt-3 flex justify-end gap-2 border-t border-border/30 pt-2.5">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowBulkAiDialog(false)}
-              className="text-xs rounded-xl h-8"
-            >
-              Cancel
-            </Button>
-            <Button
-              size="sm"
-              disabled={isBulkApplyingAi}
-              onClick={() =>
-                handleBulkAcceptAiSuggestions(bulkAiConfidenceThreshold)
-              }
-              className="text-xs rounded-xl h-8 bg-primary text-primary-foreground gap-1.5"
-            >
-              {isBulkApplyingAi ? (
-                <Loader2 className="size-3.5 animate-spin" />
-              ) : (
-                <CheckCheck className="size-3.5" />
-              )}
-              Confirm & Apply
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Lift Integrity Hold Dialog */}
       <Dialog
@@ -4598,6 +4565,19 @@ function LecturerGradingQueueContent() {
               </div>
             </div>
           </DialogHeader>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="lift-justification" className="text-xs">
+              Justification (recorded in the audit log)
+            </Label>
+            <Textarea
+              id="lift-justification"
+              className="min-h-20 text-xs"
+              placeholder="e.g. Flag reviewed — tab switch was caused by an exam-hall network issue."
+              value={liftJustification}
+              onChange={(e) => setLiftJustification(e.target.value)}
+            />
+          </div>
 
           <DialogFooter className="mt-3 flex justify-end gap-2 border-t border-border/30 pt-2.5">
             <Button

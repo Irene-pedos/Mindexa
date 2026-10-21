@@ -606,47 +606,50 @@ export default function AdminCoursesPage() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           {
             label: "Total Modules",
             value: totalCourses,
             icon: BookOpen,
-            color: "text-primary",
+            pill: "bg-primary/10 text-primary",
           },
           {
             label: "Active Registry",
             value: courses.filter((c) => c.status === "Active").length,
             icon: CheckCircle,
+            pill: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
           },
           {
             label: "Institutional Scope",
             value: institutions.length,
             icon: Building2,
+            pill: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
           },
           {
             label: "Suspended",
             value: courses.filter((c) => c.status === "Suspended").length,
             icon: Ban,
+            pill: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
           },
         ].map((stat, i) => (
           <Card
             key={i}
-            className="border shadow-none rounded-xl bg-background/50 overflow-hidden"
+            className="border border-border/60 shadow-none rounded-2xl bg-card overflow-hidden p-5"
           >
-            <CardContent className="px-4 py-3 flex flex-col gap-0.5">
-              <p className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
-                {stat.label}
-              </p>
-              <h3
-                className={cn(
-                  "text-xl font-semibold leading-tight",
-                  stat.color,
-                )}
-              >
-                {stat.value}
-              </h3>
-            </CardContent>
+            <div className="flex items-center justify-between">
+              <div className="space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  {stat.label}
+                </p>
+                <h3 className="text-2xl font-bold tracking-tight">
+                  {stat.value}
+                </h3>
+              </div>
+              <div className={cn("size-11 rounded-xl flex items-center justify-center shrink-0", stat.pill)}>
+                <stat.icon className="size-5" />
+              </div>
+            </div>
           </Card>
         ))}
       </div>
@@ -801,8 +804,8 @@ export default function AdminCoursesPage() {
                         className={cn(
                           "rounded-full px-2 py-0 text-[9px] font-medium border uppercase",
                           course.status === "Active"
-                            ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                            : "bg-amber-50 text-amber-700 border-amber-200",
+                            ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30"
+                            : "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30",
                         )}
                       >
                         {course.status}

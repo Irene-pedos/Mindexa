@@ -9,8 +9,10 @@ import { cn } from "@/lib/utils";
 import {
   LayoutDashboard,
   Users,
+  UserCog,
   BookOpen,
   Shield,
+  Lock,
   BarChart3,
   Settings,
   GraduationCap,
@@ -37,12 +39,16 @@ import { useAuth } from "@/hooks/use-auth";
 const mainNav = [
   { title: "Dashboard", url: "/admin/dashboard", icon: LayoutDashboard, tourId: "admin-dashboard" },
   { title: "Users & Roles", url: "/admin/users", icon: Users, tourId: "admin-users" },
+  { title: "Staff Duties", url: "/admin/duties", icon: UserCog },
   { title: "Institutions", url: "/admin/institutions", icon: Building2 },
   { title: "Academic Structure", url: "/admin/academic/structure", icon: GraduationCap },
   { title: "Academic Periods", url: "/admin/academic/periods", icon: Calendar },
   { title: "Academic Assignments", url: "/admin/academic/assignments", icon: Users },
   { title: "Courses & Classes", url: "/admin/courses", icon: BookOpen, tourId: "admin-courses" },
 ];
+
+// Admins never moderate (spec §13.1); they may hold the EXAM_OFFICER duty (spec §5.1).
+const examOfficeNavItem = { title: "Exam Office & Seals", url: "/admin/exam-office", icon: Lock };
 
 const oversightNav = [
   { title: "Integrity & Security", url: "/admin/integrity", icon: Shield },
@@ -55,6 +61,10 @@ export function AdminSidebar({
 }: React.ComponentProps<typeof Sidebar>) {
   const pathname = usePathname();
   const { user } = useAuth();
+
+  const managementNav = user?.duties?.includes("EXAM_OFFICER")
+    ? [examOfficeNavItem, ...oversightNav]
+    : oversightNav;
 
   const displayName = (user?.profile as any)?.display_name ||
     ((user?.profile as any)?.first_name ? `${(user?.profile as any).first_name} ${(user?.profile as any).last_name}` : "Administrator")
@@ -135,7 +145,7 @@ export function AdminSidebar({
             Management
           </SidebarGroupLabel>
           <SidebarMenu>
-            {oversightNav.map((item) => {
+            {managementNav.map((item) => {
               const isActive =
                 pathname === item.url || pathname.startsWith(item.url + "/");
               return (
